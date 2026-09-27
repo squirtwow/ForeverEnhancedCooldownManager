@@ -10,6 +10,7 @@
 Core.lua
 Skin.lua
 Spells.lua
+Buffs.lua
 Bars.lua
 BarsPanel.lua
 Probe.lua

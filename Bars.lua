@@ -10,7 +10,7 @@ ns.Bars = B
 
 local SQUARE = "Interface\\Buttons\\WHITE8X8"
 local TIMER_FONT = "SystemFont_Shadow_Large_Outline"
-local DEFAULT_Y = { cd = 190, util = 146 } -- just above the action bar
+local DEFAULT_Y = { buff = 234, cd = 190, util = 146 } -- just above the action bar
 local RANGE_INTERVAL = .25
 -- Blizzard's own Cooldown Manager tints.
 local TINT = {
@@ -108,9 +108,17 @@ local function SavePosition(bar)
     Place(bar)
 end
 
+-- The Buffs bar holds Blizzard's secure buff slots, so it is only ever
+-- shown, hidden, moved or resized outside combat.
+local function Locked(bar)
+    return bar.kind == "buff" and InCombatLockdown()
+end
+
 local function NewBar(key)
     local bar = CreateFrame("Frame", nil, UIParent)
     bar.key, bar.icons, bar.count = key, {}, 0
+    bar.kind = key == "buff" and "buff" or "cooldown"
+    bar.data = ns.BarData(key)
     bar:SetFrameStrata("MEDIUM")
     bar:SetMovable(true)
     bar:SetClampedToScreen(true)
@@ -124,12 +132,20 @@ local function NewBar(key)
     mover:RegisterForDrag("LeftButton")
     mover.fill = mover:CreateTexture(nil, "BACKGROUND")
     mover.fill:SetAllPoints()
-    mover.fill:SetColorTexture(.25, .55, 1, .3)
-    mover.label = mover:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    mover.label:SetPoint("BOTTOM", mover, "TOP", 0, 2)
-    mover.label:SetText(ns.BAR_NAMES[key] .. ": drag to move")
-    mover:SetScript("OnDragStart", function() bar:StartMoving() end)
+    mover.fill:SetColorTexture(.25, .55, 1, .45)
+    -- The name sits inside the highlight, so it never covers another bar.
+    mover.label = mover:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    mover.label:SetPoint("CENTER")
+    mover.label:SetText(ns.BAR_NAMES[key])
+    mover:SetScript("OnDragStart", function()
+        if not Locked(bar) then
+            bar.dragging = true
+            bar:StartMoving()
+        end
+    end)
     mover:SetScript("OnDragStop", function()
+        if not bar.dragging then return end
+        bar.dragging = nil
         bar:StopMovingOrSizing()
         if bar.SetUserPlaced then bar:SetUserPlaced(false) end
         SavePosition(bar)
@@ -140,9 +156,27 @@ local function NewBar(key)
     return bar
 end
 
+local function LayoutBuffs(bar, data)
+    if InCombatLockdown() then
+        bar.pendingLayout = true
+        return
+    end
+    bar.pendingLayout = nil
+    if not bar.created then
+        bar.created = true
+        ns.BuffBar:Create(bar)
+    end
+    ns.BuffBar:Layout(bar, data)
+    local size, spacing = data.size, data.spacing
+    local slots = bar.count > 0 and bar.count or 3
+    bar:SetSize(slots * size + (slots - 1) * spacing, size)
+    Place(bar)
+end
+
 local function Layout(bar)
     local data = ns.BarData(bar.key)
     bar.data = data
+    if bar.kind == "buff" then return LayoutBuffs(bar, data) end
     local size, spacing = data.size, data.spacing
     local count = 0
     for _, name in ipairs(data.spells) do
@@ -190,8 +224,18 @@ function B:UpdateShown()
     for _, key in ipairs(ns.BAR_KEYS) do
         local bar = bars[key]
         if bar then
-            local show = on and (unlocked or (bar.count > 0 and (not bar.data.combatOnly or inCombat)))
-            bar:SetShown(show and true or false)
+            if bar.kind == "buff" then
+                -- Shown whenever it has buffs; "only in combat" fades it
+                -- instead, since the secure slots can't be hidden in a fight.
+                local show = on and (unlocked or bar.count > 0) or false
+                if bar:IsShown() ~= show then
+                    if InCombatLockdown() then bar.pendingShown = true else bar:SetShown(show) end
+                end
+                bar:SetAlpha((unlocked or not bar.data.combatOnly or inCombat) and 1 or 0)
+            else
+                local show = on and (unlocked or (bar.count > 0 and (not bar.data.combatOnly or inCombat)))
+                bar:SetShown(show and true or false)
+            end
             bar.mover:SetShown(on and unlocked)
         end
     end
@@ -207,7 +251,7 @@ function B:RefreshAll()
     local hasTarget = UnitExists("target") and true or false
     for _, key in ipairs(ns.BAR_KEYS) do
         local bar = bars[key]
-        if bar then
+        if bar and bar.kind == "cooldown" then
             for i = 1, bar.count do
                 local ok, err = pcall(RefreshIcon, bar.icons[i], bar.data, hasTarget)
                 if not ok and not self.lastError then
@@ -234,17 +278,28 @@ function B:Changed()
     self:Rebuild()
 end
 
--- The bar a spell is on, and its place there.
-function B:Find(name)
-    for _, key in ipairs(ns.BAR_KEYS) do
-        for i, spell in ipairs(ns.BarData(key).spells) do
-            if spell == name then return key, i end
-        end
+local SPELL_BARS = { "cd", "util" }
+
+local function IndexOf(key, name)
+    for i, spell in ipairs(ns.BarData(key).spells) do
+        if spell == name then return i end
     end
 end
 
--- Puts a spell on a bar, or takes it off with no bar; a spell sits on one bar
--- at a time. Returns false when the bar is full.
+-- The cooldown bar a spell is on, and its place there.
+function B:Find(name)
+    for _, key in ipairs(SPELL_BARS) do
+        local index = IndexOf(key, name)
+        if index then return key, index end
+    end
+end
+
+function B:HasBuff(name)
+    return IndexOf("buff", name) ~= nil
+end
+
+-- Puts a spell on the Cooldowns or Utility bar, or takes it off with no bar;
+-- it sits on one of the two at a time. Returns false when the bar is full.
 function B:Assign(name, key)
     local current, index = self:Find(name)
     if current == key then return true end
@@ -253,6 +308,22 @@ function B:Assign(name, key)
     if key then
         local spells = ns.BarData(key).spells
         spells[#spells + 1] = name
+    end
+    self:Changed()
+    return true
+end
+
+-- Buffs are tracked separately, so a spell can be on a cooldown bar and the
+-- Buffs bar at once (a cooldown that also buffs you). Returns false when full.
+function B:SetBuff(name, on)
+    local index = IndexOf("buff", name)
+    if on and index or not on and not index then return true end
+    local spells = ns.BarData("buff").spells
+    if on then
+        if #spells >= ns.BUFF_SLOTS then return false end
+        spells[#spells + 1] = name
+    else
+        table.remove(spells, index)
     end
     self:Changed()
     return true
@@ -301,6 +372,14 @@ function B:Start()
             B:UpdateShown()
         elseif event == "PLAYER_REGEN_ENABLED" then
             inCombat = false
+            -- Anything the Buffs bar had to wait for during the fight.
+            local buffs = bars.buff
+            if buffs and buffs.pendingLayout then
+                Layout(buffs)
+            elseif buffs and buffs.pending then
+                ns.BuffBar:Apply(buffs)
+            end
+            if buffs then buffs.pendingShown = nil end
             B:UpdateShown()
         elseif event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
             B:Rebuild()

@@ -41,14 +41,20 @@ local function SmallButton(parent, label, width)
     return button
 end
 
+-- The Classic scroll arrows (the client only ships modern stand-ins), cropped
+-- to the arrow itself.
 local function ArrowButton(parent, direction)
     local button = CreateFrame("Button", nil, parent)
-    button:SetSize(18, 18)
-    local base = "Interface\\Buttons\\UI-ScrollBar-Scroll" .. direction .. "Button-"
+    button:SetSize(16, 16)
+    local base = ns.MEDIA .. "UI-ScrollBar-Scroll" .. direction .. "Button-"
     button:SetNormalTexture(base .. "Up")
     button:SetPushedTexture(base .. "Down")
     button:SetDisabledTexture(base .. "Disabled")
     button:SetHighlightTexture(base .. "Highlight", "ADD")
+    for _, texture in ipairs({ button:GetNormalTexture(), button:GetPushedTexture(),
+        button:GetDisabledTexture(), button:GetHighlightTexture() }) do
+        texture:SetTexCoord(.25, .75, .25, .75)
+    end
     return button
 end
 
@@ -116,12 +122,12 @@ function ns.BuildBarsPage(window, page)
     local spellsTitle = UI.Text(left, "GameFontNormal")
     spellsTitle:SetPoint("TOPLEFT", 10, -9)
     spellsTitle:SetText("Your spells")
-    local cdLabel = UI.Text(left, "GameFontNormalSmall", UI.GREY[1], UI.GREY[2], UI.GREY[3])
-    cdLabel:SetPoint("CENTER", left, "TOPLEFT", 296, -16)
-    cdLabel:SetText("CD")
-    local utilLabel = UI.Text(left, "GameFontNormalSmall", UI.GREY[1], UI.GREY[2], UI.GREY[3])
-    utilLabel:SetPoint("CENTER", left, "TOPLEFT", 330, -16)
-    utilLabel:SetText("Util")
+    -- Column labels line up with the row ticks (buff 330, util 296, cd 262).
+    for x, label in pairs({ [262] = "CD", [296] = "Util", [330] = "Buff" }) do
+        local text = UI.Text(left, "GameFontNormalSmall", UI.GREY[1], UI.GREY[2], UI.GREY[3])
+        text:SetPoint("CENTER", left, "TOPLEFT", x, -16)
+        text:SetText(label)
+    end
 
     local search = CreateFrame("EditBox", nil, left, "InputBoxTemplate")
     search:SetSize(190, 20)
@@ -157,10 +163,18 @@ function ns.BuildBarsPage(window, page)
         row.rank:SetPoint("LEFT", row.name, "RIGHT", 6, 0)
         row.header = UI.Text(row, "GameFontNormalSmall", UI.GREY[1], UI.GREY[2], UI.GREY[3])
         row.header:SetPoint("BOTTOMLEFT", 4, 3)
+        row.buff = Check(row)
+        row.buff:SetPoint("RIGHT", -2, 0)
         row.util = Check(row)
-        row.util:SetPoint("RIGHT", -2, 0)
+        row.util:SetPoint("RIGHT", row.buff, "LEFT", -10, 0)
         row.cd = Check(row)
         row.cd:SetPoint("RIGHT", row.util, "LEFT", -10, 0)
+        row.buff:SetScript("OnClick", function(self)
+            if not B:SetBuff(row.spell, self:GetChecked() and true or false) then
+                state.note = ns.BAR_NAMES.buff .. " is full."
+            end
+            window:RefreshBars()
+        end)
         local function Tick(self, key)
             if not B:Assign(row.spell, self:GetChecked() and key or nil) then
                 state.note = ns.BAR_NAMES[key] .. " is full."
@@ -195,7 +209,11 @@ function ns.BuildBarsPage(window, page)
     local empty = UI.Text(right, "GameFontHighlightSmall", UI.GREY[1], UI.GREY[2], UI.GREY[3])
     empty:SetPoint("TOPLEFT", 14, -44)
     empty:SetWidth(270)
-    empty:SetText("Tick spells on the left to add them to this bar.")
+    local EMPTY = {
+        cd = "Tick CD on spells to add them to this bar.",
+        util = "Tick Util on spells to add them to this bar.",
+        buff = "Tick Buff on spells that put a buff on you, or on your class procs at the bottom of the list.",
+    }
 
     local function BarRow(i)
         local row = barRows[i]
@@ -236,6 +254,13 @@ function ns.BuildBarsPage(window, page)
         B:SetOption(state.bar, "hideReady", self:GetChecked() and true or false)
         window:RefreshBars()
     end)
+    -- Buffs only show while they're on you, so their bar offers this instead.
+    local showMissing = Labelled(right, "Show missing buffs greyed")
+    showMissing:SetPoint("BOTTOMLEFT", 8, 44)
+    showMissing:SetScript("OnClick", function(self)
+        B:SetOption(state.bar, "showMissing", self:GetChecked() and true or false)
+        window:RefreshBars()
+    end)
     local combatOnly = Labelled(right, "Only in combat")
     combatOnly:SetPoint("BOTTOMLEFT", 8, 16)
     combatOnly:SetScript("OnClick", function(self)
@@ -258,7 +283,7 @@ function ns.BuildBarsPage(window, page)
                     header:SetPoint("TOPLEFT", 0, -y)
                     header.header:SetText(line)
                     header.header:Show()
-                    for _, part in ipairs({ header.icon, header.name, header.rank, header.cd, header.util }) do part:Hide() end
+                    for _, part in ipairs({ header.icon, header.name, header.rank, header.cd, header.util, header.buff }) do part:Hide() end
                     header:Show()
                     y = y + HEADER
                 end
@@ -274,7 +299,11 @@ function ns.BuildBarsPage(window, page)
                 local on = B:Find(entry.name)
                 row.cd:SetChecked(on == "cd")
                 row.util:SetChecked(on == "util")
-                for _, part in ipairs({ row.icon, row.name, row.rank, row.cd, row.util }) do part:Show() end
+                row.buff:SetChecked(B:HasBuff(entry.name))
+                for _, part in ipairs({ row.icon, row.name, row.rank, row.buff }) do part:Show() end
+                -- Procs have no cooldown of their own, only a buff.
+                row.cd:SetShown(not entry.proc)
+                row.util:SetShown(not entry.proc)
                 row:Show()
                 y = y + ROW
             end
@@ -302,9 +331,16 @@ function ns.BuildBarsPage(window, page)
         for i = #data.spells + 1, #barRows do barRows[i]:Hide() end
         barScroll.content:SetHeight(math.max(1, #data.spells * ROW))
         empty:SetShown(#data.spells == 0)
+        empty:SetText(EMPTY[state.bar])
         size:Set(data.size)
         spacing:Set(data.spacing)
+        local buffs = state.bar == "buff"
+        hideReady:SetShown(not buffs)
+        hideReady.text:SetShown(not buffs)
+        showMissing:SetShown(buffs)
+        showMissing.text:SetShown(buffs)
         hideReady:SetChecked(data.hideReady)
+        showMissing:SetChecked(data.showMissing)
         combatOnly:SetChecked(data.combatOnly)
     end
 
@@ -312,7 +348,7 @@ function ns.BuildBarsPage(window, page)
         local on = B:Enabled()
         use:SetChecked(on)
         unlock:SetText(B:IsUnlocked() and "Lock bars" or "Unlock bars to move")
-        note:SetText(state.note or "Tick a spell to put it on a bar. Each spell shows once, at your highest rank. Hidden icons keep their place on the bar.")
+        note:SetText(state.note or "Tick CD or Util for cooldowns, and Buff for buffs on you. Each spell shows once, at your highest rank.")
         state.note = nil
         RefreshSpells()
         RefreshBar()

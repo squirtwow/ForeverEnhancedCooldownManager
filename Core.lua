@@ -17,10 +17,11 @@ ns.RELOAD = {
 
 -- Classic Bars: each bar lists spells by name, so the highest known rank is
 -- always the one shown.
-ns.BAR_KEYS = { "cd", "util" }
-ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility" }
+ns.BAR_KEYS = { "cd", "util", "buff" }
+ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs" }
 ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 } } -- min, max, default
 ns.BAR_MAX_SPELLS = 40
+ns.BUFF_SLOTS = 16 -- the Buffs bar has one secure slot per buff
 
 local db
 ns.loaded = {}
@@ -59,6 +60,7 @@ function ns.BarData(key)
     bar.spacing = Limit(bar.spacing, ns.BAR_LIMITS.spacing)
     bar.hideReady = bar.hideReady == true
     bar.combatOnly = bar.combatOnly == true
+    bar.showMissing = bar.showMissing == true
     if not (Finite(bar.x) and Finite(bar.y) and math.abs(bar.x) < 4000 and math.abs(bar.y) < 4000) then
         bar.x, bar.y = nil, nil
     end
@@ -105,9 +107,9 @@ local function EncodeBars()
         for _, name in ipairs(bar.spells) do
             if not name:find("[;=|]") then names[#names + 1] = name end
         end
-        parts[#parts + 1] = ("%s.size=%d;%s.spacing=%d;%s.hide=%d;%s.combat=%d;%s.spells=%s"):format(
+        parts[#parts + 1] = ("%s.size=%d;%s.spacing=%d;%s.hide=%d;%s.combat=%d;%s.missing=%d;%s.spells=%s"):format(
             key, bar.size, key, bar.spacing, key, bar.hideReady and 1 or 0,
-            key, bar.combatOnly and 1 or 0, key, table.concat(names, "|"))
+            key, bar.combatOnly and 1 or 0, key, bar.showMissing and 1 or 0, key, table.concat(names, "|"))
         if bar.x and bar.y then parts[#parts + 1] = ("%s.x=%.1f;%s.y=%.1f"):format(key, bar.x, key, bar.y) end
     end
     return table.concat(parts, ";")
@@ -123,6 +125,8 @@ local function DecodeBars(text)
                 bar[field] = tonumber(value)
             elseif field == "hide" then
                 bar.hideReady = value == "1"
+            elseif field == "missing" then
+                bar.showMissing = value == "1"
             elseif field == "combat" then
                 bar.combatOnly = value == "1"
             elseif field == "x" or field == "y" then

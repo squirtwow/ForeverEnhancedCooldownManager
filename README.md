@@ -24,6 +24,9 @@ to EraUI.
   Riposte, Counterattack and Mongoose Bite
 - Per bar: icon size, spacing, hide when ready and only in combat; unlock to
   drag them anywhere
+- Buffs bar: your own buffs and class procs (Clearcasting, Shadow Trance and
+  more) while they're on you, with time left and stacks, in combat too;
+  optionally shows missing buffs greyed
 - Off by default
 
 ## Commands
