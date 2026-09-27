@@ -9,6 +9,7 @@ ns.MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 ns.DEFAULTS = {
     classicLook = true,
     classicBars = false,
+    listItems = false, -- show trinkets and bag items in the /ccm spell list
 }
 -- Settings that only take effect after a reload.
 ns.RELOAD = {
@@ -61,10 +62,43 @@ function ns.BarData(key)
     bar.hideReady = bar.hideReady == true
     bar.combatOnly = bar.combatOnly == true
     bar.showMissing = bar.showMissing == true
+    bar.showNames = bar.showNames == true
     if not (Finite(bar.x) and Finite(bar.y) and math.abs(bar.x) < 4000 and math.abs(bar.y) < 4000) then
         bar.x, bar.y = nil, nil
     end
     return bar
+end
+
+-- Spells added by name or ID that aren't in your spellbook: name -> spell IDs.
+function ns.CustomSpells()
+    if not db then return {} end
+    if type(db.custom) ~= "table" then db.custom = {} end
+    for name, ids in pairs(db.custom) do
+        local valid = type(name) == "string" and name ~= "" and type(ids) == "table" and #ids > 0
+        for _, id in ipairs(valid and ids or {}) do
+            if not Finite(id) then valid = false end
+        end
+        if not valid then db.custom[name] = nil end
+    end
+    return db.custom
+end
+
+function ns.AddCustom(name, ids)
+    ns.CustomSpells()[name] = ids
+end
+
+-- Forgets added spells once they're on no bar.
+function ns.PruneCustom()
+    local custom = ns.CustomSpells()
+    for name in pairs(custom) do
+        local used = false
+        for _, key in ipairs(ns.BAR_KEYS) do
+            for _, spell in ipairs(ns.BarData(key).spells) do
+                if spell == name then used = true end
+            end
+        end
+        if not used then custom[name] = nil end
+    end
 end
 
 -- Backup ------------------------------------------------------------------------
@@ -107,18 +141,31 @@ local function EncodeBars()
         for _, name in ipairs(bar.spells) do
             if not name:find("[;=|]") then names[#names + 1] = name end
         end
-        parts[#parts + 1] = ("%s.size=%d;%s.spacing=%d;%s.hide=%d;%s.combat=%d;%s.missing=%d;%s.spells=%s"):format(
-            key, bar.size, key, bar.spacing, key, bar.hideReady and 1 or 0,
-            key, bar.combatOnly and 1 or 0, key, bar.showMissing and 1 or 0, key, table.concat(names, "|"))
+        parts[#parts + 1] = ("%s.size=%d;%s.spacing=%d;%s.hide=%d;%s.combat=%d;%s.missing=%d;%s.names=%d;%s.spells=%s"):format(
+            key, bar.size, key, bar.spacing, key, bar.hideReady and 1 or 0, key, bar.combatOnly and 1 or 0,
+            key, bar.showMissing and 1 or 0, key, bar.showNames and 1 or 0, key, table.concat(names, "|"))
         if bar.x and bar.y then parts[#parts + 1] = ("%s.x=%.1f;%s.y=%.1f"):format(key, bar.x, key, bar.y) end
     end
+    local custom = {}
+    for name, ids in pairs(ns.CustomSpells()) do
+        if not name:find("[;=|~]") then custom[#custom + 1] = name .. "~" .. table.concat(ids, ",") end
+    end
+    table.sort(custom)
+    if #custom > 0 then parts[#parts + 1] = "extra.custom=" .. table.concat(custom, "|") end
     return table.concat(parts, ";")
 end
 
 local function DecodeBars(text)
-    local bars = {}
+    local bars, custom = {}, nil
     for key, field, value in text:gmatch("(%a+)%.(%a+)=([^;]*)") do
-        if ns.BAR_NAMES[key] then
+        if key == "extra" and field == "custom" then
+            custom = {}
+            for name, list in value:gmatch("([^|~]+)~([%d,]+)") do
+                local ids = {}
+                for id in list:gmatch("%d+") do ids[#ids + 1] = tonumber(id) end
+                if #name <= 60 and #ids > 0 then custom[name] = ids end
+            end
+        elseif ns.BAR_NAMES[key] then
             local bar = bars[key] or { spells = {} }
             bars[key] = bar
             if field == "size" or field == "spacing" then
@@ -127,6 +174,8 @@ local function DecodeBars(text)
                 bar.hideReady = value == "1"
             elseif field == "missing" then
                 bar.showMissing = value == "1"
+            elseif field == "names" then
+                bar.showNames = value == "1"
             elseif field == "combat" then
                 bar.combatOnly = value == "1"
             elseif field == "x" or field == "y" then
@@ -138,7 +187,7 @@ local function DecodeBars(text)
             end
         end
     end
-    return next(bars) and bars or nil
+    return next(bars) and bars or nil, custom
 end
 
 local function ReadBarsBackup()
@@ -446,7 +495,9 @@ loader:SetScript("OnEvent", function(self, _, name)
     for key, value in pairs(ReadBackup()) do
         if db[key] == nil then db[key] = value end
     end
-    if db.bars == nil then db.bars = ReadBarsBackup() end
+    local bars, custom = ReadBarsBackup()
+    if db.bars == nil then db.bars = bars end
+    if db.custom == nil then db.custom = custom end
     for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key) end
     WriteBackup()
     for key in pairs(ns.RELOAD) do ns.loaded[key] = ns.Get(key) end

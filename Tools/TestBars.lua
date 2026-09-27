@@ -76,6 +76,7 @@ end
 local SECRET = setmetatable({}, { __tostring = function() return "secret" end })
 local book, usable, noMana, range, active, target, cvars, printed
 local cooldownCalls, lockdown, containers, containerCallsInCombat
+local trinket, trinketCooldown, bagItems, itemCooldown, itemCount
 
 local function Book(ranks)
     -- Two tabs: General (Attack), Balance (Moonfire ranks, Wrath, a passive,
@@ -100,6 +101,27 @@ local function Environment(keepCVars)
     frames, printed, cooldownCalls = {}, {}, {}
     usable, noMana, range, active, target = {}, {}, {}, false, false
     lockdown, containers, containerCallsInCombat = false, {}, 0
+    trinket, trinketCooldown, bagItems, itemCooldown, itemCount = nil, { 0, 0, 1 }, {}, { 0, 0, 1 }, {}
+    _G.GetInventoryItemID = function(_, slot) return slot == 13 and trinket or nil end
+    _G.GetInventoryItemLink = function() return "|cff1eff00|Hitem:" .. tostring(trinket) .. "|h[Lucky Charm]|h|r" end
+    _G.GetInventoryItemTexture = function() return 777 end
+    _G.GetInventoryItemCooldown = function(_, slot) assert(slot == 13); return trinketCooldown[1], trinketCooldown[2], trinketCooldown[3] end
+    _G.C_Container = {
+        GetContainerNumSlots = function(bag) return bag == 0 and #bagItems or 0 end,
+        GetContainerItemInfo = function(bag, slot) return bagItems[slot] end,
+    }
+    _G.C_Item = {
+        GetItemSpell = function(id) return ({ [118] = "Healing Potion", [117] = "Food", [2698] = "Learning" })[id] end,
+        GetItemInfoInstant = function(id)
+            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 } })[id] or { 15, 0 }
+            return id, nil, nil, nil, nil, class[1], class[2]
+        end,
+        GetItemCooldown = function() return itemCooldown[1], itemCooldown[2], itemCooldown[3] end,
+        GetItemCount = function(id) return itemCount[id] or 0 end,
+        IsUsableItem = function() return true, false end,
+        GetItemIconByID = function() return 888 end,
+        GetItemNameByID = function(id) return id == 118 and "Minor Healing Potion" or nil end,
+    }
     if not keepCVars then cvars = {} end
     Book(false)
     _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 } }
@@ -129,7 +151,8 @@ local function Environment(keepCVars)
         IsSpellUsable = function(id) if usable[id] == nil then return true, false end return usable[id], noMana[id] end,
         IsSpellInRange = function(id, unit) assert(unit == "target"); return range[id] end,
         GetSpellTexture = function() return 1 end,
-        GetSpellName = function(id) return ({ [16870] = "Clearcasting", [16886] = "Nature's Grace" })[id] end,
+        GetSpellName = function(id) return ({ [16870] = "Clearcasting", [16886] = "Nature's Grace", [1243] = "Power Word: Fortitude" })[id] end,
+        GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
     _G.CustomAuraContainerSlotDefaultOptions = {}
@@ -188,7 +211,7 @@ end
 local function Load(saved)
     local ns = {}
     _G.ClassicCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "BarsPanel.lua" }) do
+    for _, file in ipairs({ "Core.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "BarsPanel.lua" }) do
         assert(loadfile(file))("ClassicCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ClassicCooldownManager")
@@ -208,9 +231,10 @@ Equal(moonfire.spellID, 8924, "Moonfire uses the highest rank")
 Equal(moonfire.rankText, "Rank 2", "shows that rank")
 Equal(moonfire.line, "Balance", "grouped by spellbook tab")
 Equal(ns.Spells:Find("Natural Weapons"), nil, "passives left out")
-Equal(table.concat(ns.Spells:Find("Thorns").ids, ","), "467,782", "every known rank recorded for buff matching")
+Equal(table.concat(ns.Spells:Find("Thorns").ids, ","), "467,782,1075,8914,9756,9910", "every rank in the game counts for buff matching")
+Equal(ns.Spells:Find("Thorns").spellID, 782, "while the icon uses your highest known rank")
 local cc = ns.Spells:Find("Clearcasting")
-Equal(cc and cc.proc and cc.line, "Procs", "class procs listed under Procs")
+Equal(cc and cc.kind == "proc" and cc.line, "Procs", "class procs listed under Procs")
 Equal(cc.ids[1], 16870, "with their spell IDs")
 Equal(list[#list].name, "Nature's Grace", "procs come last")
 
@@ -338,7 +362,7 @@ Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 
 -- Backup ------------------------------------------------------------------------------
 
-Equal(cvars.ClassicCooldownManagerBackup, "classicBars=1;classicLook=1", "on/off backup")
+Equal(cvars.ClassicCooldownManagerBackup, "classicBars=1;classicLook=1;listItems=0", "on/off backup")
 Equal(cvars.ClassicCooldownManagerBackupBars0, "1", "bars backed up in one chunk")
 Environment(true)
 ns = Load(nil)
@@ -458,6 +482,165 @@ Equal(ns.BarData("util").spells[1], "Moonfire", "without taking it off Utility")
 local proc = Row("Clearcasting")
 Equal(S[proc.cd].shown or S[proc.util].shown, false, "procs offer only the Buff tick")
 Equal(S[proc.buff].shown, true, "Buff tick shown for procs")
+
+-- Items, added spells, names and cooldown ends ---------------------------------------------
+
+Environment()
+trinket = 11111
+bagItems = {
+    { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 },
+    { itemID = 2589, hyperlink = "|cffffffff|Hitem:2589|h[Linen Cloth]|h|r" },
+    { itemID = 117, hyperlink = "|cffffffff|Hitem:117|h[Tough Jerky]|h|r" },
+    { itemID = 2698, hyperlink = "|cffffffff|Hitem:2698|h[Recipe: Cooked Crab Claw]|h|r" },
+}
+itemCount[118] = 3
+ns = Load({ classicBars = true })
+B = ns.Bars
+local charm = ns.Spells:Find("slot:13")
+Equal(charm and charm.name, "Trinket 1: Lucky Charm", "equipped trinket listed")
+Equal(charm.line, "Items", "under Items")
+Equal(ns.Spells:Find("item:118") and ns.Spells:Find("item:118").name, "Minor Healing Potion", "usable bag item listed")
+Equal(ns.Spells:Find("item:2589"), nil, "items without a use left out")
+Equal(ns.Spells:Find("item:117"), nil, "food and drink left out: no cooldown")
+Equal(ns.Spells:Find("item:2698"), nil, "recipes left out")
+
+Equal(ns.Spells:Resolve("thorns"), "Thorns", "names match whatever the case")
+local key, ids = ns.Spells:Resolve("Power Word: Fortitude")
+Equal(key, "Power Word: Fortitude", "another class's spell found in the game data")
+Equal(ids[1], 1243, "remembered by its ID")
+Equal(select(2, ns.Spells:Resolve("99999999")), "No spell has ID 99999999.", "unknown IDs explained")
+Equal(ns.Spells:Resolve("16870"), "Clearcasting", "IDs of listed spells map to them")
+Equal(select(2, ns.Spells:Resolve("   ")), "Type a spell name or ID first.", "empty input explained")
+
+B:Assign("slot:13", "cd")
+B:Assign("item:118", "cd")
+local cdBar = B:Get("cd")
+local charmIcon, potion = cdBar.icons[1], cdBar.icons[2]
+Equal(charmIcon.kind, "slot", "trinket icon")
+trinketCooldown = { 100, 120, 1 }
+B:RefreshAll()
+Equal(Last(charmIcon.cooldown, "SetCooldown", 2), 120, "trinket cooldown shown")
+Equal(S[charmIcon.texture].desaturated, true, "greyed while cooling down")
+trinketCooldown = { 0, 0, 1 }
+S[charmIcon.cooldown].scripts.OnCooldownDone()
+Equal(S[charmIcon.texture].desaturated, false, "ungreys when the cooldown finishes")
+Equal(S[potion.count].text, 3, "potion count shown")
+itemCount[118] = 0
+B:RefreshAll()
+Equal(S[potion.texture].desaturated, true, "greyed when you've run out")
+trinketCooldown = { SECRET, SECRET, 1 }
+B:RefreshAll()
+Equal(S[charmIcon.texture].desaturated, false, "a hidden item cooldown leaves the icon as it was")
+trinketCooldown = { 0, 0, 1 }
+B:SetOption("cd", "hideReady", true)
+Equal(S[cdBar.icons[1]].alpha, 0, "ready trinket hidden when asked")
+B:SetOption("cd", "hideReady", false)
+
+B:Assign("Moonfire", "util")
+local moonIcon = B:Get("util").icons[1]
+active = true
+B:RefreshAll()
+Equal(S[moonIcon.texture].desaturated, true, "spell greyed on cooldown")
+active = false
+S[moonIcon.cooldown].scripts.OnCooldownDone()
+Equal(S[moonIcon.texture].desaturated, false, "and ungreyed right when its cooldown ends")
+
+B:SetOption("cd", "showNames", true)
+Equal(S[cdBar.icons[1].label].shown, true, "names shown when asked")
+Equal(S[cdBar.icons[1].label].text, "Lucky Charm", "trinkets named by the item")
+B:SetOption("cd", "showNames", false)
+Equal(S[cdBar.icons[1].label].shown, false, "names off by default")
+
+local found = ns.Spells:Suggest("mo", 50)
+local names, firstContains = {}, nil
+for i, item in ipairs(found) do
+    names[item.name] = i
+    if not firstContains and not item.name:lower():find("^mo") then firstContains = i end
+end
+Equal(names.Moonfire ~= nil and names["Mongoose Bite"] ~= nil, true, "your spells and other classes' spells both suggested")
+Equal(names["Minor Healing Potion"] ~= nil, false, "only names containing the text")
+local startsFirst = true
+for i, item in ipairs(found) do
+    if firstContains and i > firstContains and item.name:lower():find("^mo") then startsFirst = false end
+end
+Equal(startsFirst, true, "names starting with the text come first")
+Equal(#ns.Spells:Suggest("m"), 0, "nothing suggested for a single letter")
+Equal(#ns.Spells:Suggest("a", 8) <= 8 and #ns.Spells:Suggest("ar") <= 8, true, "at most eight")
+Equal(ns.Spells:Suggest("tho")[1].name, "Thorns", "your own spell before other classes' spells")
+local fire = ns.Spells:Suggest("fire", 20)
+local order = {}
+for i, item in ipairs(fire) do order[item.name] = i end
+Equal(order.Moonfire < order["Fire Blast"], true, "your spells first, even when another class's name starts with the text")
+local shield = ns.Spells:Suggest("shield", 30)
+local wordStart, midWord
+for i, item in ipairs(shield) do
+    if item.name == "Power Word: Shield" then wordStart = i end
+    if item.name:lower():find("shield", 1, true) and not item.name:lower():find("^shield") and not item.name:lower():find("[%s%p]shield") then midWord = midWord or i end
+end
+Equal(midWord == nil or wordStart < midWord, true, "a word starting with the text before a match mid-word")
+local fort = {}
+for _, item in ipairs(ns.Spells:Suggest("fortitude")) do fort[item.name] = true end
+Equal(fort["Power Word: Fortitude"] and fort["Prayer of Fortitude"], true, "found by any part of the name")
+Equal(ns.Spells:Suggest("minor heal")[1].name, "Minor Healing Potion", "items suggested too")
+
+ns.Toggle()
+w = ClassicCooldownManagerFrame
+w.tabs.bars:Click()
+Equal(Row("item:118"), nil, "items left out of the list by default")
+Equal(Row("Moonfire") ~= nil, true, "spells listed")
+local function ShowItemsBox()
+    for _, f in ipairs(frames) do
+        if f.text and S[f.text].text == "Show items" then return f end
+    end
+end
+local itemsBox = ShowItemsBox()
+itemsBox:SetChecked(true)
+itemsBox:Click()
+Equal(ns.Get("listItems"), true, "Show items remembered")
+Equal(Row("item:118") ~= nil, true, "items listed when asked")
+Equal(cvars.ClassicCooldownManagerBackup, "classicBars=1;classicLook=1;listItems=1", "and backed up")
+
+w.add:SetText("thor")
+S[w.add].scripts.OnTextChanged(w.add, true)
+Equal(S[w.add.suggest].shown, true, "matches appear while typing")
+Equal(w.add.suggest.rows[1].name, "Thorns", "best match first")
+local anchor = S[w.add.suggest.rows[1]].points[1]
+Equal(anchor[1] == "BOTTOMLEFT" and anchor[3], 4, "best match sits right above the box")
+Equal(S[w.add.suggest.rows[2]].points[1][3], 24, "the rest stack upwards")
+w.add.suggest.rows[1]:Click()
+Equal(w.add:GetText(), "Thorns", "clicking a match fills in its exact name")
+Equal(S[w.add.suggest].shown, false, "and closes the list")
+w.add:SetText("power word: fort")
+S[w.add].scripts.OnTextChanged(w.add, true)
+S[w.add].scripts.OnEnterPressed(w.add)
+Equal(w.add:GetText(), "Power Word: Fortitude", "Enter takes the first match")
+w.add:SetText("zzzz")
+S[w.add].scripts.OnTextChanged(w.add, true)
+Equal(S[w.add.suggest].shown, false, "no list when nothing matches")
+w.add:SetText("nonsense")
+w.addButtons.cd:Click()
+Equal(S[w.note].text, 'No spell called "nonsense" was found.', "unknown names explained")
+w.add:SetText("Minor Healing Potion")
+w.addButtons.buff:Click()
+Equal(S[w.note].text, "Items can't go on the Buffs bar.", "items kept off the Buffs bar")
+w.add:SetText("Power Word: Fortitude")
+w.addButtons.buff:Click()
+Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "added from the box")
+Equal(S[w.note].text, "Added Power Word: Fortitude to Buffs.", "and confirmed")
+Equal(w.add:GetText(), "", "box cleared")
+local pwf = ns.Spells:Find("Power Word: Fortitude")
+Equal(pwf and pwf.line, "Added", "added spells listed under Added")
+local slotIDs = S[containers[1]].slots.b1.filters.includeSpellIDs
+Equal(slotIDs[1243] and slotIDs[10938] and slotIDs[21564], true, "any rank, and Prayer of Fortitude, counts")
+Equal(#printed, 0, "no errors")
+
+Environment(true)
+ns = Load(nil)
+Equal(ns.CustomSpells()["Power Word: Fortitude"][1], 1243, "added spells restored from the backup")
+Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "with their bar")
+Equal(ns.Spells:Find("item:118").name, "Minor Healing Potion", "items on a bar stay listed when your bags run out")
+ns.Bars:SetBuff("Power Word: Fortitude", false)
+Equal(ns.CustomSpells()["Power Word: Fortitude"], nil, "forgotten once on no bar")
 
 print = _G.print
 io.write("Classic Bars checks passed: " .. checks .. " assertions.\n")

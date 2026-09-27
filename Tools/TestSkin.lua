@@ -433,11 +433,11 @@ Equal(S[w].shown, false, "/ccm again closes it")
 Environment()
 Viewers(0)
 ns = Load(nil)
-Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=1", "backup written at first login")
+Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=1;listItems=0", "backup written at first login")
 ns.Toggle()
 ClassicCooldownManagerFrame.look:SetChecked(false)
 ClassicCooldownManagerFrame.look:Click()
-Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=0", "backup follows a change")
+Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=0;listItems=0", "backup follows a change")
 
 -- The client loses the saved settings on restart; the backup survives.
 Environment(true)
@@ -452,7 +452,7 @@ Environment(true)
 Viewers(0)
 ns = Load({ classicLook = true })
 Equal(ns.Get("classicLook"), true, "saved settings win")
-Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=1", "backup brought up to date")
+Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=1;listItems=0", "backup brought up to date")
 
 -- Anything unexpected in the backup is ignored.
 Environment()

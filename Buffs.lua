@@ -64,6 +64,9 @@ function F:Create(bar)
         holder.icon:SetAllPoints()
         holder.icon:SetDesaturated(true)
         holder.icon:SetAlpha(.45)
+        holder.label = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        holder.label:SetPoint("TOP", holder, "BOTTOM", 0, -3)
+        holder.label:SetWordWrap(false)
         holder:Hide()
         bar.holders[i] = holder
     end
@@ -102,6 +105,9 @@ function F:Layout(bar, data)
             holder.icon:SetTexture(entry.icon)
             holder.icon:SetShown(data.showMissing)
             holder.edge:SetShown(data.showMissing)
+            holder.label:SetWidth(size + spacing)
+            holder.label:SetText(entry.name)
+            holder.label:SetShown(data.showNames)
             holder:Show()
             local ids = {}
             for _, id in ipairs(entry.ids) do ids[id] = true end

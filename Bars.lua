@@ -56,10 +56,55 @@ local function NewIcon(bar)
     icon.cooldown:SetDrawEdge(false)
     icon.cooldown:SetDrawBling(false)
     if _G[TIMER_FONT] then icon.cooldown:SetCountdownFont(TIMER_FONT) end
+    -- Events arrive when a cooldown starts, not when it ends; this catches the
+    -- end, so the icon ungreys (or hides when ready) on time.
+    icon.cooldown:SetScript("OnCooldownDone", function() B:RefreshAll() end)
+    -- Item counts sit above the sweep.
+    local top = CreateFrame("Frame", nil, icon)
+    top:SetAllPoints()
+    top:SetFrameLevel(icon.cooldown:GetFrameLevel() + 1)
+    icon.count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    icon.count:SetPoint("BOTTOMRIGHT", -1, 1)
+    icon.label = icon:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    icon.label:SetPoint("TOP", icon, "BOTTOM", 0, -3)
+    icon.label:SetWordWrap(false)
     return icon
 end
 
+-- Trinkets and bag items. Their cooldowns come back as plain numbers; if the
+-- game ever hides them in combat, the icon simply keeps its last state.
+local function RefreshItem(icon, data)
+    local start, duration
+    if icon.kind == "slot" then
+        start, duration = GetInventoryItemCooldown("player", icon.slot)
+    else
+        start, duration = C_Item.GetItemCooldown(icon.itemID)
+    end
+    if Open(start) and Open(duration) and type(start) == "number" and type(duration) == "number" then
+        local active = start > 0 and duration > 1.5
+        if active then icon.cooldown:SetCooldown(start, duration) else icon.cooldown:Clear() end
+        icon.texture:SetDesaturated(active)
+        icon:SetAlpha(data.hideReady and not active and 0 or 1)
+    end
+    local count
+    if icon.kind == "item" then
+        count = C_Item.GetItemCount(icon.itemID, false, true)
+        if Open(count) and type(count) == "number" then
+            icon.count:SetText(count)
+            if count == 0 then icon.texture:SetDesaturated(true) end
+        end
+    end
+    local usable, noMana = C_Item.IsUsableItem(icon.itemID)
+    local tint = TINT.ready
+    if Open(usable) and usable == false then
+        tint = Open(noMana) and noMana and TINT.mana or TINT.unusable
+    end
+    icon.texture:SetVertexColor(tint[1], tint[2], tint[3])
+    icon.glow:Hide()
+end
+
 local function RefreshIcon(icon, data, hasTarget)
+    if icon.kind == "item" or icon.kind == "slot" then return RefreshItem(icon, data) end
     local id = icon.spellID
     local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(id, true)
     if duration then
@@ -189,7 +234,12 @@ local function Layout(bar)
             icon:ClearAllPoints()
             icon:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[name] == true
-            icon.texture:SetTexture(entry.icon or C_Spell.GetSpellTexture(entry.spellID))
+            icon.kind, icon.itemID, icon.slot = entry.kind, entry.itemID, entry.slot
+            icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
+            icon.count:SetText("")
+            icon.label:SetWidth(size + spacing)
+            icon.label:SetText(entry.kind == "slot" and entry.name:gsub("^Trinket %d: ", "") or entry.name)
+            icon.label:SetShown(data.showNames)
             icon:Show()
         end
     end
@@ -274,6 +324,7 @@ end
 -- Setup changes. Each saves the backup and redraws the bars.
 
 function B:Changed()
+    ns.PruneCustom()
     ns.SaveBars()
     self:Rebuild()
 end
@@ -363,7 +414,8 @@ function B:Start()
     inCombat = UnitAffectingCombat("player") and true or false
     local driver = CreateFrame("Frame")
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "SPELL_UPDATE_COOLDOWN",
-        "SPELL_UPDATE_USABLE", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED" }) do
+        "SPELL_UPDATE_USABLE", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+        "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED" }) do
         driver:RegisterEvent(event)
     end
     driver:SetScript("OnEvent", function(_, event)
@@ -381,7 +433,15 @@ function B:Start()
             end
             if buffs then buffs.pendingShown = nil end
             B:UpdateShown()
-        elseif event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
+        elseif event == "BAG_UPDATE_DELAYED" then
+            -- Counts change often; the item list only matters while /ccm is open.
+            if ns.window and ns.window:IsShown() then
+                B:Rebuild()
+                ns.window:Refresh()
+            else
+                B:RefreshAll()
+            end
+        elseif event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_EQUIPMENT_CHANGED" then
             B:Rebuild()
             if ns.window and ns.window:IsShown() then ns.window:Refresh() end
         else

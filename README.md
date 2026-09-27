@@ -26,7 +26,10 @@ to EraUI.
   drag them anywhere
 - Buffs bar: your own buffs and class procs (Clearcasting, Shadow Trance and
   more) while they're on you, with time left and stacks, in combat too;
-  optionally shows missing buffs greyed
+  optionally shows missing buffs greyed; buffs from other players count at any
+  rank, group versions included
+- Trinkets and potions on the Cooldowns or Utility bar, with counts
+- Add any spell by name or spell ID, and optional spell names under icons
 - Off by default
 
 ## Commands
