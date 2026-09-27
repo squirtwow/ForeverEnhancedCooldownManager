@@ -4,5 +4,6 @@
 
 ### Added
 - Classic look for Blizzard's Cooldown Manager: square 2004-style icons with a thin dark edge, a square cooldown sweep, smaller buff timers, and Classic buff bars. Positions stay in Edit Mode and everything works in combat. On by default; /ccm to switch it off.
+- Classic Bars: your own bars of square Classic icons, set up in /ccm > Classic Bars. Tick spells from your spellbook onto the Cooldowns or Utility bar; each spell shows once at your highest rank and switches when you train a new rank. Cooldown sweep and countdown in combat, greyed while cooling down, red out of range, blue when low on mana, and a gold edge when a reactive ability (Overpower, Revenge, Execute, Riposte, Counterattack, Mongoose Bite) is ready. Per bar: icon size, spacing, hide when ready and only in combat. Unlock to drag them anywhere. Off by default.
 - /ccm settings window, also listed under Options > AddOns.
 - Settings backup: your choices are also kept in the game's own settings, so they come back if the client forgets addon settings after a restart.

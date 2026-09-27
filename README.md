@@ -14,6 +14,18 @@ to EraUI.
   stay in Edit Mode, and everything works in combat
 - On by default; switch it off in `/ccm` and reload to restore Blizzard's look
 
+## Classic Bars
+- Your own bars of square Classic icons, set up in `/ccm` > Classic Bars
+- Tick spells from your spellbook onto the Cooldowns or Utility bar; each spell
+  shows once at your highest rank, and switches when you train a new rank
+- Cooldown sweep and countdown in combat, greyed while cooling down, red out of
+  range, blue when low on mana
+- A gold edge when a reactive ability is ready: Overpower, Revenge, Execute,
+  Riposte, Counterattack and Mongoose Bite
+- Per bar: icon size, spacing, hide when ready and only in combat; unlock to
+  drag them anywhere
+- Off by default
+
 ## Commands
 - `/ccm` opens the settings, also found under Options > AddOns
 
