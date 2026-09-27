@@ -81,6 +81,7 @@ function Proto:SetSwipeTexture(t) S[self].swipe = t end
 function Proto:SetStatusBarTexture(t) S[self].barTexture = t end
 function Proto:SetStatusBarColor(r, g, b) S[self].barColour = { r, g, b } end
 function Proto:SetFontObject(o) S[self].font = o end
+function Proto:SetCountdownFont(o) S[self].countdownFont = o end
 -- Only the addon's own frames use these.
 function Proto:Show() local s = S[self]; if not s.shown then s.shown = true; if s.scripts.OnShow then s.scripts.OnShow(self) end end end
 function Proto:Hide() local s = S[self]; if s.shown then s.shown = false; if s.scripts.OnHide then s.scripts.OnHide(self) end end end
@@ -169,6 +170,7 @@ end
 
 local frames, printed, reloads, combat, cvarOn
 local bindings
+local cvars = {} -- addon-registered game settings survive a restart
 
 local function Fire(event, ...)
     for _, frame in ipairs(frames) do
@@ -176,8 +178,9 @@ local function Fire(event, ...)
     end
 end
 
-local function Environment()
+local function Environment(keepCVars)
     frames, printed, reloads, combat, cvarOn = {}, {}, 0, false, true
+    if not keepCVars then cvars = {} end
     bindings = {}
     acquired = {}
     _G.CreateFrame = function(_, name, parent)
@@ -199,7 +202,13 @@ local function Environment()
         assert(_G.ClassicCooldownManagerFrame and S[_G.ClassicCooldownManagerFrame].shown, "window hidden before reload")
         reloads = reloads + 1
     end
-    _G.C_CVar = { GetCVarBool = function(name) assert(name == "cooldownViewerEnabled"); return cvarOn end }
+    _G.C_CVar = {
+        GetCVarBool = function(name) assert(name == "cooldownViewerEnabled"); return cvarOn end,
+        GetCVar = function(name) return cvars[name] end,
+        RegisterCVar = function(name, default) if cvars[name] == nil then cvars[name] = default end end,
+        SetCVar = function(name, value) assert(cvars[name] ~= nil, "set before register"); cvars[name] = value end,
+    }
+    _G.SystemFont_Shadow_Large_Outline = {}
     _G.ClearOverrideBindings = function(owner) assert(not combat, "binding change in combat"); bindings[owner] = nil end
     _G.SetOverrideBindingClick = function(owner, _, key, button) assert(not combat, "binding change in combat"); bindings[owner] = key .. ":" .. button end
     _G.SlashCmdList = {}
@@ -297,6 +306,9 @@ Equal(#S[buff.Icon].masks, 0, "buff icon unmasked")
 Equal(InsetBy(buff.Icon, buff, 1.5), true, "buff icon inset 1.5")
 Equal(S[buff.Cooldown].swipe, "Interface\\Buttons\\WHITE8X8", "buff duration sweep is square")
 Equal(#S[buff.DebuffBorder].points, 0, "Blizzard's debuff border keeps its own anchors")
+Equal(S[buff.Cooldown].countdownFont, "SystemFont_Shadow_Large_Outline", "buff timers one size smaller")
+Equal(S[item.Cooldown].countdownFont, nil, "essential timers keep Blizzard's font")
+Equal(S[utility.Cooldown].countdownFont, nil, "utility timers keep Blizzard's font")
 
 -- Tracked buffs as bars.
 local bar = First(v.barsActive)
@@ -398,11 +410,56 @@ ClassicCooldownManagerEscButton:Click()
 Equal(S[w].shown, false, "Escape closes it")
 Equal(bindings[ClassicCooldownManagerEscButton], nil, "and releases the key")
 
+SlashCmdList.CLASSICCOOLDOWNMANAGER("")
+Equal(S[w].shown, true, "/ccm opens it again")
+SlashCmdList.CLASSICCOOLDOWNMANAGER("check")
+Equal(S[w].shown, false, "without the development check, /ccm check just toggles")
+local probed
+ns.Probe = function(msg) probed = msg end
+SlashCmdList.CLASSICCOOLDOWNMANAGER(" check Moonfire")
+Equal(probed, " check Moonfire", "/ccm check reaches the development check")
+Equal(S[w].shown, false, "and leaves the window alone")
+ns.Probe = nil
+
 cvarOn = false
 ns.Toggle()
 Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
 ns.Toggle()
 Equal(S[w].shown, false, "/ccm again closes it")
 
+-- Settings backup -----------------------------------------------------------------------
+
+Environment()
+Viewers(0)
+ns = Load(nil)
+Equal(cvars.ClassicCooldownManagerBackup, "classicLook=1", "backup written at first login")
+ns.Toggle()
+ClassicCooldownManagerFrame.look:SetChecked(false)
+ClassicCooldownManagerFrame.look:Click()
+Equal(cvars.ClassicCooldownManagerBackup, "classicLook=0", "backup follows a change")
+
+-- The client loses the saved settings on restart; the backup survives.
+Environment(true)
+v = Viewers(1)
+ns = Load(nil)
+Equal(ns.Get("classicLook"), false, "choice restored from the backup")
+Equal(ClassicCooldownManagerDB.classicLook, false, "and saved again")
+Equal(ns.Skin.started, nil, "so the Classic look stays off")
+
+-- Saved settings win over an older backup.
+Environment(true)
+Viewers(0)
+ns = Load({ classicLook = true })
+Equal(ns.Get("classicLook"), true, "saved settings win")
+Equal(cvars.ClassicCooldownManagerBackup, "classicLook=1", "backup brought up to date")
+
+-- Anything unexpected in the backup is ignored.
+Environment()
+cvars.ClassicCooldownManagerBackup = "classicLook=maybe;os=1;print(1)"
+Viewers(0)
+ns = Load(nil)
+Equal(ns.Get("classicLook"), true, "junk ignored; default used")
+Equal(ClassicCooldownManagerDB.os, nil, "unknown keys never copied")
+
 print = _G.print
-io.write("Classic Cooldown Manager skin checks passed: " .. checks .. " assertions.\n")
+io.write("Classic Cooldown Manager checks passed: " .. checks .. " assertions.\n")

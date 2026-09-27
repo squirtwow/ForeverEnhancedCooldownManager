@@ -15,6 +15,9 @@ local OVERLAY_ATLAS = "UI-HUD-CoolDownManager-IconOverlay"
 local EDGE = { 0, 0, 0, .9 }
 local BAR_BG = { 0, 0, 0, .5 }
 local BAR_COLOUR = { 1, .5, .25 } -- Blizzard's own buff-bar colour.
+-- Buff icons get no timer font from Blizzard, so they use the 20pt default,
+-- which fills the icon with "56m"; this is the next size down (16pt).
+local BUFF_TIMER_FONT = "SystemFont_Shadow_Large_Outline"
 
 local skinned = setmetatable({}, { __mode = "k" })
 local hooked = {}
@@ -82,6 +85,7 @@ end
 local function Buff(item, inset)
     SquareIcon(item, item.Icon, inset)
     SquareSweep(item.Cooldown, item.Icon)
+    if item.Cooldown and _G[BUFF_TIMER_FONT] then item.Cooldown:SetCountdownFont(BUFF_TIMER_FONT) end
 end
 
 -- Tracked buffs shown as bars.

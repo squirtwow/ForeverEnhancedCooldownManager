@@ -23,9 +23,40 @@ function ns.Get(key)
     return value
 end
 
+-- Backup ------------------------------------------------------------------------
+-- The Forever client can lose addon saved settings after a restart, so every
+-- choice is also kept in one game setting registered by the addon, and read
+-- back at login for anything missing. Only on/off values are stored, as plain
+-- "key=1" pairs; nothing read back is ever run as code.
+ns.BACKUP = "ClassicCooldownManagerBackup"
+
+local function ReadBackup()
+    local values = {}
+    if not (C_CVar and C_CVar.GetCVar) then return values end
+    local ok, text = pcall(C_CVar.GetCVar, ns.BACKUP)
+    if not ok or type(text) ~= "string" then return values end
+    for key, flag in text:gmatch("(%w+)=([01])") do
+        if type(ns.DEFAULTS[key]) == "boolean" then values[key] = flag == "1" end
+    end
+    return values
+end
+
+local function WriteBackup()
+    if not (C_CVar and C_CVar.GetCVar and C_CVar.SetCVar and C_CVar.RegisterCVar) then return end
+    local parts = {}
+    for key, default in pairs(ns.DEFAULTS) do
+        if type(default) == "boolean" then parts[#parts + 1] = key .. "=" .. (ns.Get(key) and "1" or "0") end
+    end
+    table.sort(parts)
+    local ok, current = pcall(C_CVar.GetCVar, ns.BACKUP)
+    if not ok or current == nil then pcall(C_CVar.RegisterCVar, ns.BACKUP, "") end
+    pcall(C_CVar.SetCVar, ns.BACKUP, table.concat(parts, ";"))
+end
+
 function ns.Set(key, value)
     if not db then return end
     db[key] = value
+    WriteBackup()
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 
@@ -216,10 +247,18 @@ loader:SetScript("OnEvent", function(self, _, name)
     self:UnregisterEvent("ADDON_LOADED")
     ClassicCooldownManagerDB = type(ClassicCooldownManagerDB) == "table" and ClassicCooldownManagerDB or {}
     db = ClassicCooldownManagerDB
+    -- Saved settings win; the backup only fills in what the client lost.
+    for key, value in pairs(ReadBackup()) do
+        if db[key] == nil then db[key] = value end
+    end
+    WriteBackup()
     for key in pairs(ns.RELOAD) do ns.loaded[key] = ns.Get(key) end
 
     SLASH_CLASSICCOOLDOWNMANAGER1 = "/ccm"
-    SlashCmdList.CLASSICCOOLDOWNMANAGER = ns.Toggle
+    SlashCmdList.CLASSICCOOLDOWNMANAGER = function(msg)
+        msg = type(msg) == "string" and msg or ""
+        if ns.Probe and msg:match("^%s*check") then ns.Probe(msg) else ns.Toggle() end
+    end
     BuildEscape()
     BuildOptionsEntry()
 

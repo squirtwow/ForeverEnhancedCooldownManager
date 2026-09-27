@@ -3,5 +3,6 @@
 ## Unreleased
 
 ### Added
-- Classic look for Blizzard's Cooldown Manager: square 2004-style icons with a thin dark edge, a square cooldown sweep, and Classic buff bars. Positions stay in Edit Mode and everything works in combat. On by default; /ccm to switch it off.
+- Classic look for Blizzard's Cooldown Manager: square 2004-style icons with a thin dark edge, a square cooldown sweep, smaller buff timers, and Classic buff bars. Positions stay in Edit Mode and everything works in combat. On by default; /ccm to switch it off.
 - /ccm settings window, also listed under Options > AddOns.
+- Settings backup: your choices are also kept in the game's own settings, so they come back if the client forgets addon settings after a restart.
