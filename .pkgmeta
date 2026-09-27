@@ -1,0 +1,6 @@
+package-as: ClassicCooldownManager
+
+manual-changelog: CHANGELOG.txt
+
+ignore:
+  - Tools

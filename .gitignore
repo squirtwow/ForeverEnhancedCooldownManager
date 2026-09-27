@@ -1,0 +1,12 @@
+# OS junk
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Private release notes (kept locally, never pushed)
+Tools/ReleaseAudit-*.md
+Tools/ReleasePreview.md
