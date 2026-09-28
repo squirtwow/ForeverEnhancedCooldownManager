@@ -2,10 +2,11 @@
 -- Tracked Bars: its health and power bars in the same design, each in
 -- Blizzard's colour or one of yours. Some specs get a second mana bar under
 -- the main one: it's hidden while the main bar is mana too, so it never just
--- repeats it, and half as tall in bear, cat and other forms.
+-- repeats it, and half as tall in bear, cat and other forms. While a layout
+-- stacks your bars around it, it can be as wide as your widest row.
 -- Visual only. Blizzard still decides what shows and where: only colours,
--- textures and the addon's own pieces change, and no key is ever written on
--- Blizzard's frames.
+-- textures, sizes and the addon's own pieces change, and no key is ever
+-- written on Blizzard's frames.
 local _, ns = ...
 
 local R = {}
@@ -89,6 +90,45 @@ local function ExtraMana(frame)
     end
 end
 
+-- The width the display was given to match your rows, while it's matching.
+local matched
+
+-- As wide as your widest row while a layout holds your bars (and the choice
+-- is on): the same widths Blizzard's own Bar Width setting changes, set
+-- after Blizzard sets its own. Otherwise its width is Blizzard's again.
+-- Never in combat; it waits for the fight to end.
+function R:Match()
+    local frame = _G.PersonalResourceDisplayFrame
+    if not frame then return end
+    if InCombatLockdown() then
+        self.pendingMatch = true
+        return
+    end
+    self.pendingMatch = nil
+    local want = ns.Layout and ns.Layout:MatchWidth()
+    local width
+    if want then
+        local own = frame:GetEffectiveScale()
+        if not (type(own) == "number" and own > 0) then return end
+        width = want * UIParent:GetEffectiveScale() / own
+    elseif matched then
+        local base, percent = frame.defaultBarWidth, frame.barWidthPercent
+        if type(base) == "number" and type(percent) == "number" then width = base * percent / 100 end
+    end
+    if not width then return end
+    matched = want and width or nil
+    for _, part in ipairs({ frame, frame.HealthBarsContainer, frame.PowerBar, frame.AlternatePowerBar, frame.ClassFrameContainer }) do
+        if part then part:SetWidth(width) end
+    end
+end
+
+-- Blizzard has just set its own width (Edit Mode): a layout puts the match
+-- back, and moves anything beside the display.
+local function Rematch()
+    matched = nil
+    if ns.Layout and ns.Layout:Active() then ns.Layout:Stack() end
+end
+
 local function Hook()
     local frame = _G.PersonalResourceDisplayFrame
     if not frame then return false end
@@ -102,6 +142,7 @@ local function Hook()
     for _, method in ipairs({ "UpdatePowerBar", "UpdateAlternatePowerBar", "SetPowerBarHeight" }) do
         if type(frame[method]) == "function" then hooksecurefunc(frame, method, ExtraMana) end
     end
+    if type(frame.UpdateBarWidth) == "function" then hooksecurefunc(frame, "UpdateBarWidth", Rematch) end
     ExtraMana(frame)
     return true
 end

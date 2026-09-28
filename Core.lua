@@ -27,6 +27,7 @@ ns.DEFAULTS = {
     prdHideRepeat = true, -- its second mana bar hidden while the main one is mana
     prdHealth = "default", -- its bars' colours: Blizzard's, or a bar colour
     prdPower = "default",
+    prdMatch = true, -- while a layout holds your bars, the display is as wide as your widest row
 }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
@@ -62,8 +63,18 @@ ns.AURA_BARS = {
     buff = { unit = "player", filter = "HELPFUL", word = "buff" },
     debuff = { unit = "target", filter = "HARMFUL", mine = true, word = "debuff" },
 }
-ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 } } -- min, max, default
+ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 }, perRow = { 1, 20, 20 } } -- min, max, default
 ns.BAR_MAX_SPELLS = 40
+-- Which way a row grows as icons come and go, and where a new row goes when
+-- there are more icons than fit across.
+ns.GROW = { "centre", "left", "right" }
+ns.GROW_NAMES = { centre = "Centre", left = "Left", right = "Right" }
+ns.WRAP = { "down", "up" }
+ns.WRAP_NAMES = { down = "Below", up = "Above" }
+-- The points a saved position can be for; positions saved before rows were
+-- from the centre.
+local POINTS = { CENTER = true, TOP = true, BOTTOM = true, TOPLEFT = true, TOPRIGHT = true,
+    BOTTOMLEFT = true, BOTTOMRIGHT = true }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -402,10 +413,45 @@ function ns.BarData(key)
     bar.showMissing = bar.showMissing == true
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
+    bar.perRow = Limit(bar.perRow, ns.BAR_LIMITS.perRow)
+    if not ns.GROW_NAMES[bar.grow] then bar.grow = "centre" end
+    if not ns.WRAP_NAMES[bar.wrap] then bar.wrap = "down" end
+    if not POINTS[bar.point] then bar.point = nil end
     if not (Finite(bar.x) and Finite(bar.y) and math.abs(bar.x) < 4000 and math.abs(bar.y) < 4000) then
-        bar.x, bar.y = nil, nil
+        bar.x, bar.y, bar.point = nil, nil, nil
     end
     return bar
+end
+
+-- Layouts: your bars stacked around Blizzard's Personal Resource Display.
+-- Which bars sit above it and below it (each top to bottom) and beside it,
+-- each bar once, and whether the layout holds them now. Repaired in place.
+function ns.LayoutData()
+    if not db then return nil end
+    if type(db.layout) ~= "table" then db.layout = {} end
+    local layout = db.layout
+    layout.on = layout.on == true
+    if type(layout.preset) ~= "string" then layout.preset = nil end
+    local seen = {}
+    local function Take(key)
+        if ns.BAR_NAMES[key] and not seen[key] then
+            seen[key] = true
+            return key
+        end
+    end
+    for _, place in ipairs({ "above", "below" }) do
+        local list = {}
+        for _, key in ipairs(type(layout[place]) == "table" and layout[place] or {}) do
+            list[#list + 1] = Take(key)
+        end
+        layout[place] = list
+    end
+    layout.left, layout.right = Take(layout.left), Take(layout.right)
+    -- A bar missing from every place goes under the display.
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if not seen[key] then layout.below[#layout.below + 1] = Take(key) end
+    end
+    return layout
 end
 
 -- Blizzard's Tracked Bars coloured one by one: the bar's spell ID -> a bar
@@ -533,9 +579,13 @@ local function EncodeBars()
         Put(key .. ".missing", bar.showMissing and 1 or 0)
         Put(key .. ".names", bar.showNames and 1 or 0)
         Put(key .. ".timer", bar.showTimer and 1 or 0)
+        Put(key .. ".row", bar.perRow)
+        Put(key .. ".grow", bar.grow)
+        Put(key .. ".wrap", bar.wrap)
         if bar.x and bar.y then
             Put(key .. ".x", ("%.1f"):format(bar.x))
             Put(key .. ".y", ("%.1f"):format(bar.y))
+            if bar.point then Put(key .. ".point", bar.point) end
         end
         -- Lists saved before profiles, until the character is known.
         local old = rawget(bar, "spells")
@@ -572,6 +622,13 @@ local function EncodeBars()
     table.sort(coloured)
     for _, id in ipairs(coloured) do Put("bc." .. id, ns.BarColours()[id]) end
     if type(db.notesSeen) == "string" then Put("notes", db.notesSeen) end
+    local layout = ns.LayoutData()
+    Put("lay.on", layout.on and 1 or 0)
+    if layout.preset then Put("lay.preset", layout.preset) end
+    Put("lay.above", table.concat(layout.above, ","))
+    Put("lay.below", table.concat(layout.below, ","))
+    if layout.left then Put("lay.left", layout.left) end
+    if layout.right then Put("lay.right", layout.right) end
     return table.concat(out)
 end
 
@@ -610,8 +667,20 @@ local function DecodeV2(text)
             outOfCombat = values[key .. ".ooc"] or (Flag("combat") and "hide" or nil),
             showNames = Flag("names"), showTimer = values[key .. ".timer"] ~= "0",
             x = tonumber(values[key .. ".x"]), y = tonumber(values[key .. ".y"]),
+            point = values[key .. ".point"], perRow = tonumber(values[key .. ".row"]),
+            grow = values[key .. ".grow"], wrap = values[key .. ".wrap"],
             spells = values[key .. ".spells"] and SpellNames(values[key .. ".spells"]) or nil,
         }
+    end
+    if values["lay.on"] then
+        local function Keys(text)
+            local keys = {}
+            for key in (text or ""):gmatch("[^,]+") do keys[#keys + 1] = key end
+            return keys
+        end
+        decoded.layout = { on = values["lay.on"] == "1", preset = values["lay.preset"],
+            above = Keys(values["lay.above"]), below = Keys(values["lay.below"]),
+            left = values["lay.left"], right = values["lay.right"] }
     end
     local names = {}
     for i = 1, 500 do
@@ -867,7 +936,7 @@ local function Load()
     for key, value in pairs(flags) do
         if ns.restored or db[key] == nil then db[key] = value end
     end
-    for _, field in ipairs({ "bars", "profiles", "chars", "custom", "barColours", "notesSeen" }) do
+    for _, field in ipairs({ "bars", "profiles", "chars", "custom", "barColours", "notesSeen", "layout" }) do
         if backup[field] ~= nil and (ns.restored or db[field] == nil) then db[field] = backup[field] end
     end
     db.session = math.max(session or 0, backup.session or 0) + 1
@@ -895,6 +964,7 @@ local function Load()
     if ns.loaded.skin and ns.Skin then ns.Skin:Start() end
     if ns.Resource then ns.Resource:Start() end
     if ns.Bars then ns.Bars:Start() end
+    if ns.Layout then ns.Layout:Start() end
     if ns.Notes then ns.Notes:Start() end
 end
 

@@ -14,6 +14,8 @@
 - Debuffs bar: your own debuffs on your target.
 - Join entries on the Buffs and Debuffs bars to show one icon for whichever is up, for seals, auras, aspects or stings.
 - Each bar has its own icon size, spacing and options: hide when ready, spell names, countdown numbers, and show, fade or hide out of combat. Unlock to drag bars anywhere.
+- Icons per row: more icons than fit across go onto another row, and each bar grows from its centre or from either edge.
+- Layout page: one click stacks your bars around your Personal Resource Display, as a pyramid, wide rows, sides and more. Hover a row to change how many icons fit across, or move it past the display. The display widens to your widest row, and your bars follow it when you move it in Edit Mode.
 - Trinkets, potions, your Hearthstone and ammo can go on a bar too. Search to add spells outside your spellbook by name or spell ID, or tick Show all ranks to use a lower rank.
 
 ### Settings

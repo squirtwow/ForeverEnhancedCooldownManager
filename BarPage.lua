@@ -165,7 +165,7 @@ function ns.BuildBarPage(window, page, width)
     -- Options ------------------------------------------------------------------------
     local options = CreateFrame("Frame", nil, page)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
-    options:SetSize(inner, 90)
+    options:SetSize(inner, 112)
     local size = T:Slider(options, "Icon size", ns.BAR_LIMITS.size, 2, 280, function(value)
         B:SetOption(state.bar, "size", value)
         window:Refresh()
@@ -176,7 +176,13 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end)
     spacing:SetPoint("TOPLEFT", 0, -30)
-    page.size, page.spacing = size, spacing
+    -- More icons than fit across go on another row. (Not the tray's perRow.)
+    local across = T:Slider(options, "Icons per row", ns.BAR_LIMITS.perRow, 1, 280, function(value)
+        B:SetOption(state.bar, "perRow", value)
+        window:Refresh()
+    end)
+    across:SetPoint("TOPLEFT", 0, -58)
+    page.size, page.spacing, page.across = size, spacing, across
 
     local function Option(label, field, y)
         local check = T:Check(options, label, function(self)
@@ -192,25 +198,42 @@ function ns.BuildBarPage(window, page, width)
     local showNames = Option("Show spell names", "showNames", -22)
     local showTimer = Option("Show countdown numbers", "showTimer", -44)
 
-    -- Out of combat: show, fade or hide. The footer explains when bars come back.
-    local oocLabel = T:Text(options, "GameFontHighlight")
-    oocLabel:SetPoint("TOPLEFT", 0, -63)
-    oocLabel:SetText("Out of combat")
-    local choices = {}
-    for _, mode in ipairs(ns.OUT_OF_COMBAT) do choices[#choices + 1] = { key = mode, label = ns.OUT_OF_COMBAT_NAMES[mode] } end
-    local outOfCombat = T:Segmented(options, choices, 156, function(mode)
-        B:SetOption(state.bar, "outOfCombat", mode)
-        window:Refresh()
-    end)
-    outOfCombat:SetPoint("TOPLEFT", 100, -59)
-    for _, button in ipairs(outOfCombat.buttons) do
-        button:SetScript("OnEnter", function()
-            window.note:SetText("Out of combat. Bars come back in full in combat, with an enemy targeted, while unlocked, and in Edit Mode.")
+    -- A label and joined buttons for a choice, with the footer explaining it.
+    local function Pills(label, x, y, width, keys, names, field, note)
+        local text = T:Text(options, "GameFontHighlight")
+        text:SetPoint("TOPLEFT", x, y - 4)
+        text:SetText(label)
+        local choices = {}
+        for _, key in ipairs(keys) do choices[#choices + 1] = { key = key, label = names[key] } end
+        local pills
+        pills = T:Segmented(options, choices, width, function(key)
+            -- A layout decides which way its bars grow.
+            if pills.held then
+                window:Say("Your layout sets this. Change it on the Layout page.")
+            else
+                B:SetOption(state.bar, field, key)
+            end
+            window:Refresh()
         end)
-        button:SetScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
+        pills:SetPoint("TOPLEFT", x + 100, y)
+        for _, button in ipairs(pills.buttons) do
+            button:SetScript("OnEnter", function()
+                window.note:SetText(pills.held and "Your layout sets this. Change it on the Layout page." or note)
+            end)
+            button:SetScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
+        end
+        pills.label = text
+        return pills
     end
+    -- Out of combat: show, fade or hide. The footer explains when bars come back.
+    local outOfCombat = Pills("Out of combat", 0, -85, 156, ns.OUT_OF_COMBAT, ns.OUT_OF_COMBAT_NAMES, "outOfCombat",
+        "Out of combat. Bars come back in full in combat, with an enemy targeted, while unlocked, and in Edit Mode.")
+    local grow = Pills("Grow", 320, -63, 156, ns.GROW, ns.GROW_NAMES, "grow",
+        "Which way a row grows as icons come and go: from its centre, or from its right or left edge.")
+    local wrap = Pills("New rows", 320, -85, 110, ns.WRAP, ns.WRAP_NAMES, "wrap",
+        "Where the next row goes when there are more icons than fit across.")
     page.options = { hideReady = hideReady, showMissing = showMissing, showNames = showNames,
-        showTimer = showTimer, outOfCombat = outOfCombat }
+        showTimer = showTimer, outOfCombat = outOfCombat, grow = grow, wrap = wrap }
 
     -- The spell list -------------------------------------------------------------------
     local listPanel = CreateFrame("Frame", nil, page, "BackdropTemplate")
@@ -307,9 +330,10 @@ function ns.BuildBarPage(window, page, width)
         row.name:SetWordWrap(false)
         row.rank = T:Text(row, "GameFontHighlightSmall", T.MUTED)
         row.rank:SetPoint("LEFT", row.name, "RIGHT", 5, 0)
+        -- Which other bar has the spell, right after its name and rank, so
+        -- it can't be read as another row's.
         row.where = T:Text(row, "GameFontHighlightSmall", T.MUTED)
-        row.where:SetPoint("RIGHT", -8, 0)
-        row.where:SetJustifyH("RIGHT")
+        row.where:SetPoint("LEFT", row.name, "RIGHT", 10, 0)
         row.header = T:Text(row, "GameFontHighlightSmall", T.MUTED)
         row.header:SetPoint("BOTTOMLEFT", 4, 3)
         rows[i] = row
@@ -344,6 +368,8 @@ function ns.BuildBarPage(window, page, width)
         row.name:SetText(name)
         row.rank:SetText(rankText or "")
         row.where:SetText("")
+        row.where:ClearAllPoints()
+        row.where:SetPoint("LEFT", (rankText or "") ~= "" and row.rank or row.name, "RIGHT", 10, 0)
         for _, part in ipairs({ row.check, row.icon, row.name, row.rank, row.where }) do part:Show() end
         row:Show()
         y = y + ROW
@@ -475,6 +501,20 @@ function ns.BuildBarPage(window, page, width)
         RefreshTray()
         size:Set(data.size)
         spacing:Set(data.spacing)
+        across:Set(data.perRow)
+        -- Packed buffs are laid out by the game in one row.
+        local oneRow = aura ~= nil and not data.showMissing
+        across:SetShown(not oneRow)
+        wrap:SetShown(not oneRow)
+        wrap.label:SetShown(not oneRow)
+        local held = ns.Layout ~= nil and ns.Layout:Active()
+        for _, pills in ipairs({ grow, wrap }) do
+            pills.held = held
+            pills:SetAlpha(held and .4 or 1)
+            pills.label:SetAlpha(held and .4 or 1)
+        end
+        grow:SetSelected(data.grow)
+        wrap:SetSelected(data.wrap)
         hideReady:SetShown(not aura)
         showMissing:SetShown(aura ~= nil)
         showMissing.text:SetText("Show missing " .. word .. "s greyed")

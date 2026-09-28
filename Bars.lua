@@ -32,6 +32,12 @@ local function Open(value)
     return not (issecretvalue and issecretvalue(value))
 end
 
+-- Hide when ready waits while the bars are being arranged (unlocked, or in
+-- Edit Mode), so every icon on them can be seen.
+local function HidesReady(data)
+    return data.hideReady and not (unlocked or editMode)
+end
+
 -- Icons ---------------------------------------------------------------------------
 
 local function NewIcon(bar)
@@ -80,7 +86,7 @@ local function RefreshItem(icon, data)
         local active = start > 0 and duration > 1.5
         if active then icon.cooldown:SetCooldown(start, duration) else icon.cooldown:Clear() end
         icon.texture:SetDesaturated(active)
-        icon:SetAlpha(data.hideReady and not active and 0 or 1)
+        icon:SetAlpha(HidesReady(data) and not active and 0 or 1)
     end
     local count
     if icon.kind == "item" then
@@ -124,7 +130,7 @@ local function RefreshIcon(icon, data, hasTarget)
         -- Secret in combat: passed to the game as it is, never tested here.
         local active = duration:IsActive()
         icon.texture:SetDesaturated(active)
-        if data.hideReady and icon.SetAlphaFromBoolean then icon:SetAlphaFromBoolean(active) else icon:SetAlpha(1) end
+        if HidesReady(data) and icon.SetAlphaFromBoolean then icon:SetAlphaFromBoolean(active) else icon:SetAlpha(1) end
     else
         icon.cooldown:Clear()
         icon.texture:SetDesaturated(false)
@@ -145,13 +151,79 @@ end
 
 -- Bars ------------------------------------------------------------------------------
 
+local NAMES = 14 -- room for spell names under a row of icons
+
+-- Rows of up to perRow icons (or aura spots). Each row lines up by the bar's
+-- grow choice: centred, from the right edge (growing left, first icon on the
+-- right) or from the left edge; a new row goes below or above. Returns the
+-- bar's size.
+function B:Arrange(bar, frames, count, data)
+    local size, spacing = data.size, data.spacing
+    -- An empty bar keeps room for three icons so it can still be dragged.
+    if count < 1 then return 3 * size + 2 * spacing, size end
+    local across = math.max(1, math.min(data.perRow, count))
+    local rows = math.ceil(count / across)
+    local step = size + spacing + (data.showNames and NAMES or 0)
+    local width = across * size + (across - 1) * spacing
+    for i = 1, count do
+        local row, column = math.floor((i - 1) / across), (i - 1) % across
+        local inRow = math.min(across, count - row * across)
+        local x
+        if data.grow == "left" then
+            x = width - size - column * (size + spacing)
+        elseif data.grow == "right" then
+            x = column * (size + spacing)
+        else
+            x = (width - (inRow * size + (inRow - 1) * spacing)) / 2 + column * (size + spacing)
+        end
+        local frame = frames[i]
+        frame:ClearAllPoints()
+        if data.wrap == "up" then
+            frame:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, row * step)
+        else
+            frame:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -row * step)
+        end
+    end
+    return width, size + (rows - 1) * step
+end
+
+-- The point a bar is held by: the edge its rows grow away from, so icons
+-- already there stay put as more are added.
+local function Point(data)
+    local side = data.grow == "left" and "RIGHT" or data.grow == "right" and "LEFT" or ""
+    return (data.wrap == "up" and "BOTTOM" or "TOP") .. side, side
+end
+
+-- Where a point is, from the bar's centre.
+local function Offset(point, width, height)
+    local x = point:find("LEFT") and -width / 2 or point:find("RIGHT") and width / 2 or 0
+    local y = point:find("TOP") and height / 2 or point:find("BOTTOM") and -height / 2 or 0
+    return x, y
+end
+
+local function Round(n)
+    return math.floor(n * 10 + .5) / 10
+end
+
 local function Place(bar)
     local data = bar.data
+    local width, height = bar:GetWidth() or 0, bar:GetHeight() or 0
+    local point, side = Point(data)
     bar:ClearAllPoints()
     if data.x and data.y then
-        bar:SetPoint("CENTER", UIParent, "CENTER", data.x, data.y)
+        -- Kept for another point (from the centre, before rows existed):
+        -- moved over to this one without the bar shifting.
+        local from = data.point or "CENTER"
+        if from ~= point then
+            local fromX, fromY = Offset(from, width, height)
+            local toX, toY = Offset(point, width, height)
+            data.x, data.y, data.point = Round(data.x - fromX + toX), Round(data.y - fromY + toY), point
+        end
+        bar:SetPoint(point, UIParent, "CENTER", data.x, data.y)
     else
-        bar:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, DEFAULT_Y[bar.key] or 160)
+        -- Just above the action bar, growing up from there.
+        local low = "BOTTOM" .. side
+        bar:SetPoint(low, UIParent, "BOTTOM", (Offset(low, width, height)), DEFAULT_Y[bar.key] or 160)
     end
 end
 
@@ -159,8 +231,11 @@ local function SavePosition(bar)
     local x, y = bar:GetCenter()
     local cx, cy = UIParent:GetCenter()
     if not (x and cx) then return end
-    bar.data.x = math.floor((x - cx) * 10 + .5) / 10
-    bar.data.y = math.floor((y - cy) * 10 + .5) / 10
+    local point = Point(bar.data)
+    local offsetX, offsetY = Offset(point, bar:GetWidth() or 0, bar:GetHeight() or 0)
+    bar.data.x, bar.data.y, bar.data.point = Round(x - cx + offsetX), Round(y - cy + offsetY), point
+    -- A bar moved by hand leaves the layout it was stacked in.
+    if ns.Layout then ns.Layout:Moved() end
     ns.SaveBars()
     Place(bar)
 end
@@ -224,9 +299,14 @@ local function LayoutAuras(bar, data)
         ns.BuffBar:Create(bar)
     end
     ns.BuffBar:Layout(bar, data)
-    local size, spacing = data.size, data.spacing
-    local slots = bar.count > 0 and bar.count or 3
-    bar:SetSize(slots * size + (slots - 1) * spacing, size)
+    -- Fixed spots go in rows like icons; packed buffs are laid out by the
+    -- game in one row.
+    if ns.BuffBar:Packed(data) then
+        local slots = bar.count > 0 and bar.count or 3
+        bar:SetSize(slots * data.size + (slots - 1) * data.spacing, data.size)
+    else
+        bar:SetSize(B:Arrange(bar, bar.holders, bar.count, data))
+    end
     Place(bar)
 end
 
@@ -246,8 +326,6 @@ local function Layout(bar)
             icon.cooldown:SetCountdownFont(Style:Countdown(size))
             icon.cooldown:SetHideCountdownNumbers(not data.showTimer)
             icon.count:SetFontObject(Style:Count(size))
-            icon:ClearAllPoints()
-            icon:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
             icon.kind, icon.itemID, icon.slot = entry.kind, entry.itemID, entry.slot
             icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
@@ -263,9 +341,7 @@ local function Layout(bar)
         bar.icons[i].spellID = nil
     end
     bar.count = count
-    -- An empty bar keeps room for three icons so it can still be dragged.
-    local slots = count > 0 and count or 3
-    bar:SetSize(slots * size + (slots - 1) * spacing, size)
+    bar:SetSize(B:Arrange(bar, bar.icons, count, data))
     Place(bar)
 end
 
@@ -323,6 +399,9 @@ end
 function B:SetUnlocked(value)
     unlocked = value and self:Enabled() or false
     self:UpdateShown()
+    self:RefreshAll()
+    -- Unlocked, empty bars show too, so a layout makes room for them.
+    if ns.Layout then ns.Layout:Stack() end
 end
 
 function B:RefreshAll()
@@ -348,6 +427,7 @@ function B:Rebuild()
     for _, key in ipairs(ns.BAR_KEYS) do Layout(bars[key] or NewBar(key)) end
     self:UpdateShown()
     self:RefreshAll()
+    if ns.Layout then ns.Layout:Stack() end
 end
 
 -- Setup changes. Each saves the backup and redraws the bars.
@@ -497,6 +577,29 @@ function B:SetOption(key, field, value)
     Layout(bars[key] or NewBar(key))
     self:UpdateShown()
     self:RefreshAll()
+    -- A bar in a layout may now be taller or shorter.
+    if ns.Layout then ns.Layout:Stack() end
+end
+
+-- Puts a bar's point at a spot, from the middle of the screen, for a layout.
+-- The Buffs and Debuffs bars move once a fight is over.
+function B:PlaceAt(key, point, x, y)
+    local data = ns.BarData(key)
+    data.x, data.y, data.point = Round(x), Round(y), point
+    local bar = bars[key]
+    if not bar then return end
+    if Locked(bar) then
+        bar.pendingLayout = true
+        return
+    end
+    Place(bar)
+end
+
+-- Lays one bar out again after a layout changes which way it grows.
+function B:Relayout(key)
+    if not self.started then return end
+    local bar = bars[key] or NewBar(key)
+    Layout(bar)
 end
 
 -- Empties a bar.
@@ -511,9 +614,11 @@ function B:Clear(key)
 end
 
 function B:ResetPositions()
+    -- Back above the action bar, so no longer stacked in a layout.
+    if ns.Layout then ns.Layout:TurnOff() end
     for _, key in ipairs(ns.BAR_KEYS) do
         local data = ns.BarData(key)
-        data.x, data.y = nil, nil
+        data.x, data.y, data.point = nil, nil, nil
     end
     self:Changed()
 end
@@ -577,8 +682,14 @@ function B:Start()
     -- Bars come back in full while Edit Mode is open.
     local editor = EditModeManagerFrame
     if editor and editor.HookScript then
-        editor:HookScript("OnShow", function() editMode = true; B:UpdateShown() end)
-        editor:HookScript("OnHide", function() editMode = false; B:UpdateShown() end)
+        editor:HookScript("OnShow", function() editMode = true; B:UpdateShown(); B:RefreshAll() end)
+        -- The resource display may have moved: a layout follows it.
+        editor:HookScript("OnHide", function()
+            editMode = false
+            B:UpdateShown()
+            B:RefreshAll()
+            if ns.Layout then ns.Layout:Stack() end
+        end)
         editMode = editor:IsShown() and true or false
     end
     self:Rebuild()

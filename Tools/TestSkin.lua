@@ -3,7 +3,9 @@
 -- frames are sealed: writing any key on them, or calling anything that shows,
 -- hides, scales or reads them, fails the test. The only size changes allowed
 -- are a Tracked Bar's own status bar height, inside its unchanged item frame,
--- and the height of the Personal Resource Display's extra mana bar.
+-- the height of the Personal Resource Display's extra mana bar, and the
+-- display's width while a layout matches it to your rows (the widths its own
+-- Bar Width setting changes).
 local checks = 0
 local function Equal(actual, expected, label)
     checks = checks + 1
@@ -510,10 +512,10 @@ Equal(ns.Skin:IsSkinned(First(v.barsActive)), true, "bars too")
 Environment()
 Viewers(0)
 ns = Load(nil)
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup written at first login")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup written at first login")
 ns.Set("skin", false)
 ns.Set("accent", "teal")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=0;useBars=0", "backup follows a change")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=0;useBars=0", "backup follows a change")
 
 ns.SetBarColour(467, "blue")
 ns.SetBarColour(1126, "class")
@@ -533,7 +535,7 @@ Environment(true)
 Viewers(0)
 ns = Load({ skin = true })
 Equal(ns.Get("skin"), true, "saved settings win")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup brought up to date")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup brought up to date")
 
 -- Anything unexpected in the backup is ignored.
 Environment()
@@ -565,7 +567,7 @@ Equal(ns.Get("skin"), false, "old Classic look switch carried over")
 Equal(ns.Get("accent"), "teal", "accent carried over")
 Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Bash", "bars carried over")
 Equal(ns.BarData("cd").size, 40, "with their size")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=1;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=0;useBars=1", "and saved under the new name")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=1;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=0;useBars=1", "and saved under the new name")
 
 -- After that, the new name's own settings and backup are used.
 Environment(true)
@@ -600,6 +602,18 @@ local function PRD()
         self.AlternatePowerBar:SetHeight(height)
     end
     S[frame.PowerBar].height, S[frame.AlternatePowerBar].height = 12, 12
+    frame.ClassFrameContainer = New("Frame", frame)
+    -- Edit Mode's Bar Width: these widths, and only these, may change.
+    frame.defaultBarWidth, frame.barWidthPercent = 200, 100
+    frame.UpdateBarWidth = function(self)
+        local width = self.defaultBarWidth * self.barWidthPercent / 100
+        for _, part in ipairs({ self, self.HealthBarsContainer, self.PowerBar, self.AlternatePowerBar, self.ClassFrameContainer }) do
+            part:SetWidth(width)
+        end
+    end
+    for _, part in ipairs({ frame, container, frame.PowerBar, frame.AlternatePowerBar, frame.ClassFrameContainer }) do
+        S[part].resizable = true
+    end
     for _, part in ipairs({ frame, health, frame.PowerBar, frame.AlternatePowerBar }) do Seal(part) end
     return frame, healthArt
 end
@@ -667,6 +681,46 @@ _G.PersonalResourceDisplayFrame = prd
 Fire("ADDON_LOADED", "Blizzard_PersonalResourceDisplay")
 Equal(S[prd.PowerBar].barTexture, "Interface\\Buttons\\WHITE8X8", "restyled once Blizzard loads it")
 Equal(#printed, 0, "no errors from the display")
+
+-- A layout can make the display as wide as your widest row: only the widths
+-- its own Bar Width setting changes, never in combat, and Blizzard's back after.
+function Proto:GetEffectiveScale() return 1 end
+Environment()
+Viewers(0)
+_G.UnitPowerType = function() return power end
+_G.UIParent = New("Frame")
+prd = PRD()
+_G.PersonalResourceDisplayFrame = prd
+ns = Load(nil)
+local wanted
+ns.Layout = {
+    MatchWidth = function() return wanted end,
+    Active = function() return wanted ~= nil end,
+    Stack = function() ns.Resource:Match() end,
+}
+local function Widths()
+    local list = {}
+    for _, part in ipairs({ prd, prd.HealthBarsContainer, prd.PowerBar, prd.AlternatePowerBar, prd.ClassFrameContainer }) do
+        list[#list + 1] = string.format("%g", S[part].width or 0)
+    end
+    return table.concat(list, ",")
+end
+wanted = 300
+ns.Resource:Match()
+Equal(Widths(), "300,300,300,300,300", "the display and its bars as wide as the rows")
+prd:UpdateBarWidth()
+Equal(Widths(), "300,300,300,300,300", "and again after Blizzard sets its own width")
+combat = true
+wanted = 340
+ns.Resource:Match()
+Equal(Widths() .. " " .. tostring(ns.Resource.pendingMatch), "300,300,300,300,300 true", "never in combat")
+combat = false
+ns.Resource:Match()
+Equal(Widths(), "340,340,340,340,340", "done once it's over")
+wanted = nil
+ns.Resource:Match()
+Equal(Widths(), "200,200,200,200,200", "Blizzard's own width back when it stops")
+Equal(#printed, 0, "no errors while matching")
 
 print = _G.print
 io.write("Forever Enhanced Cooldown Manager checks passed: " .. checks .. " assertions.\n")

@@ -303,7 +303,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarPage.lua", "ProfileMenu.lua", "Window.lua", "Notes.lua" }) do
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "ProfileMenu.lua", "Window.lua", "Notes.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -398,6 +398,17 @@ Equal(S[moon].alpha, 1, "shown while not hiding ready icons")
 B:SetOption("cd", "hideReady", true)
 moon = cd.icons[2]
 Equal(S[moon].alphaFrom, SECRET, "hide when ready also uses the secret state as it is")
+-- While the bars are being arranged, every icon shows.
+S[moon].alpha, S[moon].alphaFrom = nil, nil
+B:SetUnlocked(true)
+Equal(S[moon].alpha == 1 and S[moon].alphaFrom == nil, true, "unlocked: shown even when ready, to see while moving it")
+B:SetUnlocked(false)
+Equal(S[moon].alphaFrom, SECRET, "locked again: hidden when ready")
+S[moon].alpha, S[moon].alphaFrom = nil, nil
+EditModeManagerFrame:Show()
+Equal(S[moon].alpha == 1 and S[moon].alphaFrom == nil, true, "in Edit Mode too")
+EditModeManagerFrame:Hide()
+Equal(S[moon].alphaFrom, SECRET, "and hidden when ready once Edit Mode closes")
 B:SetOption("cd", "hideReady", false)
 active = false
 
@@ -448,9 +459,9 @@ S[cd].cx, S[cd].cy = 520.04, 300
 S[cd.mover].scripts.OnDragStart()
 S[cd.mover].scripts.OnDragStop()
 Equal(ns.BarData("cd").x, 20, "position saved from the centre")
-Equal(ns.BarData("cd").y, -100, "position saved")
+Equal(ns.BarData("cd").y, -82, "by the top edge, so new rows grow down from it")
 p = S[cd].points[1]
-Equal(p[1] == "CENTER" and p[4] == 20 and p[5], -100, "placed where it was dropped")
+Equal(p[1] == "TOP" and p[4] == 20 and p[5], -82, "placed where it was dropped")
 B:SetOption("cd", "outOfCombat", "show")
 ns.Set("useBars", false)
 B:Rebuild()
@@ -468,7 +479,7 @@ Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 
 -- Backup ------------------------------------------------------------------------------
 
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
 Equal(cvars.FECMBackupBars0, "1", "bars backed up in one chunk")
 Environment(true)
 ns = Load(nil)
@@ -853,6 +864,9 @@ w:Select("util")
 row = Row("Moonfire")
 Equal(row.check:GetChecked(), false, "not ticked on Utility")
 Equal(S[row.where].text, "on Cooldowns", "which says where it is")
+local at = S[row.where].points[1]
+Equal(at[1] == "LEFT" and at[2] == row.rank and at[3] == "RIGHT" and at[4], 10, "right after its rank, on its own row")
+Equal(S[Row("Attack").where].points[1][2], Row("Attack").name, "or its name, for a spell without ranks")
 row.check:Click()
 Equal(ns.BarData("util").spells[1], "Moonfire", "ticking it on Utility moves it")
 Equal(#ns.BarData("cd").spells, 0, "off Cooldowns")
@@ -988,7 +1002,7 @@ Equal(Row("Moonfire") ~= nil, true, "spells listed")
 page.showItems:Click()
 Equal(ns.Get("listItems"), true, "Show items remembered")
 Equal(Row("item:118") ~= nil, true, "items listed when asked")
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=1;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "and backed up")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=1;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "and backed up")
 
 -- Searching filters the list and finds spells outside your spellbook.
 Equal(#S[page.list].points, 2, "the list is pinned by two corners, so the game can place it")
@@ -1195,6 +1209,7 @@ page = w.pages.bar
 Equal(S[w].shown, true, "/fecm opens the window")
 Equal(w.nav.cd ~= nil and w.nav.util ~= nil and w.nav.buff ~= nil and w.nav.look ~= nil and w.nav.general ~= nil,
     true, "bars, Look and General listed down the left")
+Equal(S[w.yourBars].text, "YOUR BARS", "the bars headed as your own, apart from Blizzard's")
 Equal(S[w.nav.cd.fill].shown and not S[w.nav.util.fill].shown, true, "the chosen one highlighted")
 Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape closes the window")
 Equal(S[w.close.label].text, "X", "a plain X")
@@ -1678,6 +1693,298 @@ for _, f in ipairs(objects) do
 end
 Equal(footerVersion ~= nil, true, "the window's footer shows the version too")
 _G.C_AddOns = nil
+
+-- Rows and which way a bar grows ---------------------------------------------------------
+
+local function At(frame)
+    local p = S[frame].points[1]
+    return string.format("%s %g %g", p[1], p[4], p[5])
+end
+Environment()
+ns = Load({ useBars = true })
+B = ns.Bars
+local rowBar = B:Get("cd")
+for _, name in ipairs({ "Moonfire", "Wrath", "Overpower", "Attack", "Thorns" }) do B:Assign(name, "cd") end
+Equal(ns.BarData("cd").perRow .. " " .. At(rowBar.icons[5]), "20 TOPLEFT 160 0", "one row until told otherwise")
+B:SetOption("cd", "perRow", 2)
+Equal(At(rowBar.icons[1]) .. "|" .. At(rowBar.icons[2]) .. "|" .. At(rowBar.icons[5]),
+    "TOPLEFT 0 0|TOPLEFT 40 0|TOPLEFT 20 -80", "two across: rows of two, the last one centred")
+Equal(string.format("%gx%g", S[rowBar].width, S[rowBar].height), "76x116", "the bar fits its rows")
+B:SetOption("cd", "grow", "left")
+Equal(At(rowBar.icons[1]) .. "|" .. At(rowBar.icons[2]) .. "|" .. At(rowBar.icons[5]),
+    "TOPLEFT 40 0|TOPLEFT 0 0|TOPLEFT 40 -80", "growing left: the first icon on the right")
+B:SetOption("cd", "grow", "right")
+Equal(At(rowBar.icons[5]), "TOPLEFT 0 -80", "growing right: rows start on the left")
+Equal(At(rowBar), "BOTTOMLEFT -38 190", "above the action bar, it grows right from where it was")
+B:SetOption("cd", "wrap", "up")
+Equal(At(rowBar.icons[1]) .. "|" .. At(rowBar.icons[3]), "BOTTOMLEFT 0 0|BOTTOMLEFT 0 40", "new rows above")
+B:SetOption("cd", "showNames", true)
+Equal(At(rowBar.icons[3]), "BOTTOMLEFT 0 54", "with room for names between rows")
+B:SetOption("cd", "showNames", false)
+-- Positions saved before rows were from the centre: the bar doesn't shift.
+local cdData = ns.BarData("cd")
+cdData.perRow, cdData.grow, cdData.wrap = 20, "centre", "down"
+cdData.x, cdData.y, cdData.point = 10, 20, nil
+B:Rebuild()
+Equal(At(rowBar) .. " " .. cdData.point, "TOP 10 38 TOP", "an old position kept by the top edge instead")
+B:SetOption("cd", "grow", "left")
+Equal(At(rowBar), "TOPRIGHT 108 38", "and by the right edge when it grows left, still in the same place")
+B:SetOption("cd", "grow", "centre")
+Equal(At(rowBar), "TOP 10 38", "and back")
+
+-- The Buffs bar: fixed spots in rows, packed icons from the bar's edge.
+for _, name in ipairs({ "Thorns", "Clearcasting", "Nature's Grace" }) do B:SetAura("buff", name, true) end
+local buffRows = B:Get("buff")
+B:SetOption("buff", "showMissing", true)
+B:SetOption("buff", "perRow", 2)
+Equal(At(buffRows.holders[3]), "TOPLEFT 20 -40", "fixed buff spots go in rows too")
+B:SetOption("buff", "showMissing", false)
+B:SetOption("buff", "grow", "left")
+Equal(S[buffRows.container].points[1][1], "RIGHT", "packed buffs line up from the edge the bar grows away from")
+Equal(S[buffRows.container].groups.g1.layout.layoutIndex, ns.BUFF_SLOTS, "the first one on the right")
+Equal(string.format("%gx%g", S[buffRows].width, S[buffRows].height), "116x36", "in one row: the game lays those out")
+
+-- Kept in the backup with everything else.
+cdData.perRow, cdData.grow, cdData.wrap = 3, "right", "up"
+ns.SaveBars()
+Environment(true)
+ns = Load(nil)
+cdData = ns.BarData("cd")
+Equal(cdData.perRow .. " " .. cdData.grow .. " " .. cdData.wrap .. " " .. tostring(cdData.point), "3 right up BOTTOMLEFT",
+    "rows and grow come back from the backup, the position held by the edge it grows from")
+
+-- Layouts around the Personal Resource Display --------------------------------------------
+
+function Proto:GetRect()
+    local r = S[self].rect
+    if r then return r[1], r[2], r[3], r[4] end
+end
+local prd
+local function Display()
+    prd = New("Frame")
+    S[prd].rect = { 400, 300, 200, 20 } -- its middle 90 below the middle of the screen
+    rawset(prd, "HealthBarsContainer", New("Frame", prd))
+    S[prd.HealthBarsContainer].rect = { 400, 305, 200, 15 }
+    rawset(prd, "PowerBar", New("Frame", prd))
+    S[prd.PowerBar].rect = { 400, 300, 200, 5 }
+    rawset(prd, "AlternatePowerBar", false)
+    rawset(prd, "ClassFrameContainer", false)
+    rawset(prd, "defaultBarWidth", 200)
+    rawset(prd, "barWidthPercent", 100)
+    -- Blizzard's own Bar Width setting.
+    rawset(prd, "UpdateBarWidth", function(self)
+        local width = self.defaultBarWidth * self.barWidthPercent / 100
+        for _, part in ipairs({ self, self.HealthBarsContainer, self.PowerBar }) do part:SetWidth(width) end
+    end)
+    _G.PersonalResourceDisplayFrame = prd
+end
+Environment()
+_G.hooksecurefunc = function(t, key, hook)
+    local original = t[key]
+    rawset(t, key, function(...)
+        if original then original(...) end
+        hook(...)
+    end)
+end
+Display()
+ns = Load({ useBars = true, prdSkin = false })
+B = ns.Bars
+local L = ns.Layout
+Equal(L:Active(), false, "no layout until one is picked")
+for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+B:Assign("Attack", "util")
+local ok, message = L:Apply("pyramid")
+Equal(ok and message, "Pyramid is set up. Tick spells for each bar, then size them to taste.", "a preset in one click")
+local cd, util = ns.BarData("cd"), ns.BarData("util")
+Equal(cd.perRow .. " " .. cd.size .. " " .. util.perRow .. " " .. util.size, "6 42 5 38", "each bar's icons across and size")
+Equal(At(B:Get("cd")), "BOTTOM 0 -74", "Cooldowns just above the display")
+Equal(At(B:Get("util")), "TOP 0 -106", "Utility just below it")
+Equal(At(B:Get("buff")) .. " " .. At(B:Get("debuff")), "TOP 0 -150 TOP 0 -150", "empty bars take no room")
+Equal(string.format("%g %g", S[prd].width, S[prd.PowerBar].width), "272 272", "the display as wide as the widest row")
+B:SetUnlocked(true)
+Equal(At(B:Get("debuff")), "TOP 0 -190", "unlocked, empty bars show, so they get room")
+B:SetUnlocked(false)
+-- More spells than fit across: the row wraps, and the rows below move down.
+B:Assign("Thorns", "util")
+B:SetOption("util", "perRow", 1)
+Equal(string.format("%g", S[B:Get("util")].height), "80", "Utility wraps onto a second row")
+B:SetAura("buff", "Thorns", true)
+Equal(At(B:Get("buff")), "TOP 0 -192", "the bar under it moves down")
+
+-- Blizzard setting its own width puts the match back.
+prd:UpdateBarWidth()
+Equal(S[prd].width, 272, "the match comes back after Blizzard's Bar Width")
+-- The display moved in Edit Mode: the bars follow once it closes.
+S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 200, 200, 20 }, { 400, 205, 200, 15 }, { 400, 200, 200, 5 }
+EditModeManagerFrame:Show()
+EditModeManagerFrame:Hide()
+Equal(At(B:Get("cd")), "BOTTOM 0 -174", "the bars follow the display")
+-- Hidden until combat, the game can't say where it is: where it was last seen.
+S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = nil, nil, nil
+L:Stack()
+Equal(At(B:Get("cd")), "BOTTOM 0 -174", "a hidden display: where it was last seen")
+-- As it shows, the bars are stacked around it again.
+S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 250, 200, 20 }, { 400, 255, 200, 15 }, { 400, 250, 200, 5 }
+prd:Hide()
+prd:Show()
+Equal(At(B:Get("cd")), "BOTTOM 0 -124", "stacked again as it shows")
+S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 200, 200, 20 }, { 400, 205, 200, 15 }, { 400, 200, 200, 5 }
+L:Stack()
+
+-- Undo puts back what the preset changed.
+ok, message = L:Undo()
+Equal(message .. " " .. ns.BarData("cd").perRow .. " " .. tostring(L:Active()), "Put back as it was. 20 false", "Undo")
+Equal(S[prd].width, 200, "and the display gets Blizzard's width back")
+Equal(L.undo, nil, "once")
+
+-- Dragging a bar leaves the layout; Line up stacks them again.
+L:Apply("pyramid")
+B:SetUnlocked(true)
+S[B:Get("util")].cx, S[B:Get("util")].cy = 300, 300
+S[B:Get("util").mover].scripts.OnDragStart()
+S[B:Get("util").mover].scripts.OnDragStop()
+Equal(tostring(L:Active()) .. " " .. tostring(L.moved), "false true", "a bar dragged by hand leaves the layout")
+Equal(S[prd].width, 200, "the display's own width again")
+B:SetUnlocked(false)
+ok, message = L:LineUp()
+Equal(tostring(L:Active()) .. " " .. message, "true Your bars are stacked again.", "lined up again")
+Equal(At(B:Get("util")), "TOP 0 -206", "back under the display")
+
+-- Changing rows: how many fit across, and moving one past the display.
+L:SetAcross("cd", 7)
+Equal(ns.BarData("cd").perRow .. " " .. tostring(ns.LayoutData().preset), "7 nil", "one more across, as your own layout")
+Equal(S[prd].width, 7 * 42 + 6 * 4, "the display follows the widest row")
+Equal(L:CanMove("cd", -1), false, "the top row can't go higher")
+L:Move("util", -1)
+local layout = ns.LayoutData()
+Equal(table.concat(layout.above, ",") .. "|" .. table.concat(layout.below, ","), "cd,util|buff,debuff", "moved past the display")
+Equal(ns.BarData("util").wrap .. " " .. At(B:Get("util")), "up BOTTOM 0 -174", "now just above it, growing up")
+Equal(At(B:Get("cd")), "BOTTOM 0 -130", "the row above makes room")
+L:Move("util", 1)
+Equal(table.concat(layout.below, ","), "util,buff,debuff", "and back below")
+
+-- Beside the display.
+L:Apply("sides")
+Equal(At(B:Get("buff")) .. " " .. ns.BarData("buff").grow, "TOPRIGHT -106 -174 left", "Buffs left of the display, growing left")
+Equal(At(B:Get("debuff")) .. " " .. ns.BarData("debuff").grow, "TOPLEFT 106 -174 right", "Debuffs right of it, growing right")
+Equal(L:CanMove("buff", -1) and L:CanMove("buff", 1), true, "a row beside it can go above or below")
+L:Move("buff", 1)
+Equal(tostring(ns.LayoutData().left) .. " " .. ns.LayoutData().below[1], "nil buff", "and joins the stack just below")
+
+-- Match off: Blizzard's width.
+ns.Set("prdMatch", false)
+L:Stack()
+Equal(S[prd].width, 200, "matching off gives Blizzard's width back")
+ns.Set("prdMatch", true)
+L:Stack()
+
+-- Never in combat.
+lockdown = true
+ok, message = L:Apply("wide")
+Equal(tostring(ok) .. " " .. message, "false Finish combat first.", "presets wait for the fight to end")
+Equal(select(2, L:SetAcross("cd", 3)), "Finish combat first.", "so do row changes")
+L:Stack()
+Equal(B:Get("buff").pendingLayout, true, "the Buffs bar moves after the fight")
+lockdown = false
+Fire("PLAYER_REGEN_ENABLED")
+Equal(L.pending, nil, "and it's stacked again then")
+
+-- Reset positions ends the layout; the backup keeps it.
+L:Apply("funnel")
+local kept = ns.LayoutData()
+Equal(table.concat(kept.above, ","), "debuff,buff,util,cd", "everything above the display")
+Environment(true)
+Display()
+ns = Load(nil)
+Equal(tostring(ns.LayoutData().on) .. " " .. ns.LayoutData().preset .. " " .. table.concat(ns.LayoutData().above, ","),
+    "true funnel debuff,buff,util,cd", "the layout comes back from the backup")
+ns.Bars:ResetPositions()
+Equal(ns.Layout:Active(), false, "Reset positions ends the layout")
+
+-- The Layout page ----------------------------------------------------------------------------
+
+Environment()
+Display()
+ns = Load({ useBars = true, prdSkin = false })
+B, L = ns.Bars, ns.Layout
+for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+SlashCmdList.FECM("")
+w = FECMFrame
+Equal(w.nav.layout ~= nil, true, "Layout in the window's list")
+w:Select("layout")
+local lp = w.pages.layout
+Equal(S[lp].shown and #lp.cards, 7, "seven layouts to pick from")
+Equal(S[lp.status].text, "Pick a layout to stack your bars around your resource display.", "says what it's for")
+lp.cards[2]:Click()
+Equal(ns.BarData("cd").perRow .. " " .. S[w.note].text, "12 Wide is set up. Tick spells for each bar, then size them to taste.",
+    "clicking one sets it up")
+Equal(S[lp.cards[2]].border[1], .88, "outlined in the accent while it's in use")
+Equal(S[lp.status].text, "Your bars follow your Personal Resource Display.", "and says the bars follow the display")
+local row = lp.rows.cd
+local tiles = 0
+for _, tile in ipairs(row.tiles) do if S[tile].shown then tiles = tiles + 1 end end
+Equal(tiles, 12, "a tile for every icon across")
+Equal(S[row.tiles[1]].texture ~= nil and S[row.tiles[4]].texture == nil, true, "your icons first, then empty spots")
+Equal(S[row.across].text, "12 across", "and how many")
+Equal(S[row.buttons].shown, false, "buttons out of the way")
+S[row].mouseOver = true
+S[row].scripts.OnEnter(row)
+Equal(S[row.buttons].shown and S[w.note].text:find("Hover a row", 1, true) ~= nil, true, "hovering a row shows its buttons")
+row.wider:Click()
+Equal(ns.BarData("cd").perRow, 13, "+ fits one more across")
+row.fewer:Click()
+row.fewer:Click()
+Equal(ns.BarData("cd").perRow .. " " .. S[lp.rows.cd.across].text, "11 11 across", "- one fewer")
+Equal(S[lp.cards[2]].border[1] == .88, false, "changed, it's your own layout")
+S[row].mouseOver = nil
+lp.rows.util.up:Click()
+Equal(ns.LayoutData().above[#ns.LayoutData().above], "util", "an arrow moves a row past the display")
+Equal(S[lp.rows.util].points[1][5] > S[lp.display].points[1][5], true, "drawn above it")
+lp.undo:Click()
+Equal(ns.BarData("cd").perRow, 20, "Undo")
+lp.cards[1]:Click()
+Equal(S[lp.toggle.label].text, "Turn off", "a way to stop")
+lp.toggle:Click()
+Equal(tostring(L:Active()) .. " " .. S[lp.status].text, "false Your bars stay where you put them.", "stopped")
+lp.toggle:Click()
+Equal(L:Active(), true, "and Line up starts again")
+lp.match:Click()
+Equal(tostring(ns.Get("prdMatch")) .. string.format(" %g", S[prd].width), "false 200", "the match can be turned off")
+lp.match:Click()
+Equal(S[prd].width, 6 * 42 + 5 * 4, "and on")
+-- The display off, or your bars off.
+cvarOn = true
+_G.C_CVar.GetCVarBool = function(name) if name == "nameplateShowSelf" then return false end return cvarOn end
+w:Refresh()
+Equal(S[lp.status].text .. " " .. tostring(S[lp.turnOn].shown), "Your Personal Resource Display is off. true", "a way to turn the display on")
+_G.C_CVar.GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end
+ns.Set("useBars", false)
+w:Refresh()
+Equal(S[lp.status].text .. " " .. tostring(S[lp.toggle].shown), "Your bars are off. false", "and your bars")
+lp.turnOn:Click()
+Equal(B:Enabled(), true, "turned on from here")
+Equal(lp.drawError, nil, "the page drew without errors")
+
+-- A bar's page: icons per row, and which way it grows.
+w:Select("cd")
+local bp = w.pages.bar
+Equal(bp.across.current, 6, "Icons per row on the bar's page")
+bp.across:Choose(4)
+Equal(ns.BarData("cd").perRow, 4, "set there too")
+bp.options.grow.buttons[2]:Click()
+Equal(ns.BarData("cd").grow .. " " .. S[w.note].text, "centre Your layout sets this. Change it on the Layout page.",
+    "a layout decides which way its bars grow")
+L:TurnOff()
+w:Refresh()
+bp.options.grow.buttons[2]:Click()
+Equal(ns.BarData("cd").grow, "left", "otherwise it's yours to pick")
+bp.options.wrap.buttons[2]:Click()
+Equal(ns.BarData("cd").wrap, "up", "and where new rows go")
+w:Select("buff")
+Equal(S[bp.across].shown or S[bp.options.wrap].shown, false, "packed buffs stay on one row")
+bp.options.showMissing:Click()
+Equal(S[bp.across].shown and S[bp.options.wrap].shown, true, "fixed spots can have rows")
+Equal(bp.listError, nil, "the bar page drew without errors")
 
 print = _G.print
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

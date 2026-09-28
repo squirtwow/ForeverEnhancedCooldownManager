@@ -15,8 +15,10 @@ Ranks.lua
 Spells.lua
 Buffs.lua
 Bars.lua
+Layout.lua
 Theme.lua
 BarPage.lua
+LayoutPage.lua
 ProfileMenu.lua
 Window.lua
 Notes.lua

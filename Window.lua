@@ -595,7 +595,13 @@ local function BuildWindow()
     edge:SetWidth(1)
     T:Fill(edge, T.BORDER)
     window.nav = {}
-    local y = 8
+    -- The addon's own bars, headed so they aren't taken for Blizzard's
+    -- Essential or Utility Cooldowns.
+    local yours = T:Text(nav, "GameFontHighlightSmall", T.MUTED)
+    yours:SetPoint("TOPLEFT", 14, -12)
+    yours:SetText("YOUR BARS")
+    window.yourBars = yours
+    local y = 28
     for _, key in ipairs(ns.BAR_KEYS) do
         window.nav[key] = NavItem(window, nav, key, ns.BAR_NAMES[key], y, true)
         y = y + 48
@@ -607,7 +613,8 @@ local function BuildWindow()
     T:Fill(rule, T.BORDER)
     y = y + 12
     window.nav.look = NavItem(window, nav, "look", "Look", y)
-    window.nav.general = NavItem(window, nav, "general", "General", y + 32)
+    window.nav.layout = NavItem(window, nav, "layout", "Layout", y + 32)
+    window.nav.general = NavItem(window, nav, "general", "General", y + 64)
     -- What's new in this version, at the foot of the list.
     local news = T:Button(nav, "What's new", NAV - 24, 22)
     news:SetPoint("BOTTOMLEFT", 12, 12)
@@ -622,8 +629,9 @@ local function BuildWindow()
         page:Hide()
         return page
     end
-    window.pages = { look = Page(), general = Page(), bar = Page() }
+    window.pages = { look = Page(), layout = Page(), general = Page(), bar = Page() }
     BuildLook(window, window.pages.look, WIDTH - NAV - 2)
+    ns.BuildLayoutPage(window, window.pages.layout, WIDTH - NAV - 2, HEIGHT - HEADER - FOOTER - 1)
     BuildGeneral(window, window.pages.general)
     ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)
 
