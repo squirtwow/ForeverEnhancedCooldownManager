@@ -1,6 +1,6 @@
 -- Development check for Classic Bars (step 2). NOT FOR RELEASE: remove this
 -- file from the TOC before packaging.
--- /ccm check [spell]: for 20 seconds, prints once a second whether the game
+-- /fecm check [spell]: for 20 seconds, prints once a second whether the game
 -- hides from addons the values the bars would use in combat, shows a test
 -- sweep above the character for that spell's cooldown, and reports any proc
 -- glow events.
@@ -17,7 +17,7 @@ local SELF_BUFF = { DRUID = { name = "thorns", ids = { 467, 782, 1075, 8914, 975
 local running, sweep, events, firstError
 
 local function Say(text)
-    print("|cffffd100CCM check|r " .. text)
+    print("|cffffd100FECM check|r " .. text)
 end
 
 local function Hidden(value)
@@ -104,7 +104,7 @@ function ns.Probe(msg)
     local _, class = UnitClass("player")
     local spell = msg:match("^%s*check%s+(.-)%s*$")
     if not spell or spell == "" then spell = DEFAULT_SPELL[class] or "Attack" end
-    if not C_Spell.GetSpellInfo(spell) then Say("you don't know " .. spell .. ". Try /ccm check <spell name>.") return end
+    if not C_Spell.GetSpellInfo(spell) then Say("you don't know " .. spell .. ". Try /fecm check <spell name>.") return end
     if not sweep then Build() end
     sweep.icon:SetTexture(C_Spell.GetSpellTexture(spell))
     sweep:Show()

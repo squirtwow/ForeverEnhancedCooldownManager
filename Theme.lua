@@ -194,6 +194,8 @@ function T:Segmented(parent, items, width, onSelect)
             Colour(button.fill, accent)
             local c = chosen and on or T.TEXT
             button.label:SetTextColor(c[1], c[2], c[3])
+            -- The font's black drop shadow smears dark text on a light accent.
+            button.label:SetShadowColor(0, 0, 0, chosen and on[1] < .5 and 0 or 1)
         end
     end
     self:Paint(function() if bar.selected then bar:SetSelected(bar.selected) end end)

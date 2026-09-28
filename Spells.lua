@@ -1,4 +1,4 @@
--- Everything a Classic Bar can show, one entry each: your spells at their
+-- Everything a bar can show, one entry each: your spells at their
 -- highest known rank, your class's talent procs, your trinkets and usable bag
 -- items, and spells added by name or ID. Bars store each entry's key (a spell
 -- name, "item:<id>" or "slot:<n>"), so training a new rank or swapping a

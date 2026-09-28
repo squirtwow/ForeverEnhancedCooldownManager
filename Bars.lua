@@ -1,5 +1,5 @@
--- Classic Bars: the addon's own rows of square Classic icons for the spells
--- you pick. Cooldowns are secret in combat, so each icon hands the game's
+-- The addon's own bars: rows of square frameless icons for the spells you
+-- pick. Cooldowns are secret in combat, so each icon hands the game's
 -- duration object straight to its sweep, greying and hide-when-ready without
 -- ever reading it; only the open "usable" and range checks are read here.
 -- The icons never take the mouse, so they can't get in the way in combat.
@@ -8,8 +8,7 @@ local _, ns = ...
 local B = {}
 ns.Bars = B
 
-local SQUARE = "Interface\\Buttons\\WHITE8X8"
-local TIMER_FONT = "SystemFont_Shadow_Large_Outline"
+local Style = ns.Style
 local DEFAULT_Y = { buff = 234, cd = 190, util = 146 } -- just above the action bar
 local RANGE_INTERVAL = .25
 -- Blizzard's own Cooldown Manager tints.
@@ -37,25 +36,21 @@ end
 local function NewIcon(bar)
     local icon = CreateFrame("Frame", nil, bar)
     icon:EnableMouse(false)
-    -- A gold edge outside the dark one marks a reactive ability that is ready.
+    -- A gold edge around the icon marks a reactive ability that is ready.
     icon.glow = icon:CreateTexture(nil, "BACKGROUND", nil, -8)
     icon.glow:SetColorTexture(1, .82, 0, 1)
     icon.glow:SetPoint("TOPLEFT", -2, 2)
     icon.glow:SetPoint("BOTTOMRIGHT", 2, -2)
     icon.glow:Hide()
-    icon.edge = icon:CreateTexture(nil, "BACKGROUND", nil, -7)
-    icon.edge:SetColorTexture(0, 0, 0, .9)
-    icon.edge:SetPoint("TOPLEFT", -1, 1)
-    icon.edge:SetPoint("BOTTOMRIGHT", 1, -1)
     icon.texture = icon:CreateTexture(nil, "ARTWORK")
     icon.texture:SetAllPoints()
+    Style:Zoom(icon.texture)
     icon.cooldown = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
-    icon.cooldown:SetAllPoints()
-    icon.cooldown:SetSwipeTexture(SQUARE)
+    icon.cooldown:SetAllPoints(icon.texture)
+    icon.cooldown:SetSwipeTexture(Style.FLAT)
     icon.cooldown:SetSwipeColor(0, 0, 0, .7)
     icon.cooldown:SetDrawEdge(false)
     icon.cooldown:SetDrawBling(false)
-    if _G[TIMER_FONT] then icon.cooldown:SetCountdownFont(TIMER_FONT) end
     -- Events arrive when a cooldown starts, not when it ends; this catches the
     -- end, so the icon ungreys (or hides when ready) on time.
     icon.cooldown:SetScript("OnCooldownDone", function() B:RefreshAll() end)
@@ -231,6 +226,8 @@ local function Layout(bar)
             local icon = bar.icons[count] or NewIcon(bar)
             bar.icons[count] = icon
             icon:SetSize(size, size)
+            icon.cooldown:SetCountdownFont(Style:Countdown(size))
+            icon.count:SetFontObject(Style:Count(size))
             icon:ClearAllPoints()
             icon:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
@@ -257,7 +254,7 @@ end
 -- Public ------------------------------------------------------------------------------
 
 function B:Enabled()
-    return ns.Get("classicBars") == true
+    return ns.Get("useBars") == true
 end
 
 function B:Get(key)
@@ -306,7 +303,7 @@ function B:RefreshAll()
                 local ok, err = pcall(RefreshIcon, bar.icons[i], bar.data, hasTarget)
                 if not ok and not self.lastError then
                     self.lastError = tostring(err)
-                    print("|cffffd100" .. ns.TITLE .. ":|r a Classic Bars icon couldn't update. Please report this: " .. self.lastError)
+                    print("|cffffd100" .. ns.TITLE .. ":|r a bar icon couldn't update. Please report this: " .. self.lastError)
                 end
             end
         end

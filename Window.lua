@@ -21,16 +21,16 @@ local function BuildSettings(window, panel)
     local B = ns.Bars
     T:Heading(panel, "Settings"):SetPoint("TOPLEFT", 8, -9)
 
-    local bars = T:Check(panel, "Use Classic Bars", function(self)
-        ns.Set("classicBars", self:GetChecked())
+    local bars = T:Check(panel, "Use my bars", function(self)
+        ns.Set("useBars", self:GetChecked())
         B:Rebuild()
         window:Refresh()
     end)
     bars:SetPoint("TOPLEFT", 8, -28)
     window.useBars = bars
 
-    local look = T:Check(panel, "Classic look for Blizzard's", function(self)
-        ns.Set("classicLook", self:GetChecked())
+    local look = T:Check(panel, "Charcoal look", function(self)
+        ns.Set("skin", self:GetChecked())
         window:Refresh()
     end)
     look:SetPoint("TOPLEFT", 8, -50)
@@ -38,7 +38,7 @@ local function BuildSettings(window, panel)
     local lookDetail = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
     lookDetail:SetPoint("TOPLEFT", 26, -67)
     lookDetail:SetWidth(150)
-    lookDetail:SetText("Cooldown Manager. Needs a reload.")
+    lookDetail:SetText("For Blizzard's Cooldown Manager. Needs a reload.")
 
     -- Shown when Blizzard's Cooldown Manager is switched off.
     local off = T:Text(panel, "GameFontHighlightSmall", { 1, .45, .3 })
@@ -51,7 +51,7 @@ local function BuildSettings(window, panel)
     unlock:SetPoint("TOPLEFT", 8, -126)
     unlock:SetScript("OnClick", function()
         if not B:Enabled() then
-            window:Say("Tick Use Classic Bars first.")
+            window:Say("Tick Use my bars first.")
         else
             B:SetUnlocked(not B:IsUnlocked())
         end
@@ -86,7 +86,7 @@ local function BuildSettings(window, panel)
     end
     window.swatches = swatches
 
-    -- The reload a changed Classic look needs, at the foot of the column.
+    -- The reload a changed charcoal look needs, at the foot of the column.
     local hint = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
     hint:SetPoint("BOTTOMLEFT", 8, 38)
     hint:SetWidth(168)
@@ -105,7 +105,7 @@ local function BuildSettings(window, panel)
 
     function window:RefreshSettings()
         self.useBars:SetChecked(B:Enabled())
-        self.look:SetChecked(ns.Get("classicLook"))
+        self.look:SetChecked(ns.Get("skin"))
         self.off:SetShown(not ns.CooldownManagerOn())
         self.unlock:SetLabel(B:IsUnlocked() and "Lock bars" or "Unlock bars to move")
         local needsReload = ns.NeedsReload()
@@ -121,7 +121,7 @@ local function BuildSettings(window, panel)
 end
 
 local function BuildWindow()
-    local window = CreateFrame("Frame", "ClassicCooldownManagerFrame", UIParent, "BackdropTemplate")
+    local window = CreateFrame("Frame", "FECMFrame", UIParent, "BackdropTemplate")
     window:SetSize(WIDTH, HEIGHT)
     window:SetPoint("CENTER", 0, 60)
     window:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -135,7 +135,7 @@ local function BuildWindow()
     T:Flat(window, T.BG, { .22, .22, .22, 1 })
     window:Hide()
 
-    -- Header: the icon on an accent square, and "Classic" in the accent.
+    -- Header: the icon on an accent square, and "Enhanced" in the accent.
     local logo = CreateFrame("Frame", nil, window, "BackdropTemplate")
     logo:SetSize(24, 24)
     logo:SetPoint("TOPLEFT", 12, -10)
@@ -147,7 +147,7 @@ local function BuildWindow()
     title:SetPoint("LEFT", logo, "RIGHT", 8, 0)
     T:Paint(function(accent)
         T:Flat(logo, { accent[1], accent[2], accent[3], 1 }, { accent[1], accent[2], accent[3], 1 })
-        title:SetText("|cff" .. T:Hex(accent) .. "Classic|r Cooldown Manager")
+        title:SetText("Forever |cff" .. T:Hex(accent) .. "Enhanced|r Cooldown Manager")
     end)
     local close = T:Square(window, "X")
     close:SetSize(22, 22)
@@ -167,7 +167,7 @@ local function BuildWindow()
     -- Footer: the version, and messages from the window (or a tip).
     local version = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     version:SetPoint("BOTTOMLEFT", 12, 10)
-    version:SetText(Version() .. "   /ccm to open")
+    version:SetText(Version() .. "   /fecm to open")
     local note = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     note:SetPoint("BOTTOMRIGHT", -12, 10)
     note:SetJustifyH("RIGHT")

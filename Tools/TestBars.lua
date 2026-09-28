@@ -1,4 +1,4 @@
--- Run the actual Classic Bars files (Core, Spells, Bars, BarsPanel) against a
+-- Run the actual bars files (Core, Style, Spells, Buffs, Bars, the window) against a
 -- mock game: spellbook ranks, secret cooldowns in combat, usable and range
 -- tints, showing and hiding, dragging, the settings backup, and the panel.
 local checks = 0
@@ -70,6 +70,7 @@ function Proto:SetVerticalScroll(v) S[self].scroll = v end
 function Proto:GetEffectiveScale() return 1 end
 function Proto:SetBackdropBorderColor(r, g, b, a) S[self].border = { r, g, b, a } end
 function Proto:SetTextColor(r, g, b) S[self].colour = { r, g, b } end
+function Proto:SetShadowColor(r, g, b, a) S[self].shadow = a end
 function Proto:SetAlpha(a) S[self].alpha = a end
 function Proto:GetCenter() return S[self].cx, S[self].cy end
 function Proto:GetFrameLevel() return 1 end
@@ -124,7 +125,7 @@ local function Environment(keepCVars)
     _G.GetCursorPosition = function() return 0, 0 end
     _G.ReloadUI = function()
         assert(not lockdown, "blocked ReloadUI in combat")
-        assert(S[ClassicCooldownManagerFrame].shown, "window hidden before reload")
+        assert(S[FECMFrame].shown, "window hidden before reload")
         reloads = reloads + 1
     end
     _G.RAID_CLASS_COLORS = { DRUID = { r = 1, g = .49, b = .04 } }
@@ -250,6 +251,7 @@ local function Environment(keepCVars)
     _G.UIParent = New("Frame")
     S[UIParent].cx, S[UIParent].cy = 500, 400
     _G.GameFontHighlight = { GetFont = function() return "font", 12, "" end }
+    _G.CreateFont = function(name) local font = New("Font"); _G[name] = font; return font end
     _G.SlashCmdList = {}
     _G.Settings = nil
     _G.ClearOverrideBindings = function(owner) assert(not lockdown, "binding change in combat"); bindings[owner] = nil end
@@ -258,11 +260,11 @@ end
 
 local function Load(saved)
     local ns = {}
-    _G.ClassicCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarsPanel.lua", "Window.lua" }) do
-        assert(loadfile(file))("ClassicCooldownManager", ns)
+    _G.ForeverEnhancedCooldownManagerDB = saved
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarsPanel.lua", "Window.lua" }) do
+        assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
-    Fire("ADDON_LOADED", "ClassicCooldownManager")
+    Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
     Fire("PLAYER_ENTERING_WORLD")
     return ns
 end
@@ -291,7 +293,7 @@ Equal(list[#list].name, "Nature's Grace", "procs come last")
 
 -- Off by default ------------------------------------------------------------------------
 
-Equal(B:Enabled(), false, "Classic Bars start off")
+Equal(B:Enabled(), false, "own bars start off")
 Equal(B:Get("cd") and S[B:Get("cd")].shown, false, "no bar shown while off")
 
 -- Assigning spells ---------------------------------------------------------------------
@@ -318,7 +320,7 @@ B:SetOption("cd", "size", 36)
 
 -- Showing -----------------------------------------------------------------------------
 
-ns.Set("classicBars", true)
+ns.Set("useBars", true)
 B:Rebuild()
 local cd, util = B:Get("cd"), B:Get("util")
 Equal(S[cd].shown, true, "a bar with spells shows")
@@ -326,6 +328,14 @@ Equal(S[util].shown, false, "an empty bar stays hidden")
 Equal(cd.count, 2, "two icons")
 Equal(S[cd].width, 2 * 36 + 4, "bar width fits its icons")
 local over, moon = cd.icons[1], cd.icons[2]
+Equal(over.edge, nil, "no frame around the icon")
+Equal(S[over.texture].last.SetAllPoints ~= nil, true, "the art fills the whole icon")
+Equal(Last(over.texture, "SetTexCoord"), .08, "icon art zoomed past its bevel")
+Equal(Last(over.cooldown, "SetCountdownFont"), "FECMFont18", "big countdown, half the icon's height")
+Equal(Last(over.count, "SetFontObject"), "FECMFont13", "item counts sized to match")
+B:SetOption("cd", "size", 54)
+Equal(Last(over.cooldown, "SetCountdownFont"), "FECMFont27", "the numbers grow with the icon")
+B:SetOption("cd", "size", 36)
 Equal(over.spellID, 7384, "Overpower icon")
 Equal(moon.spellID, 8924, "Moonfire icon at its highest rank")
 Equal(S[over].last.EnableMouse[1], false, "icons never take the mouse")
@@ -397,11 +407,11 @@ Equal(ns.BarData("cd").y, -100, "position saved")
 p = S[cd].points[1]
 Equal(p[1] == "CENTER" and p[4] == 20 and p[5], -100, "placed where it was dropped")
 B:SetOption("cd", "combatOnly", false)
-ns.Set("classicBars", false)
+ns.Set("useBars", false)
 B:Rebuild()
-Equal(B:IsUnlocked(), false, "turning Classic Bars off locks them")
+Equal(B:IsUnlocked(), false, "turning the bars off locks them")
 Equal(S[cd].shown, false, "and hides them")
-ns.Set("classicBars", true)
+ns.Set("useBars", true)
 B:Rebuild()
 
 -- A new rank moves the bar onto it ------------------------------------------------------
@@ -413,19 +423,19 @@ Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 
 -- Backup ------------------------------------------------------------------------------
 
-Equal(cvars.ClassicCooldownManagerBackup, "accent=orange;classicBars=1;classicLook=1;listItems=0;listRanks=0", "on/off backup")
-Equal(cvars.ClassicCooldownManagerBackupBars0, "1", "bars backed up in one chunk")
+Equal(cvars.FECMBackup, "accent=orange;listItems=0;listRanks=0;skin=1;useBars=1", "on/off backup")
+Equal(cvars.FECMBackupBars0, "1", "bars backed up in one chunk")
 Environment(true)
 ns = Load(nil)
 B = ns.Bars
-Equal(B:Enabled(), true, "Classic Bars on again after lost settings")
+Equal(B:Enabled(), true, "bars on again after lost settings")
 Equal(table.concat(ns.BarData("cd").spells, ","), "Overpower,Moonfire", "bar spells restored")
 Equal(ns.BarData("cd").x, 20, "bar position restored")
 Equal(ns.BarData("util").x, nil, "unmoved bar keeps its default spot")
 Equal(B:Get("cd").count, 2, "and drawn")
 
 Environment(true)
-cvars.ClassicCooldownManagerBackupBars1 = "cd.size=9999;cd.spells=A|B;cd.x=nope;evil.size=3;cd.hide=maybe"
+cvars.FECMBackupBars1 = "cd.size=9999;cd.spells=A|B;cd.x=nope;evil.size=3;cd.hide=maybe"
 ns = Load(nil)
 local data = ns.BarData("cd")
 Equal(data.size, 64, "bad sizes clamped")
@@ -437,7 +447,7 @@ Equal(ns.BarData("evil"), nil, "unknown bars ignored")
 -- Buffs bar -------------------------------------------------------------------------------
 
 Environment()
-ns = Load({ classicBars = true })
+ns = Load({ useBars = true })
 B = ns.Bars
 local buffs = B:Get("buff")
 watched[buffs] = true
@@ -455,6 +465,8 @@ Equal(S[b1.button].last.EnableMouse[1], false, "slots never take the mouse")
 Equal(b1.supplied.SetIcon ~= nil and b1.supplied.SetDurationCooldown ~= nil and b1.supplied.SetApplicationCount ~= nil, true, "icon, sweep and stack count supplied")
 Equal(S[b1.supplied.SetDurationCooldown].last.SetSwipeTexture[1], "Interface\\Buttons\\WHITE8X8", "square sweep")
 Equal(S[b1.supplied.SetDurationCooldown].last.SetReverse[1], true, "buff sweep runs the buff way")
+Equal(S[b1.supplied.SetDurationCooldown].last.SetCountdownFont[1], "FECMFont18", "big buff timers")
+Equal(Last(b1.supplied.SetIcon, "SetTexCoord"), .08, "buff icons zoomed like the rest")
 
 local anchor = S[box].points[1]
 Equal(#S[box].points == 1 and anchor[1] == "CENTER" and anchor[2] == buffs and anchor[3], "CENTER", "container held by its centre, so packed buffs stay centred")
@@ -496,6 +508,9 @@ Equal(slots.b1.filters.includeSpellIDs[467], true, "Thorns in the first spot")
 Equal(S[box].scale, 1, "fixed spots take their size from the holders")
 Equal(S[buffs.holders[1]].shown and S[buffs.holders[1].icon].shown, true, "shown greyed when asked")
 Equal(S[buffs.holders[1].icon].desaturated, true, "in grey")
+B:SetOption("buff", "size", 54)
+Equal(S[slots.b1.supplied.SetDurationCooldown].last.SetCountdownFont[1], "FECMFont27", "a fixed spot's numbers follow its size")
+B:SetOption("buff", "size", 36)
 
 -- Nothing touches the secure slots, or shows or hides the bar, in combat.
 Fire("PLAYER_REGEN_DISABLED")
@@ -505,7 +520,7 @@ Equal(containerCallsInCombat, 0, "no slot or group changes in combat")
 Equal(slots.b2.enabled, true, "Clearcasting's slot waits")
 B:SetOption("buff", "combatOnly", true)
 Equal(S[buffs].alpha, 1, "only in combat: visible in a fight")
-ns.Set("classicBars", false)
+ns.Set("useBars", false)
 B:Rebuild()
 Equal(S[buffs].combatToggle, nil, "never shown or hidden in combat")
 Equal(S[buffs].shown, true, "hiding waits for the fight to end")
@@ -513,26 +528,26 @@ lockdown = false
 Fire("PLAYER_REGEN_ENABLED")
 Equal(S[buffs].shown, false, "hidden after the fight")
 Equal(slots.b1.enabled or slots.b2.enabled, false, "and every slot switched off")
-ns.Set("classicBars", true)
+ns.Set("useBars", true)
 B:Rebuild()
-Equal(slots.b1.enabled, true, "back on with Classic Bars")
+Equal(slots.b1.enabled, true, "back on with the bars")
 Equal(slots.b2.enabled, false, "Clearcasting's change applied")
 Equal(S[buffs].alpha, 0, "only in combat: faded out of combat")
 B:SetOption("buff", "showMissing", false)
 Equal(groups.g1.enabled and slots.b1.enabled == false, true, "back to packed")
 Equal(groups.g2.enabled, false, "Clearcasting's group off after being unticked")
 Equal(#printed, 0, "no errors")
-Equal(cvars.ClassicCooldownManagerBackupBars1:find("buff.missing=0;buff.names=0;buff.spells=Thorns", 1, true) ~= nil, true, "Buffs bar backed up")
+Equal(cvars.FECMBackupBars1:find("buff.missing=0;buff.names=0;buff.spells=Thorns", 1, true) ~= nil, true, "Buffs bar backed up")
 Equal(S[buffs.mover.label].text, "Buffs", "mover label is the bar's name")
 Equal(S[buffs.mover.label].points[1][1], "CENTER", "inside the highlight")
 
 -- Settings panel ------------------------------------------------------------------------
 
 Environment()
-ns = Load({ classicBars = true })
+ns = Load({ useBars = true })
 B = ns.Bars
 ns.Toggle()
-local w = ClassicCooldownManagerFrame
+local w = FECMFrame
 
 -- Find the Moonfire row and tick CD.
 local function Row(name)
@@ -566,7 +581,7 @@ bagItems = {
     { itemID = 2698, hyperlink = "|cffffffff|Hitem:2698|h[Recipe: Cooked Crab Claw]|h|r" },
 }
 itemCount[118] = 3
-ns = Load({ classicBars = true })
+ns = Load({ useBars = true })
 B = ns.Bars
 local charm = ns.Spells:Find("slot:13")
 Equal(charm and charm.name, "Trinket 1: Lucky Charm", "equipped trinket listed")
@@ -665,7 +680,7 @@ Equal(fort["Power Word: Fortitude"] and fort["Prayer of Fortitude"], true, "foun
 Equal(ns.Spells:Suggest("minor heal")[1].name, "Minor Healing Potion", "items suggested too")
 
 ns.Toggle()
-w = ClassicCooldownManagerFrame
+w = FECMFrame
 Equal(Row("item:118"), nil, "items left out of the list by default")
 Equal(Row("Moonfire") ~= nil, true, "spells listed")
 local function ShowItemsBox()
@@ -677,7 +692,7 @@ local itemsBox = ShowItemsBox()
 itemsBox:Click()
 Equal(ns.Get("listItems"), true, "Show items remembered")
 Equal(Row("item:118") ~= nil, true, "items listed when asked")
-Equal(cvars.ClassicCooldownManagerBackup, "accent=orange;classicBars=1;classicLook=1;listItems=1;listRanks=0", "and backed up")
+Equal(cvars.FECMBackup, "accent=orange;listItems=1;listRanks=0;skin=1;useBars=1", "and backed up")
 
 w.add:SetText("thor")
 S[w.add].scripts.OnTextChanged(w.add, true)
@@ -724,7 +739,7 @@ Equal(ns.CustomSpells()["Power Word: Fortitude"], nil, "forgotten once on no bar
 -- Lower ranks on their own ------------------------------------------------------------
 
 Environment()
-ns = Load({ classicBars = true })
+ns = Load({ useBars = true })
 B = ns.Bars
 local rank1 = ns.Spells:Find("Moonfire@1")
 Equal(rank1 and rank1.spellID, 8921, "rank 1 can be tracked on its own")
@@ -741,8 +756,8 @@ Equal(B:Get("cd").icons[1].spellID, 8921, "training rank 3 leaves the fixed rank
 Equal(B:Get("util").icons[1].spellID, 8925, "and moves the normal one up")
 Equal(#ns.Spells:Find("Moonfire").lower, 2, "rank 2 now also listed on its own")
 
-SlashCmdList.CLASSICCOOLDOWNMANAGER("")
-w = ClassicCooldownManagerFrame
+SlashCmdList.FECM("")
+w = FECMFrame
 Equal(Row("Moonfire@1"), nil, "lower ranks hidden by default")
 local ranksBox
 for _, f in ipairs(frames) do
@@ -768,20 +783,20 @@ Equal(table.concat(ns.BarData("util").spells, ","), "Moonfire,Moonfire@2", "fixe
 Environment()
 ns = Load(nil)
 B = ns.Bars
-SlashCmdList.CLASSICCOOLDOWNMANAGER("")
-w = ClassicCooldownManagerFrame
+SlashCmdList.FECM("")
+w = FECMFrame
 Equal(S[w].shown, true, "/ccm opens the window")
 Equal(#w.panels, 3, "Spellbook, Bars and Settings side by side")
-Equal(w.look:GetChecked(), true, "Classic look shown as on")
-Equal(w.useBars:GetChecked(), false, "Classic Bars shown as off")
+Equal(w.look:GetChecked(), true, "charcoal look shown as on")
+Equal(w.useBars:GetChecked(), false, "own bars shown as off")
 Equal(S[w.off].shown, false, "no Cooldown Manager warning while it is on")
 Equal(S[w.reload].shown, false, "no reload needed yet")
-Equal(bindings[ClassicCooldownManagerEscButton], "ESCAPE:ClassicCooldownManagerEscButton", "Escape closes the window")
+Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape closes the window")
 Equal(S[w.close.label].text, "X", "a plain X")
 Equal(S[w.note].text, "Each spell shows once, at your highest rank.", "footer tip")
 
 w.look:Click()
-Equal(ClassicCooldownManagerDB.classicLook, false, "unticking saves the choice")
+Equal(ForeverEnhancedCooldownManagerDB.skin, false, "unticking saves the choice")
 Equal(S[w.reload].shown, true, "reload offered after a change")
 Equal(w.hint:GetText(), "Reload UI to apply your change.", "explains the reload")
 lockdown = true
@@ -795,9 +810,9 @@ w.look:Click()
 Equal(S[w.reload].shown, false, "changing back needs no reload")
 
 w.unlock:Click()
-Equal(S[w.note].text, "Tick Use Classic Bars first.", "can't unlock while Classic Bars are off")
+Equal(S[w.note].text, "Tick Use my bars first.", "can't unlock while the bars are off")
 w.useBars:Click()
-Equal(B:Enabled(), true, "Use Classic Bars turns them on")
+Equal(B:Enabled(), true, "Use my bars turns them on")
 w.unlock:Click()
 Equal(B:IsUnlocked(), true, "unlocked")
 Equal(S[w.unlock.label].text, "Lock bars", "button offers to lock")
@@ -819,6 +834,15 @@ w.swatches[3]:Click()
 Equal(ns.Get("accent"), "teal", "a set colour chosen")
 Equal(S[spellbook].colour[1] == .17 and S[spellbook].colour[2], .70, "the whole window repaints")
 Equal(S[w.swatches[3]].border[1], 1, "chosen swatch outlined")
+local function Segment(label)
+    for i = #objects, 1, -1 do
+        local o = objects[i]
+        if S[o] and S[o].text == label and S[o].shadow ~= nil then return o end
+    end
+end
+local chosenTab, otherTab = Segment("Cooldowns"), Segment("Utility")
+Equal(S[chosenTab].colour[1] < .5 and S[chosenTab].shadow, 0, "dark text on a light accent has no smeared shadow")
+Equal(S[otherTab].shadow, 1, "light text on dark keeps its shadow")
 Equal(S[w.swatches[1]].border[1] < 1, true, "the others not")
 w.swatches[1]:Click()
 Equal(ns.Get("accent"), "orange", "back to orange")
@@ -841,21 +865,21 @@ w.clear:Click()
 Equal(#ns.BarData("cd").spells, 1, "after a pause, the next click asks again")
 
 Fire("PLAYER_REGEN_DISABLED")
-Equal(bindings[ClassicCooldownManagerEscButton], nil, "Escape handed back as combat starts")
+Equal(bindings[FECMEscButton], nil, "Escape handed back as combat starts")
 lockdown = true
 Fire("PLAYER_REGEN_ENABLED")
 lockdown = false
 Fire("PLAYER_REGEN_ENABLED")
-Equal(bindings[ClassicCooldownManagerEscButton] ~= nil, true, "and taken again after combat while the window is open")
-ClassicCooldownManagerEscButton:Click()
+Equal(bindings[FECMEscButton] ~= nil, true, "and taken again after combat while the window is open")
+FECMEscButton:Click()
 Equal(S[w].shown, false, "Escape closes it")
-Equal(bindings[ClassicCooldownManagerEscButton], nil, "and releases the key")
+Equal(bindings[FECMEscButton], nil, "and releases the key")
 
-SlashCmdList.CLASSICCOOLDOWNMANAGER("check")
+SlashCmdList.FECM("check")
 Equal(S[w].shown, true, "without the development check, /ccm check just toggles")
 local probed
 ns.Probe = function(msg) probed = msg end
-SlashCmdList.CLASSICCOOLDOWNMANAGER(" check Moonfire")
+SlashCmdList.FECM(" check Moonfire")
 Equal(probed, " check Moonfire", "/ccm check reaches the development check")
 Equal(S[w].shown, true, "and leaves the window alone")
 ns.Probe = nil
@@ -866,4 +890,4 @@ Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
 Equal(#printed, 0, "no errors")
 
 print = _G.print
-io.write("Classic Bars checks passed: " .. checks .. " assertions.\n")
+io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

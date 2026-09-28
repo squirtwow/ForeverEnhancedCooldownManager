@@ -1,12 +1,12 @@
 Copyright (c) 2026 Squirt. All rights reserved.
 
-Classic Cooldown Manager and its source code are the property of the author.
-No part of this addon may be copied, modified, redistributed, reuploaded, or
-included in other packages or projects, in whole or in part, without the
-prior written permission of the author.
+Forever Enhanced Cooldown Manager and its source code are the property of the
+author. No part of this addon may be copied, modified, redistributed,
+reuploaded, or included in other packages or projects, in whole or in part,
+without the prior written permission of the author.
 
-You are permitted to download and use Classic Cooldown Manager for personal
-use with World of Warcraft: Forever.
+You are permitted to download and use Forever Enhanced Cooldown Manager for
+personal use with World of Warcraft: Forever.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

@@ -1,13 +1,14 @@
 ## Interface: 16001
-## Title: Classic Cooldown Manager
-## Notes: Classic 2004 look for Blizzard's Cooldown Manager on WoW Forever.
+## Title: Forever Enhanced Cooldown Manager
+## Notes: Restyles Blizzard's Cooldown Manager and adds cooldown and buff bars of your own, for WoW Forever.
 ## Author: Squirt
 ## Version: @project-version@
-## SavedVariables: ClassicCooldownManagerDB
+## SavedVariables: ForeverEnhancedCooldownManagerDB
 ## IconTexture: Interface\Icons\INV_Misc_PocketWatch_01
 ## Category: UI
 
 Core.lua
+Style.lua
 Skin.lua
 Ranks.lua
 Spells.lua

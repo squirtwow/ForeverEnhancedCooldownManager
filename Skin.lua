@@ -1,5 +1,5 @@
--- Classic look for Blizzard's Cooldown Manager: square 2004-style icons with a
--- thin dark edge, a square cooldown sweep, and Classic buff bars.
+-- Charcoal look for Blizzard's Cooldown Manager: square frameless icons with
+-- big bold countdown numbers, and flat charcoal Tracked Bars.
 -- Visual only. Blizzard still decides what shows, when, and where (Edit Mode).
 -- Cooldowns and auras are secret in combat, so nothing here reads them: each
 -- item frame gets its textures, fonts and anchors set once, after Blizzard's
@@ -9,15 +9,15 @@ local _, ns = ...
 local M = {}
 ns.Skin = M
 
-local SQUARE = "Interface\\Buttons\\WHITE8X8"
-local BAR = "Interface\\TargetingFrame\\UI-StatusBar"
+local Style = ns.Style
 local OVERLAY_ATLAS = "UI-HUD-CoolDownManager-IconOverlay"
-local EDGE = { 0, 0, 0, .9 }
-local BAR_BG = { 0, 0, 0, .5 }
-local BAR_COLOUR = { 1, .5, .25 } -- Blizzard's own buff-bar colour.
--- Buff icons get no timer font from Blizzard, so they use the 20pt default,
--- which fills the icon with "56m"; this is the next size down (16pt).
-local BUFF_TIMER_FONT = "SystemFont_Shadow_Large_Outline"
+-- Tracked Bars are 30 tall with a 30 icon; the bar grows from 19 to sit level
+-- with the icon's art.
+local BAR_HEIGHT = 26
+-- Blizzard places icons 4 units closer than the padding setting because its
+-- mask trims their edges; trimming 2 from each side of the square art makes
+-- the gap between icons match Edit Mode's Padding exactly.
+local INSET = 2
 
 local skinned = setmetatable({}, { __mode = "k" })
 local hooked = {}
@@ -34,19 +34,9 @@ local function Inset(region, anchor, inset)
     region:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", -inset, inset)
 end
 
-local function Edge(owner, anchor)
-    local edge = owner:CreateTexture(nil, "BACKGROUND", nil, -8)
-    edge:SetColorTexture(EDGE[1], EDGE[2], EDGE[3], EDGE[4])
-    edge:SetPoint("TOPLEFT", anchor, "TOPLEFT", -1, 1)
-    edge:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", 1, -1)
-    return edge
-end
-
--- The rounded mask and the modern frame art go, so the icon shows square with
--- its own bevelled edge, as icons did in 2004. Blizzard places icons 4 units
--- closer than the padding setting because the mask trims their edges; the
--- inset keeps a small gap between square icons at the default spacing.
-local function SquareIcon(frame, icon, inset)
+-- The rounded mask and the modern frame art go, and the icon art is zoomed
+-- past its own bevel, with nothing drawn around it.
+local function SquareIcon(frame, icon)
     for _, region in ipairs(Regions(frame)) do
         local kind = region:GetObjectType()
         if kind == "MaskTexture" then
@@ -55,62 +45,70 @@ local function SquareIcon(frame, icon, inset)
             region:SetAlpha(0)
         end
     end
-    Inset(icon, frame, inset)
-    Edge(frame, icon)
+    Inset(icon, frame, INSET)
+    Style:Zoom(icon)
 end
 
 local function SquareSweep(cooldown, icon)
     if not cooldown then return end
     Inset(cooldown, icon, 0)
-    cooldown:SetSwipeTexture(SQUARE)
+    cooldown:SetSwipeTexture(Style.FLAT)
 end
 
-local function Font(region, object)
-    if region and object then region:SetFontObject(object) end
+local function Font(region, name)
+    if region and name then region:SetFontObject(name) end
 end
 
 -- Item frames -------------------------------------------------------------------
 
 -- Essential and Utility cooldowns, including trinkets and potions.
-local function Cooldown(item, inset)
-    SquareIcon(item, item.Icon, inset)
+local function Cooldown(item, spec)
+    SquareIcon(item, item.Icon)
     SquareSweep(item.Cooldown, item.Icon)
-    -- Out of range already tints the icon red, as in Classic; the modern
-    -- shadow and the end-of-cooldown sparkle stay hidden.
+    if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
+    Font(item.ChargeCount and item.ChargeCount.Current, Style:Count(spec.size))
+    -- Out of range still tints the icon red; the modern shadow and the
+    -- end-of-cooldown sparkle stay hidden.
     if item.OutOfRange then item.OutOfRange:SetAlpha(0) end
     if item.CooldownFlash then item.CooldownFlash:SetAlpha(0) end
 end
 
 -- Tracked buffs shown as icons.
-local function Buff(item, inset)
-    SquareIcon(item, item.Icon, inset)
+local function Buff(item, spec)
+    SquareIcon(item, item.Icon)
     SquareSweep(item.Cooldown, item.Icon)
-    if item.Cooldown and _G[BUFF_TIMER_FONT] then item.Cooldown:SetCountdownFont(BUFF_TIMER_FONT) end
+    if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
+    Font(item.Applications and item.Applications.Applications, Style:Count(spec.size))
 end
 
 -- Tracked buffs shown as bars.
-local function Bar(item, inset)
+local function Bar(item, spec)
     local iconFrame = item.Icon
-    if iconFrame and iconFrame.Icon then SquareIcon(iconFrame, iconFrame.Icon, inset) end
+    if iconFrame and iconFrame.Icon then
+        SquareIcon(iconFrame, iconFrame.Icon)
+        Font(iconFrame.Applications, Style:Count(spec.size))
+    end
     local bar = item.Bar
     if not bar then return end
-    bar:SetStatusBarTexture(BAR)
-    bar:SetStatusBarColor(BAR_COLOUR[1], BAR_COLOUR[2], BAR_COLOUR[3])
+    bar:SetHeight(BAR_HEIGHT)
+    bar:SetStatusBarTexture(Style.FLAT)
+    bar:SetStatusBarColor(Style.FILL[1], Style.FILL[2], Style.FILL[3])
     if bar.BarBG then
-        bar.BarBG:SetColorTexture(BAR_BG[1], BAR_BG[2], BAR_BG[3], BAR_BG[4])
+        bar.BarBG:SetColorTexture(Style.TRACK[1], Style.TRACK[2], Style.TRACK[3], Style.TRACK[4])
         Inset(bar.BarBG, bar, 0)
     end
-    Edge(bar, bar)
     if bar.Pip then bar.Pip:SetAlpha(0) end
-    Font(bar.Name, GameFontHighlight)
-    Font(bar.Duration, GameFontHighlightSmall)
+    Font(bar.Name, Style:Font(13))
+    Font(bar.Duration, Style:Font(15))
 end
 
+-- size is the item's own size in Blizzard's templates; Edit Mode's icon size
+-- scales the whole viewer, fonts included.
 M.VIEWERS = {
-    { name = "EssentialCooldownViewer", skin = Cooldown, inset = 2 },
-    { name = "UtilityCooldownViewer", skin = Cooldown, inset = 1.5 },
-    { name = "BuffIconCooldownViewer", skin = Buff, inset = 1.5 },
-    { name = "BuffBarCooldownViewer", skin = Bar, inset = 1 },
+    { name = "EssentialCooldownViewer", skin = Cooldown, size = 50 },
+    { name = "UtilityCooldownViewer", skin = Cooldown, size = 30 },
+    { name = "BuffIconCooldownViewer", skin = Buff, size = 40 },
+    { name = "BuffBarCooldownViewer", skin = Bar, size = 30 },
 }
 
 -- Setup -------------------------------------------------------------------------
@@ -120,7 +118,7 @@ M.VIEWERS = {
 local function Skin(item, spec)
     if not item or skinned[item] then return end
     skinned[item] = true
-    local ok, err = pcall(spec.skin, item, spec.inset)
+    local ok, err = pcall(spec.skin, item, spec)
     if not ok and not M.lastError then
         M.lastError = tostring(err)
         print("|cffffd100" .. ns.TITLE .. ":|r couldn't restyle a cooldown icon. Please report this: " .. M.lastError)

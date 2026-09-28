@@ -1,14 +1,14 @@
--- Classic Cooldown Manager: saved settings and their backup, the /ccm command,
+-- Forever Enhanced Cooldown Manager: saved settings and their backup, the /ccm command,
 -- Escape for the window and the entry in Options > AddOns. Each feature lives
 -- in its own file and starts from here once the saved settings are loaded.
 local ADDON, ns = ...
 
-ns.TITLE = "Classic Cooldown Manager"
+ns.TITLE = "Forever Enhanced Cooldown Manager"
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 
 ns.DEFAULTS = {
-    classicLook = true,
-    classicBars = false,
+    skin = true,
+    useBars = false, -- the addon's own bars
     listItems = false, -- show trinkets and bag items in the /ccm spell list
     listRanks = false, -- show every rank you know as its own row
     accent = "orange", -- the /ccm window's accent colour
@@ -26,10 +26,10 @@ function ns.Valid(key, value)
 end
 -- Settings that only take effect after a reload.
 ns.RELOAD = {
-    classicLook = true,
+    skin = true,
 }
 
--- Classic Bars: each bar lists spells by name, so the highest known rank is
+-- Bars: each bar lists spells by name, so the highest known rank is
 -- always the one shown.
 ns.BAR_KEYS = { "cd", "util", "buff" }
 ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs" }
@@ -120,8 +120,12 @@ end
 -- at login for anything missing. Plain settings are stored as "key=1" pairs and
 -- the bars as "cd.size=36;cd.spells=Moonfire|Bash" text split into chunks;
 -- everything read back is checked, and nothing is ever run as code.
-ns.BACKUP = "ClassicCooldownManagerBackup"
+ns.BACKUP = "FECMBackup"
 local BARS_BACKUP = ns.BACKUP .. "Bars"
+-- The backup this addon kept under its first name, read once to carry a
+-- setup over, with the two settings that were renamed.
+local LEGACY = "ClassicCooldownManagerBackup"
+local LEGACY_KEYS = { classicLook = "skin", classicBars = "useBars" }
 local CHUNK, MAX_CHUNKS = 900, 16
 
 local function ReadCVar(name)
@@ -136,11 +140,12 @@ local function WriteCVar(name, value)
     pcall(C_CVar.SetCVar, name, value)
 end
 
-local function ReadBackup()
+local function ReadBackup(name)
     local values = {}
-    local text = ReadCVar(ns.BACKUP)
+    local text = ReadCVar(name or ns.BACKUP)
     if not text then return values end
     for key, value in text:gmatch("(%w+)=(%w+)") do
+        key = LEGACY_KEYS[key] or key
         local default = ns.DEFAULTS[key]
         if type(default) == "boolean" and (value == "0" or value == "1") then
             values[key] = value == "1"
@@ -208,12 +213,13 @@ local function DecodeBars(text)
     return next(bars) and bars or nil, custom
 end
 
-local function ReadBarsBackup()
-    local count = tonumber(ReadCVar(BARS_BACKUP .. "0") or "")
+local function ReadBarsBackup(prefix)
+    prefix = prefix or BARS_BACKUP
+    local count = tonumber(ReadCVar(prefix .. "0") or "")
     if not count or count < 1 or count > MAX_CHUNKS then return nil end
     local parts = {}
     for i = 1, count do
-        parts[i] = ReadCVar(BARS_BACKUP .. i)
+        parts[i] = ReadCVar(prefix .. i)
         if not parts[i] then return nil end
     end
     return DecodeBars(table.concat(parts))
@@ -275,7 +281,7 @@ function ns.EscUpdate()
 end
 
 local function BuildEscape()
-    escButton = CreateFrame("Button", "ClassicCooldownManagerEscButton", UIParent)
+    escButton = CreateFrame("Button", "FECMEscButton", UIParent)
     escButton:SetScript("OnClick", function() if ns.window then ns.window:Hide() end end)
     escButton:RegisterEvent("PLAYER_REGEN_DISABLED")
     escButton:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -300,7 +306,7 @@ local function BuildOptionsEntry()
     about:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
     about:SetWidth(560)
     about:SetJustifyH("LEFT")
-    about:SetText("Classic 2004 look for Blizzard's Cooldown Manager, plus Classic Bars of your own. Type /ccm, or click below, for the settings.")
+    about:SetText("A charcoal look for Blizzard's Cooldown Manager, plus cooldown and buff bars of your own. Type /fecm, or click below, for the settings.")
     local open = CreateFrame("Button", nil, canvas, "UIPanelButtonTemplate")
     open:SetSize(160, 24)
     open:SetPoint("TOPLEFT", about, "BOTTOMLEFT", 0, -14)
@@ -317,27 +323,30 @@ loader:RegisterEvent("ADDON_LOADED")
 loader:SetScript("OnEvent", function(self, _, name)
     if name ~= ADDON then return end
     self:UnregisterEvent("ADDON_LOADED")
-    ClassicCooldownManagerDB = type(ClassicCooldownManagerDB) == "table" and ClassicCooldownManagerDB or {}
-    db = ClassicCooldownManagerDB
+    ForeverEnhancedCooldownManagerDB = type(ForeverEnhancedCooldownManagerDB) == "table" and ForeverEnhancedCooldownManagerDB or {}
+    db = ForeverEnhancedCooldownManagerDB
     -- Saved settings win; the backup only fills in what the client lost.
-    for key, value in pairs(ReadBackup()) do
+    -- A first login under the new name picks up the old backup instead.
+    local fresh = next(db) == nil and ReadCVar(ns.BACKUP) == nil
+    for key, value in pairs(ReadBackup(fresh and LEGACY or nil)) do
         if db[key] == nil then db[key] = value end
     end
-    local bars, custom = ReadBarsBackup()
+    local bars, custom = ReadBarsBackup(fresh and LEGACY .. "Bars" or nil)
     if db.bars == nil then db.bars = bars end
     if db.custom == nil then db.custom = custom end
     for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key) end
     WriteBackup()
     for key in pairs(ns.RELOAD) do ns.loaded[key] = ns.Get(key) end
 
-    SLASH_CLASSICCOOLDOWNMANAGER1 = "/ccm"
-    SlashCmdList.CLASSICCOOLDOWNMANAGER = function(msg)
+    SLASH_FECM1 = "/fecm"
+    SLASH_FECM2 = "/ccm"
+    SlashCmdList.FECM = function(msg)
         msg = type(msg) == "string" and msg or ""
         if ns.Probe and msg:match("^%s*check") then ns.Probe(msg) elseif ns.Toggle then ns.Toggle() end
     end
     BuildEscape()
     BuildOptionsEntry()
 
-    if ns.loaded.classicLook and ns.Skin then ns.Skin:Start() end
+    if ns.loaded.skin and ns.Skin then ns.Skin:Start() end
     if ns.Bars then ns.Bars:Start() end
 end)

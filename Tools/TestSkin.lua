@@ -1,7 +1,8 @@
 -- Run the actual addon files against mock copies of Blizzard's cooldown viewer
 -- frames, built from Blizzard_CooldownViewer's CooldownViewer.xml. Blizzard's
 -- frames are sealed: writing any key on them, or calling anything that shows,
--- hides, scales or reads them, fails the test.
+-- hides, scales or reads them, fails the test. The one size change allowed is
+-- a Tracked Bar's own status bar height, inside its unchanged item frame.
 local checks = 0
 local function Equal(actual, expected, label)
     checks = checks + 1
@@ -13,8 +14,8 @@ end
 local S = setmetatable({}, { __mode = "k" }) -- per-object mock state, never on the object
 local FORBIDDEN = {
     Show = true, Hide = true, SetShown = true, SetScale = true, SetSize = true, SetWidth = true,
-    SetHeight = true, SetParent = true, SetVertexColor = true, SetDesaturated = true,
-    SetSwipeColor = true, SetDrawSwipe = true, SetTexCoord = true, IsShown = true, GetText = true,
+    SetParent = true, SetVertexColor = true, SetDesaturated = true,
+    SetSwipeColor = true, SetDrawSwipe = true, IsShown = true, GetText = true,
     GetValue = true, GetCooldownTimes = true, GetSpellID = true, GetAuraData = true,
     GetAuraDataCached = true, RefreshLayout = true, RefreshData = true, Layout = true,
     SetTexture = true,
@@ -82,6 +83,14 @@ function Proto:SetStatusBarTexture(t) S[self].barTexture = t end
 function Proto:SetStatusBarColor(r, g, b) S[self].barColour = { r, g, b } end
 function Proto:SetFontObject(o) S[self].font = o end
 function Proto:SetCountdownFont(o) S[self].countdownFont = o end
+function Proto:SetTexCoord(...)
+    S[self].coords = table.concat({ ... }, ",")
+    S[self].zooms = (S[self].zooms or 0) + 1
+end
+function Proto:SetHeight(h)
+    if S[self].blizzard and S[self].kind ~= "StatusBar" then error("resized a Blizzard frame", 2) end
+    S[self].height = h
+end
 -- Only the addon's own frames use these.
 function Proto:Show() local s = S[self]; if not s.shown then s.shown = true; if s.scripts.OnShow then s.scripts.OnShow(self) end end end
 function Proto:Hide() local s = S[self]; if s.shown then s.shown = false; if s.scripts.OnHide then s.scripts.OnHide(self) end end end
@@ -135,6 +144,7 @@ local function BuffItem()
     item.Cooldown = New("Cooldown", item)
     item.DebuffBorder = New("Frame", item)
     item.Applications = New("Frame", item)
+    item.Applications.Applications = New("FontString", item.Applications)
     Seal(item)
     return item, overlay
 end
@@ -200,7 +210,7 @@ local function Environment(keepCVars)
     _G.InCombatLockdown = function() return combat end
     _G.ReloadUI = function()
         assert(not combat, "blocked ReloadUI in combat")
-        assert(_G.ClassicCooldownManagerFrame and S[_G.ClassicCooldownManagerFrame].shown, "window hidden before reload")
+        assert(_G.FECMFrame and S[_G.FECMFrame].shown, "window hidden before reload")
         reloads = reloads + 1
     end
     _G.C_CVar = {
@@ -209,7 +219,11 @@ local function Environment(keepCVars)
         RegisterCVar = function(name, default) if cvars[name] == nil then cvars[name] = default end end,
         SetCVar = function(name, value) assert(cvars[name] ~= nil, "set before register"); cvars[name] = value end,
     }
-    _G.SystemFont_Shadow_Large_Outline = {}
+    _G.CreateFont = function(name)
+        local font = New("Font")
+        _G[name] = font
+        return font
+    end
     _G.ClearOverrideBindings = function(owner) assert(not combat, "binding change in combat"); bindings[owner] = nil end
     _G.SetOverrideBindingClick = function(owner, _, key, button) assert(not combat, "binding change in combat"); bindings[owner] = key .. ":" .. button end
     _G.SlashCmdList = {}
@@ -219,8 +233,8 @@ local function Environment(keepCVars)
         RegisterCanvasLayoutCategory = function(canvas, title) return { canvas = canvas, title = title } end,
         RegisterAddOnCategory = function(cat) _G.registeredCategory = cat end,
     }
-    _G.ClassicCooldownManagerDB = nil
-    _G.ClassicCooldownManagerFrame = nil
+    _G.ForeverEnhancedCooldownManagerDB = nil
+    _G.FECMFrame = nil
     for _, name in ipairs({ "EssentialCooldownViewer", "UtilityCooldownViewer", "BuffIconCooldownViewer", "BuffBarCooldownViewer" }) do
         _G[name] = nil
     end
@@ -239,10 +253,11 @@ end
 
 local function Load(saved)
     local ns = {}
-    _G.ClassicCooldownManagerDB = saved
-    assert(loadfile("Core.lua"))("ClassicCooldownManager", ns)
-    assert(loadfile("Skin.lua"))("ClassicCooldownManager", ns)
-    Fire("ADDON_LOADED", "ClassicCooldownManager")
+    _G.ForeverEnhancedCooldownManagerDB = saved
+    assert(loadfile("Core.lua"))("ForeverEnhancedCooldownManager", ns)
+    assert(loadfile("Style.lua"))("ForeverEnhancedCooldownManager", ns)
+    assert(loadfile("Skin.lua"))("ForeverEnhancedCooldownManager", ns)
+    Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
     return ns
 end
 
@@ -251,7 +266,7 @@ local function First(active) for item in pairs(active) do return item end end
 local function Edges(frame)
     local found = {}
     for _, r in ipairs(S[frame].regions) do
-        if S[r].layer == "BACKGROUND" and S[r].sublevel == -8 then table.insert(found, r) end
+        if S[r].layer == "BACKGROUND" and S[r].sublevel == -7 then table.insert(found, r) end
     end
     return found
 end
@@ -262,25 +277,29 @@ local function InsetBy(region, anchor, inset)
         and p[2][1] == "BOTTOMRIGHT" and p[2][2] == anchor and p[2][4] == -inset and p[2][5] == inset
 end
 
--- Classic look on existing and newly acquired cooldown icons ---------------------------------
+-- Charcoal look on existing and newly acquired cooldown icons --------------------------------
+
+local ZOOM = "0.08,0.92,0.08,0.92"
 
 Environment()
 local v = Viewers(1)
 local ns = Load(nil)
-Equal(ns.Get("classicLook"), true, "Classic look is on by default")
-Equal(SlashCmdList.CLASSICCOOLDOWNMANAGER ~= nil and SLASH_CLASSICCOOLDOWNMANAGER1, "/ccm", "/ccm opens the settings")
-Equal(registeredCategory and registeredCategory.title, "Classic Cooldown Manager", "listed under Options > AddOns")
+Equal(ns.Get("skin"), true, "charcoal look is on by default")
+Equal(SlashCmdList.FECM ~= nil and SLASH_FECM1, "/fecm", "/fecm opens the settings")
+Equal(SLASH_FECM2, "/ccm", "/ccm still works")
+Equal(registeredCategory and registeredCategory.title, "Forever Enhanced Cooldown Manager", "listed under Options > AddOns")
 
 local item = First(v.essentialActive)
 Equal(ns.Skin:IsSkinned(item), true, "icons already on screen are restyled at load")
 Equal(#S[item.Icon].masks, 0, "rounded mask removed")
-Equal(InsetBy(item.Icon, item, 2), true, "essential icon inset 2 so default spacing keeps a gap")
-local edges = Edges(item)
-Equal(#edges, 1, "one dark edge behind the icon")
-Equal(S[edges[1]].color[1] == 0 and S[edges[1]].color[4], .9, "the edge is near-black")
-Equal(InsetBy(edges[1], item.Icon, -1), true, "the edge sits one unit around the icon")
+Equal(InsetBy(item.Icon, item, 2), true, "essential icon inset 2, so the gap matches Edit Mode's padding")
+Equal(S[item.Icon].coords, ZOOM, "icon art zoomed past its own bevel")
+Equal(#Edges(item), 0, "no frame around the icon")
 Equal(InsetBy(item.Cooldown, item.Icon, 0), true, "the sweep covers exactly the square icon")
 Equal(S[item.Cooldown].swipe, "Interface\\Buttons\\WHITE8X8", "square cooldown sweep")
+Equal(S[item.Cooldown].countdownFont, "FECMFont25", "big countdown, half the icon's height")
+Equal(_G.FECMFont25 ~= nil, true, "the font exists for the game to use")
+Equal(S[item.ChargeCount.Current].font, "FECMFont18", "bigger charge count")
 Equal(S[item.OutOfRange].alpha, 0, "modern range shadow hidden; the red icon tint remains")
 Equal(S[item.CooldownFlash].alpha, 0, "modern end-of-cooldown sparkle hidden")
 local overlayHidden = false
@@ -294,37 +313,43 @@ v.essential:OnAcquireItemFrame(fresh)
 Equal(acquired[fresh], 1, "Blizzard's own OnAcquireItemFrame still runs first")
 Equal(ns.Skin:IsSkinned(fresh), true, "newly acquired icons are restyled")
 v.essential:OnAcquireItemFrame(fresh)
-Equal(#Edges(fresh), 1, "a reused frame is not restyled twice")
+Equal(S[fresh.Icon].zooms, 1, "a reused frame is not restyled twice")
 Equal(acquired[fresh], 2, "Blizzard still handles every acquire")
 
 local utility = CooldownItem()
 v.utility:OnAcquireItemFrame(utility)
-Equal(InsetBy(utility.Icon, utility, 1.5), true, "utility icon inset 1.5")
+Equal(InsetBy(utility.Icon, utility, 2), true, "utility icon inset 2")
+Equal(S[utility.Cooldown].countdownFont, "FECMFont15", "utility countdown sized for its smaller icons")
+Equal(S[utility.ChargeCount.Current].font, "FECMFont12", "utility charges readable")
 
 -- Tracked buffs as icons.
 local buff = First(v.buffsActive)
 Equal(#S[buff.Icon].masks, 0, "buff icon unmasked")
-Equal(InsetBy(buff.Icon, buff, 1.5), true, "buff icon inset 1.5")
+Equal(InsetBy(buff.Icon, buff, 2), true, "buff icon inset 2")
+Equal(S[buff.Icon].coords, ZOOM, "buff icon zoomed")
+Equal(#Edges(buff), 0, "no frame around buff icons")
 Equal(S[buff.Cooldown].swipe, "Interface\\Buttons\\WHITE8X8", "buff duration sweep is square")
 Equal(#S[buff.DebuffBorder].points, 0, "Blizzard's debuff border keeps its own anchors")
-Equal(S[buff.Cooldown].countdownFont, "SystemFont_Shadow_Large_Outline", "buff timers one size smaller")
-Equal(S[item.Cooldown].countdownFont, nil, "essential timers keep Blizzard's font")
-Equal(S[utility.Cooldown].countdownFont, nil, "utility timers keep Blizzard's font")
+Equal(S[buff.Cooldown].countdownFont, "FECMFont20", "buff timers big and bold")
+Equal(S[buff.Applications.Applications].font, "FECMFont14", "bigger stack count")
 
 -- Tracked buffs as bars.
 local bar = First(v.barsActive)
 Equal(#S[bar.Icon.Icon].masks, 0, "bar icon unmasked")
-Equal(InsetBy(bar.Icon.Icon, bar.Icon, 1), true, "bar icon inset 1")
-Equal(#Edges(bar.Icon), 1, "bar icon has a dark edge")
-Equal(S[bar.Bar].barTexture, "Interface\\TargetingFrame\\UI-StatusBar", "Classic bar texture")
-Equal(S[bar.Bar].barColour[1] == 1 and S[bar.Bar].barColour[2] == .5 and S[bar.Bar].barColour[3], .25, "Blizzard's orange kept")
-Equal(S[bar.Bar.BarBG].color[4], .5, "dark bar background")
-Equal(InsetBy(bar.Bar.BarBG, bar.Bar, 0), true, "background fits the bar")
-Equal(#Edges(bar.Bar), 1, "bar has a dark edge")
+Equal(InsetBy(bar.Icon.Icon, bar.Icon, 2), true, "bar icon inset 2")
+Equal(S[bar.Icon.Icon].coords, ZOOM, "bar icon zoomed")
+Equal(#Edges(bar.Icon), 0, "no frame around the bar icon")
+Equal(S[bar.Icon.Applications].font, "FECMFont12", "bar stack count")
+Equal(S[bar.Bar].height, 26, "bar as tall as the icon art")
+Equal(S[bar].height, nil, "the item frame itself is never resized")
+Equal(S[bar.Bar].barTexture, "Interface\\Buttons\\WHITE8X8", "flat bar")
+Equal(S[bar.Bar].barColour[1] == .36 and S[bar.Bar].barColour[2] == .38 and S[bar.Bar].barColour[3], .41, "charcoal grey fill")
+Equal(S[bar.Bar.BarBG].color[1] == .08 and S[bar.Bar.BarBG].color[4], .85, "near-black track")
+Equal(InsetBy(bar.Bar.BarBG, bar.Bar, 0), true, "track fits the bar")
+Equal(#Edges(bar.Bar), 0, "no frame around the bar")
 Equal(S[bar.Bar.Pip].alpha, 0, "modern spark hidden")
-Equal(S[bar.Bar.Name].font, GameFontHighlight, "Classic name font")
-Equal(S[bar.Bar.Duration].font, GameFontHighlightSmall, "Classic duration font")
-Equal(next(S[bar.Icon.Applications].calls) == nil and S[bar.Icon.Applications].font == nil, true, "stack count untouched")
+Equal(S[bar.Bar.Name].font, "FECMFont13", "bold name")
+Equal(S[bar.Bar.Duration].font, "FECMFont15", "bigger time")
 
 -- Only hooksecurefunc touched Blizzard's viewers.
 for _, viewer in ipairs({ v.essential, v.utility, v.buffs, v.bars }) do
@@ -346,11 +371,11 @@ Seal(broken2)
 v.utility:OnAcquireItemFrame(broken2)
 Equal(#printed, 1, "reported only once per session")
 
--- Classic look off: nothing is hooked or restyled -----------------------------------
+-- Charcoal look off: nothing is hooked or restyled -----------------------------------
 
 Environment()
 v = Viewers(1)
-ns = Load({ classicLook = false })
+ns = Load({ skin = false })
 Equal(ns.Skin.started, nil, "skin not started when off")
 Equal(ns.Skin:IsSkinned(First(v.essentialActive)), false, "icons keep Blizzard's look")
 Equal(rawget(v.essential, "OnAcquireItemFrame") == v.essential.OnAcquireItemFrame, true, "no hook installed")
@@ -375,37 +400,58 @@ Equal(ns.Skin:IsSkinned(First(v.barsActive)), true, "bars too")
 Environment()
 Viewers(0)
 ns = Load(nil)
-Equal(cvars.ClassicCooldownManagerBackup, "accent=orange;classicBars=0;classicLook=1;listItems=0;listRanks=0", "backup written at first login")
-ns.Set("classicLook", false)
+Equal(cvars.FECMBackup, "accent=orange;listItems=0;listRanks=0;skin=1;useBars=0", "backup written at first login")
+ns.Set("skin", false)
 ns.Set("accent", "teal")
-Equal(cvars.ClassicCooldownManagerBackup, "accent=teal;classicBars=0;classicLook=0;listItems=0;listRanks=0", "backup follows a change")
+Equal(cvars.FECMBackup, "accent=teal;listItems=0;listRanks=0;skin=0;useBars=0", "backup follows a change")
 
 -- The client loses the saved settings on restart; the backup survives.
 Environment(true)
 v = Viewers(1)
 ns = Load(nil)
-Equal(ns.Get("classicLook"), false, "choice restored from the backup")
-Equal(ClassicCooldownManagerDB.classicLook, false, "and saved again")
-Equal(ns.Skin.started, nil, "so the Classic look stays off")
+Equal(ns.Get("skin"), false, "choice restored from the backup")
+Equal(ForeverEnhancedCooldownManagerDB.skin, false, "and saved again")
+Equal(ns.Skin.started, nil, "so the charcoal look stays off")
 Equal(ns.Get("accent"), "teal", "accent restored too")
 
 -- Saved settings win over an older backup.
 Environment(true)
 Viewers(0)
-ns = Load({ classicLook = true })
-Equal(ns.Get("classicLook"), true, "saved settings win")
-Equal(cvars.ClassicCooldownManagerBackup, "accent=teal;classicBars=0;classicLook=1;listItems=0;listRanks=0", "backup brought up to date")
+ns = Load({ skin = true })
+Equal(ns.Get("skin"), true, "saved settings win")
+Equal(cvars.FECMBackup, "accent=teal;listItems=0;listRanks=0;skin=1;useBars=0", "backup brought up to date")
 
 -- Anything unexpected in the backup is ignored.
 Environment()
-cvars.ClassicCooldownManagerBackup = "classicLook=maybe;os=1;print(1);accent=pink"
+cvars.FECMBackup = "skin=maybe;os=1;print(1);accent=pink"
 Viewers(0)
 ns = Load(nil)
-Equal(ns.Get("classicLook"), true, "junk ignored; default used")
-Equal(ClassicCooldownManagerDB.os, nil, "unknown keys never copied")
+Equal(ns.Get("skin"), true, "junk ignored; default used")
+Equal(ForeverEnhancedCooldownManagerDB.os, nil, "unknown keys never copied")
 Equal(ns.Get("accent"), "orange", "unknown accents ignored")
-ClassicCooldownManagerDB.accent = "pink"
+ForeverEnhancedCooldownManagerDB.accent = "pink"
 Equal(ns.Get("accent"), "orange", "an invalid saved accent reads as the default")
 
+-- The first login under the new name carries the old name's backup over.
+Environment()
+cvars.ClassicCooldownManagerBackup = "accent=teal;classicBars=1;classicLook=0;listItems=1"
+cvars.ClassicCooldownManagerBackupBars0 = "1"
+cvars.ClassicCooldownManagerBackupBars1 = "cd.size=40;cd.spells=Moonfire|Bash"
+Viewers(0)
+ns = Load(nil)
+Equal(ns.Get("useBars"), true, "old Classic Bars switch carried over")
+Equal(ns.Get("skin"), false, "old Classic look switch carried over")
+Equal(ns.Get("accent"), "teal", "accent carried over")
+Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Bash", "bars carried over")
+Equal(ns.BarData("cd").size, 40, "with their size")
+Equal(cvars.FECMBackup, "accent=teal;listItems=1;listRanks=0;skin=0;useBars=1", "and saved under the new name")
+
+-- After that, the new name's own settings and backup are used.
+Environment(true)
+cvars.ClassicCooldownManagerBackup = "classicBars=0"
+Viewers(0)
+ns = Load({ useBars = true })
+Equal(ns.Get("useBars"), true, "the old backup is never read again")
+
 print = _G.print
-io.write("Classic Cooldown Manager checks passed: " .. checks .. " assertions.\n")
+io.write("Forever Enhanced Cooldown Manager checks passed: " .. checks .. " assertions.\n")

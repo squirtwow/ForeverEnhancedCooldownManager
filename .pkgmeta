@@ -1,4 +1,4 @@
-package-as: ClassicCooldownManager
+package-as: ForeverEnhancedCooldownManager
 
 manual-changelog: CHANGELOG.txt
 

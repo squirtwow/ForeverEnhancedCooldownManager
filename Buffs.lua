@@ -17,8 +17,7 @@ local _, ns = ...
 local F = {}
 ns.BuffBar = F
 
-local SQUARE = "Interface\\Buttons\\WHITE8X8"
-local TIMER_FONT = "SystemFont_Shadow_Large_Outline"
+local Style = ns.Style
 local BASE = 36 -- packed icons are drawn at this size, then scaled
 
 function F:Available()
@@ -29,30 +28,27 @@ function F:Packed(data)
     return not data.showMissing
 end
 
-local function Edge(owner)
-    local edge = owner:CreateTexture(nil, "BACKGROUND", nil, -7)
-    edge:SetColorTexture(0, 0, 0, .9)
-    edge:SetPoint("TOPLEFT", -1, 1)
-    edge:SetPoint("BOTTOMRIGHT", 1, -1)
-    return edge
+-- Sizes an icon's numbers for its size.
+local function Fit(parts, size)
+    parts.cooldown:SetCountdownFont(Style:Countdown(size))
+    parts.count:SetFontObject(Style:Count(size))
 end
 
 -- Runs once per icon, before the client restricts it in combat. Everything
 -- supplied to the icon must be a descendant of its button.
-local function Look(button)
+local function Look(button, size)
     button:EnableMouse(false)
-    Edge(button)
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
+    Style:Zoom(icon)
     button:SetIcon(icon)
     local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
-    cooldown:SetAllPoints()
-    cooldown:SetSwipeTexture(SQUARE)
+    cooldown:SetAllPoints(icon)
+    cooldown:SetSwipeTexture(Style.FLAT)
     cooldown:SetSwipeColor(0, 0, 0, .7)
     cooldown:SetReverse(true)
     cooldown:SetDrawEdge(false)
     cooldown:SetDrawBling(false)
-    if _G[TIMER_FONT] then cooldown:SetCountdownFont(TIMER_FONT) end
     button:SetDurationCooldown(cooldown)
     -- Stack counts sit above the sweep.
     local top = CreateFrame("Frame", nil, button)
@@ -61,18 +57,22 @@ local function Look(button)
     local count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     count:SetPoint("BOTTOMRIGHT", -1, 1)
     button:SetApplicationCount(count)
+    local parts = { cooldown = cooldown, count = count }
+    Fit(parts, size)
+    return parts
 end
 
+-- A slot's numbers take its holder's size; a later size change refits them.
 local function SlotLook(holder)
     return function(button)
         button:SetAllPoints(holder)
-        Look(button)
+        holder.slot = Look(button, holder.size or BASE)
     end
 end
 
 local function GroupLook(button)
     button:SetSize(BASE, BASE)
-    Look(button)
+    Look(button, BASE)
 end
 
 function F:Create(bar)
@@ -80,9 +80,9 @@ function F:Create(bar)
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
-        holder.edge = Edge(holder)
         holder.icon = holder:CreateTexture(nil, "ARTWORK")
         holder.icon:SetAllPoints()
+        Style:Zoom(holder.icon)
         holder.icon:SetDesaturated(true)
         holder.icon:SetAlpha(.45)
         holder.label = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -125,6 +125,8 @@ function F:Layout(bar, data)
             count = count + 1
             local holder = bar.holders[count]
             holder:SetSize(size, size)
+            holder.size = size
+            if holder.slot then Fit(holder.slot, size) end
             holder:ClearAllPoints()
             holder:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
             holder.icon:SetTexture(entry.icon)
