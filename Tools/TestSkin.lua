@@ -370,74 +370,15 @@ Fire("ADDON_LOADED", "Blizzard_CooldownViewer")
 Equal(ns.Skin:IsSkinned(First(v.essentialActive)), true, "restyles once Blizzard's viewers load")
 Equal(ns.Skin:IsSkinned(First(v.barsActive)), true, "bars too")
 
--- Settings window -------------------------------------------------------------------------
-
-Environment()
-v = Viewers(0)
-ns = Load(nil)
-ns.Toggle()
-local w = ClassicCooldownManagerFrame
-Equal(S[w].shown, true, "/ccm opens the window")
-Equal(w.look:GetChecked(), true, "Classic look shown as on")
-Equal(S[w.off].shown, false, "no Cooldown Manager warning while it is on")
-Equal(S[w.reload].shown, false, "no reload needed yet")
-Equal(bindings[ClassicCooldownManagerEscButton], "ESCAPE:ClassicCooldownManagerEscButton", "Escape closes the window")
-Equal(S[w.close.label].text, "X", "the EraUI-style plain X")
-
-w.look:SetChecked(false)
-w.look:Click()
-Equal(ClassicCooldownManagerDB.classicLook, false, "unticking saves the choice")
-Equal(S[w.reload].shown, true, "reload offered after a change")
-Equal(w.hint:GetText(), "Reload UI to apply your change.", "explains the reload")
-combat = true
-w.reload:Click()
-Equal(reloads, 0, "no reload in combat")
-Equal(w.hint:GetText(), "Finish combat first, then reload.", "explains why")
-combat = false
-w.reload:Click()
-Equal(reloads, 1, "reloads straight from the click")
-w.look:SetChecked(true)
-w.look:Click()
-Equal(S[w.reload].shown, false, "changing back needs no reload")
-
-Fire("PLAYER_REGEN_DISABLED")
-Equal(bindings[ClassicCooldownManagerEscButton], nil, "Escape handed back as combat starts")
-combat = true
-Fire("PLAYER_REGEN_ENABLED")
-combat = false
-Fire("PLAYER_REGEN_ENABLED")
-Equal(bindings[ClassicCooldownManagerEscButton] ~= nil, true, "and taken again after combat while the window is open")
-ClassicCooldownManagerEscButton:Click()
-Equal(S[w].shown, false, "Escape closes it")
-Equal(bindings[ClassicCooldownManagerEscButton], nil, "and releases the key")
-
-SlashCmdList.CLASSICCOOLDOWNMANAGER("")
-Equal(S[w].shown, true, "/ccm opens it again")
-SlashCmdList.CLASSICCOOLDOWNMANAGER("check")
-Equal(S[w].shown, false, "without the development check, /ccm check just toggles")
-local probed
-ns.Probe = function(msg) probed = msg end
-SlashCmdList.CLASSICCOOLDOWNMANAGER(" check Moonfire")
-Equal(probed, " check Moonfire", "/ccm check reaches the development check")
-Equal(S[w].shown, false, "and leaves the window alone")
-ns.Probe = nil
-
-cvarOn = false
-ns.Toggle()
-Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
-ns.Toggle()
-Equal(S[w].shown, false, "/ccm again closes it")
-
 -- Settings backup -----------------------------------------------------------------------
 
 Environment()
 Viewers(0)
 ns = Load(nil)
-Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=1;listItems=0", "backup written at first login")
-ns.Toggle()
-ClassicCooldownManagerFrame.look:SetChecked(false)
-ClassicCooldownManagerFrame.look:Click()
-Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=0;listItems=0", "backup follows a change")
+Equal(cvars.ClassicCooldownManagerBackup, "accent=orange;classicBars=0;classicLook=1;listItems=0;listRanks=0", "backup written at first login")
+ns.Set("classicLook", false)
+ns.Set("accent", "teal")
+Equal(cvars.ClassicCooldownManagerBackup, "accent=teal;classicBars=0;classicLook=0;listItems=0;listRanks=0", "backup follows a change")
 
 -- The client loses the saved settings on restart; the backup survives.
 Environment(true)
@@ -446,21 +387,25 @@ ns = Load(nil)
 Equal(ns.Get("classicLook"), false, "choice restored from the backup")
 Equal(ClassicCooldownManagerDB.classicLook, false, "and saved again")
 Equal(ns.Skin.started, nil, "so the Classic look stays off")
+Equal(ns.Get("accent"), "teal", "accent restored too")
 
 -- Saved settings win over an older backup.
 Environment(true)
 Viewers(0)
 ns = Load({ classicLook = true })
 Equal(ns.Get("classicLook"), true, "saved settings win")
-Equal(cvars.ClassicCooldownManagerBackup, "classicBars=0;classicLook=1;listItems=0", "backup brought up to date")
+Equal(cvars.ClassicCooldownManagerBackup, "accent=teal;classicBars=0;classicLook=1;listItems=0;listRanks=0", "backup brought up to date")
 
 -- Anything unexpected in the backup is ignored.
 Environment()
-cvars.ClassicCooldownManagerBackup = "classicLook=maybe;os=1;print(1)"
+cvars.ClassicCooldownManagerBackup = "classicLook=maybe;os=1;print(1);accent=pink"
 Viewers(0)
 ns = Load(nil)
 Equal(ns.Get("classicLook"), true, "junk ignored; default used")
 Equal(ClassicCooldownManagerDB.os, nil, "unknown keys never copied")
+Equal(ns.Get("accent"), "orange", "unknown accents ignored")
+ClassicCooldownManagerDB.accent = "pink"
+Equal(ns.Get("accent"), "orange", "an invalid saved accent reads as the default")
 
 print = _G.print
 io.write("Classic Cooldown Manager checks passed: " .. checks .. " assertions.\n")

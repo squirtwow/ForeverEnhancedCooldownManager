@@ -98,8 +98,9 @@ local function ScanSpellbook()
                         local sub = Text(item.subName) or ""
                         local rank = tonumber(sub:match("%d+")) or 0
                         local entry = byKey[name] or Add({ key = name, name = name, kind = "spell",
-                            line = info.name or "", known = {}, rank = -1 })
+                            line = info.name or "", known = {}, byRank = {}, rank = -1 })
                         entry.known[#entry.known + 1] = spellID
+                        if rank > 0 then entry.byRank[rank] = { spellID = spellID, icon = item.iconID } end
                         if rank >= entry.rank then
                             entry.spellID, entry.icon, entry.rank = spellID, item.iconID, rank
                             entry.rankText = sub
@@ -109,7 +110,22 @@ local function ScanSpellbook()
             end
         end
     end
-    for _, entry in ipairs(list) do entry.ids = BuffIDs(entry.name, entry.known) end
+    for _, entry in ipairs(list) do
+        entry.ids = BuffIDs(entry.name, entry.known)
+        -- Every rank below the highest can also be tracked on its own, as
+        -- "Name@N", for players who cast a lower rank on purpose.
+        entry.lower = {}
+        for rank = 1, entry.rank - 1 do
+            local known = entry.byRank[rank]
+            if known then
+                local fixed = { key = entry.name .. "@" .. rank, name = entry.name .. " (Rank " .. rank .. ")",
+                    baseName = entry.name, kind = "rank", line = entry.line, rank = rank, rankText = "Rank " .. rank,
+                    spellID = known.spellID, icon = known.icon or entry.icon }
+                byKey[fixed.key] = fixed
+                entry.lower[#entry.lower + 1] = fixed
+            end
+        end
+    end
 end
 
 local function ScanProcs()
@@ -205,8 +221,8 @@ end
 
 -- Names to offer while typing in the add box. Your own spells, procs and items
 -- come before other classes' spells from the game data; within each, names
--- that start with the text, then a word that does, then any match, each
--- alphabetically.
+-- that start with the text, then a word that does, then (from three letters
+-- on) any match, each alphabetically.
 function S:Suggest(text, limit)
     text = type(text) == "string" and text:lower():match("^%s*(.-)%s*$") or ""
     if #text < 2 then return {} end
@@ -218,6 +234,7 @@ function S:Suggest(text, limit)
         local at = lower:find(text, 1, true)
         if not at then return end
         local place = at == 1 and 1 or lower:sub(at - 1, at - 1):match("[%s%p]") and 2 or 3
+        if place == 3 and #text < 3 then return end
         found[#found + 1] = { name = name, icon = icon, spellID = spellID, tier = (own and 0 or 3) + place }
     end
     for _, entry in ipairs(list) do Consider(entry.name, entry.icon, entry.spellID, true) end

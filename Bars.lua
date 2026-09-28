@@ -233,7 +233,7 @@ local function Layout(bar)
             icon:SetSize(size, size)
             icon:ClearAllPoints()
             icon:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
-            icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[name] == true
+            icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
             icon.kind, icon.itemID, icon.slot = entry.kind, entry.itemID, entry.slot
             icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
             icon.count:SetText("")
@@ -397,6 +397,13 @@ end
 
 function B:SetOption(key, field, value)
     ns.BarData(key)[field] = value
+    self:Changed()
+end
+
+-- Empties a bar.
+function B:Clear(key)
+    local spells = ns.BarData(key).spells
+    for i = #spells, 1, -1 do spells[i] = nil end
     self:Changed()
 end
 

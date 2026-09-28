@@ -1,10 +1,17 @@
 -- The Buffs bar: your own buffs and class procs, shown while they're on you.
 -- Buffs are secret in combat, so the icons come from Blizzard's secure aura
--- container, the same way the portrait CC works in EraUI: each slot gets its
+-- container, the same way the portrait CC works in EraUI: each icon gets its
 -- look once, before the game restricts it, and the addon only ever tells the
--- container which spell IDs belong in which slot, never in combat. Each slot
--- follows a plain holder frame of the addon's own, which sets its size and
--- place and can show the buff greyed while it's missing.
+-- container which spell IDs belong where, never in combat.
+--
+-- Two layouts:
+-- * Packed (the default): one aura group per buff, in your order. Blizzard's
+--   own layout places only the buffs that are up, side by side and centred on
+--   the bar, so there are no gaps, even in combat. Groups size themselves, so
+--   the icon size comes from scaling the container.
+-- * Fixed, with "Show missing buffs greyed": one slot per buff, each following
+--   a holder frame of the addon's own that keeps its place and shows the buff
+--   greyed while it's missing.
 local _, ns = ...
 
 local F = {}
@@ -12,9 +19,14 @@ ns.BuffBar = F
 
 local SQUARE = "Interface\\Buttons\\WHITE8X8"
 local TIMER_FONT = "SystemFont_Shadow_Large_Outline"
+local BASE = 36 -- packed icons are drawn at this size, then scaled
 
 function F:Available()
     return CustomAuraContainerSlotDefaultOptions ~= nil
+end
+
+function F:Packed(data)
+    return not data.showMissing
 end
 
 local function Edge(owner)
@@ -25,37 +37,46 @@ local function Edge(owner)
     return edge
 end
 
--- Runs once per slot, before the client restricts the slot in combat.
--- Everything supplied to the slot must be a descendant of its button.
+-- Runs once per icon, before the client restricts it in combat. Everything
+-- supplied to the icon must be a descendant of its button.
+local function Look(button)
+    button:EnableMouse(false)
+    Edge(button)
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints()
+    button:SetIcon(icon)
+    local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+    cooldown:SetAllPoints()
+    cooldown:SetSwipeTexture(SQUARE)
+    cooldown:SetSwipeColor(0, 0, 0, .7)
+    cooldown:SetReverse(true)
+    cooldown:SetDrawEdge(false)
+    cooldown:SetDrawBling(false)
+    if _G[TIMER_FONT] then cooldown:SetCountdownFont(TIMER_FONT) end
+    button:SetDurationCooldown(cooldown)
+    -- Stack counts sit above the sweep.
+    local top = CreateFrame("Frame", nil, button)
+    top:SetAllPoints()
+    top:SetFrameLevel(cooldown:GetFrameLevel() + 1)
+    local count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    count:SetPoint("BOTTOMRIGHT", -1, 1)
+    button:SetApplicationCount(count)
+end
+
 local function SlotLook(holder)
     return function(button)
         button:SetAllPoints(holder)
-        button:EnableMouse(false)
-        Edge(button)
-        local icon = button:CreateTexture(nil, "ARTWORK")
-        icon:SetAllPoints()
-        button:SetIcon(icon)
-        local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
-        cooldown:SetAllPoints()
-        cooldown:SetSwipeTexture(SQUARE)
-        cooldown:SetSwipeColor(0, 0, 0, .7)
-        cooldown:SetReverse(true)
-        cooldown:SetDrawEdge(false)
-        cooldown:SetDrawBling(false)
-        if _G[TIMER_FONT] then cooldown:SetCountdownFont(TIMER_FONT) end
-        button:SetDurationCooldown(cooldown)
-        -- Stack counts sit above the sweep.
-        local top = CreateFrame("Frame", nil, button)
-        top:SetAllPoints()
-        top:SetFrameLevel(cooldown:GetFrameLevel() + 1)
-        local count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
-        count:SetPoint("BOTTOMRIGHT", -1, 1)
-        button:SetApplicationCount(count)
+        Look(button)
     end
 end
 
+local function GroupLook(button)
+    button:SetSize(BASE, BASE)
+    Look(button)
+end
+
 function F:Create(bar)
-    bar.holders, bar.slotIDs, bar.applied = {}, {}, {}
+    bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -73,7 +94,10 @@ function F:Create(bar)
     if not self:Available() then return end
     local ok, err = pcall(function()
         local container = CreateFrame("AuraContainer", nil, bar, "CustomAuraContainerTemplate")
-        container:SetAllPoints(bar)
+        -- One point only: packed groups resize the container around the buffs
+        -- that are up, and it stays centred on the bar.
+        container:SetPoint("CENTER", bar, "CENTER")
+        container:SetSize(BASE, BASE)
         container:EnableMouse(false)
         container:SetFrameLevel(bar:GetFrameLevel() + 5)
         container:SetEditModePreviewEnabled(false)
@@ -90,9 +114,10 @@ function F:Create(bar)
     end
 end
 
--- Places the holders for the bar's buffs and works out each slot's spell IDs.
+-- Places the holders for the bar's buffs and works out each one's spell IDs.
 function F:Layout(bar, data)
     local size, spacing = data.size, data.spacing
+    local fixed = not self:Packed(data)
     local count = 0
     for _, name in ipairs(data.spells) do
         local entry = ns.Spells:Find(name)
@@ -103,12 +128,10 @@ function F:Layout(bar, data)
             holder:ClearAllPoints()
             holder:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
             holder.icon:SetTexture(entry.icon)
-            holder.icon:SetShown(data.showMissing)
-            holder.edge:SetShown(data.showMissing)
             holder.label:SetWidth(size + spacing)
             holder.label:SetText(entry.name)
             holder.label:SetShown(data.showNames)
-            holder:Show()
+            holder:SetShown(fixed)
             local ids = {}
             for _, id in ipairs(entry.ids) do ids[id] = true end
             bar.slotIDs[count] = ids
@@ -130,8 +153,8 @@ local function Signature(ids)
     return table.concat(keys, ",")
 end
 
--- Tells the secure container which buffs go in which slot. Never in combat;
--- a change made then waits for the fight to end. Only changed slots are sent.
+-- Tells the secure container which buffs go where. Never in combat; a change
+-- made then waits for the fight to end. Only what changed is sent.
 function F:Apply(bar)
     local container = bar.container
     if not container then return end
@@ -140,9 +163,11 @@ function F:Apply(bar)
         return
     end
     bar.pending = nil
+    local data = bar.data
     local on = ns.Bars:Enabled()
+    local packed = self:Packed(data)
     for i = 1, ns.BUFF_SLOTS do
-        local ids = on and bar.slotIDs[i] or nil
+        local ids = on and not packed and bar.slotIDs[i] or nil
         local signature = Signature(ids)
         if bar.applied[i] ~= signature then
             bar.applied[i] = signature
@@ -154,5 +179,35 @@ function F:Apply(bar)
                 container:SetAuraSlotEnabled(key, false)
             end
         end
+    end
+    -- Groups are made as they're first needed; the game keeps them after that.
+    local scale = packed and data.size / BASE or 1
+    local spacing = data.spacing / scale
+    if on and packed then
+        for i = bar.groups + 1, bar.count do
+            container:AddAuraGroup("g" .. i, "HELPFUL", { initializeFrame = GroupLook, maxFrameCount = 1,
+                candidateFilters = { includeSpellIDs = bar.slotIDs[i] }, layout = { layoutIndex = i, groupSpacing = spacing } })
+            bar.groups = i
+            bar.appliedGroups[i] = Signature(bar.slotIDs[i]) .. "|" .. spacing
+        end
+    end
+    for i = 1, bar.groups do
+        local ids = on and packed and bar.slotIDs[i] or nil
+        local signature = ids and (Signature(ids) .. "|" .. spacing) or ""
+        if bar.appliedGroups[i] ~= signature then
+            bar.appliedGroups[i] = signature
+            local key = "g" .. i
+            if ids then
+                container:SetAuraGroupCandidateFilters(key, { includeSpellIDs = ids })
+                container:SetAuraGroupLayout(key, { layoutIndex = i, groupSpacing = spacing })
+                container:SetAuraGroupEnabled(key, true)
+            else
+                container:SetAuraGroupEnabled(key, false)
+            end
+        end
+    end
+    if bar.appliedScale ~= scale then
+        bar.appliedScale = scale
+        container:SetScale(scale)
     end
 end

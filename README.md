@@ -26,14 +26,17 @@ to EraUI.
   drag them anywhere
 - Buffs bar: your own buffs and class procs (Clearcasting, Shadow Trance and
   more) while they're on you, with time left and stacks, in combat too;
-  optionally shows missing buffs greyed; buffs from other players count at any
-  rank, group versions included
+  active buffs sit side by side with no gaps, or keep fixed spots with missing
+  buffs greyed; buffs from other players count at any rank, group versions
+  included
+- Show all ranks: put a lower rank on a bar for casting it on purpose
 - Trinkets and potions on the Cooldowns or Utility bar, with counts
 - Add any spell by name or spell ID, and optional spell names under icons
 - Off by default
 
 ## Commands
-- `/ccm` opens the settings, also found under Options > AddOns
+- `/ccm` opens the settings: Spellbook, Bars and Settings on one screen, with
+  an accent colour you pick; also found under Options > AddOns
 
 Blizzard's Cooldown Manager must be on: Options > Gameplay > Advanced Options >
 Enable Cooldown Manager.

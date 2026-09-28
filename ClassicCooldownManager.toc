@@ -13,5 +13,7 @@ Ranks.lua
 Spells.lua
 Buffs.lua
 Bars.lua
+Theme.lua
 BarsPanel.lua
+Window.lua
 Probe.lua
