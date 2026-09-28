@@ -83,6 +83,11 @@ function Proto:SetAlpha(a) S[self].alpha = a end
 function Proto:GetCenter() return S[self].cx, S[self].cy end
 function Proto:GetFrameLevel() return 1 end
 function Proto:GetStringWidth() return 40 end
+-- Wrapped text: about six units a letter, twelve a line.
+function Proto:GetStringHeight()
+    local s = S[self]
+    return math.max(1, math.ceil(#(s.text or "") * 6 / math.max(1, s.width))) * 12
+end
 function Proto:GetFont() return "font", 12, "" end
 function Proto:Click() S[self].scripts.OnClick(self) end
 function Proto:SetTexture(t) S[self].texture = t end
@@ -298,7 +303,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarPage.lua", "ProfileMenu.lua", "Window.lua" }) do
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarPage.lua", "ProfileMenu.lua", "Window.lua", "Notes.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -1407,8 +1412,14 @@ Equal(copy.input:GetText(), "https://www.curseforge.com/wow/addons/eraui", "with
 copy.input:SetText("typed over")
 S[copy.input].scripts.OnTextChanged(copy.input)
 Equal(copy.input:GetText(), "https://www.curseforge.com/wow/addons/eraui", "which can't be typed over")
+Equal(S[copy.note].text:find("On CurseForge, Install opens the CurseForge app.", 1, true) ~= nil, true,
+    "CurseForge's box says Install opens the app")
 copy.close:Click()
 Equal(S[copy].shown, false, "Close closes it")
+w.moreLinks[2]:Click()
+Equal(S[copy.title].text .. "|" .. copy.input:GetText(), "ERAUI ON GITHUB|https://github.com/squirtwow/EraUI", "GitHub's box")
+Equal(S[copy.note].text, "Press Ctrl+C to copy, then paste it into your browser.", "says only how to copy")
+copy.close:Click()
 _G.C_AddOns = { IsAddOnLoaded = function(name) return name == "EraUI" end }
 local eraOpened
 SlashCmdList.ERAUI = function() eraOpened = true end
@@ -1556,6 +1567,117 @@ end
 Equal(footer ~= nil and S[footer].colour[1], 1, "the footer warns, in orange")
 w:Select("general")
 Equal(S[w.kept].text:find(ns.RESTORED_TEXT, 1, true) ~= nil, true, "and General explains")
+
+-- What's new -------------------------------------------------------------------------------
+
+-- A first install has nothing new: the version is noted and nothing shows.
+Environment()
+ns = Load(nil)
+Equal(ns.NotesSeen(), "dev", "a first install notes the version")
+for _, timer in ipairs(timers) do timer() end
+Equal(FECMNotes == nil or not S[FECMNotes].shown, true, "without showing What's new")
+
+-- After an update it shows once, a moment after login, never in combat.
+Environment()
+ns = Load({ useBars = true })
+Equal(ns.NotesSeen(), "dev", "an update notes the new version at once")
+Equal(FECMNotes, nil, "and waits a moment to show What's new")
+lockdown = true
+for _, timer in ipairs(timers) do timer() end
+Equal(FECMNotes, nil, "not in combat")
+lockdown = false
+Fire("PLAYER_REGEN_ENABLED")
+local notes = FECMNotes
+Equal(notes ~= nil and S[notes].shown, true, "but once the fight is over")
+Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape is taken while it's open")
+Equal(S[notes.version].text, "Unreleased", "headed with the notes' version")
+Equal(S[notes.close.label].text, "X", "under the window's title bar")
+-- Every heading and bullet, top to bottom, none overlapping.
+local texts, expected = {}, 0
+for _, row in ipairs(notes.flow) do
+    if row.text then texts[#texts + 1] = row end
+end
+for _, section in ipairs(ns.NOTES[1].sections) do expected = expected + 1 + #section[2] end
+Equal(#texts, expected, "every heading and bullet listed")
+Equal(S[texts[1].text].text, "BLIZZARD'S COOLDOWN MANAGER", "headings in capitals")
+local above
+for _, row in ipairs(texts) do
+    local y = -S[row.text].points[1][3]
+    if above then
+        Equal(y >= -S[above.text].points[1][3] + above.text:GetStringHeight(), true, "no row overlaps the one above")
+    end
+    if row.dot then
+        local dot = -S[row.dot].points[1][3]
+        Equal(dot > y and dot < y + 12, true, "each bullet's square sits beside its first line")
+    end
+    above = row
+end
+Equal(S[notes.scroll.content].height > 200, true, "the notes take their full height")
+UIParent:SetHeight(800)
+Fire("DISPLAY_SIZE_CHANGED")
+Equal(S[notes].height, 620, "the window grows to fit, up to its limit")
+UIParent:SetHeight(300)
+Fire("UI_SCALE_CHANGED")
+Equal(S[notes].height, 260, "and stays on a small screen, the notes scrolling")
+FECMEscButton:Click()
+Equal(S[notes].shown, false, "Escape closes What's new")
+Equal(bindings[FECMEscButton], nil, "and hands the key back")
+
+-- Once per version, even if the settings file is lost.
+local saved = ForeverEnhancedCooldownManagerDB
+Environment(true)
+ns = Load(saved)
+for _, timer in ipairs(timers) do timer() end
+Equal(FECMNotes == notes and not S[notes].shown, true, "shown once per version")
+Environment(true)
+ns = Load(nil)
+Equal(ns.restored and ns.NotesSeen(), "dev", "a lost settings file gets the version seen back from the backup")
+for _, timer in ipairs(timers) do timer() end
+Equal(FECMNotes == notes, true, "so What's new doesn't show again")
+
+-- Any time: /fecm new, or What's new in the window.
+SlashCmdList.FECM("new")
+notes = FECMNotes
+Equal(S[notes].shown, true, "/fecm new shows it again")
+notes.done:Click()
+Equal(S[notes].shown, false, "Got it closes it")
+SlashCmdList.FECM("")
+w = FECMFrame
+Equal(S[w.news.label].text, "What's new", "What's new at the foot of the window's list")
+w.news:Click()
+Equal(S[notes].shown and S[w].shown, true, "opens it over the window")
+FECMEscButton:Click()
+Equal(not S[notes].shown and S[w].shown, true, "Escape closes What's new first")
+Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "keeping the key for the window")
+FECMEscButton:Click()
+Equal(S[w].shown, false, "then the window")
+
+-- A released version: its own notes, then the ones before it.
+_G.C_AddOns = { GetAddOnMetadata = function(_, field) assert(field == "Version"); return "@project-version@" end }
+Equal(ns.Version(), "dev", "a copy straight from the source is dev")
+_G.C_AddOns.GetAddOnMetadata = function() return "1.1.0" end
+Environment()
+ns = Load({ useBars = true, notesSeen = "1.0.0" })
+Equal(ns.Version(), "1.1.0", "a release has its version from the TOC")
+ns.NOTES = {
+    { version = "1.2.0", sections = { { "Added", { "Later." } } } },
+    { version = "1.1.0", sections = { { "Added", { "This one." } }, { "Fixed", { "A bug." } } } },
+    { version = "1.0.0", sections = { { "Added", { "The first." } } } },
+}
+for _, timer in ipairs(timers) do timer() end
+notes = FECMNotes
+Equal(S[notes].shown and S[notes.version].text, "Version 1.1.0", "an update to it shows its own notes")
+local rows = {}
+for _, row in ipairs(notes.flow) do rows[#rows + 1] = row.rule and "--" or S[row.text].text end
+Equal(table.concat(rows, "|"), "ADDED|This one.|FIXED|A bug.|--|Version 1.0.0|ADDED|The first.",
+    "then the release before, under a line")
+SlashCmdList.FECM("")
+local footerVersion
+for _, f in ipairs(objects) do
+    if S[f].text == "v1.1.0   /fecm to open" then footerVersion = f end
+end
+Equal(footerVersion ~= nil, true, "the window's footer shows the version too")
+_G.C_AddOns = nil
 
 print = _G.print
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

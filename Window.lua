@@ -2,7 +2,7 @@
 -- its icons, then the Look and General pages; the chosen page fills the rest.
 -- A bar's page (BarPage.lua) shows its icons, its options and a spell list to
 -- tick from. Drawn in the flat charcoal Theme style.
-local ADDON, ns = ...
+local _, ns = ...
 local T = ns.Theme
 
 local WIDTH, HEIGHT = 820, 560
@@ -11,10 +11,8 @@ local PREVIEW = 9 -- icons previewed under each bar's name
 local HINT = "Each spell shows once, at your highest rank."
 
 local function Version()
-    local get = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
-    local version = get and get(ADDON, "Version")
-    if not version or version:find("@", 1, true) then return "dev" end
-    return "v" .. version
+    local version = ns.Version()
+    return version == "dev" and version or "v" .. version
 end
 
 -- Pages ----------------------------------------------------------------------------
@@ -366,8 +364,9 @@ end
 
 -- A link to copy, in the window's own look: an addon can't open a web page
 -- or the CurseForge app itself. The link stays as it is, selected.
+local COPY = "Press Ctrl+C to copy, then paste it into your browser."
 local copyBox
-local function CopyLink(title, url)
+local function CopyLink(title, url, note)
     if not copyBox then
         local box = CreateFrame("Frame", "FECMCopyLink", UIParent, "BackdropTemplate")
         box:SetSize(420, 136)
@@ -379,10 +378,9 @@ local function CopyLink(title, url)
         T:Paint(function(accent) box:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
         box.title = T:Heading(box, "")
         box.title:SetPoint("TOPLEFT", 16, -16)
-        local note = T:Text(box, "GameFontHighlightSmall", T.MUTED)
-        note:SetPoint("TOPLEFT", 16, -36)
-        note:SetWidth(388)
-        note:SetText("Press Ctrl+C to copy, then paste it into your browser. On CurseForge, Install opens the CurseForge app.")
+        box.note = T:Text(box, "GameFontHighlightSmall", T.MUTED)
+        box.note:SetPoint("TOPLEFT", 16, -36)
+        box.note:SetWidth(388)
         box.input = T:Input(box, "", 388)
         box.input:SetPoint("TOPLEFT", 16, -72)
         box.input:SetScript("OnTextChanged", function(self)
@@ -401,6 +399,7 @@ local function CopyLink(title, url)
     end
     copyBox.url = url
     copyBox.title:SetText(title:upper())
+    copyBox.note:SetText(note or COPY)
     copyBox:Show()
     copyBox:Raise()
     copyBox.input:SetText(url)
@@ -408,7 +407,8 @@ local function CopyLink(title, url)
     copyBox.input:SetFocus()
 end
 local ERAUI_LINKS = {
-    { label = "CurseForge", url = "https://www.curseforge.com/wow/addons/eraui" },
+    { label = "CurseForge", url = "https://www.curseforge.com/wow/addons/eraui",
+        note = COPY .. " On CurseForge, Install opens the CurseForge app." },
     { label = "GitHub", url = "https://github.com/squirtwow/EraUI" },
 }
 
@@ -478,7 +478,7 @@ local function BuildGeneral(window, page)
     for i, link in ipairs(ERAUI_LINKS) do
         local button = T:Button(more, link.label, 90, 22)
         button:SetPoint("RIGHT", -12 - (#ERAUI_LINKS - i) * 98, 0)
-        button:SetScript("OnClick", function() CopyLink("EraUI on " .. link.label, link.url) end)
+        button:SetScript("OnClick", function() CopyLink("EraUI on " .. link.label, link.url, link.note) end)
         moreLinks[i] = button
     end
     window.moreOpen, window.moreState, window.moreLinks = moreOpen, moreState, moreLinks
@@ -574,36 +574,14 @@ local function BuildWindow()
     end)
 
     -- Header: the icon on an accent square, and "Enhanced" in the accent.
-    local header = CreateFrame("Frame", nil, window, "BackdropTemplate")
-    header:SetPoint("TOPLEFT", 1, -1)
-    header:SetPoint("TOPRIGHT", -1, -1)
-    header:SetHeight(HEADER)
-    T:Flat(header, T.HEADER, T.HEADER)
+    local header = T:TitleBar(window, HEADER)
     -- The accent washes in from the right, over the title bar and the pages.
-    window.fades = { header = T:Fade(header, T.FADE.header), page = T:Fade(window, T.FADE.page) }
-    window.fades.header:SetAllPoints()
+    window.fades = { header = header.fade, page = T:Fade(window, T.FADE.page) }
     window.fades.page:SetPoint("TOPLEFT", NAV + 1, -(HEADER + 1))
     window.fades.page:SetPoint("BOTTOMRIGHT", -1, FOOTER)
-    local logo = CreateFrame("Frame", nil, header, "BackdropTemplate")
-    logo:SetSize(24, 24)
-    logo:SetPoint("LEFT", 12, 0)
-    local icon = logo:CreateTexture(nil, "ARTWORK")
-    icon:SetPoint("TOPLEFT", 2, -2)
-    icon:SetPoint("BOTTOMRIGHT", -2, 2)
-    icon:SetTexture("Interface\\Icons\\INV_Misc_PocketWatch_01")
-    local title = T:Text(header, "GameFontNormalLarge")
-    title:SetPoint("LEFT", logo, "RIGHT", 8, 0)
-    T:Paint(function(accent)
-        T:Flat(logo, { accent[1], accent[2], accent[3], 1 }, { accent[1], accent[2], accent[3], 1 })
-        title:SetText("Forever |cff" .. T:Hex(accent) .. "Enhanced|r Cooldown Manager")
-    end)
-    local close = T:Square(header, "X")
-    close:SetSize(22, 22)
-    close:SetPoint("RIGHT", -10, 0)
-    close:SetScript("OnClick", function() window:Hide() end)
-    window.close = close
+    window.close = header.close
     window.header = header
-    ns.BuildProfileMenu(window, header, close)
+    ns.BuildProfileMenu(window, header, header.close)
 
     -- The bar list down the left.
     local nav = CreateFrame("Frame", nil, window, "BackdropTemplate")
@@ -630,6 +608,11 @@ local function BuildWindow()
     y = y + 12
     window.nav.look = NavItem(window, nav, "look", "Look", y)
     window.nav.general = NavItem(window, nav, "general", "General", y + 32)
+    -- What's new in this version, at the foot of the list.
+    local news = T:Button(nav, "What's new", NAV - 24, 22)
+    news:SetPoint("BOTTOMLEFT", 12, 12)
+    news:SetScript("OnClick", function() if ns.ShowNotes then ns.ShowNotes() end end)
+    window.news = news
 
     -- Pages fill the rest.
     local function Page()

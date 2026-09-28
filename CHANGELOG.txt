@@ -2,13 +2,21 @@
 
 ## Unreleased
 
-### Added
-- Classic look for Blizzard's Cooldown Manager: square 2004-style icons with a thin dark edge, a square cooldown sweep, smaller buff timers, and Classic buff bars. Positions stay in Edit Mode and everything works in combat. On by default; /fecm to switch it off.
-- Bars: your own bars of square Classic icons, set up in /fecm > Bars. Tick spells from your spellbook onto the Cooldowns or Utility bar; each spell shows once at your highest rank and switches when you train a new rank. Cooldown sweep and countdown in combat, greyed while cooling down, red out of range, blue when low on mana, and a gold edge when a reactive ability (Overpower, Revenge, Execute, Riposte, Counterattack, Mongoose Bite) is ready. Per bar: icon size, spacing, hide when ready and only in combat. Unlock to drag them anywhere. Off by default.
-- Buffs bar: tick Buff on spells that put a buff on you (Thorns, Mark of the Wild, Rejuvenation) or on your class procs (Clearcasting, Shadow Trance and more). Each shows while it's on you, with time left and stacks, in combat too, using the game's own secure buff display. Active buffs sit side by side in your order, centred, with no gaps; or tick Show missing buffs greyed to keep every buff in its own spot. A spell can be on a cooldown bar and the Buffs bar at once. Buffs from other players count at any rank, and group versions (Gift of the Wild, Prayer of Fortitude, Greater Blessings) count as the same buff. Racial buffs match too, including racials whose buff has its own spell ID (Walk on Air).
-- Trinkets and potions: your trinket slots and usable bag items can go on the Cooldowns or Utility bar, with their cooldown and how many you have left. Tick Show items to list them.
-- Add by name or spell ID: put spells outside your spellbook on a bar, like another class's buff on you. Matching names appear as you type.
-- Show spell names: optional names under each bar's icons.
-- Show all ranks: list every rank you know as its own row and put a lower rank on a bar, for casting it on purpose (a cheap rank 1 Moonfire, say). It stays on that rank; the normal row always follows your highest.
-- /fecm settings window: one screen with Spellbook, Bars and Settings side by side, in a flat dark style. Pick its accent colour: orange, blue, teal, purple or green. Clear a whole bar with two clicks. Also listed under Options > AddOns.
-- Settings backup: your choices are also kept in the game's own settings, so they come back if the client forgets addon settings after a restart.
+### Blizzard's Cooldown Manager
+- A new look: square icons with big, bold countdown numbers, and Tracked Bars in three designs (Glass, Split and Outline) and six colours. Any Tracked Bar can have a colour of its own. On by default, in /fecm > Look.
+- Your Personal Resource Display's health and power bars get the same look, in Blizzard's colours or your own. The extra mana bar some specs get hides in caster form and is half size in forms.
+- If Blizzard's Cooldown Manager or Personal Resource Display is off, /fecm tells you and can turn it on.
+
+### Your own bars
+- Cooldowns, Utility, Buffs and Debuffs bars, set up in /fecm by ticking spells. Each spell shows once, at your highest rank, and switches when you train a new one. Off until you tick Use my bars on the General page.
+- Cooldown icons show the sweep and countdown in combat: grey while cooling down, red out of range, blue without enough mana, and a gold edge when a reactive ability like Overpower is ready.
+- Buffs bar: your buffs and class procs (Clearcasting, Shadow Trance and more) with time left and stacks. Buffs from other players count at any rank, group versions too.
+- Debuffs bar: your own debuffs on your target.
+- Join entries on the Buffs and Debuffs bars to show one icon for whichever is up, for seals, auras, aspects or stings.
+- Each bar has its own icon size, spacing and options: hide when ready, spell names, countdown numbers, and show, fade or hide out of combat. Unlock to drag bars anywhere.
+- Trinkets, potions, your Hearthstone and ammo can go on a bar too. Search to add spells outside your spellbook by name or spell ID, or tick Show all ranks to use a lower rank.
+
+### Settings
+- Profiles: each character gets its own lists, and characters can share one. Switch, copy, rename or delete them from the Profile menu.
+- Your settings are also backed up in the game's own settings, so they come back if the game loses them, and you're told when that happens.
+- Pick the window's accent colour on the Look page, and find EraUI, my other addon, under More from Squirt on the General page.

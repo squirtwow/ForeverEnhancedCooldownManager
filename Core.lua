@@ -6,6 +6,15 @@ local ADDON, ns = ...
 ns.TITLE = "Forever Enhanced Cooldown Manager"
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 
+-- The addon's version, filled in when it's packaged for release; "dev" for a
+-- copy straight from the source.
+function ns.Version()
+    local get = C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata
+    local version = get and get(ADDON, "Version")
+    if type(version) ~= "string" or version == "" or version:find("@", 1, true) then return "dev" end
+    return version
+end
+
 ns.DEFAULTS = {
     skin = true,
     useBars = false, -- the addon's own bars
@@ -562,6 +571,7 @@ local function EncodeBars()
     for id in pairs(ns.BarColours()) do coloured[#coloured + 1] = id end
     table.sort(coloured)
     for _, id in ipairs(coloured) do Put("bc." .. id, ns.BarColours()[id]) end
+    if type(db.notesSeen) == "string" then Put("notes", db.notesSeen) end
     return table.concat(out)
 end
 
@@ -640,6 +650,7 @@ local function DecodeV2(text)
         end
     end
     if next(decoded.profiles) == nil then decoded.profiles, decoded.chars = nil, nil end
+    if values.notes and #values.notes <= 40 then decoded.notesSeen = values.notes end
     return decoded
 end
 
@@ -734,6 +745,18 @@ function ns.SaveBars()
     WriteBackup()
 end
 
+-- What's new: the version whose notes were last shown, or passed over on a
+-- first install.
+function ns.NotesSeen()
+    return db and type(db.notesSeen) == "string" and db.notesSeen or nil
+end
+
+function ns.SetNotesSeen(version)
+    if not db then return end
+    db.notesSeen = version
+    WriteBackup()
+end
+
 function ns.NeedsReload()
     for key in pairs(ns.RELOAD) do
         if ns.Get(key) ~= ns.loaded[key] then return true end
@@ -761,22 +784,29 @@ function ns.TurnOn(cvar)
     return C_CVar.GetCVarBool(cvar) == true
 end
 
--- Escape closes the /ccm window. The key is borrowed only while the window is
--- up and handed back as a fight begins, since bindings cannot change in combat;
--- this keeps the addon out of the game's own Escape handling.
+-- Escape closes the /ccm window and What's new. The key is borrowed only while
+-- one is up and handed back as a fight begins, since bindings cannot change in
+-- combat; this keeps the addon out of the game's own Escape handling.
 local escButton
+
+local function Shown(frame)
+    return frame ~= nil and frame:IsShown()
+end
 
 function ns.EscUpdate()
     if not escButton or InCombatLockdown() then return end
     ClearOverrideBindings(escButton)
-    if ns.window and ns.window:IsShown() then
+    if Shown(ns.window) or Shown(ns.notes) then
         SetOverrideBindingClick(escButton, true, "ESCAPE", escButton:GetName())
     end
 end
 
 local function BuildEscape()
     escButton = CreateFrame("Button", "FECMEscButton", UIParent)
-    escButton:SetScript("OnClick", function() if ns.window then ns.window:Hide() end end)
+    -- What's new sits over the window, so it closes first.
+    escButton:SetScript("OnClick", function()
+        if Shown(ns.notes) then ns.notes:Hide() elseif ns.window then ns.window:Hide() end
+    end)
     escButton:RegisterEvent("PLAYER_REGEN_DISABLED")
     escButton:RegisterEvent("PLAYER_REGEN_ENABLED")
     escButton:SetScript("OnEvent", function(self, event)
@@ -824,6 +854,7 @@ local function Load()
     -- A first login under the new name picks up the old backup.
     local hadBackup = ReadCVar(ns.BACKUP) ~= nil
     local fresh = next(db) == nil and not hadBackup
+    ns.firstInstall = fresh
     local flags = ReadBackup(fresh and LEGACY or nil)
     local backup = ReadBarsBackup(fresh and LEGACY .. "Bars" or nil) or {}
     -- Each login is numbered in both the saved settings and the backup. An
@@ -836,7 +867,7 @@ local function Load()
     for key, value in pairs(flags) do
         if ns.restored or db[key] == nil then db[key] = value end
     end
-    for _, field in ipairs({ "bars", "profiles", "chars", "custom", "barColours" }) do
+    for _, field in ipairs({ "bars", "profiles", "chars", "custom", "barColours", "notesSeen" }) do
         if backup[field] ~= nil and (ns.restored or db[field] == nil) then db[field] = backup[field] end
     end
     db.session = math.max(session or 0, backup.session or 0) + 1
@@ -850,7 +881,13 @@ local function Load()
     SLASH_FECM2 = "/ccm"
     SlashCmdList.FECM = function(msg)
         msg = type(msg) == "string" and msg or ""
-        if ns.Probe and msg:match("^%s*check") then ns.Probe(msg) elseif ns.Toggle then ns.Toggle() end
+        if ns.Probe and msg:match("^%s*check") then
+            ns.Probe(msg)
+        elseif msg:match("^%s*new%s*$") and ns.ShowNotes then
+            ns.ShowNotes()
+        elseif ns.Toggle then
+            ns.Toggle()
+        end
     end
     BuildEscape()
     BuildOptionsEntry()
@@ -858,6 +895,7 @@ local function Load()
     if ns.loaded.skin and ns.Skin then ns.Skin:Start() end
     if ns.Resource then ns.Resource:Start() end
     if ns.Bars then ns.Bars:Start() end
+    if ns.Notes then ns.Notes:Start() end
 end
 
 loader:SetScript("OnEvent", function(self, event, name)

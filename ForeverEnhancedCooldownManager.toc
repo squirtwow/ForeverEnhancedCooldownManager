@@ -19,4 +19,5 @@ Theme.lua
 BarPage.lua
 ProfileMenu.lua
 Window.lua
+Notes.lua
 Probe.lua
