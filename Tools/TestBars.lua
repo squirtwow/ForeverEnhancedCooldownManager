@@ -106,6 +106,7 @@ local cooldownCalls, lockdown, containers, containerCallsInCombat
 local trinket, trinketCooldown, bagItems, itemCooldown, itemCount
 local ammo, ammoCount -- the equipped ammunition and how many you carry
 local bindings, cvarOn, reloads, timers
+local prdOn = true -- Blizzard's Personal Resource Display switched on
 -- Who is logged in: a GUID tells characters apart, even with the same name.
 local character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
 
@@ -142,6 +143,8 @@ local function Environment(keepCVars)
         reloads = reloads + 1
     end
     _G.RAID_CLASS_COLORS = { DRUID = { r = 1, g = .49, b = .04 } }
+    _G.CreateColor = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
+    _G.C_Texture = { GetAtlasInfo = function(atlas) if atlas == "classicon-druid" then return {} end end }
     trinket, trinketCooldown, bagItems, itemCooldown, itemCount = nil, { 0, 0, 1 }, {}, { 0, 0, 1 }, {}
     ammo, ammoCount = nil, 0
     _G.INVSLOT_AMMO = 0
@@ -215,10 +218,14 @@ local function Environment(keepCVars)
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
     _G.C_CVar = {
-        GetCVarBool = function() return cvarOn end,
+        GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end,
         GetCVar = function(name) return cvars[name] end,
         RegisterCVar = function(name, default) if cvars[name] == nil then cvars[name] = default end end,
-        SetCVar = function(name, value) cvars[name] = value end,
+        SetCVar = function(name, value)
+            cvars[name] = value
+            if name == "cooldownViewerEnabled" then cvarOn = value == "1" end
+            if name == "nameplateShowSelf" then prdOn = value == "1" end
+        end,
     }
     _G.wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
     _G.print = function(msg) printed[#printed + 1] = msg end
@@ -282,6 +289,7 @@ local function Environment(keepCVars)
     _G.GameFontHighlight = { GetFont = function() return "font", 12, "" end }
     _G.CreateFont = function(name) local font = New("Font"); _G[name] = font; return font end
     _G.SlashCmdList = {}
+    _G.StaticPopupDialogs = {}
     _G.Settings = nil
     _G.ClearOverrideBindings = function(owner) assert(not lockdown, "binding change in combat"); bindings[owner] = nil end
     _G.SetOverrideBindingClick = function(owner, _, key, button) assert(not lockdown, "binding change in combat"); bindings[owner] = key .. ":" .. button end
@@ -290,7 +298,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarPage.lua", "ProfileMenu.lua", "Window.lua" }) do
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarPage.lua", "ProfileMenu.lua", "Window.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -455,7 +463,7 @@ Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 
 -- Backup ------------------------------------------------------------------------------
 
-Equal(cvars.FECMBackup, "accent=orange;listItems=0;listRanks=0;skin=1;useBars=1", "on/off backup")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
 Equal(cvars.FECMBackupBars0, "1", "bars backed up in one chunk")
 Environment(true)
 ns = Load(nil)
@@ -975,7 +983,7 @@ Equal(Row("Moonfire") ~= nil, true, "spells listed")
 page.showItems:Click()
 Equal(ns.Get("listItems"), true, "Show items remembered")
 Equal(Row("item:118") ~= nil, true, "items listed when asked")
-Equal(cvars.FECMBackup, "accent=orange;listItems=1;listRanks=0;skin=1;useBars=1", "and backed up")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=1;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "and backed up")
 
 -- Searching filters the list and finds spells outside your spellbook.
 Equal(#S[page.list].points, 2, "the list is pinned by two corners, so the game can place it")
@@ -1254,20 +1262,23 @@ for _, timer in ipairs(timers) do timer() end
 page.clear:Click()
 Equal(#ns.BarData("cd").spells, 1, "after a pause, the next click asks again")
 
--- Look: the charcoal look, reload and accent.
+-- Look: the restyle, reload and accent.
 w:Select("look")
 Equal(S[w.pages.look].shown and not S[page].shown, true, "Look page shown")
-Equal(w.look:GetChecked(), true, "charcoal look shown as on")
+Equal(w.look:GetChecked(), true, "restyle shown as on")
+Equal(S[w.look.text].text .. "|" .. S[w.personal.text].text .. "|" .. S[w.repeatMana.text].text,
+    "Apply this look to the Cooldown Manager|Apply this look to the Personal Resource Display|Extra mana bar: hide in caster form, half size in forms",
+    "the ticks say what they apply to")
 Equal(S[w.off].shown, false, "no Cooldown Manager warning while it is on")
 Equal(S[w.reload].shown, false, "no reload needed yet")
 w.look:Click()
 Equal(ForeverEnhancedCooldownManagerDB.skin, false, "unticking saves the choice")
 Equal(S[w.reload].shown, true, "reload offered after a change")
-Equal(w.hint:GetText(), "Reload UI to apply your change.", "explains the reload")
+Equal(S[w.reload.label].text, "Reload to apply", "saying why")
 lockdown = true
 w.reload:Click()
 Equal(reloads, 0, "no reload in combat")
-Equal(w.hint:GetText(), "Finish combat first, then reload.", "explains why")
+Equal(S[w.note].text, "Finish combat first, then reload.", "explains why")
 lockdown = false
 w.reload:Click()
 Equal(reloads, 1, "reloads straight from the click")
@@ -1279,10 +1290,10 @@ local function Heading(text)
         if S[objects[i]] and S[objects[i]].text == text then return objects[i] end
     end
 end
-local accentHeading = Heading("ACCENT")
+local accentHeading = Heading("EACH BAR")
 Equal(accentHeading ~= nil, true, "headings in small capitals")
 Equal(S[accentHeading].colour[1] == .88 and S[accentHeading].colour[2], .47, "headings in orange by default")
-Equal(#w.swatches, 5, "five set colours")
+Equal(#w.swatches, 5, "five window accents")
 Equal(w.swatches[1].key, "orange", "orange first")
 w.swatches[3]:Click()
 Equal(ns.Get("accent"), "teal", "a set colour chosen")
@@ -1292,6 +1303,92 @@ Equal(S[w.swatches[1]].border[1] < 1, true, "the others not")
 w.swatches[1]:Click()
 Equal(ns.Get("accent"), "orange", "back to orange")
 
+-- A wash of the accent from the right, and a line round the Each bar box.
+local function Wash(texture)
+    local from, to = Last(texture, "SetGradient", 2), Last(texture, "SetGradient", 3)
+    return Last(texture, "SetGradient", 1) == "HORIZONTAL" and from.a == 0 and to.r == .88 and to.a
+end
+Equal(Wash(w.fades.header), .30, "the title bar fades in from the right, in the accent")
+Equal(Wash(w.fades.page), .18, "softer behind the pages")
+Equal(Wash(w.nav.look.glow), .36, "stronger on the chosen menu item")
+Equal(S[w.nav.look.glow].shown and not S[w.nav.general.glow].shown, true, "only the chosen one")
+Equal(S[w.eachPanel].border[1], .88, "the Each bar box outlined in the accent")
+Equal(S[page.listPanel].border[1], .88, "and each bar page's spell list")
+Equal(S[page.tray].border[1] < .5, true, "the smaller box at the top keeps a plain line")
+w.swatches[3]:Click()
+Equal(Last(w.fades.header, "SetGradient", 3).r == .17 and S[w.eachPanel].border[1], .17, "all repainted with a new accent")
+w.swatches[1]:Click()
+-- The Class swatch shows your class icon, so it isn't a second orange.
+Equal(Last(w.barSwatches[6].icon, "SetAtlas", 1), "classicon-druid", "class icon on the Class swatch")
+Equal(w.barSwatches[1].icon, nil, "the other swatches are plain colour")
+
+-- Tracked Bars: a design and a colour.
+Equal(w.barDesign.selected, "glass", "Glass by default")
+w.barDesign.buttons[3]:Click()
+Equal(ns.Get("barStyle"), "outline", "Outline chosen")
+Equal(w.barDesign.selected, "outline", "and shown")
+Equal(#w.barSwatches, 6, "six bar colours")
+Equal(w.barSwatches[6].key, "class", "your class colour last")
+w.barSwatches[3]:Click()
+Equal(ns.Get("barColour"), "blue", "a colour chosen")
+Equal(S[w.barSwatches[3]].border[1], 1, "its swatch outlined")
+Equal(S[w.barSwatches[1]].border[1] < 1, true, "the others not")
+Equal(Last(w.preview.Bar, "SetStatusBarColor", 3), .88, "the preview bar shows it")
+w.barDesign.buttons[1]:Click()
+w.barSwatches[1]:Click()
+Equal(Last(w.preview.Bar, "SetStatusBarColor", 1), 1, "and changes back")
+
+-- Each Tracked Bar in a colour of its own, listed from Blizzard's bars.
+local function Tracked(id, order)
+    return { GetBaseSpellID = function() return id end, layoutIndex = order }
+end
+local tracked = { [Tracked(1243, 2)] = true, [Tracked(16870, 1)] = true }
+_G.BuffBarCooldownViewer = { itemFramePool = { EnumerateActive = function() return pairs(tracked) end } }
+w:Refresh()
+local rows = w.eachRows
+Equal(S[rows[1].name].text .. "," .. S[rows[2].name].text, "Clearcasting,Power Word: Fortitude", "your Tracked Bars, in Blizzard's order")
+Equal(Last(rows[1].swatches[6].icon, "SetAtlas", 1), "classicon-druid", "each bar's Class swatch shows the icon too")
+Equal(S[rows[1].chosen].text, "Default", "each uses the colour for all at first")
+Equal(S[w.eachEmpty].shown, false, "no note while there are bars")
+rows[1].swatches[4]:Click()
+Equal(ns.BarColours()[16870], "green", "a colour picked for one bar")
+Equal(S[rows[1].chosen].text, "Green", "and named")
+Equal(S[rows[1].swatches[4]].border[1], 1, "its swatch outlined")
+Equal(S[rows[2].chosen].text, "Default", "the other bar unchanged")
+rows[1].swatches[4]:Click()
+Equal(ns.BarColours()[16870], nil, "clicking it again goes back to the colour for all")
+Equal(S[rows[1].chosen].text, "Default", "and says so")
+tracked = {}
+w:Refresh()
+Equal(S[rows[1]].shown, false, "rows go with the bars")
+Equal(S[w.eachEmpty].text:find("No Tracked Bars yet", 1, true) ~= nil, true, "and the list says how to add some")
+ns.loaded.skin = false
+w:Refresh()
+Equal(S[w.eachEmpty].text, "Reload first, then colour your bars one by one here.", "just ticked: reload first")
+ns.Set("skin", false)
+w:Refresh()
+Equal(S[w.eachEmpty].text, "Tick Restyle and reload to colour your bars one by one.", "with the restyle off, how to turn it on")
+ns.Set("skin", true)
+ns.loaded.skin = true
+_G.BuffBarCooldownViewer = nil
+-- The Personal Resource Display's bars, listed first while it's on.
+_G.PersonalResourceDisplayFrame = {}
+w:Refresh()
+Equal(S[rows[1].name].text .. "," .. S[rows[2].name].text, "Personal health,Personal power", "the personal bars listed first")
+rows[2].swatches[5]:Click()
+Equal(ns.Get("prdPower"), "purple", "a colour for the personal power bar")
+Equal(S[rows[2].chosen].text, "Purple", "and named")
+rows[2].swatches[5]:Click()
+Equal(ns.Get("prdPower"), "default", "clicking it again goes back to Blizzard's")
+w.repeatMana:Click()
+Equal(ns.Get("prdHideRepeat"), false, "the repeat mana bar can be kept")
+w.repeatMana:Click()
+w.personal:Click()
+Equal(ns.Get("prdSkin") == false and S[w.reload].shown, true, "turning the restyle off asks for a reload")
+w.personal:Click()
+Equal(S[w.reload].shown, false, "and back on needs none")
+_G.PersonalResourceDisplayFrame = nil
+
 -- Joined buttons (for the pill choices): no smeared shadow on a light accent.
 local pills = ns.Theme:Segmented(UIParent, { { key = "a", label = "Show" }, { key = "b", label = "Fade" } }, 120, function() end)
 pills:SetSelected("a")
@@ -1299,6 +1396,29 @@ Equal(S[pills.buttons[1].label].shadow, 0, "dark text on a light accent has no s
 Equal(S[pills.buttons[2].label].shadow, 1, "light text on dark keeps its shadow")
 
 -- General: your bars and moving them.
+w:Select("general")
+-- More from Squirt: EraUI, and a way to open it.
+Equal(S[w.moreOpen].shown, false, "EraUI not installed: no Open button")
+Equal(S[w.moreLinks[1]].shown and S[w.moreLinks[2]].shown, true, "but CurseForge and GitHub buttons")
+w.moreLinks[1]:Click()
+local copy = FECMCopyLink
+Equal(S[copy].shown and S[copy.title].text, "ERAUI ON CURSEFORGE", "each opens a box in the window's own look")
+Equal(copy.input:GetText(), "https://www.curseforge.com/wow/addons/eraui", "with its link to copy")
+copy.input:SetText("typed over")
+S[copy.input].scripts.OnTextChanged(copy.input)
+Equal(copy.input:GetText(), "https://www.curseforge.com/wow/addons/eraui", "which can't be typed over")
+copy.close:Click()
+Equal(S[copy].shown, false, "Close closes it")
+_G.C_AddOns = { IsAddOnLoaded = function(name) return name == "EraUI" end }
+local eraOpened
+SlashCmdList.ERAUI = function() eraOpened = true end
+w:Refresh()
+Equal(S[w.moreOpen].shown, true, "installed: an Open button")
+Equal(S[w.moreLinks[1]].shown, false, "and no links")
+w.moreOpen:Click()
+Equal(eraOpened and not S[w].shown, true, "which opens EraUI and closes this window")
+_G.C_AddOns, SlashCmdList.ERAUI = nil, nil
+ns.ShowWindow()
 w:Select("general")
 Equal(w.useBars:GetChecked(), true, "own bars shown as on")
 w.useBars:Click()
@@ -1334,6 +1454,20 @@ ns.Probe = nil
 cvarOn = false
 w:Select("look")
 Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
+Equal(S[w.eachEmpty].text, "Blizzard's Cooldown Manager is off.", "and the list says so")
+Equal(S[w.turnOnManager].shown, true, "with a way to turn it on")
+w.turnOnManager:Click()
+Equal(cvarOn and S[w.note].text, "Blizzard's Cooldown Manager is on.", "which switches it on")
+Equal(S[w.off].shown or S[w.turnOnManager].shown, false, "and the warning goes")
+prdOn = false
+w:Refresh()
+Equal(S[w.personalOff].shown and S[w.turnOnPersonal].shown, true, "a Personal Resource Display that's off is pointed out too")
+lockdown = true
+w.turnOnPersonal:Click()
+Equal(prdOn == false and S[w.note].text, "Finish combat first.", "never switched in combat")
+lockdown = false
+w.turnOnPersonal:Click()
+Equal(prdOn and S[w.personalOff].shown, false, "switched on, and the note goes")
 Equal(#printed, 0, "no errors")
 
 -- The profile menu ---------------------------------------------------------------------

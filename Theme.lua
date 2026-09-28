@@ -24,6 +24,10 @@ T.TEXT = { .84, .843, .851 }
 T.MUTED = { .545, .553, .573 }
 T.WARN = { 1, .45, .3 }
 
+-- Soft washes of the accent, full on the right and fading out to the left:
+-- how strong each is at its right-hand edge.
+T.FADE = { page = .18, header = .30, selected = .36 }
+
 T.ACCENTS = {
     orange = { name = "Orange", colour = { .88, .47, .16 } },
     blue = { name = "Blue", colour = { .24, .55, .88 } },
@@ -77,6 +81,29 @@ function T:Flat(frame, fill, border)
     frame:SetBackdropColor(fill[1], fill[2], fill[3], fill[4] or 1)
     border = border or T.BORDER
     frame:SetBackdropBorderColor(border[1], border[2], border[3], border[4] or 1)
+end
+
+local function Gradient(texture, colour, strength)
+    local r, g, b = colour[1], colour[2], colour[3]
+    if CreateColor and texture.SetGradient then
+        texture:SetGradient("HORIZONTAL", CreateColor(r, g, b, 0), CreateColor(r, g, b, strength))
+    elseif texture.SetGradientAlpha then
+        texture:SetGradientAlpha("HORIZONTAL", r, g, b, 0, r, g, b, strength)
+    end
+end
+
+-- A wash of the accent over a frame's background, repainted with the accent.
+function T:Fade(parent, strength)
+    local fade = parent:CreateTexture(nil, "BORDER")
+    fade:SetTexture(FLAT)
+    self:Paint(function(accent) Gradient(fade, accent, strength) end)
+    return fade
+end
+
+-- A page's main box (its list), outlined in the accent so it stands out.
+function T:Box(frame)
+    self:Flat(frame, T.PANEL, T.BORDER)
+    self:Paint(function(accent) frame:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
 end
 
 function T:Panel(parent)
@@ -241,7 +268,7 @@ function T:Slider(parent, label, limits, step, width, onChange)
     slider.value:SetWidth(28)
     slider.value:SetJustifyH("RIGHT")
     local track = CreateFrame("Frame", nil, slider)
-    track:SetPoint("LEFT", 84, 0)
+    track:SetPoint("LEFT", 100, 0)
     track:SetPoint("RIGHT", -40, 0)
     track:SetHeight(16)
     track:EnableMouse(true)

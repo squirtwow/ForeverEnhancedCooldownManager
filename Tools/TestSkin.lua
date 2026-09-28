@@ -1,8 +1,9 @@
 -- Run the actual addon files against mock copies of Blizzard's cooldown viewer
 -- frames, built from Blizzard_CooldownViewer's CooldownViewer.xml. Blizzard's
 -- frames are sealed: writing any key on them, or calling anything that shows,
--- hides, scales or reads them, fails the test. The one size change allowed is
--- a Tracked Bar's own status bar height, inside its unchanged item frame.
+-- hides, scales or reads them, fails the test. The only size changes allowed
+-- are a Tracked Bar's own status bar height, inside its unchanged item frame,
+-- and the height of the Personal Resource Display's extra mana bar.
 local checks = 0
 local function Equal(actual, expected, label)
     checks = checks + 1
@@ -13,7 +14,7 @@ end
 
 local S = setmetatable({}, { __mode = "k" }) -- per-object mock state, never on the object
 local FORBIDDEN = {
-    Show = true, Hide = true, SetShown = true, SetScale = true, SetSize = true, SetWidth = true,
+    Show = true, Hide = true, SetShown = true, SetScale = true, SetSize = true,
     SetParent = true, SetVertexColor = true, SetDesaturated = true,
     SetSwipeColor = true, SetDrawSwipe = true, IsShown = true, GetText = true,
     GetValue = true, GetCooldownTimes = true, GetSpellID = true, GetAuraData = true,
@@ -80,7 +81,14 @@ end
 function Proto:SetColorTexture(r, g, b, a) S[self].color = { r, g, b, a } end
 function Proto:SetSwipeTexture(t) S[self].swipe = t end
 function Proto:SetStatusBarTexture(t) S[self].barTexture = t end
-function Proto:SetStatusBarColor(r, g, b) S[self].barColour = { r, g, b } end
+function Proto:SetStatusBarColor(r, g, b, a) S[self].barColour = { r, g, b, a } end
+function Proto:GetHeight() return S[self].height end
+function Proto:GetStatusBarColor() local c = S[self].barColour or { 1, 1, 1, 1 }; return c[1], c[2], c[3], c[4] end
+function Proto:SetAtlas(atlas) S[self].atlas = atlas end
+function Proto:SetWidth(w)
+    if S[self].blizzard and not S[self].resizable then error("resized a Blizzard frame", 2) end
+    S[self].width = w
+end
 function Proto:SetFontObject(o) S[self].font = o end
 function Proto:SetCountdownFont(o) S[self].countdownFont = o end
 function Proto:SetTexCoord(...)
@@ -105,6 +113,8 @@ function Proto:GetText() return S[self].text end
 function Proto:SetChecked(v) S[self].checked = v end
 function Proto:GetChecked() return S[self].checked end
 function Proto:GetFont() return "font", 12, "" end
+-- The spell Blizzard's settings give a Tracked Bar.
+function Proto:GetBaseSpellID() return S[self].baseSpell end
 function Proto:GetStringWidth() return 40 end
 function Proto:Click() S[self].scripts.OnClick(self) end
 
@@ -158,6 +168,7 @@ local function BarItem()
     item.Bar = New("StatusBar", item)
     item.Bar.BarBG = New("Texture", item.Bar)
     item.Bar.Pip = New("Texture", item.Bar)
+    S[item.Bar.Pip].atlas = "UI-HUD-CoolDownManager-Bar-Pip"
     item.Bar.Name = New("FontString", item.Bar)
     item.Bar.Duration = New("FontString", item.Bar)
     Seal(item)
@@ -219,6 +230,8 @@ local function Environment(keepCVars)
         RegisterCVar = function(name, default) if cvars[name] == nil then cvars[name] = default end end,
         SetCVar = function(name, value) assert(cvars[name] ~= nil, "set before register"); cvars[name] = value end,
     }
+    _G.UnitClass = function() return "Druid", "DRUID" end
+    _G.RAID_CLASS_COLORS = { DRUID = { r = 1, g = .49, b = .04 } }
     _G.CreateFont = function(name)
         local font = New("Font")
         _G[name] = font
@@ -235,6 +248,7 @@ local function Environment(keepCVars)
     }
     _G.ForeverEnhancedCooldownManagerDB = nil
     _G.FECMFrame = nil
+    _G.PersonalResourceDisplayFrame = nil
     for _, name in ipairs({ "EssentialCooldownViewer", "UtilityCooldownViewer", "BuffIconCooldownViewer", "BuffBarCooldownViewer" }) do
         _G[name] = nil
     end
@@ -257,6 +271,7 @@ local function Load(saved)
     assert(loadfile("Core.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("Style.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("Skin.lua"))("ForeverEnhancedCooldownManager", ns)
+    assert(loadfile("Resource.lua"))("ForeverEnhancedCooldownManager", ns)
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
     return ns
 end
@@ -343,13 +358,108 @@ Equal(S[bar.Icon.Applications].font, "FECMFont12", "bar stack count")
 Equal(S[bar.Bar].height, 26, "bar as tall as the icon art")
 Equal(S[bar].height, nil, "the item frame itself is never resized")
 Equal(S[bar.Bar].barTexture, "Interface\\Buttons\\WHITE8X8", "flat bar")
-Equal(S[bar.Bar].barColour[1] == .36 and S[bar.Bar].barColour[2] == .38 and S[bar.Bar].barColour[3], .41, "charcoal grey fill")
+local fill = S[bar.Bar].barColour
+Equal(fill[1] == 1 and fill[2] == .5 and fill[3] == .25 and fill[4], 1, "Glass in Blizzard's orange by default")
 Equal(S[bar.Bar.BarBG].color[1] == .08 and S[bar.Bar.BarBG].color[4], .85, "near-black track")
 Equal(InsetBy(bar.Bar.BarBG, bar.Bar, 0), true, "track fits the bar")
-Equal(#Edges(bar.Bar), 0, "no frame around the bar")
-Equal(S[bar.Bar.Pip].alpha, 0, "modern spark hidden")
+Equal(#Edges(bar.Bar), 0, "no charcoal frame around the bar")
 Equal(S[bar.Bar.Name].font, "FECMFont13", "bold name")
 Equal(S[bar.Bar.Duration].font, "FECMFont15", "bigger time")
+-- The pieces the skin added to the bar, found by their layer.
+local function Piece(owner, layer, sublevel)
+    for _, r in ipairs(S[owner].regions) do
+        if S[r].layer == layer and S[r].sublevel == sublevel then return r end
+    end
+end
+local barEdge, sheen, box = Piece(bar.Bar, "BACKGROUND", -8), Piece(bar.Bar, "OVERLAY", -8), Piece(bar.Bar, "OVERLAY", -7)
+local iconEdge = Piece(bar.Icon, "BACKGROUND", -8)
+Equal(InsetBy(barEdge, bar.Bar, -1) and S[barEdge].color[1] == 0 and S[barEdge].color[4], 1, "Glass: a 1px black edge round the bar")
+Equal(InsetBy(iconEdge, bar.Icon.Icon, -1), true, "and round its icon")
+Equal(S[sheen].shown, true, "a shine across the top")
+Equal(S[box].shown, false, "no time box")
+Equal(S[bar.Bar.Pip].alpha, 1, "and Blizzard's spark at the end of the fill")
+Equal(S[bar.Bar.Duration].points[1][1], "RIGHT", "time on the right")
+Equal(S[bar.Bar.Name].points[2][2], bar.Bar.Duration, "the name stops short of it")
+
+ns.Set("barStyle", "split")
+ns.Skin:ApplyBarLook()
+Equal(S[sheen].shown == false and S[box].shown, true, "Split: a dark box instead of the shine")
+local at = S[bar.Bar.Duration].points[1]
+Equal(at[1] == "CENTER" and at[2], box, "the time centred in it")
+Equal(S[bar.Bar.Name].points[2][2], box, "the name stops before it")
+Equal(S[bar.Bar.Pip].alpha, 0, "no spark")
+
+ns.Set("barStyle", "outline")
+ns.Set("barColour", "blue")
+ns.Skin:ApplyBarLook()
+fill = S[bar.Bar].barColour
+Equal(fill[3] == .88 and fill[4], .45, "Outline: a see-through fill")
+Equal(S[barEdge].color[3] == .88 and S[iconEdge].color[3], .88, "inside an edge in the bar's colour, round the icon too")
+local pip = S[bar.Bar.Pip]
+Equal(pip.alpha == 0 and pip.color == nil and pip.width, nil, "no line where the fill ends; the spark is never redrawn or resized")
+
+ns.Set("barStyle", "glass")
+ns.Set("barColour", "class")
+ns.Skin:ApplyBarLook()
+Equal(S[bar.Bar.Pip].atlas == "UI-HUD-CoolDownManager-Bar-Pip" and S[bar.Bar.Pip].alpha, 1, "back to Glass, the spark returns")
+fill = S[bar.Bar].barColour
+Equal(fill[1] == 1 and fill[2] == .49 and fill[3], .04, "Class: your class colour")
+Equal(S[barEdge].color[1], 0, "and the edge is black again")
+ns.Set("barColour", "orange")
+ns.Skin:ApplyBarLook()
+Equal(#printed, 0, "no errors while switching")
+
+-- Each bar can have a colour of its own, by the spell Blizzard gives it.
+S[bar].baseSpell = 467 -- Thorns
+local other = BarItem()
+S[other].baseSpell = 1126 -- Mark of the Wild
+v.bars:OnAcquireItemFrame(other)
+v.barsActive[other] = true
+rawset(other, "layoutIndex", 1) -- Blizzard's own order
+rawset(bar, "layoutIndex", 2)
+Equal(table.concat(ns.Skin:TrackedBars(), ","), "1126,467", "the window lists your Tracked Bars in Blizzard's order")
+ns.SetBarColour(467, "purple")
+ns.Skin:ApplyBarLook()
+fill = S[bar.Bar].barColour
+Equal(fill[1] == .6 and fill[2] == .43 and fill[3], .91, "Thorns in its own purple")
+fill = S[other.Bar].barColour
+Equal(fill[1] == 1 and fill[2] == .5 and fill[3], .25, "the others keep the colour for all")
+ns.Set("barColour", "green")
+ns.Skin:ApplyBarLook()
+Equal(S[bar.Bar].barColour[3], .91, "a bar's own colour stays when the colour for all changes")
+Equal(S[other.Bar].barColour[2], .74, "which the others follow")
+-- Blizzard's bars are pooled and change spell; the colour follows at once.
+S[other].baseSpell = 467
+other:OnCooldownIDSet()
+Equal(S[other.Bar].barColour[3], .91, "a bar given Thorns turns purple straight away")
+local SECRET = {}
+_G.issecretvalue = function(value) return value == SECRET end
+S[other].baseSpell = SECRET
+other:OnCooldownIDSet()
+Equal(S[other.Bar].barColour[2], .74, "a spell that can't be read uses the colour for all")
+_G.issecretvalue = nil
+ns.SetBarColour(467, nil)
+ns.Skin:ApplyBarLook()
+Equal(ns.BarColours()[467] == nil and S[bar.Bar].barColour[2], .74, "and back to the colour for all")
+ns.Set("barColour", "orange")
+ns.Skin:ApplyBarLook()
+v.barsActive[other] = nil
+
+-- The window's preview: the addon's own bar, drawn by the same code.
+local sample = ns.Skin:Sample(nil, 300)
+Equal(S[sample].sealed, nil, "made from the addon's own frames")
+Equal(S[sample.Bar].height, 26, "shaped like a Tracked Bar")
+Equal(S[sample.Bar].barColour[2], .5, "in the colour for all bars")
+ns.Set("barStyle", "split")
+ns.Set("barColour", "blue")
+ns.Skin:ApplyBarLook()
+Equal(S[sample.Bar].barColour[3], .88, "following the colour")
+Equal(S[Piece(sample.Bar, "OVERLAY", -7)].shown, true, "and the design")
+Equal(S[sample.Bar.Pip].atlas, "UI-HUD-CoolDownManager-Bar-Pip", "with Blizzard's spark")
+ns.Set("barStyle", "glass")
+ns.Set("barColour", "orange")
+ns.Skin:ApplyBarLook()
+Equal(#printed, 0, "no errors with bars of their own colour")
 
 -- Only hooksecurefunc touched Blizzard's viewers.
 for _, viewer in ipairs({ v.essential, v.utility, v.buffs, v.bars }) do
@@ -400,10 +510,13 @@ Equal(ns.Skin:IsSkinned(First(v.barsActive)), true, "bars too")
 Environment()
 Viewers(0)
 ns = Load(nil)
-Equal(cvars.FECMBackup, "accent=orange;listItems=0;listRanks=0;skin=1;useBars=0", "backup written at first login")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup written at first login")
 ns.Set("skin", false)
 ns.Set("accent", "teal")
-Equal(cvars.FECMBackup, "accent=teal;listItems=0;listRanks=0;skin=0;useBars=0", "backup follows a change")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=0;useBars=0", "backup follows a change")
+
+ns.SetBarColour(467, "blue")
+ns.SetBarColour(1126, "class")
 
 -- The client loses the saved settings on restart; the backup survives.
 Environment(true)
@@ -413,13 +526,14 @@ Equal(ns.Get("skin"), false, "choice restored from the backup")
 Equal(ForeverEnhancedCooldownManagerDB.skin, false, "and saved again")
 Equal(ns.Skin.started, nil, "so the charcoal look stays off")
 Equal(ns.Get("accent"), "teal", "accent restored too")
+Equal(ns.BarColours()[467] == "blue" and ns.BarColours()[1126], "class", "and each bar's own colour")
 
 -- Saved settings win over an older backup.
 Environment(true)
 Viewers(0)
 ns = Load({ skin = true })
 Equal(ns.Get("skin"), true, "saved settings win")
-Equal(cvars.FECMBackup, "accent=teal;listItems=0;listRanks=0;skin=1;useBars=0", "backup brought up to date")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup brought up to date")
 
 -- Anything unexpected in the backup is ignored.
 Environment()
@@ -431,6 +545,13 @@ Equal(ForeverEnhancedCooldownManagerDB.os, nil, "unknown keys never copied")
 Equal(ns.Get("accent"), "orange", "unknown accents ignored")
 ForeverEnhancedCooldownManagerDB.accent = "pink"
 Equal(ns.Get("accent"), "orange", "an invalid saved accent reads as the default")
+ForeverEnhancedCooldownManagerDB.barColours = { [467] = "pink", [0] = "blue", foo = "green", [1126] = "green" }
+local kept = 0
+for _ in pairs(ns.BarColours()) do kept = kept + 1 end
+Equal(kept == 1 and ns.BarColours()[1126], "green", "only real spells with a real colour are kept")
+ns.SetBarColour("Thorns", "blue")
+ns.SetBarColour(467, "pink")
+Equal(ns.BarColours()[467], nil, "nothing else can be set")
 
 -- The first login under the new name carries the old name's backup over.
 Environment()
@@ -444,7 +565,7 @@ Equal(ns.Get("skin"), false, "old Classic look switch carried over")
 Equal(ns.Get("accent"), "teal", "accent carried over")
 Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Bash", "bars carried over")
 Equal(ns.BarData("cd").size, 40, "with their size")
-Equal(cvars.FECMBackup, "accent=teal;listItems=1;listRanks=0;skin=0;useBars=1", "and saved under the new name")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=1;listRanks=0;prdHealth=default;prdHideRepeat=1;prdPower=default;prdSkin=1;skin=0;useBars=1", "and saved under the new name")
 
 -- After that, the new name's own settings and backup are used.
 Environment(true)
@@ -452,6 +573,100 @@ cvars.ClassicCooldownManagerBackup = "classicBars=0"
 Viewers(0)
 ns = Load({ useBars = true })
 Equal(ns.Get("useBars"), true, "the old backup is never read again")
+
+-- Blizzard's Personal Resource Display ------------------------------------------------------
+
+local function PRDBar(colour)
+    local bar = New("StatusBar")
+    local art = New("Texture", bar)
+    S[art].atlas = "UI-HUD-CoolDownManager-Bar-BG"
+    S[bar].barColour = colour
+    return bar, art
+end
+local function PRD()
+    local frame = New("Frame")
+    local container = New("Frame", frame)
+    frame.HealthBarsContainer = container
+    local health, healthArt = PRDBar({ 0, 1, 0, 1 })
+    container.healthBar = health
+    frame.PowerBar = PRDBar({ 0, 0, 1, 1 })
+    frame.AlternatePowerBar = PRDBar({ 0, 0, 1, 1 })
+    frame.AlternatePowerBar.powerName = "MANA"
+    frame.UpdatePowerBar = function() end
+    frame.UpdateAlternatePowerBar = function() end
+    -- Edit Mode's bar height, for both power bars.
+    frame.SetPowerBarHeight = function(self, height)
+        self.PowerBar:SetHeight(height)
+        self.AlternatePowerBar:SetHeight(height)
+    end
+    S[frame.PowerBar].height, S[frame.AlternatePowerBar].height = 12, 12
+    for _, part in ipairs({ frame, health, frame.PowerBar, frame.AlternatePowerBar }) do Seal(part) end
+    return frame, healthArt
+end
+local power = 0 -- the main bar's power: 0 mana, 3 energy
+Environment()
+Viewers(0)
+_G.UnitPowerType = function() return power end
+local prd, healthArt = PRD()
+_G.PersonalResourceDisplayFrame = prd
+ns = Load(nil)
+local health = prd.HealthBarsContainer.healthBar
+Equal(S[health].barTexture, "Interface\\Buttons\\WHITE8X8", "personal health bar made flat")
+Equal(S[healthArt].color[1] == .08 and S[healthArt].color[4], .85, "its art swapped for the near-black track")
+Equal(InsetBy(healthArt, health, 0), true, "fitted to the bar")
+Equal(S[Piece(health, "BACKGROUND", -8)].color[1] == 0 and S[Piece(health, "OVERLAY", -8)].shown, true, "Glass: a black edge and a shine")
+Equal(S[health].barColour[2] == 1 and S[health].barColour[1], 0, "Blizzard's green kept by default")
+Equal(S[prd.AlternatePowerBar].alpha, 0, "the second mana bar hides while the main bar is mana")
+power = 3
+prd:UpdatePowerBar()
+Equal(S[prd.AlternatePowerBar].alpha, 1, "and shows in cat form")
+Equal(S[prd.AlternatePowerBar].height, 6, "half as tall there")
+prd:SetPowerBarHeight(20)
+Equal(S[prd.PowerBar].height == 20 and S[prd.AlternatePowerBar].height, 10, "still half after Edit Mode changes the bars")
+power = 0
+prd:UpdateAlternatePowerBar()
+Equal(S[prd.AlternatePowerBar].alpha == 0 and S[prd.AlternatePowerBar].height, 20, "hidden again in caster form, at full height")
+-- Blizzard recolours the power bar as your power changes; Default follows it.
+prd.PowerBar:SetStatusBarColor(1, 1, 0)
+Equal(S[prd.PowerBar].barColour[1] == 1 and S[prd.PowerBar].barColour[2], 1, "Blizzard's energy yellow kept")
+ns.Set("prdPower", "purple")
+ns.Resource:Apply()
+Equal(S[prd.PowerBar].barColour[1] == .6 and S[prd.AlternatePowerBar].barColour[1], .6, "your own colour instead, on both power bars")
+prd.PowerBar:SetStatusBarColor(0, 0, 1)
+Equal(S[prd.PowerBar].barColour[1], .6, "and it stays when Blizzard recolours")
+ns.Set("barStyle", "outline")
+ns.Resource:Apply()
+Equal(S[prd.PowerBar].barColour[4], .45, "Outline: a see-through fill")
+Equal(S[Piece(prd.PowerBar, "BACKGROUND", -8)].color[1], .6, "inside an edge in its colour")
+ns.Set("prdHideRepeat", false)
+ns.Resource:Apply()
+Equal(S[prd.AlternatePowerBar].alpha, 1, "the repeat bar can stay")
+power = 3
+prd:UpdatePowerBar()
+Equal(S[prd.AlternatePowerBar].height, 20, "at full size in forms too")
+power = 0
+Equal(#printed, 0, "no errors")
+
+-- Restyle off: Blizzard's bars untouched, but the repeat mana bar still hides.
+Environment()
+Viewers(0)
+_G.UnitPowerType = function() return power end
+prd = PRD()
+_G.PersonalResourceDisplayFrame = prd
+ns = Load({ prdSkin = false })
+Equal(S[prd.PowerBar].barTexture, nil, "restyle off: Blizzard's own bars")
+Equal(S[prd.AlternatePowerBar].alpha, 0, "the repeat bar still hides")
+
+-- Blizzard loads the display once it's switched on.
+Environment()
+Viewers(0)
+_G.UnitPowerType = function() return power end
+ns = Load(nil)
+prd = PRD()
+_G.PersonalResourceDisplayFrame = prd
+Fire("ADDON_LOADED", "Blizzard_PersonalResourceDisplay")
+Equal(S[prd.PowerBar].barTexture, "Interface\\Buttons\\WHITE8X8", "restyled once Blizzard loads it")
+Equal(#printed, 0, "no errors from the display")
 
 print = _G.print
 io.write("Forever Enhanced Cooldown Manager checks passed: " .. checks .. " assertions.\n")

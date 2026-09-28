@@ -12,11 +12,25 @@ ns.DEFAULTS = {
     listItems = false, -- show trinkets and bag items in the /ccm spell list
     listRanks = false, -- show every rank you know as its own row
     accent = "orange", -- the /ccm window's accent colour
+    barStyle = "glass", -- Blizzard's Tracked Bars: glass, split or outline
+    barColour = "orange", -- and their colour
+    prdSkin = true, -- Blizzard's Personal Resource Display in the same design
+    prdHideRepeat = true, -- its second mana bar hidden while the main one is mana
+    prdHealth = "default", -- its bars' colours: Blizzard's, or a bar colour
+    prdPower = "default",
 }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
-local CHOICES = { accent = {} }
+ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
+ns.BAR_STYLE_NAMES = { glass = "Glass", split = "Split", outline = "Outline" }
+ns.BAR_COLOUR_KEYS = { "orange", "charcoal", "blue", "green", "purple", "class" } -- your class colour last
+ns.BAR_COLOUR_NAMES = { orange = "Orange", class = "Class", charcoal = "Charcoal", blue = "Blue", green = "Green", purple = "Purple" }
+local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true } }
 for _, key in ipairs(ns.ACCENT_KEYS) do CHOICES.accent[key] = true end
+for _, key in ipairs(ns.BAR_STYLE_KEYS) do CHOICES.barStyle[key] = true end
+for _, key in ipairs(ns.BAR_COLOUR_KEYS) do
+    CHOICES.barColour[key], CHOICES.prdHealth[key], CHOICES.prdPower[key] = true, true, true
+end
 
 function ns.Valid(key, value)
     local default = ns.DEFAULTS[key]
@@ -27,6 +41,7 @@ end
 -- Settings that only take effect after a reload.
 ns.RELOAD = {
     skin = true,
+    prdSkin = true,
 }
 
 -- Bars: each bar lists spells by name, so the highest known rank is
@@ -384,6 +399,17 @@ function ns.BarData(key)
     return bar
 end
 
+-- Blizzard's Tracked Bars coloured one by one: the bar's spell ID -> a bar
+-- colour. Bars not listed use the colour for all bars.
+function ns.BarColours()
+    if not db then return {} end
+    if type(db.barColours) ~= "table" then db.barColours = {} end
+    for id, key in pairs(db.barColours) do
+        if not (Finite(id) and id > 0 and ns.Valid("barColour", key)) then db.barColours[id] = nil end
+    end
+    return db.barColours
+end
+
 -- Spells added by name or ID that aren't in your spellbook: name -> spell IDs.
 function ns.CustomSpells()
     if not db then return {} end
@@ -532,6 +558,10 @@ local function EncodeBars()
         Put("u" .. i, name)
         Put("u" .. i .. ".ids", table.concat(ns.CustomSpells()[name], ","))
     end
+    local coloured = {}
+    for id in pairs(ns.BarColours()) do coloured[#coloured + 1] = id end
+    table.sort(coloured)
+    for _, id in ipairs(coloured) do Put("bc." .. id, ns.BarColours()[id]) end
     return table.concat(out)
 end
 
@@ -601,6 +631,13 @@ local function DecodeV2(text)
         local ids = {}
         for id in (values["u" .. i .. ".ids"] or ""):gmatch("%d+") do ids[#ids + 1] = tonumber(id) end
         if #name <= 60 and #ids > 0 then decoded.custom[name] = ids end
+    end
+    for key, value in pairs(values) do
+        local id = tonumber(key:match("^bc%.(%d+)$") or "")
+        if id and id > 0 and ns.Valid("barColour", value) then
+            decoded.barColours = decoded.barColours or {}
+            decoded.barColours[id] = value
+        end
     end
     if next(decoded.profiles) == nil then decoded.profiles, decoded.chars = nil, nil end
     return decoded
@@ -684,6 +721,14 @@ function ns.Set(key, value)
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 
+-- A Tracked Bar's own colour, or nil to go back to the colour for all bars.
+function ns.SetBarColour(spellID, key)
+    if not db or not (Finite(spellID) and spellID > 0) then return end
+    ns.BarColours()[spellID] = key ~= nil and ns.Valid("barColour", key) and key or nil
+    WriteBackup()
+    if ns.window and ns.window:IsShown() then ns.window:Refresh() end
+end
+
 -- Called after any change to a bar's data.
 function ns.SaveBars()
     WriteBackup()
@@ -699,6 +744,21 @@ end
 function ns.CooldownManagerOn()
     if not (C_CVar and C_CVar.GetCVarBool) then return true end
     return C_CVar.GetCVarBool("cooldownViewerEnabled") ~= false
+end
+
+-- Blizzard's Personal Resource Display, Options > Combat.
+function ns.PersonalDisplayOn()
+    if not (C_CVar and C_CVar.GetCVarBool) then return true end
+    return C_CVar.GetCVarBool("nameplateShowSelf") ~= false
+end
+
+-- Switches one of Blizzard's own settings on, outside combat: true when it's
+-- on afterwards, or false and why not.
+function ns.TurnOn(cvar)
+    if InCombatLockdown() then return false, "Finish combat first." end
+    if not (C_CVar and C_CVar.SetCVar and C_CVar.GetCVarBool) then return false end
+    pcall(C_CVar.SetCVar, cvar, "1")
+    return C_CVar.GetCVarBool(cvar) == true
 end
 
 -- Escape closes the /ccm window. The key is borrowed only while the window is
@@ -776,7 +836,7 @@ local function Load()
     for key, value in pairs(flags) do
         if ns.restored or db[key] == nil then db[key] = value end
     end
-    for _, field in ipairs({ "bars", "profiles", "chars", "custom" }) do
+    for _, field in ipairs({ "bars", "profiles", "chars", "custom", "barColours" }) do
         if backup[field] ~= nil and (ns.restored or db[field] == nil) then db[field] = backup[field] end
     end
     db.session = math.max(session or 0, backup.session or 0) + 1
@@ -796,6 +856,7 @@ local function Load()
     BuildOptionsEntry()
 
     if ns.loaded.skin and ns.Skin then ns.Skin:Start() end
+    if ns.Resource then ns.Resource:Start() end
     if ns.Bars then ns.Bars:Start() end
 end
 

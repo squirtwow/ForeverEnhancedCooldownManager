@@ -1,13 +1,30 @@
 -- The look shared by Blizzard's restyled Cooldown Manager and the addon's own
 -- bars: square icon art zoomed past its built-in bevel with no frame around
--- it, big bold countdown numbers, and flat charcoal bars.
+-- it, big bold countdown numbers, and flat bars in a colour of your choice.
 local _, ns = ...
 
 local S = {}
 ns.Style = S
 
 S.FLAT = "Interface\\Buttons\\WHITE8X8"
-S.FILL = { .36, .38, .41 } -- a bar's fill
+-- Colours for Blizzard's Tracked Bars; "class" (not listed) is your class colour.
+S.BAR_COLOURS = {
+    orange = { 1, .5, .25 }, -- Blizzard's own
+    charcoal = { .36, .38, .41 },
+    blue = { .24, .55, .88 },
+    green = { .38, .74, .30 },
+    purple = { .6, .43, .91 },
+}
+-- A bar colour by its key; "class" is your class colour.
+function S:BarColour(key)
+    if key == "class" then
+        local _, class = UnitClass("player")
+        local colour = class and (C_ClassColor and C_ClassColor.GetClassColor and C_ClassColor.GetClassColor(class)
+            or RAID_CLASS_COLORS and RAID_CLASS_COLORS[class])
+        if colour then return { colour.r, colour.g, colour.b } end
+    end
+    return S.BAR_COLOURS[key] or S.BAR_COLOURS.orange
+end
 S.TRACK = { .08, .08, .09, .85 } -- behind a bar's fill
 S.ZOOM = { .08, .92, .08, .92 } -- trims the icon art's own bevelled edge
 

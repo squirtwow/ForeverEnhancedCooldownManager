@@ -27,77 +27,390 @@ local function Detail(page, text, x, y, width)
     return detail
 end
 
-local function BuildLook(window, page)
-    T:Heading(page, "Blizzard's Cooldown Manager"):SetPoint("TOPLEFT", 16, -16)
-    local look = T:Check(page, "Charcoal look", function(self)
-        ns.Set("skin", self:GetChecked())
+-- Look: Blizzard's Cooldown Manager restyled, laid out like a bar's page: a
+-- title row, a panel with a live preview bar, the choices under it, your
+-- Tracked Bars to colour one by one, and the window's accent at the foot.
+local SWATCH, SWATCH_GAP = 20, 6 -- colour swatches
+local ROW, ROW_SWATCH = 24, 16 -- the list of Tracked Bars
+
+local function Swatch(parent, size, onClick)
+    local swatch = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    swatch:SetSize(size, size)
+    swatch:SetScript("OnClick", onClick)
+    return swatch
+end
+
+-- Your class icon on the Class swatch, so it isn't taken for a second orange
+-- (or whichever colour your class shares).
+local function ClassIcon(swatch)
+    local _, class = UnitClass("player")
+    if not class then return end
+    local icon = swatch:CreateTexture(nil, "ARTWORK")
+    icon:SetPoint("TOPLEFT", 2, -2)
+    icon:SetPoint("BOTTOMRIGHT", -2, 2)
+    local atlas, coords = "classicon-" .. class:lower(), CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+        icon:SetAtlas(atlas)
+    elseif coords then
+        icon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
+        icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+    else
+        icon:Hide()
+        return
+    end
+    swatch.icon = icon
+end
+
+-- A swatch in its colour, outlined in white when it's the one chosen.
+local function PaintSwatch(swatch, colour, chosen)
+    local border = chosen and { 1, 1, 1, 1 } or T.CONTROL_BORDER
+    T:Flat(swatch, { colour[1], colour[2], colour[3], 1 }, border)
+end
+
+local function BuildLook(window, page, width)
+    local inner = width - 32
+    local function Redraw()
+        if ns.Skin then ns.Skin:ApplyBarLook() end
+        if ns.Resource then ns.Resource:Apply() end
+        window:Refresh()
+    end
+    local function Note(text) window.note:SetText(text) end
+    local function Unnote() window.note:SetText(window.lastNote or "") end
+
+    -- Title row; a reload is offered at the right once one is needed.
+    local title = T:Heading(page, "Look")
+    title:SetPoint("TOPLEFT", 16, -16)
+    local about = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    about:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    about:SetText("Blizzard's Cooldown Manager, restyled")
+    local off = T:Text(page, "GameFontHighlightSmall", T.WARN)
+    off:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    off:SetText("Blizzard's Cooldown Manager is off.")
+    window.off = off
+    local managerOn = T:Button(page, "Turn on", 70, 18)
+    managerOn:SetPoint("LEFT", off, "RIGHT", 8, 0)
+    managerOn:SetScript("OnClick", function()
+        local on, why = ns.TurnOn("cooldownViewerEnabled")
+        window:Say(on and "Blizzard's Cooldown Manager is on." or why
+            or "It couldn't be switched on here: Options > Gameplay > Advanced Options.")
         window:Refresh()
     end)
-    look:SetPoint("TOPLEFT", 16, -36)
-    window.look = look
-    Detail(page, "Square frameless icons, big bold countdown numbers and charcoal bars on Blizzard's own "
-        .. "Cooldown Manager. Needs a reload.", 34, -56)
-
-    -- Shown when Blizzard's Cooldown Manager is switched off.
-    local off = T:Text(page, "GameFontHighlightSmall", T.WARN)
-    off:SetPoint("TOPLEFT", 16, -92)
-    off:SetWidth(440)
-    off:SetText("Blizzard's Cooldown Manager is off: Options > Gameplay > Advanced Options.")
-    window.off = off
-    Detail(page, "To hide Blizzard's countdown numbers, open Edit Mode, click one of its bars and untick "
-        .. "its timer option.", 16, -112, 440)
-
-    T:Heading(page, "Accent"):SetPoint("TOPLEFT", 16, -156)
-    local swatches = {}
-    local chosen = T:Text(page, "GameFontHighlightSmall", T.MUTED)
-    chosen:SetPoint("TOPLEFT", 16 + #ns.ACCENT_KEYS * 28 + 6, -180)
-    for i, key in ipairs(ns.ACCENT_KEYS) do
-        local swatch = CreateFrame("Button", nil, page, "BackdropTemplate")
-        swatch:SetSize(20, 20)
-        swatch:SetPoint("TOPLEFT", 16 + (i - 1) * 28, -176)
-        local colour = T.ACCENTS[key].colour
-        T:Flat(swatch, { colour[1], colour[2], colour[3], 1 }, T.CONTROL_BORDER)
-        swatch.key = key
-        swatch:SetScript("OnClick", function()
-            ns.Set("accent", key)
-            T:Repaint()
-            window:Refresh()
-        end)
-        swatches[i] = swatch
-    end
-    window.swatches = swatches
-
-    -- The reload a changed charcoal look needs, at the foot of the page.
-    local hint = T:Text(page, "GameFontHighlightSmall", T.MUTED)
-    hint:SetPoint("BOTTOMLEFT", 16, 44)
-    hint:SetWidth(300)
-    window.hint = hint
-    local reload = T:Button(page, "Reload UI", 140)
-    reload:SetPoint("BOTTOMLEFT", 16, 16)
+    window.turnOnManager = managerOn
+    local reload = T:Button(page, "Reload to apply", 120, 20)
+    reload:SetPoint("TOPRIGHT", -16, -12)
     -- Straight from the click, while the window is still shown.
     reload:SetScript("OnClick", function()
         if InCombatLockdown() then
-            hint:SetText("Finish combat first, then reload.")
+            window:Say("Finish combat first, then reload.")
+            window:Refresh()
             return
         end
         ReloadUI()
     end)
     window.reload = reload
 
-    function page:Refresh()
-        look:SetChecked(ns.Get("skin"))
-        off:SetShown(not ns.CooldownManagerOn())
-        local needsReload = ns.NeedsReload()
-        reload:SetShown(needsReload)
-        hint:SetText(needsReload and "Reload UI to apply your change." or "")
-        local current = ns.Get("accent")
-        for _, swatch in ipairs(swatches) do
-            local border = swatch.key == current and { 1, 1, 1, 1 } or T.CONTROL_BORDER
-            swatch:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+    -- The preview: a bar like Blizzard's, in the design and colour chosen.
+    local tray = CreateFrame("Frame", nil, page, "BackdropTemplate")
+    tray:SetPoint("TOPLEFT", 16, -38)
+    tray:SetSize(inner, 48)
+    T:Flat(tray, T.PANEL, T.BORDER)
+    if ns.Skin and ns.Skin.Sample then
+        window.preview = ns.Skin:Sample(tray, 300)
+        window.preview:SetPoint("LEFT", tray, "LEFT", 12, 0)
+    end
+    local previewNote = T:Text(tray, "GameFontHighlightSmall", T.MUTED)
+    previewNote:SetPoint("RIGHT", -12, 0)
+    previewNote:SetJustifyH("RIGHT")
+    previewNote:SetText("Preview. Changes show straight away.")
+
+    -- The choices: the design and colour, then what the look applies to.
+    local options = CreateFrame("Frame", nil, page)
+    options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
+    options:SetSize(inner, 120)
+    local function Label(text, y)
+        local label = T:Text(options, "GameFontHighlight")
+        label:SetPoint("TOPLEFT", 0, y)
+        label:SetText(text)
+    end
+    Label("Design", -4)
+    local designs = {}
+    for _, key in ipairs(ns.BAR_STYLE_KEYS) do designs[#designs + 1] = { key = key, label = ns.BAR_STYLE_NAMES[key] } end
+    local design = T:Segmented(options, designs, 210, function(key)
+        ns.Set("barStyle", key)
+        Redraw()
+    end)
+    design:SetPoint("TOPLEFT", 100, 0)
+    window.barDesign = design
+    Label("Colour", -32)
+    local barSwatches = {}
+    for i, key in ipairs(ns.BAR_COLOUR_KEYS) do
+        local swatch = Swatch(options, SWATCH, function()
+            ns.Set("barColour", key)
+            Redraw()
+        end)
+        swatch:SetPoint("TOPLEFT", 100 + (i - 1) * (SWATCH + SWATCH_GAP), -28)
+        swatch.key = key
+        if key == "class" then
+            ClassIcon(swatch)
+            swatch:SetScript("OnEnter", function() Note("Your class colour.") end)
+            swatch:SetScript("OnLeave", Unnote)
         end
-        chosen:SetText(T.ACCENTS[current].name)
+        barSwatches[i] = swatch
+    end
+    window.barSwatches = barSwatches
+    local barChosen = T:Text(options, "GameFontHighlightSmall", T.MUTED)
+    barChosen:SetPoint("TOPLEFT", 100 + #ns.BAR_COLOUR_KEYS * (SWATCH + SWATCH_GAP) + 2, -32)
+
+    -- What the look applies to; the footer explains each.
+    local function Choice(label, key, y, note, after)
+        local check = T:Check(options, label, function(self)
+            ns.Set(key, self:GetChecked())
+            if after then after() end
+            window:Refresh()
+        end)
+        check:SetPoint("TOPLEFT", 0, y)
+        check:HookScript("OnEnter", function() Note(note) end)
+        check:HookScript("OnLeave", Unnote)
+        return check
+    end
+    local look = Choice("Apply this look to the Cooldown Manager", "skin", -60,
+        "Square icons, bold numbers and these bars. Needs a reload. Countdown numbers: Edit Mode, click a bar, untick its timer.")
+    local personal = Choice("Apply this look to the Personal Resource Display", "prdSkin", -82,
+        "Blizzard's health and power bars under you (Options > Combat). Needs a reload.")
+    local repeatMana = Choice("Extra mana bar: hide in caster form, half size in forms", "prdHideRepeat", -104,
+        "The second mana bar some specs get, under your main bar.",
+        function() if ns.Resource then ns.Resource:Apply() end end)
+    window.look, window.personal, window.repeatMana = look, personal, repeatMana
+
+    -- Each Tracked Bar in a colour of its own.
+    local eachTitle = T:Heading(page, "Each bar")
+    eachTitle:SetPoint("TOPLEFT", options, "BOTTOMLEFT", 0, -12)
+    local eachAbout = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    eachAbout:SetPoint("LEFT", eachTitle, "RIGHT", 10, 0)
+    eachAbout:SetText("a colour of its own for any of your bars")
+    local personalOn = T:Button(page, "Turn on", 70, 18)
+    personalOn:SetPoint("TOPRIGHT", options, "BOTTOMRIGHT", 0, -8)
+    personalOn:SetScript("OnClick", function()
+        local on, why = ns.TurnOn("nameplateShowSelf")
+        window:Say(on and "Your Personal Resource Display is on." or why
+            or "It couldn't be switched on here: Options > Combat > Personal Resource Display.")
+        window:Refresh()
+    end)
+    local personalOff = T:Text(page, "GameFontHighlightSmall", T.WARN)
+    personalOff:SetPoint("RIGHT", personalOn, "LEFT", -8, 0)
+    personalOff:SetJustifyH("RIGHT")
+    personalOff:SetText("Your Personal Resource Display is off.")
+    window.turnOnPersonal, window.personalOff = personalOn, personalOff
+    local listPanel = CreateFrame("Frame", nil, page, "BackdropTemplate")
+    listPanel:SetPoint("TOPLEFT", eachTitle, "BOTTOMLEFT", 0, -8)
+    listPanel:SetPoint("BOTTOMRIGHT", -16, 44)
+    T:Box(listPanel)
+    window.eachPanel = listPanel
+    local empty = T:Text(listPanel, "GameFontHighlightSmall", T.MUTED)
+    empty:SetPoint("TOPLEFT", 12, -12)
+    empty:SetWidth(inner - 24)
+    window.eachEmpty = empty
+    local listWidth = inner - 30
+    -- Pinned by two corners, again once the page shows (see the bar page).
+    local scroll = T:Scroll(listPanel, listWidth)
+    local function Pin()
+        scroll:ClearAllPoints()
+        scroll:SetPoint("TOPLEFT", listPanel, "TOPLEFT", 8, -6)
+        scroll:SetPoint("BOTTOMRIGHT", listPanel, "BOTTOMRIGHT", -16, 6)
+        scroll:ScrollTo(scroll:GetVerticalScroll() or 0)
+    end
+    Pin()
+    page:HookScript("OnShow", function() C_Timer.After(0, Pin) end)
+    local rows = {}
+    window.eachRows = rows
+    local SWATCHES_AT = 260
+    local function Row(i)
+        if rows[i] then return rows[i] end
+        local row = CreateFrame("Frame", nil, scroll.content)
+        row:SetSize(listWidth, ROW)
+        row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW)
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(18, 18)
+        row.icon:SetPoint("LEFT", 4, 0)
+        ns.Style:Zoom(row.icon)
+        row.name = T:Text(row, "GameFontHighlight")
+        row.name:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+        row.name:SetWidth(SWATCHES_AT - 40)
+        row.swatches = {}
+        for s, key in ipairs(ns.BAR_COLOUR_KEYS) do
+            -- Picking the bar's own colour again goes back: to the colour for
+            -- all Tracked Bars, or Blizzard's own for the personal bars.
+            local swatch = Swatch(row, ROW_SWATCH, function()
+                local entry = row.entry
+                if entry.spell then
+                    ns.SetBarColour(entry.spell, ns.BarColours()[entry.spell] ~= key and key or nil)
+                else
+                    ns.Set(entry.setting, ns.Get(entry.setting) ~= key and key or "default")
+                end
+                Redraw()
+            end)
+            swatch:SetPoint("LEFT", SWATCHES_AT + (s - 1) * (ROW_SWATCH + 6), 0)
+            swatch.key = key
+            if key == "class" then ClassIcon(swatch) end
+            swatch:SetScript("OnEnter", function()
+                Note(row.entry and row.entry.setting and "A colour for this bar. Click it again for Blizzard's own."
+                    or "A colour for this bar. Click it again to use the colour for all bars.")
+            end)
+            swatch:SetScript("OnLeave", Unnote)
+            row.swatches[s] = swatch
+        end
+        row.chosen = T:Text(row, "GameFontHighlightSmall", T.MUTED)
+        row.chosen:SetPoint("LEFT", SWATCHES_AT + #ns.BAR_COLOUR_KEYS * (ROW_SWATCH + 6) + 4, 0)
+        rows[i] = row
+        return row
+    end
+
+    -- The window's own accent, at the foot.
+    local accentLabel = T:Text(page, "GameFontHighlight")
+    accentLabel:SetPoint("BOTTOMLEFT", 16, 18)
+    accentLabel:SetText("Window accent")
+    local swatches = {}
+    for i, key in ipairs(ns.ACCENT_KEYS) do
+        local swatch = Swatch(page, SWATCH, function()
+            ns.Set("accent", key)
+            T:Repaint()
+            window:Refresh()
+        end)
+        swatch:SetPoint("BOTTOMLEFT", 126 + (i - 1) * (SWATCH + SWATCH_GAP), 14)
+        swatch.key = key
+        swatches[i] = swatch
+    end
+    window.swatches = swatches
+    local chosen = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    chosen:SetPoint("BOTTOMLEFT", 126 + #ns.ACCENT_KEYS * (SWATCH + SWATCH_GAP) + 2, 18)
+
+    -- Why the list is empty, if it is.
+    local function EmptyText(spells)
+        if not ns.loaded.skin then
+            return ns.Get("skin") and "Reload first, then colour your bars one by one here."
+                or "Tick Restyle and reload to colour your bars one by one."
+        end
+        if not ns.CooldownManagerOn() then return "Blizzard's Cooldown Manager is off." end
+        if #spells == 0 then
+            return "No Tracked Bars yet. Add buffs to Tracked Bars in Blizzard's Cooldown Settings, and they'll show here."
+        end
+    end
+
+    function page:Refresh()
+        local on = ns.CooldownManagerOn()
+        off:SetShown(not on)
+        managerOn:SetShown(not on)
+        about:SetShown(on)
+        local personalShown = ns.Get("prdSkin") and not ns.PersonalDisplayOn()
+        personalOff:SetShown(personalShown)
+        personalOn:SetShown(personalShown)
+        reload:SetShown(ns.NeedsReload())
+        look:SetChecked(ns.Get("skin"))
+        personal:SetChecked(ns.Get("prdSkin"))
+        repeatMana:SetChecked(ns.Get("prdHideRepeat"))
+        design:SetSelected(ns.Get("barStyle"))
+        local barColour = ns.Get("barColour")
+        for _, swatch in ipairs(barSwatches) do
+            PaintSwatch(swatch, ns.Style:BarColour(swatch.key), swatch.key == barColour)
+        end
+        barChosen:SetText(ns.BAR_COLOUR_NAMES[barColour])
+        local accent = ns.Get("accent")
+        for _, swatch in ipairs(swatches) do
+            PaintSwatch(swatch, T.ACCENTS[swatch.key].colour, swatch.key == accent)
+        end
+        chosen:SetText(T.ACCENTS[accent].name)
+
+        -- The Personal Resource Display's bars first, then your Tracked Bars.
+        local entries = {}
+        if ns.loaded.prdSkin and ns.Resource and ns.Resource:Shown() then
+            entries[1] = { setting = "prdHealth", name = "Personal health", icon = "Interface\\Icons\\INV_Potion_54" }
+            entries[2] = { setting = "prdPower", name = "Personal power", icon = "Interface\\Icons\\INV_Potion_76" }
+        end
+        local personalRows = #entries
+        local spells = ns.loaded.skin and on and ns.Skin and ns.Skin:TrackedBars() or {}
+        local why = EmptyText(spells)
+        if not why then
+            for _, id in ipairs(spells) do entries[#entries + 1] = { spell = id } end
+        end
+        empty:ClearAllPoints()
+        empty:SetPoint("TOPLEFT", 12, -(12 + personalRows * ROW))
+        empty:SetText(why or "")
+        empty:SetShown(why ~= nil)
+        local own = ns.BarColours()
+        for i, entry in ipairs(entries) do
+            local row = Row(i)
+            row.entry = entry
+            local chosen
+            if entry.spell then
+                local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(entry.spell)
+                row.name:SetText(type(name) == "string" and name or ("Spell " .. entry.spell))
+                row.icon:SetTexture(C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.spell) or 134400)
+                chosen = own[entry.spell]
+            else
+                row.name:SetText(entry.name)
+                row.icon:SetTexture(entry.icon)
+                chosen = ns.Get(entry.setting)
+                if chosen == "default" then chosen = nil end
+            end
+            for _, swatch in ipairs(row.swatches) do
+                PaintSwatch(swatch, ns.Style:BarColour(swatch.key), swatch.key == chosen)
+            end
+            row.chosen:SetText(chosen and ns.BAR_COLOUR_NAMES[chosen] or "Default")
+            row:Show()
+        end
+        for i = #entries + 1, #rows do rows[i]:Hide() end
+        scroll.content:SetHeight(math.max(1, #entries * ROW))
+        scroll:ScrollTo(scroll:GetVerticalScroll() or 0)
     end
 end
+
+-- A link to copy, in the window's own look: an addon can't open a web page
+-- or the CurseForge app itself. The link stays as it is, selected.
+local copyBox
+local function CopyLink(title, url)
+    if not copyBox then
+        local box = CreateFrame("Frame", "FECMCopyLink", UIParent, "BackdropTemplate")
+        box:SetSize(420, 136)
+        box:SetPoint("CENTER", 0, 120)
+        box:SetFrameStrata("FULLSCREEN_DIALOG")
+        box:SetToplevel(true)
+        box:EnableMouse(true)
+        T:Flat(box, T.BG, T.CONTROL_BORDER)
+        T:Paint(function(accent) box:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
+        box.title = T:Heading(box, "")
+        box.title:SetPoint("TOPLEFT", 16, -16)
+        local note = T:Text(box, "GameFontHighlightSmall", T.MUTED)
+        note:SetPoint("TOPLEFT", 16, -36)
+        note:SetWidth(388)
+        note:SetText("Press Ctrl+C to copy, then paste it into your browser. On CurseForge, Install opens the CurseForge app.")
+        box.input = T:Input(box, "", 388)
+        box.input:SetPoint("TOPLEFT", 16, -72)
+        box.input:SetScript("OnTextChanged", function(self)
+            if self:GetText() ~= box.url then
+                self:SetText(box.url or "")
+                self:HighlightText()
+            end
+        end)
+        box.input:SetScript("OnEscapePressed", function() box:Hide() end)
+        box.input:SetScript("OnEnterPressed", function() box:Hide() end)
+        local close = T:Button(box, "Close", 90, 22)
+        close:SetPoint("BOTTOMRIGHT", -16, 12)
+        close:SetScript("OnClick", function() box:Hide() end)
+        box.close = close
+        copyBox = box
+    end
+    copyBox.url = url
+    copyBox.title:SetText(title:upper())
+    copyBox:Show()
+    copyBox:Raise()
+    copyBox.input:SetText(url)
+    copyBox.input:HighlightText()
+    copyBox.input:SetFocus()
+end
+local ERAUI_LINKS = {
+    { label = "CurseForge", url = "https://www.curseforge.com/wow/addons/eraui" },
+    { label = "GitHub", url = "https://github.com/squirtwow/EraUI" },
+}
 
 local function BuildGeneral(window, page)
     local B = ns.Bars
@@ -132,12 +445,54 @@ local function BuildGeneral(window, page)
     Detail(page, "Unlocked bars show a box you can drag. Closing this window locks them again.", 16, -114)
 
     T:Heading(page, "Saved settings"):SetPoint("TOPLEFT", 16, -150)
+
+    -- More from Squirt: the author's other addons, and a way to open them.
+    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -236)
+    local more = CreateFrame("Frame", nil, page, "BackdropTemplate")
+    more:SetPoint("TOPLEFT", 16, -256)
+    more:SetSize(WIDTH - NAV - 34, 74)
+    T:Flat(more, T.PANEL, T.BORDER)
+    local moreIcon = more:CreateTexture(nil, "ARTWORK")
+    moreIcon:SetSize(36, 36)
+    moreIcon:SetPoint("TOPLEFT", 12, -12)
+    moreIcon:SetTexture("Interface\\AddOns\\EraUI\\Media\\EraUIIcon.tga")
+    local moreName = T:Text(more, "GameFontHighlight")
+    moreName:SetPoint("TOPLEFT", 60, -12)
+    moreName:SetText("EraUI")
+    local moreAbout = T:Text(more, "GameFontHighlightSmall", T.MUTED)
+    moreAbout:SetPoint("TOPLEFT", 60, -30)
+    moreAbout:SetWidth(330) -- clear of the buttons on the right
+    moreAbout:SetText("The Classic look for WoW Forever's whole interface, with quality of life options.")
+    local moreState = T:Text(more, "GameFontHighlightSmall", T.MUTED)
+    moreState:SetPoint("BOTTOMLEFT", 60, 10)
+    local moreOpen = T:Button(more, "Open", 80, 22)
+    moreOpen:SetPoint("RIGHT", -12, 0)
+    moreOpen:SetScript("OnClick", function()
+        local run = SlashCmdList and SlashCmdList.ERAUI
+        if run then
+            window:Hide()
+            run("")
+        end
+    end)
+    local moreLinks = {}
+    for i, link in ipairs(ERAUI_LINKS) do
+        local button = T:Button(more, link.label, 90, 22)
+        button:SetPoint("RIGHT", -12 - (#ERAUI_LINKS - i) * 98, 0)
+        button:SetScript("OnClick", function() CopyLink("EraUI on " .. link.label, link.url) end)
+        moreLinks[i] = button
+    end
+    window.moreOpen, window.moreState, window.moreLinks = moreOpen, moreState, moreLinks
     local kept = T:Text(page, "GameFontHighlightSmall", T.MUTED)
     kept:SetPoint("TOPLEFT", 16, -170)
     kept:SetWidth(440)
     window.kept = kept
 
     function page:Refresh()
+        local installed = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EraUI")
+        moreOpen:SetShown(installed and true or false)
+        for _, button in ipairs(moreLinks) do button:SetShown(not installed) end
+        moreState:SetText(installed and "Installed. Type /era, or click Open."
+            or "Get it on CurseForge or GitHub: click one for its link.")
         bars:SetChecked(B:Enabled())
         unlock:SetLabel(B:IsUnlocked() and "Lock bars" or "Unlock bars to move")
         if ns.restored then
@@ -160,6 +515,8 @@ local function NavItem(window, nav, key, label, y, previews)
     item.fill = item:CreateTexture(nil, "BACKGROUND")
     item.fill:SetAllPoints()
     T:Fill(item.fill, T.SELECTED)
+    item.glow = T:Fade(item, T.FADE.selected)
+    item.glow:SetAllPoints()
     item.mark = item:CreateTexture(nil, "ARTWORK")
     item.mark:SetPoint("TOPLEFT")
     item.mark:SetPoint("BOTTOMLEFT")
@@ -222,6 +579,11 @@ local function BuildWindow()
     header:SetPoint("TOPRIGHT", -1, -1)
     header:SetHeight(HEADER)
     T:Flat(header, T.HEADER, T.HEADER)
+    -- The accent washes in from the right, over the title bar and the pages.
+    window.fades = { header = T:Fade(header, T.FADE.header), page = T:Fade(window, T.FADE.page) }
+    window.fades.header:SetAllPoints()
+    window.fades.page:SetPoint("TOPLEFT", NAV + 1, -(HEADER + 1))
+    window.fades.page:SetPoint("BOTTOMRIGHT", -1, FOOTER)
     local logo = CreateFrame("Frame", nil, header, "BackdropTemplate")
     logo:SetSize(24, 24)
     logo:SetPoint("LEFT", 12, 0)
@@ -278,7 +640,7 @@ local function BuildWindow()
         return page
     end
     window.pages = { look = Page(), general = Page(), bar = Page() }
-    BuildLook(window, window.pages.look)
+    BuildLook(window, window.pages.look, WIDTH - NAV - 2)
     BuildGeneral(window, window.pages.general)
     ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)
 
@@ -313,6 +675,7 @@ local function BuildWindow()
         for key, item in pairs(self.nav) do
             local chosen = key == selected
             item.fill:SetShown(chosen)
+            item.glow:SetShown(chosen)
             item.mark:SetShown(chosen)
             if item.icons then
                 local spells = ns.BarData(key).spells
