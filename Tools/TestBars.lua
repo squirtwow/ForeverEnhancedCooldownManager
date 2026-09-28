@@ -49,6 +49,14 @@ function Proto:SetShown(v) Toggled(self, v and true or false) end
 function Proto:IsShown() return S[self].shown end
 function Proto:SetScript(k, fn) S[self].scripts[k] = fn end
 function Proto:GetScript(k) return S[self].scripts[k] end
+-- Like the game: a hook runs after the script; setting a script drops hooks.
+function Proto:HookScript(k, fn)
+    local old = S[self].scripts[k]
+    S[self].scripts[k] = function(...)
+        if old then old(...) end
+        fn(...)
+    end
+end
 function Proto:RegisterEvent(e) S[self].events[e] = true end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:CreateTexture() return New("Texture", self) end
@@ -96,6 +104,8 @@ local book, usable, noMana, range, active, target, cvars, printed
 local cooldownCalls, lockdown, containers, containerCallsInCombat
 local trinket, trinketCooldown, bagItems, itemCooldown, itemCount
 local bindings, cvarOn, reloads, timers
+-- Who is logged in: a GUID tells characters apart, even with the same name.
+local character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
 
 local function Book(ranks)
     -- Two tabs: General (Attack), Balance (Moonfire ranks, Wrath, a passive,
@@ -184,6 +194,9 @@ local function Environment(keepCVars)
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
+    _G.UnitGUID = function(unit) assert(unit == "player"); return character.guid end
+    _G.UnitName = function(unit) assert(unit == "player"); return character.name end
+    _G.GetRealmName = function() return character.realm end
     _G.CustomAuraContainerSlotDefaultOptions = {}
     _G.issecretvalue = function(v) return v == SECRET end
     _G.UnitExists = function() return target end
@@ -259,14 +272,17 @@ local function Environment(keepCVars)
     _G.SetOverrideBindingClick = function(owner, _, key, button) assert(not lockdown, "binding change in combat"); bindings[owner] = key .. ":" .. button end
 end
 
-local function Load(saved)
+local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarPage.lua", "Window.lua" }) do
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarPage.lua", "ProfileMenu.lua", "Window.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
-    Fire("PLAYER_ENTERING_WORLD")
+    if not beforeLogin then
+        Fire("PLAYER_LOGIN")
+        Fire("PLAYER_ENTERING_WORLD")
+    end
     return ns
 end
 
@@ -543,7 +559,9 @@ B:SetOption("buff", "showMissing", false)
 Equal(groups.g1.enabled and slots.b1.enabled == false, true, "back to packed")
 Equal(groups.g2.enabled, false, "Clearcasting's group off after being unticked")
 Equal(#printed, 0, "no errors")
-Equal(cvars.FECMBackupBars1:find("buff.missing=0;buff.names=0;buff.timer=1;buff.spells=Thorns", 1, true) ~= nil, true, "Buffs bar backed up")
+local text = cvars.FECMBackupBars1
+Equal(text:find("12:buff.missing1:0", 1, true) ~= nil and text:find("10:buff.timer1:1", 1, true) ~= nil, true, "Buffs bar options backed up")
+Equal(text:find("7:p1.buff6:Thorns", 1, true) ~= nil, true, "and its list, in your profile")
 Equal(S[buffs.mover.label].text, "Buffs", "mover label is the bar's name")
 Equal(S[buffs.mover.label].points[1][1], "CENTER", "inside the highlight")
 
@@ -665,7 +683,7 @@ Equal(S[cdBar.icons[1].label].shown, false, "names off by default")
 Equal(Last(cdBar.icons[1].cooldown, "SetHideCountdownNumbers"), false, "countdown numbers on by default")
 B:SetOption("cd", "showTimer", false)
 Equal(Last(cdBar.icons[1].cooldown, "SetHideCountdownNumbers"), true, "and off when asked")
-Equal(cvars.FECMBackupBars1:find("cd.timer=0", 1, true) ~= nil, true, "that choice backed up")
+Equal(cvars.FECMBackupBars1:find("8:cd.timer1:0", 1, true) ~= nil, true, "that choice backed up")
 B:SetOption("cd", "showTimer", true)
 
 local found = ns.Spells:Suggest("mo", 50)
@@ -796,6 +814,122 @@ Equal(S[page.showRanks].shown, false, "nor the ranks box")
 Environment(true)
 ns = Load(nil)
 Equal(table.concat(ns.BarData("util").spells, ","), "Moonfire,Moonfire@2", "fixed ranks restored from the backup")
+
+-- Profiles --------------------------------------------------------------------------------
+
+-- Lists saved before profiles become the first character's own profile.
+Environment()
+character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+ns = Load({ useBars = true, bars = { cd = { size = 40, spells = { "Moonfire", "Wrath" } } } })
+B = ns.Bars
+local mine = "Zriel (Druid) - Zephras"
+Equal(ns.ProfileName(), mine, "first login makes a profile named Name (Class) - Realm")
+Equal(ForeverEnhancedCooldownManagerDB.chars["Player-1-0001"], mine, "kept for this character's GUID")
+Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Wrath", "the lists saved before profiles move into it")
+Equal(rawget(ForeverEnhancedCooldownManagerDB.bars.cd, "spells"), nil, "and leave the shared bar settings")
+Equal(ns.BarData("cd").size, 40, "sizes stay shared")
+Equal(B:Get("cd").count, 2, "the bar shows the profile's list")
+Equal(#printed, 0, "no warning on a normal first login")
+
+-- A second character gets its own empty profile; a same-named one is told apart.
+local saved = ForeverEnhancedCooldownManagerDB
+character = { guid = "Player-1-0002", name = "Zriel", realm = "Zephras" }
+Environment(true)
+ns = Load(saved)
+B = ns.Bars
+Equal(ns.ProfileName(), mine .. " 2", "a second character with the same name gets its own profile")
+Equal(#ns.BarData("cd").spells, 0, "starting empty")
+Equal(ns.BarData("cd").size, 40, "with the shared sizes")
+Equal(#saved.profiles[mine].cd, 2, "the first character's lists untouched")
+
+-- New, Copy, Rename and Delete.
+B:Assign("Thorns", "util")
+local ok, message = ns.NewProfile("  Healing  ")
+Equal(ok and ns.ProfileName(), "Healing", "New makes a blank profile, trimmed, and switches to it")
+Equal(message, "Made Healing, and switched to it.", "and says so")
+Equal(#ns.BarData("util").spells, 0, "blank")
+Equal(select(2, ns.NewProfile("Healing")), "Healing already exists.", "names are unique")
+Equal(select(2, ns.NewProfile("   ")), "Type a profile name first.", "a name is needed")
+Equal(select(2, ns.NewProfile("a|b")), "Profile names can't use the | character.", "no escape characters")
+Equal(select(2, ns.NewProfile(string.rep("x", 49))), "Profile names can be up to 48 characters.", "names kept short")
+ns.UseProfile(mine .. " 2")
+Equal(ns.BarData("util").spells[1], "Thorns", "switching brings back that profile's lists")
+Equal(B:Get("util").count, 1, "and redraws the bars")
+ok = ns.CopyProfile("Thorns copy")
+Equal(ok and ns.BarData("util").spells[1], "Thorns", "Copy starts with your lists")
+B:Assign("Wrath", "util")
+ns.UseProfile(mine .. " 2")
+Equal(#ns.BarData("util").spells, 1, "a copy is its own list")
+Equal(select(2, ns.UseProfile("Nope")), 'No profile is called "Nope".', "unknown names explained")
+
+-- Sharing: renaming follows every character; deleting a shared one is refused.
+ns.UseProfile(mine)
+Equal(ns.ProfileUsers(mine), 2, "two characters can share a profile")
+ok, message = ns.RenameProfile("Balance")
+Equal(ok and saved.chars["Player-1-0001"], "Balance", "renaming updates every character using it")
+Equal(saved.profiles[mine], nil, "the old name is gone")
+Equal(select(2, ns.DeleteProfile("Balance")), "Another character uses Balance, so it can't be deleted.", "a profile another character uses can't be deleted")
+ok = ns.DeleteProfile("Healing")
+Equal(ok and saved.profiles.Healing, nil, "an unused profile can be deleted by name")
+ns.UseProfile("Thorns copy")
+ok, message = ns.DeleteProfile("Thorns copy")
+Equal(ok and ns.ProfileName(), mine, "deleting your own leaves you on a fresh profile named after you")
+Equal(message, "Deleted Thorns copy. You're now on " .. mine .. ".", "and says so")
+Equal(#ns.BarData("util").spells, 0, "empty")
+lockdown = true
+Equal(select(2, ns.NewProfile("War")), "Profiles can't change in combat.", "nothing changes in combat")
+Equal(select(2, ns.UseProfile("Balance")), "Profiles can't change in combat.", "not even switching")
+lockdown = false
+
+-- Spells added by name stay while any profile uses them.
+ns.UseProfile("Balance")
+ns.AddCustom("Power Word: Fortitude", { 1243 })
+B:SetBuff("Power Word: Fortitude", true)
+ns.UseProfile(mine .. " 2")
+ns.PruneCustom()
+Equal(ns.CustomSpells()["Power Word: Fortitude"] ~= nil, true, "an added spell in another profile is remembered")
+
+-- The backup keeps profiles, and a lost settings file is noticed ------------------------
+
+character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+Environment(true)
+ns = Load(nil) -- the game lost the settings file
+Equal(ns.ProfileName(), "Balance", "profile restored for this character")
+Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "with its lists")
+Equal(ns.CustomSpells()["Power Word: Fortitude"][1], 1243, "and added spells")
+Equal(ForeverEnhancedCooldownManagerDB.chars["Player-1-0002"], mine .. " 2", "who uses what, too")
+Equal(ns.restored, true, "the loss is noticed")
+Equal(printed[#printed], "|cffffd100Forever Enhanced Cooldown Manager:|r " .. ns.RESTORED_TEXT, "and you're told at login")
+
+-- A settings file older than the backup means the last session wasn't kept.
+saved = ForeverEnhancedCooldownManagerDB
+local stale = {}
+for key, value in pairs(saved) do stale[key] = value end
+stale.session = saved.session - 1
+stale.accent = "green"
+Environment(true)
+ns = Load(stale)
+Equal(ns.restored, true, "an older settings file is noticed")
+Equal(ns.Get("accent"), "orange", "and the newer backup is used")
+
+-- A normal reload keeps the file and says nothing.
+saved = ForeverEnhancedCooldownManagerDB
+local before = saved.session
+Environment(true)
+ns = Load(saved)
+Equal(ns.restored, false, "a kept settings file is trusted")
+Equal(#printed, 0, "with no warning")
+Equal(saved.session, before + 1, "each login is numbered")
+
+-- A character that logs in before its GUID is known is sorted out at login.
+Environment()
+local guid = character.guid
+character.guid = nil
+ns = Load({ useBars = true }, true)
+Equal(ns.ProfileName(), nil, "no profile until the character is known")
+character.guid = guid
+Fire("PLAYER_LOGIN")
+Equal(ns.ProfileName(), "Zriel (Druid) - Zephras", "worked out at login")
 
 -- The /fecm window ------------------------------------------------------------------------
 
@@ -961,6 +1095,93 @@ cvarOn = false
 w:Select("look")
 Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
 Equal(#printed, 0, "no errors")
+
+-- The profile menu ---------------------------------------------------------------------
+
+Environment()
+character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+ns = Load({ useBars = true })
+B = ns.Bars
+SlashCmdList.FECM("")
+w = FECMFrame
+local profile = w.profileButton
+Equal(S[profile.label].text, "|cff8b8d92Profile|r   Zriel (Druid) - Zephras", "the header shows your profile")
+Equal(S[w.profilePanel].shown, false, "the menu starts closed")
+profile:Click()
+Equal(S[w.profilePanel].shown, true, "clicking opens it")
+local function MenuRow(name)
+    for _, f in ipairs(frames) do
+        if f.profile == name and S[f].shown then return f end
+    end
+end
+local own = MenuRow("Zriel (Druid) - Zephras")
+Equal(own ~= nil and S[own.users].text, "you", "each profile listed with who uses it")
+Equal(S[own.fill].shown, true, "yours highlighted")
+local input = w.profileInput
+Equal(w.profileActions.delete, nil, "no Delete button to type a name for")
+input:SetText("Resto")
+w.profileActions.new:Click()
+Equal(ns.ProfileName(), "Resto", "New from the menu")
+Equal(S[w.note].text, "Made Resto, and switched to it.", "confirmed in the footer")
+Equal(S[w.profilePanel].shown, false, "the menu closes once you've switched")
+Equal(input:GetText(), "", "the box clears")
+profile:Click()
+Equal(S[MenuRow("Zriel (Druid) - Zephras").users].text, "unused", "the other profile shows as unused")
+MenuRow("Zriel (Druid) - Zephras"):Click()
+Equal(ns.ProfileName(), "Zriel (Druid) - Zephras", "clicking a profile switches to it")
+Equal(S[w.profilePanel].shown, false, "and closes the menu")
+
+-- Deleting: the x on a row, then a question.
+profile:Click()
+local confirm = w.confirm
+Equal(S[confirm.shade].shown, false, "no question until asked")
+MenuRow("Resto").remove:Click()
+Equal(S[confirm.shade].shown, true, "x asks first")
+Equal(S[confirm.dialog.title].text, 'Delete "Resto"?', "naming the profile")
+Equal(S[confirm.dialog.detail].text, "This can't be undone.", "with a warning")
+confirm.no:Click()
+Equal(S[confirm.shade].shown, false, "Cancel closes the question")
+Equal(ns.ProfileNames()[1], "Resto", "and keeps the profile")
+MenuRow("Resto").remove:Click()
+confirm.yes:Click()
+Equal(#ns.ProfileNames(), 1, "Delete removes it")
+Equal(S[w.note].text, "Deleted Resto.", "and says so")
+Equal(S[w.profilePanel].shown, true, "the menu stays open, showing the shorter list")
+ForeverEnhancedCooldownManagerDB.chars["Player-1-0009"] = "Zriel (Druid) - Zephras"
+w:Refresh()
+MenuRow("Zriel (Druid) - Zephras").remove:Click()
+Equal(S[confirm.shade].shown, false, "a profile another character uses isn't asked about")
+Equal(S[w.note].text, "Another character uses Zriel (Druid) - Zephras, so it can't be deleted.", "the reason is given instead")
+ForeverEnhancedCooldownManagerDB.chars["Player-1-0009"] = nil
+w:Refresh()
+MenuRow("Zriel (Druid) - Zephras").remove:Click()
+Equal(S[confirm.dialog.detail].text:find("new, empty profile", 1, true) ~= nil, true, "deleting your own says where you'll go")
+confirm.yes:Click()
+Equal(ns.ProfileName(), "Zriel (Druid) - Zephras", "a fresh profile named after you")
+Equal(S[w.profilePanel].shown, false, "and the menu closes, as for any switch")
+profile:Click()
+MenuRow("Zriel (Druid) - Zephras").remove:Click()
+w:Hide()
+Equal(S[confirm.shade].shown, false, "closing the window drops the question")
+ns.ShowWindow()
+input:SetText("")
+w.profileActions.rename:Click()
+Equal(S[w.note].text, "Type a profile name first.", "problems explained in the footer")
+w:Select("look")
+Equal(S[w.profilePanel].shown, false, "changing page closes the menu")
+
+-- Settings the game didn't keep are pointed out in the window too.
+Environment(true)
+ns = Load(nil)
+SlashCmdList.FECM("")
+w = FECMFrame
+local footer
+for _, f in ipairs(objects) do
+    if S[f].text == "Settings restored from backup at login. See General." then footer = f end
+end
+Equal(footer ~= nil and S[footer].colour[1], 1, "the footer warns, in orange")
+w:Select("general")
+Equal(S[w.kept].text:find(ns.RESTORED_TEXT, 1, true) ~= nil, true, "and General explains")
 
 print = _G.print
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

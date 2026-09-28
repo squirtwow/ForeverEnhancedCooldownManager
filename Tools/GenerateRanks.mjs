@@ -62,8 +62,9 @@ const groups = new Map();
 for (const row of abilities) {
     const id = +row.Spell;
     const name = names.get(id);
-    // Hidden helper spells (stance and form passives) can't be tracked.
-    if (!name || /[\\"\n]/.test(name) || /passive/i.test(name)) continue;
+    // Hidden helper spells (stance and form passives) can't be tracked, and
+    // rune engraving spells aren't anything you'd put on a bar.
+    if (!name || /[\\"\n]/.test(name) || /passive/i.test(name) || /^Engrave /.test(name)) continue;
     const match = (subtext.get(id) || '').match(/^Rank (\d+)$/);
     if (!groups.has(name)) groups.set(name, new Map());
     groups.get(name).set(id, match ? +match[1] : 0);

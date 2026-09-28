@@ -131,9 +131,22 @@ local function BuildGeneral(window, page)
     end)
     Detail(page, "Unlocked bars show a box you can drag. Closing this window locks them again.", 16, -114)
 
+    T:Heading(page, "Saved settings"):SetPoint("TOPLEFT", 16, -150)
+    local kept = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    kept:SetPoint("TOPLEFT", 16, -170)
+    kept:SetWidth(440)
+    window.kept = kept
+
     function page:Refresh()
         bars:SetChecked(B:Enabled())
         unlock:SetLabel(B:IsUnlocked() and "Lock bars" or "Unlock bars to move")
+        if ns.restored then
+            kept:SetText(ns.RESTORED_TEXT .. " This happens when the game closes without saving, for example after a crash.")
+            kept:SetTextColor(T.WARN[1], T.WARN[2], T.WARN[3])
+        else
+            kept:SetText("Saved normally. The addon also keeps a backup in the game's own settings, in case the game loses them.")
+            kept:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
+        end
     end
 end
 
@@ -192,6 +205,16 @@ local function BuildWindow()
     window:SetScript("OnDragStop", window.StopMovingOrSizing)
     T:Flat(window, T.BG, T.CONTROL_BORDER)
     window:Hide()
+    -- Set before anything hooks these: setting a script later would drop the
+    -- hooks the pages and the profile menu add.
+    window:SetScript("OnShow", function(self)
+        self:Refresh()
+        ns.EscUpdate()
+    end)
+    window:SetScript("OnHide", function()
+        ns.EscUpdate()
+        if ns.Bars then ns.Bars:SetUnlocked(false) end
+    end)
 
     -- Header: the icon on an accent square, and "Enhanced" in the accent.
     local header = CreateFrame("Frame", nil, window, "BackdropTemplate")
@@ -218,6 +241,7 @@ local function BuildWindow()
     close:SetScript("OnClick", function() window:Hide() end)
     window.close = close
     window.header = header
+    ns.BuildProfileMenu(window, header, close)
 
     -- The bar list down the left.
     local nav = CreateFrame("Frame", nil, window, "BackdropTemplate")
@@ -274,10 +298,16 @@ local function BuildWindow()
     window.selected = "cd"
     function window:Select(key)
         self.selected = key
+        self.profilePanel:Hide()
         self:Refresh()
     end
 
     function window:Refresh()
+        self:RefreshProfiles()
+        -- Settings the game didn't keep are pointed out until the next login.
+        version:SetText(ns.restored and "Settings restored from backup at login. See General." or (Version() .. "   /fecm to open"))
+        local colour = ns.restored and T.WARN or T.MUTED
+        version:SetTextColor(colour[1], colour[2], colour[3])
         local selected = self.selected
         local barPage = ns.BAR_NAMES[selected] ~= nil
         for key, item in pairs(self.nav) do
@@ -303,14 +333,6 @@ local function BuildWindow()
         self.message = nil
     end
 
-    window:SetScript("OnShow", function(self)
-        self:Refresh()
-        ns.EscUpdate()
-    end)
-    window:SetScript("OnHide", function()
-        ns.EscUpdate()
-        if ns.Bars then ns.Bars:SetUnlocked(false) end
-    end)
     ns.window = window
     return window
 end

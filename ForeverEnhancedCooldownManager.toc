@@ -16,5 +16,6 @@ Buffs.lua
 Bars.lua
 Theme.lua
 BarPage.lua
+ProfileMenu.lua
 Window.lua
 Probe.lua
