@@ -9,7 +9,7 @@ local B = {}
 ns.Bars = B
 
 local Style = ns.Style
-local DEFAULT_Y = { buff = 234, cd = 190, util = 146 } -- just above the action bar
+local DEFAULT_Y = { debuff = 278, buff = 234, cd = 190, util = 146 } -- just above the action bar
 local RANGE_INTERVAL = .25
 -- Blizzard's own Cooldown Manager tints.
 local TINT = {
@@ -148,16 +148,16 @@ local function SavePosition(bar)
     Place(bar)
 end
 
--- The Buffs bar holds Blizzard's secure buff slots, so it is only ever
--- shown, hidden, moved or resized outside combat.
+-- The Buffs and Debuffs bars hold Blizzard's secure aura slots, so they are
+-- only ever shown, hidden, moved or resized outside combat.
 local function Locked(bar)
-    return bar.kind == "buff" and InCombatLockdown()
+    return bar.kind == "aura" and InCombatLockdown()
 end
 
 local function NewBar(key)
     local bar = CreateFrame("Frame", nil, UIParent)
     bar.key, bar.icons, bar.count = key, {}, 0
-    bar.kind = key == "buff" and "buff" or "cooldown"
+    bar.kind = ns.AURA_BARS[key] and "aura" or "cooldown"
     bar.data = ns.BarData(key)
     bar:SetFrameStrata("MEDIUM")
     bar:SetMovable(true)
@@ -196,7 +196,7 @@ local function NewBar(key)
     return bar
 end
 
-local function LayoutBuffs(bar, data)
+local function LayoutAuras(bar, data)
     if InCombatLockdown() then
         bar.pendingLayout = true
         return
@@ -216,7 +216,7 @@ end
 local function Layout(bar)
     local data = ns.BarData(bar.key)
     bar.data = data
-    if bar.kind == "buff" then return LayoutBuffs(bar, data) end
+    if bar.kind == "aura" then return LayoutAuras(bar, data) end
     local size, spacing = data.size, data.spacing
     local count = 0
     for _, name in ipairs(data.spells) do
@@ -272,8 +272,8 @@ function B:UpdateShown()
     for _, key in ipairs(ns.BAR_KEYS) do
         local bar = bars[key]
         if bar then
-            if bar.kind == "buff" then
-                -- Shown whenever it has buffs; "only in combat" fades it
+            if bar.kind == "aura" then
+                -- Shown whenever it has entries; "only in combat" fades it
                 -- instead, since the secure slots can't be hidden in a fight.
                 local show = on and (unlocked or bar.count > 0) or false
                 if bar:IsShown() ~= show then
@@ -343,8 +343,60 @@ function B:Find(name)
     end
 end
 
+-- Whether a spell is on the Buffs or Debuffs bar.
+function B:HasAura(key, name)
+    return IndexOf(key, name) ~= nil
+end
+
 function B:HasBuff(name)
-    return IndexOf("buff", name) ~= nil
+    return self:HasAura("buff", name)
+end
+
+-- Joins -------------------------------------------------------------------------------
+-- On the Buffs and Debuffs bars an entry can be joined to the one before it;
+-- a run of joined entries shows as one icon. The first entry never joins.
+
+function B:Joined(key, index)
+    local spells = ns.BarData(key).spells
+    return ns.AURA_BARS[key] ~= nil and index > 1 and spells[index] ~= nil and ns.Joins(key)[spells[index]] == true
+end
+
+function B:SetJoined(key, index, on)
+    local spells = ns.BarData(key).spells
+    if not ns.AURA_BARS[key] or index < 2 or not spells[index] then return false end
+    ns.Joins(key)[spells[index]] = on and true or nil
+    self:Changed()
+    return true
+end
+
+-- The bar's entries in order, with joined ones gathered into one group.
+function B:Units(key)
+    local units = {}
+    for i, name in ipairs(ns.BarData(key).spells) do
+        if self:Joined(key, i) and #units > 0 then
+            table.insert(units[#units], name)
+        else
+            units[#units + 1] = { name }
+        end
+    end
+    return units
+end
+
+-- Takes an entry off a bar. When it heads a joined group, the next entry
+-- becomes the head, so the rest stay together without joining the entry
+-- before.
+local function Take(key, index)
+    local spells = ns.BarData(key).spells
+    local name = spells[index]
+    if not name then return end
+    if ns.AURA_BARS[key] then
+        local joins = ns.Joins(key)
+        local after = spells[index + 1]
+        if after and not joins[name] then joins[after] = nil end
+        joins[name] = nil
+    end
+    table.remove(spells, index)
+    return name
 end
 
 -- Puts a spell on the Cooldowns or Utility bar, or takes it off with no bar;
@@ -353,7 +405,7 @@ function B:Assign(name, key)
     local current, index = self:Find(name)
     if current == key then return true end
     if key and #ns.BarData(key).spells >= ns.BAR_MAX_SPELLS then return false end
-    if current then table.remove(ns.BarData(current).spells, index) end
+    if current then Take(current, index) end
     if key then
         local spells = ns.BarData(key).spells
         spells[#spells + 1] = name
@@ -362,42 +414,46 @@ function B:Assign(name, key)
     return true
 end
 
--- Buffs are tracked separately, so a spell can be on a cooldown bar and the
--- Buffs bar at once (a cooldown that also buffs you). Returns false when full.
-function B:SetBuff(name, on)
-    local index = IndexOf("buff", name)
+-- The Buffs and Debuffs bars are tracked separately, so a spell can be on a
+-- cooldown bar and an aura bar at once (a cooldown that also buffs you).
+-- Returns false when the bar is full.
+function B:SetAura(key, name, on)
+    local index = IndexOf(key, name)
     if on and index or not on and not index then return true end
-    local spells = ns.BarData("buff").spells
+    local spells = ns.BarData(key).spells
     if on then
         if #spells >= ns.BUFF_SLOTS then return false end
         spells[#spells + 1] = name
     else
-        table.remove(spells, index)
+        Take(key, index)
     end
     self:Changed()
     return true
 end
 
-function B:Move(key, index, delta)
-    local spells = ns.BarData(key).spells
-    local target = index + delta
-    if not spells[index] or target < 1 or target > #spells then return end
-    spells[index], spells[target] = spells[target], spells[index]
-    self:Changed()
+function B:SetBuff(name, on)
+    return self:SetAura("buff", name, on)
 end
 
--- Moves a spell to another place on its bar, as dragged in the window.
+function B:Move(key, index, delta)
+    self:MoveTo(key, index, index + delta)
+end
+
+-- Moves a spell to another place on its bar, as dragged in the window. A
+-- moved entry leaves its joined group; dropped inside another group, it
+-- joins that one rather than splitting it.
 function B:MoveTo(key, from, to)
     local spells = ns.BarData(key).spells
     if from == to or not spells[from] or not spells[to] then return end
-    table.insert(spells, to, table.remove(spells, from))
+    local name = Take(key, from)
+    table.insert(spells, to, name)
+    local after = spells[to + 1]
+    if ns.AURA_BARS[key] and to > 1 and after and ns.Joins(key)[after] then ns.Joins(key)[name] = true end
     self:Changed()
 end
 
 function B:Remove(key, index)
-    local spells = ns.BarData(key).spells
-    if not spells[index] then return end
-    table.remove(spells, index)
+    if not Take(key, index) then return end
     self:Changed()
 end
 
@@ -416,6 +472,10 @@ end
 function B:Clear(key)
     local spells = ns.BarData(key).spells
     for i = #spells, 1, -1 do spells[i] = nil end
+    if ns.AURA_BARS[key] then
+        local joins = ns.Joins(key)
+        for name in pairs(joins) do joins[name] = nil end
+    end
     self:Changed()
 end
 
@@ -444,13 +504,16 @@ function B:Start()
         elseif event == "PLAYER_REGEN_ENABLED" then
             inCombat = false
             -- Anything the Buffs bar had to wait for during the fight.
-            local buffs = bars.buff
-            if buffs and buffs.pendingLayout then
-                Layout(buffs)
-            elseif buffs and buffs.pending then
-                ns.BuffBar:Apply(buffs)
+            -- Anything the aura bars had to wait for during the fight.
+            for key in pairs(ns.AURA_BARS) do
+                local bar = bars[key]
+                if bar and bar.pendingLayout then
+                    Layout(bar)
+                elseif bar and bar.pending then
+                    ns.BuffBar:Apply(bar)
+                end
+                if bar then bar.pendingShown = nil end
             end
-            if buffs then buffs.pendingShown = nil end
             B:UpdateShown()
         elseif event == "BAG_UPDATE_DELAYED" then
             -- Counts change often; the item list only matters while /ccm is open.
@@ -464,6 +527,7 @@ function B:Start()
             B:Rebuild()
             if ns.window and ns.window:IsShown() then ns.window:Refresh() end
         else
+            if event == "PLAYER_TARGET_CHANGED" then ns.BuffBar:UpdateTarget(bars.debuff) end
             B:RefreshAll()
         end
     end)

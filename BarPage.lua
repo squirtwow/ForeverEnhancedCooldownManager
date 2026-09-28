@@ -4,12 +4,13 @@
 local _, ns = ...
 local T = ns.Theme
 
-local ICON, GAP = 32, 8 -- icons in the tray
+local ICON, GAP = 32, 12 -- icons in the tray; the gap fits the join button
 local ROW, HEADER_ROW = 22, 20 -- spell list rows
 local EMPTY = {
     cd = "Nothing here yet. Tick spells in the list below to add them.",
     util = "Nothing here yet. Tick spells in the list below to add them.",
     buff = "Nothing here yet. Tick spells that buff you, or your class procs, in the list below.",
+    debuff = "Nothing here yet. Tick spells that put a debuff on your target in the list below.",
 }
 
 local function Full(key)
@@ -116,6 +117,27 @@ function ns.BuildBarPage(window, page, width)
             B:Remove(state.bar, icon.index)
             window:Refresh()
         end)
+        -- On the Buffs and Debuffs bars, the button in the gap before an icon
+        -- joins it to the one before, or splits them again; a line under the
+        -- pair shows they're joined.
+        icon.link = T:Square(tray, "+")
+        icon.link:SetSize(14, 14)
+        icon.link:SetPoint("CENTER", icon, "LEFT", -GAP / 2, 0)
+        icon.link:SetFrameLevel(icon:GetFrameLevel() + 3)
+        icon.link:SetScript("OnClick", function()
+            B:SetJoined(state.bar, icon.index, not B:Joined(state.bar, icon.index))
+            window:Refresh()
+        end)
+        icon.link:SetScript("OnEnter", function()
+            window.note:SetText(B:Joined(state.bar, icon.index) and "Split this from the one before."
+                or "Join this to the one before: they'll show as one icon, lit by whichever is up.")
+        end)
+        icon.link:SetScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
+        icon.bridge = tray:CreateTexture(nil, "ARTWORK")
+        icon.bridge:SetHeight(3)
+        icon.bridge:SetPoint("TOPLEFT", icon, "BOTTOMLEFT", -(ICON + GAP), -3)
+        icon.bridge:SetPoint("TOPRIGHT", icon, "BOTTOMRIGHT", 0, -3)
+        T:Paint(function(accent) T:Fill(icon.bridge, accent) end)
         icon:RegisterForDrag("LeftButton")
         icon:SetScript("OnDragStart", function(self)
             state.drag = self.index
@@ -226,13 +248,13 @@ function ns.BuildBarPage(window, page, width)
             return
         end
         local entry = ns.Spells:Find(found)
-        if bar == "buff" and entry and (entry.kind == "item" or entry.kind == "slot") then
-            window:Say("Items can't go on the Buffs bar.")
+        if ns.AURA_BARS[bar] and entry and (entry.kind == "item" or entry.kind == "slot") then
+            window:Say("Items can't go on the " .. ns.BAR_NAMES[bar] .. " bar.")
             return
         end
         if ids and not entry then ns.AddCustom(found, ids) end
         local ok
-        if bar == "buff" then ok = B:SetBuff(found, true) else ok = B:Assign(found, bar) end
+        if ns.AURA_BARS[bar] then ok = B:SetAura(bar, found, true) else ok = B:Assign(found, bar) end
         ns.PruneCustom()
         window:Say(ok and ("Added " .. (entry and entry.name or found) .. " to " .. ns.BAR_NAMES[bar] .. ".") or Full(bar))
     end
@@ -243,8 +265,8 @@ function ns.BuildBarPage(window, page, width)
             if checked then AddOther(row.other) end
         else
             local ok
-            if bar == "buff" then
-                ok = B:SetBuff(row.spell, checked)
+            if ns.AURA_BARS[bar] then
+                ok = B:SetAura(bar, row.spell, checked)
             else
                 ok = B:Assign(row.spell, checked and bar or nil)
             end
@@ -314,8 +336,8 @@ function ns.BuildBarPage(window, page, width)
     local function Spell(entry, indent, rankText)
         local row = Entry(entry.icon, indent and entry.rankText or entry.name, rankText, indent)
         row.spell, row.other = entry.key, nil
-        if state.bar == "buff" then
-            row.check:SetChecked(B:HasBuff(entry.key))
+        if ns.AURA_BARS[state.bar] then
+            row.check:SetChecked(B:HasAura(state.bar, entry.key))
         else
             local on = B:Find(entry.key)
             row.check:SetChecked(on == state.bar)
@@ -324,12 +346,13 @@ function ns.BuildBarPage(window, page, width)
         end
     end
 
-    -- What this bar can hold: procs have no cooldown of their own, items put
-    -- no buff on you, and a fixed rank adds nothing to the Buffs bar, which
-    -- already counts every rank.
+    -- What this bar can hold: procs have no cooldown of their own and are
+    -- buffs on you, items put no aura on anyone, and a fixed rank adds
+    -- nothing to an aura bar, which already counts every rank.
     local function Fits(entry)
         local item = entry.kind == "item" or entry.kind == "slot"
         if state.bar == "buff" then return not item and entry.kind ~= "rank" end
+        if state.bar == "debuff" then return not item and entry.kind ~= "rank" and entry.kind ~= "proc" end
         if item then return ns.Get("listItems") end
         return entry.kind ~= "proc"
     end
@@ -338,7 +361,7 @@ function ns.BuildBarPage(window, page, width)
         y, n = 0, 0
         local list = ns.Spells:List()
         if #list == 0 then list = ns.Spells:Scan() end
-        local text, listRanks = state.search, ns.Get("listRanks") and state.bar ~= "buff"
+        local text, listRanks = state.search, ns.Get("listRanks") and not ns.AURA_BARS[state.bar]
         local id = tonumber(text)
         local line
         local known = {}
@@ -389,12 +412,20 @@ function ns.BuildBarPage(window, page, width)
 
     local function RefreshTray()
         local spells = ns.BarData(state.bar).spells
+        local aura = ns.AURA_BARS[state.bar] ~= nil
         for i, key in ipairs(spells) do
             local icon = TrayIcon(i)
             local entry = ns.Spells:Find(key)
             icon.index, icon.name = i, entry and entry.name or key
             icon.texture:SetTexture(entry and entry.icon or 134400) -- question mark until learned
             icon.texture:SetDesaturated(entry == nil)
+            local joined = aura and B:Joined(state.bar, i)
+            icon.link:SetShown(aura and i > 1)
+            icon.link:SetLabel(joined and "-" or "+")
+            local colour = joined and T:Accent() or T.MUTED
+            icon.link.label:SetTextColor(colour[1], colour[2], colour[3])
+            -- An icon starting a new row has its partner at the end of the row above.
+            icon.bridge:SetShown(joined and (i - 1) % perRow ~= 0)
             icon:Show()
         end
         for i = #spells + 1, #page.icons do page.icons[i]:Hide() end
@@ -418,7 +449,8 @@ function ns.BuildBarPage(window, page, width)
         off:SetShown(not on)
         turnOn:SetShown(not on)
         count:SetShown(on)
-        local word = key == "buff" and "buff" or "icon"
+        local aura = ns.AURA_BARS[key]
+        local word = aura and aura.word or "icon"
         count:SetText(#spells == 0 and "Empty" or (#spells .. " " .. word .. (#spells == 1 and "" or "s")
             .. ", drag to reorder"))
         clear:SetLabel(state.armed == key and "Click again to clear" or ("Clear " .. name))
@@ -426,18 +458,18 @@ function ns.BuildBarPage(window, page, width)
         RefreshTray()
         size:Set(data.size)
         spacing:Set(data.spacing)
-        local buffs = key == "buff"
-        hideReady:SetShown(not buffs)
-        showMissing:SetShown(buffs)
+        hideReady:SetShown(not aura)
+        showMissing:SetShown(aura ~= nil)
+        showMissing.text:SetText("Show missing " .. word .. "s greyed")
         -- Packed buffs have no fixed spot to put a name under.
-        showNames:SetShown(not buffs or data.showMissing)
+        showNames:SetShown(not aura or data.showMissing)
         hideReady:SetChecked(data.hideReady)
         showMissing:SetChecked(data.showMissing)
         showNames:SetChecked(data.showNames)
         combatOnly:SetChecked(data.combatOnly)
         showTimer:SetChecked(data.showTimer)
-        showItems:SetShown(not buffs)
-        showRanks:SetShown(not buffs)
+        showItems:SetShown(not aura)
+        showRanks:SetShown(not aura)
         showItems:SetChecked(ns.Get("listItems"))
         showRanks:SetChecked(ns.Get("listRanks"))
         RefreshList()

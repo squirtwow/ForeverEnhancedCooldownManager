@@ -109,7 +109,7 @@ local function BuildGeneral(window, page)
     end)
     bars:SetPoint("TOPLEFT", 16, -36)
     window.useBars = bars
-    Detail(page, "Cooldowns, Utility and Buffs bars of your own, set up on the left.", 34, -56)
+    Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left.", 34, -56)
 
     local unlock = T:Button(page, "Unlock bars to move", 160)
     unlock:SetPoint("TOPLEFT", 16, -84)

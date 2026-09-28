@@ -31,8 +31,13 @@ ns.RELOAD = {
 
 -- Bars: each bar lists spells by name, so the highest known rank is
 -- always the one shown.
-ns.BAR_KEYS = { "cd", "util", "buff" }
-ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs" }
+ns.BAR_KEYS = { "cd", "util", "buff", "debuff" }
+ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs", debuff = "Debuffs" }
+-- The bars fed by Blizzard's secure aura container, and what each watches.
+ns.AURA_BARS = {
+    buff = { unit = "player", filter = "HELPFUL", word = "buff" },
+    debuff = { unit = "target", filter = "HARMFUL", mine = true, word = "debuff" },
+}
 ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 } } -- min, max, default
 ns.BAR_MAX_SPELLS = 40
 ns.BUFF_SLOTS = 16 -- the Buffs bar has one secure slot per buff
@@ -83,11 +88,26 @@ local function Repair(spells)
     return spells
 end
 
--- A profile's lists, repaired in place.
+-- A profile's lists, repaired in place, with their joins: on the Buffs and
+-- Debuffs bars, the names joined to the entry just before them.
 local function Lists(profile)
     for _, key in ipairs(ns.BAR_KEYS) do
         if type(profile[key]) ~= "table" then profile[key] = {} end
         Repair(profile[key])
+    end
+    if type(profile.joins) ~= "table" then profile.joins = {} end
+    for key, joins in pairs(profile.joins) do
+        if not ns.AURA_BARS[key] or type(joins) ~= "table" then
+            profile.joins[key] = nil
+        else
+            local listed = {}
+            for i, name in ipairs(profile[key]) do
+                if i > 1 then listed[name] = true end
+            end
+            for name, on in pairs(joins) do
+                if on ~= true or not listed[name] then joins[name] = nil end
+            end
+        end
     end
     return profile
 end
@@ -113,6 +133,15 @@ function ns.ActiveList(key)
     end
     scratch[key] = scratch[key] or {}
     return scratch[key]
+end
+
+-- This character's joins for an aura bar.
+function ns.Joins(key)
+    local profile = active and db and Profiles()[active]
+    local store = profile or scratch
+    if type(store.joins) ~= "table" then store.joins = {} end
+    if type(store.joins[key]) ~= "table" then store.joins[key] = {} end
+    return store.joins[key]
 end
 
 local function PlayerGUID()
@@ -227,13 +256,19 @@ local function Create(text, copy)
     local name, problem = CleanName(text)
     if not name then return false, problem end
     if Profiles()[name] then return false, name .. " already exists." end
-    local from, profile = Profiles()[active], {}
+    local from, profile = Profiles()[active], { joins = {} }
     for _, key in ipairs(ns.BAR_KEYS) do
         local list = {}
         if copy then
             for i, spell in ipairs(from[key]) do list[i] = spell end
         end
         profile[key] = list
+    end
+    if copy then
+        for key, joins in pairs(from.joins or {}) do
+            profile.joins[key] = {}
+            for name in pairs(joins) do profile.joins[key][name] = true end
+        end
     end
     Profiles()[name] = profile
     Switch(name)
@@ -469,6 +504,12 @@ local function EncodeBars()
         Put("p" .. i, name)
         local profile = Profiles()[name]
         for _, key in ipairs(ns.BAR_KEYS) do Put("p" .. i .. "." .. key, SpellText(profile[key])) end
+        for key in pairs(ns.AURA_BARS) do
+            local joined = {}
+            for spell in pairs(profile.joins and profile.joins[key] or {}) do joined[#joined + 1] = spell end
+            table.sort(joined)
+            if #joined > 0 then Put("p" .. i .. "." .. key .. ".joins", SpellText(joined)) end
+        end
     end
     local guids = {}
     for guid, name in pairs(Chars()) do
@@ -529,8 +570,15 @@ local function DecodeV2(text)
         if not name then break end
         if not CleanName(name) or CleanName(name) ~= name then break end
         names[i] = name
-        local profile = {}
+        local profile = { joins = {} }
         for _, key in ipairs(ns.BAR_KEYS) do profile[key] = SpellNames(values["p" .. i .. "." .. key]) end
+        for key in pairs(ns.AURA_BARS) do
+            local joined = values["p" .. i .. "." .. key .. ".joins"]
+            if joined then
+                profile.joins[key] = {}
+                for _, spell in ipairs(SpellNames(joined)) do profile.joins[key][spell] = true end
+            end
+        end
         decoded.profiles[name] = profile
     end
     for key, value in pairs(values) do

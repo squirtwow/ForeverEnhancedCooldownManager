@@ -1,17 +1,19 @@
--- The Buffs bar: your own buffs and class procs, shown while they're on you.
--- Buffs are secret in combat, so the icons come from Blizzard's secure aura
--- container, the same way the portrait CC works in EraUI: each icon gets its
--- look once, before the game restricts it, and the addon only ever tells the
--- container which spell IDs belong where, never in combat.
+-- The Buffs and Debuffs bars: your buffs and class procs while they're on
+-- you, and your own debuffs on your target. Auras are secret in combat, so
+-- the icons come from Blizzard's secure aura container, the same way the
+-- portrait CC works in EraUI: each icon gets its look once, before the game
+-- restricts it, and the addon only ever tells the container which spell IDs
+-- belong where, never in combat. Entries joined together (seals, auras,
+-- aspects, stings) share one icon that lights for whichever is up.
 --
 -- Two layouts:
--- * Packed (the default): one aura group per buff, in your order. Blizzard's
---   own layout places only the buffs that are up, side by side and centred on
+-- * Packed (the default): one aura group per entry, in your order. Blizzard's
+--   own layout places only the ones that are up, side by side and centred on
 --   the bar, so there are no gaps, even in combat. Groups size themselves, so
 --   the icon size comes from scaling the container.
--- * Fixed, with "Show missing buffs greyed": one slot per buff, each following
---   a holder frame of the addon's own that keeps its place and shows the buff
---   greyed while it's missing.
+-- * Fixed, with "Show missing ... greyed": one slot per entry, each following
+--   a holder frame of the addon's own that keeps its place and shows the
+--   entry greyed while it's missing.
 local _, ns = ...
 
 local F = {}
@@ -19,6 +21,16 @@ ns.BuffBar = F
 
 local Style = ns.Style
 local BASE = 36 -- packed icons are drawn at this size, then scaled
+
+local function Open(value)
+    return not (issecretvalue and issecretvalue(value))
+end
+
+-- What the container is told about a slot or group: its spell IDs, and on
+-- the Debuffs bar, only auras you cast.
+local function Filters(bar, ids)
+    return { includeSpellIDs = ids, isFromPlayerOrPlayerPet = ns.AURA_BARS[bar.key].mine or nil }
+end
 
 function F:Available()
     return CustomAuraContainerSlotDefaultOptions ~= nil
@@ -96,36 +108,57 @@ function F:Create(bar)
         bar.holders[i] = holder
     end
     if not self:Available() then return end
+    local aura = ns.AURA_BARS[bar.key]
     local ok, err = pcall(function()
         local container = CreateFrame("AuraContainer", nil, bar, "CustomAuraContainerTemplate")
-        -- One point only: packed groups resize the container around the buffs
-        -- that are up, and it stays centred on the bar.
+        -- One point only: packed groups resize the container around the
+        -- entries that are up, and it stays centred on the bar.
         container:SetPoint("CENTER", bar, "CENTER")
         container:SetSize(BASE, BASE)
         container:EnableMouse(false)
         container:SetFrameLevel(bar:GetFrameLevel() + 5)
         container:SetEditModePreviewEnabled(false)
-        container:SetUnit("player")
+        container:SetUnit(aura.unit)
         for i = 1, ns.BUFF_SLOTS do
-            container:AddAuraSlot("b" .. i, "HELPFUL", { initializeFrame = SlotLook(bar.holders[i]) })
+            container:AddAuraSlot("b" .. i, aura.filter, { initializeFrame = SlotLook(bar.holders[i]) })
             container:SetAuraSlotEnabled("b" .. i, false)
         end
         bar.container = container
     end)
     if not ok and not F.lastError then
         F.lastError = tostring(err)
-        print("|cffffd100" .. ns.TITLE .. ":|r the Buffs bar couldn't start. Please report this: " .. F.lastError)
+        print("|cffffd100" .. ns.TITLE .. ":|r the " .. ns.BAR_NAMES[bar.key] .. " bar couldn't start. Please report this: " .. F.lastError)
     end
 end
 
--- Places the holders for the bar's buffs and works out each one's spell IDs.
+-- The Debuffs bar's greyed spots only show while you have a target you can
+-- attack, and its icons follow a new target at once. Only the addon's own
+-- textures change here, so this is fine in combat, as is the refresh, which
+-- Blizzard's target frame does the same way.
+function F:UpdateTarget(bar)
+    if not (bar and bar.holders and ns.AURA_BARS[bar.key].unit == "target") then return end
+    local hostile = UnitExists("target") and UnitCanAttack("player", "target")
+    if not Open(hostile) then hostile = true end
+    for _, holder in ipairs(bar.holders) do holder.icon:SetAlpha(hostile and .45 or 0) end
+    if bar.container then bar.container:UpdateAllAuras() end
+end
+
+-- Places the holders for the bar's entries and works out each one's spell
+-- IDs; joined entries count as one, with every linked spell's IDs.
 function F:Layout(bar, data)
     local size, spacing = data.size, data.spacing
     local fixed = not self:Packed(data)
     local count = 0
-    for _, name in ipairs(data.spells) do
-        local entry = ns.Spells:Find(name)
-        if entry and entry.ids and #entry.ids > 0 and count < ns.BUFF_SLOTS then
+    for _, group in ipairs(ns.Bars:Units(bar.key)) do
+        local ids, entry = {}, nil
+        for _, name in ipairs(group) do
+            local found = ns.Spells:Find(name)
+            if found and found.ids then
+                entry = entry or found
+                for _, id in ipairs(found.ids) do ids[id] = true end
+            end
+        end
+        if entry and next(ids) and count < ns.BUFF_SLOTS then
             count = count + 1
             local holder = bar.holders[count]
             holder:SetSize(size, size)
@@ -135,11 +168,9 @@ function F:Layout(bar, data)
             holder:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
             holder.icon:SetTexture(entry.icon)
             holder.label:SetWidth(size + spacing)
-            holder.label:SetText(entry.name)
+            holder.label:SetText(#group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name)
             holder.label:SetShown(data.showNames)
             holder:SetShown(fixed)
-            local ids = {}
-            for _, id in ipairs(entry.ids) do ids[id] = true end
             bar.slotIDs[count] = ids
         end
     end
@@ -150,6 +181,7 @@ function F:Layout(bar, data)
     for _, parts in ipairs(bar.groupParts) do parts.cooldown:SetHideCountdownNumbers(not data.showTimer) end
     bar.count = count
     self:Apply(bar)
+    self:UpdateTarget(bar)
 end
 
 local function Signature(ids)
@@ -160,7 +192,7 @@ local function Signature(ids)
     return table.concat(keys, ",")
 end
 
--- Tells the secure container which buffs go where. Never in combat; a change
+-- Tells the secure container which entries go where. Never in combat; a change
 -- made then waits for the fight to end. Only what changed is sent.
 function F:Apply(bar)
     local container = bar.container
@@ -180,7 +212,7 @@ function F:Apply(bar)
             bar.applied[i] = signature
             local key = "b" .. i
             if ids then
-                container:SetAuraSlotCandidateFilters(key, { includeSpellIDs = ids })
+                container:SetAuraSlotCandidateFilters(key, Filters(bar, ids))
                 container:SetAuraSlotEnabled(key, true)
             else
                 container:SetAuraSlotEnabled(key, false)
@@ -192,8 +224,8 @@ function F:Apply(bar)
     local spacing = data.spacing / scale
     if on and packed then
         for i = bar.groups + 1, bar.count do
-            container:AddAuraGroup("g" .. i, "HELPFUL", { initializeFrame = GroupLook(bar), maxFrameCount = 1,
-                candidateFilters = { includeSpellIDs = bar.slotIDs[i] }, layout = { layoutIndex = i, groupSpacing = spacing } })
+            container:AddAuraGroup("g" .. i, ns.AURA_BARS[bar.key].filter, { initializeFrame = GroupLook(bar), maxFrameCount = 1,
+                candidateFilters = Filters(bar, bar.slotIDs[i]), layout = { layoutIndex = i, groupSpacing = spacing } })
             bar.groups = i
             bar.appliedGroups[i] = Signature(bar.slotIDs[i]) .. "|" .. spacing
         end
@@ -205,7 +237,7 @@ function F:Apply(bar)
             bar.appliedGroups[i] = signature
             local key = "g" .. i
             if ids then
-                container:SetAuraGroupCandidateFilters(key, { includeSpellIDs = ids })
+                container:SetAuraGroupCandidateFilters(key, Filters(bar, ids))
                 container:SetAuraGroupLayout(key, { layoutIndex = i, groupSpacing = spacing })
                 container:SetAuraGroupEnabled(key, true)
             else

@@ -101,6 +101,7 @@ end
 
 local SECRET = setmetatable({}, { __tostring = function() return "secret" end })
 local book, usable, noMana, range, active, target, cvars, printed
+local hostile = true -- whether the target can be attacked
 local cooldownCalls, lockdown, containers, containerCallsInCombat
 local trinket, trinketCooldown, bagItems, itemCooldown, itemCount
 local bindings, cvarOn, reloads, timers
@@ -200,6 +201,7 @@ local function Environment(keepCVars)
     _G.CustomAuraContainerSlotDefaultOptions = {}
     _G.issecretvalue = function(v) return v == SECRET end
     _G.UnitExists = function() return target end
+    _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return hostile end
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
     _G.C_CVar = {
@@ -236,6 +238,7 @@ local function Environment(keepCVars)
                 Guard(); slots[key].filters = filters
             end)
             rawset(f, "SetUnit", function(_, unit) S[f].unit = unit end)
+            rawset(f, "UpdateAllAuras", function() S[f].refreshes = (S[f].refreshes or 0) + 1 end)
             local groups = {}
             S[f].groups = groups
             rawset(f, "AddAuraGroup", function(self, key, filter, options)
@@ -468,7 +471,7 @@ ns = Load({ useBars = true })
 B = ns.Bars
 local buffs = B:Get("buff")
 watched[buffs] = true
-Equal(#containers, 1, "one secure aura container")
+Equal(#containers, 2, "one secure aura container for each aura bar")
 local box = containers[1]
 Equal(S[box].unit, "player", "watching your own buffs")
 local slots = S[box].slots
@@ -564,6 +567,137 @@ Equal(text:find("12:buff.missing1:0", 1, true) ~= nil and text:find("10:buff.tim
 Equal(text:find("7:p1.buff6:Thorns", 1, true) ~= nil, true, "and its list, in your profile")
 Equal(S[buffs.mover.label].text, "Buffs", "mover label is the bar's name")
 Equal(S[buffs.mover.label].points[1][1], "CENTER", "inside the highlight")
+
+-- Debuffs bar -------------------------------------------------------------------------------
+
+Environment()
+ns = Load({ useBars = true })
+B = ns.Bars
+local debuffs = B:Get("debuff")
+local dbox = containers[2]
+Equal(S[dbox].unit, "target", "the Debuffs bar watches your target")
+Equal(S[dbox].slots.b1.filter, "HARMFUL", "for harmful auras")
+Equal(B:SetAura("debuff", "Moonfire", true), true, "Moonfire ticked onto Debuffs")
+local dg1 = S[dbox].groups.g1
+Equal(dg1.filter, "HARMFUL", "its icon looks at debuffs")
+Equal(dg1.filters.isFromPlayerOrPlayerPet, true, "only the ones you cast")
+Equal(dg1.filters.includeSpellIDs[8921] and dg1.filters.includeSpellIDs[8924], true, "any rank of Moonfire")
+Equal(S[containers[1]].groups.g1, nil, "the Buffs bar is left alone")
+Equal(S[containers[1]].slots.b1.filters, nil, "and its slots too")
+Equal(S[debuffs].shown, true, "the bar shows")
+local before = S[dbox].refreshes or 0
+target, hostile = true, true
+Fire("PLAYER_TARGET_CHANGED")
+Equal(S[dbox].refreshes, before + 1, "a new target is looked at straight away")
+B:SetOption("debuff", "showMissing", true)
+Equal(S[debuffs.holders[1].icon].alpha, .45, "missing debuffs greyed while you have a target")
+Equal(S[dbox].slots.b1.filters.isFromPlayerOrPlayerPet, true, "fixed spots also show only yours")
+target = false
+Fire("PLAYER_TARGET_CHANGED")
+Equal(S[debuffs.holders[1].icon].alpha, 0, "no greyed spots without a target")
+target, hostile = true, false
+Fire("PLAYER_TARGET_CHANGED")
+Equal(S[debuffs.holders[1].icon].alpha, 0, "nor on a friendly one")
+hostile = SECRET
+Fire("PLAYER_TARGET_CHANGED")
+Equal(S[debuffs.holders[1].icon].alpha, .45, "a hidden answer shows them")
+hostile = true
+Fire("PLAYER_REGEN_DISABLED")
+lockdown = true
+Fire("PLAYER_TARGET_CHANGED")
+Equal(containerCallsInCombat, 0, "a target change in combat sets nothing up")
+lockdown = false
+Fire("PLAYER_REGEN_ENABLED")
+B:SetOption("debuff", "showMissing", false)
+Equal(#printed, 0, "no errors")
+
+-- Joined entries ------------------------------------------------------------------------------
+
+local box = containers[1]
+local function Shape(key)
+    local out = {}
+    for _, unit in ipairs(B:Units(key)) do out[#out + 1] = table.concat(unit, "+") end
+    return table.concat(out, ", ")
+end
+for _, name in ipairs({ "Thorns", "Clearcasting", "Nature's Grace" }) do B:SetAura("buff", name, true) end
+Equal(B:SetJoined("buff", 1, true), false, "the first entry can't join anything")
+Equal(B:SetJoined("buff", 2, true), true, "an entry joins the one before it")
+Equal(Shape("buff"), "Thorns+Clearcasting, Nature's Grace", "shown as one icon")
+local ids = S[box].groups.g1.filters.includeSpellIDs
+Equal(ids[467] and ids[9910] and ids[16870], true, "which lights for either spell")
+Equal(S[box].groups.g2.filters.includeSpellIDs[16886], true, "the next entry moves up")
+Equal(S[box].groups.g3.enabled, false, "no third icon")
+B:SetJoined("buff", 3, true)
+Equal(Shape("buff"), "Thorns+Clearcasting+Nature's Grace", "a run of joined entries is one icon")
+B:SetOption("buff", "showMissing", true)
+local buffs = B:Get("buff")
+Equal(S[buffs.holders[1].label].text, "Thorns +2", "a fixed spot names the first and counts the rest")
+Equal(buffs.slotIDs[1][16886] and buffs.slotIDs[1][467], true, "and lights for any of them")
+Equal(S[buffs.holders[1].icon].alpha, .45, "buff spots don't depend on a target")
+B:SetOption("buff", "showMissing", false)
+
+B:Clear("buff")
+Equal(next(ns.Joins("buff")), nil, "clearing a bar clears its joins")
+for _, name in ipairs({ "Walk on Air", "Thorns", "Clearcasting", "Nature's Grace" }) do B:SetAura("buff", name, true) end
+B:SetJoined("buff", 3, true)
+B:SetJoined("buff", 4, true)
+Equal(Shape("buff"), "Walk on Air, Thorns+Clearcasting+Nature's Grace", "a group of three after another entry")
+B:Remove("buff", 2)
+Equal(Shape("buff"), "Walk on Air, Clearcasting+Nature's Grace", "removing the first of a group keeps the rest together, apart from the entry above")
+B:SetAura("buff", "Thorns", true)
+B:SetJoined("buff", 4, true)
+B:SetAura("buff", "Nature's Grace", false)
+Equal(Shape("buff"), "Walk on Air, Clearcasting+Thorns", "unticking one in the middle keeps the group")
+B:MoveTo("buff", 3, 1)
+Equal(Shape("buff"), "Thorns, Walk on Air, Clearcasting", "a dragged entry leaves its group")
+B:SetJoined("buff", 3, true)
+B:SetAura("buff", "Nature's Grace", true)
+B:MoveTo("buff", 4, 3)
+Equal(Shape("buff"), "Thorns, Walk on Air+Nature's Grace+Clearcasting", "dropped inside a group, it joins it")
+B:SetAura("debuff", "Wrath", true)
+B:SetJoined("debuff", 2, true)
+Equal(Shape("debuff"), "Moonfire+Wrath", "the Debuffs bar joins the same way")
+Equal(B:SetJoined("cd", 2, true), false, "cooldown bars don't join")
+
+ns.CopyProfile("Joined copy")
+Equal(Shape("buff"), "Thorns, Walk on Air+Nature's Grace+Clearcasting", "a copied profile keeps its joins")
+Environment(true)
+ns = Load(nil)
+B = ns.Bars
+Equal(Shape("buff"), "Thorns, Walk on Air+Nature's Grace+Clearcasting", "joins come back from the backup")
+Equal(Shape("debuff"), "Moonfire+Wrath", "on both bars")
+
+-- The window: the Debuffs page and the join buttons.
+SlashCmdList.FECM("")
+local win = FECMFrame
+local barPage = win.pages.bar
+local function ListRow(name)
+    for _, f in ipairs(frames) do
+        if f.spell == name and S[f].shown then return f end
+    end
+end
+Equal(win.nav.debuff ~= nil and S[win.nav.debuff.count].text, 2, "Debuffs listed down the left")
+win:Select("debuff")
+Equal(S[barPage.options.showMissing.text].text, "Show missing debuffs greyed", "its page speaks of debuffs")
+Equal(ListRow("Clearcasting"), nil, "procs aren't offered for debuffs")
+Equal(ListRow("Moonfire").check:GetChecked(), true, "spells on the bar are ticked")
+win:Select("buff")
+Equal(S[barPage.options.showMissing.text].text, "Show missing buffs greyed", "and the Buffs page of buffs")
+Equal(S[barPage.icons[1].link].shown, false, "the first icon has no join button")
+local link = barPage.icons[2].link
+Equal(S[link].shown and S[link.label].text, "+", "the others offer to join")
+link:Click()
+Equal(B:Joined("buff", 2), true, "clicking joins it to the one before")
+Equal(S[link.label].text, "-", "then offers to split")
+Equal(S[barPage.icons[2].bridge].shown, true, "a line under the pair shows they're joined")
+link:Click()
+Equal(B:Joined("buff", 2), false, "clicking again splits them")
+Equal(S[barPage.icons[2].bridge].shown, false, "and the line goes")
+B:Assign("Moonfire", "cd")
+B:Assign("Wrath", "cd")
+win:Select("cd")
+Equal(S[barPage.icons[2].link].shown, false, "cooldown bars have no join buttons")
+Equal(#printed, 1, "only the restored-settings notice was printed")
 
 -- Ticking spells onto bars from their pages ------------------------------------------------
 
