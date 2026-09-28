@@ -12,10 +12,10 @@ to EraUI.
   fonts
 - Visual only: Blizzard still decides what shows and when, positions and sizes
   stay in Edit Mode, and everything works in combat
-- On by default; switch it off in `/fecm` and reload to restore Blizzard's look
+- On by default; switch it off in `/ccm` and reload to restore Blizzard's look
 
 ## Bars
-- Your own bars of square Classic icons, set up in `/fecm` > Bars
+- Your own bars of square Classic icons, set up in `/ccm` > Bars
 - Tick spells from your spellbook onto the Cooldowns or Utility bar; each spell
   shows once at your highest rank, and switches when you train a new rank
 - Cooldown sweep and countdown in combat, greyed while cooling down, red out of
@@ -35,7 +35,7 @@ to EraUI.
 - Off by default
 
 ## Commands
-- `/fecm` opens the settings: Spellbook, Bars and Settings on one screen, with
+- `/ccm` opens the settings: Spellbook, Bars and Settings on one screen, with
   an accent colour you pick; also found under Options > AddOns
 
 Blizzard's Cooldown Manager must be on: Options > Gameplay > Advanced Options >

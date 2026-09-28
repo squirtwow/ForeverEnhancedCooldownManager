@@ -1,6 +1,6 @@
 -- Development check for Classic Bars (step 2). NOT FOR RELEASE: remove this
 -- file from the TOC before packaging.
--- /fecm check [spell]: for 20 seconds, prints once a second whether the game
+-- /ccm check [spell]: for 20 seconds, prints once a second whether the game
 -- hides from addons the values the bars would use in combat, shows a test
 -- sweep above the character for that spell's cooldown, and reports any proc
 -- glow events.
@@ -99,7 +99,7 @@ local function Stop()
     Say("done. Please screenshot the chat.")
 end
 
--- /fecm check list: what the window's spell list holds, and where the game
+-- /ccm check list: what the window's spell list holds, and where the game
 -- has placed it. Also kept in the saved settings (probe), read after a reload.
 local function Rect(frame)
     if not frame then return "missing" end
@@ -114,7 +114,7 @@ end
 local function ProbeList()
     local window = ns.window
     local page = window and window.pages and window.pages.bar
-    if not page then Say("open /fecm first.") return end
+    if not page then Say("open /ccm first.") return end
     local lines = {}
     local function Add(text)
         lines[#lines + 1] = text
@@ -174,7 +174,7 @@ function ns.Probe(msg)
     local _, class = UnitClass("player")
     local spell = msg:match("^%s*check%s+(.-)%s*$")
     if not spell or spell == "" then spell = DEFAULT_SPELL[class] or "Attack" end
-    if not C_Spell.GetSpellInfo(spell) then Say("you don't know " .. spell .. ". Try /fecm check <spell name>.") return end
+    if not C_Spell.GetSpellInfo(spell) then Say("you don't know " .. spell .. ". Try /ccm check <spell name>.") return end
     if not sweep then Build() end
     sweep.icon:SetTexture(C_Spell.GetSpellTexture(spell))
     sweep:Show()
@@ -198,7 +198,7 @@ function ns.Probe(msg)
     end)
 end
 
--- Old /fecm check list results are cleared at the next login.
+-- Old /ccm check list results are cleared at the next login.
 local cleaner = CreateFrame("Frame")
 cleaner:RegisterEvent("ADDON_LOADED")
 cleaner:SetScript("OnEvent", function(self, _, name)

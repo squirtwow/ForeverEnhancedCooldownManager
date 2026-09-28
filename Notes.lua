@@ -1,6 +1,6 @@
 -- What's new: this version's notes, shown once after the addon updates (a
 -- first install has nothing new to show), then any time from What's new in
--- /fecm or /fecm new. The releases before it follow underneath. Drawn in the
+-- /ccm or /ccm new. The releases before it follow underneath. Drawn in the
 -- window's flat style.
 local _, ns = ...
 local T = ns.Theme
@@ -12,12 +12,14 @@ ns.NOTES = {
         version = "Unreleased",
         sections = {
             { "Blizzard's Cooldown Manager", {
-                "A new look: square icons with big, bold countdown numbers, and Tracked Bars in three designs (Glass, Split and Outline) and six colours. Any Tracked Bar can have a colour of its own. On by default, in /fecm > Look.",
+                "A new look: square icons with big, bold countdown numbers, and Tracked Bars in three designs (Glass, Split and Outline) and six colours. Any Tracked Bar can have a colour of its own. On by default, in /ccm > Look.",
+                "Borders and shadows on the Look page: a thin border and a soft shadow, each round every icon or round whole bars, on Blizzard's Cooldown Manager icons and your own bars. Off until you pick them.",
                 "Your Personal Resource Display's health and power bars get the same look, in Blizzard's colours or your own. The extra mana bar some specs get hides in caster form and is half size in forms.",
-                "If Blizzard's Cooldown Manager or Personal Resource Display is off, /fecm tells you and can turn it on.",
+                "Combo points under your energy bar for rogues and druids in cat form, which Forever's display leaves out: five sharp segments as wide as the display, in your bar design and a colour of your own. Off until you tick it on the Look page.",
+                "If Blizzard's Cooldown Manager or Personal Resource Display is off, /ccm tells you and can turn it on.",
             } },
             { "Your own bars", {
-                "Cooldowns, Utility, Buffs and Debuffs bars, set up in /fecm by ticking spells or dragging them in from your spellbook. Each spell shows once, at your highest rank, and switches when you train a new one. Off until you tick Use my bars on the General page.",
+                "Cooldowns, Utility, Buffs and Debuffs bars, set up in /ccm by ticking spells or dragging them in from your spellbook. Each spell shows once, at your highest rank, and switches when you train a new one. Off until you tick Use my bars on the General page.",
                 "Cooldown icons show the sweep and countdown in combat: grey while cooling down, red out of range, blue without enough mana, and a gold edge when a reactive ability like Overpower is ready.",
                 "Buffs bar: your buffs and class procs (Clearcasting, Shadow Trance and more) with time left and stacks. Buffs from other players count at any rank, group versions too.",
                 "Debuffs bar: your own debuffs on your target.",
@@ -25,11 +27,13 @@ ns.NOTES = {
                 "Each bar has its own icon size, spacing and options: hide when ready, spell names, countdown numbers, and show, fade or hide out of combat. Unlock to drag bars anywhere.",
                 "Icons per row: more icons than fit across go onto another row, and each bar grows from its centre or from either edge.",
                 "Layout page: one click stacks your bars around your Personal Resource Display, as a pyramid, wide rows, sides and more, flush or with the room you choose between rows and icons. The display widens to your widest row, or hide it and the rows close up; your bars follow it as it moves or changes with your form.",
-                "Change a layout row by row: how many icons fit across, which bar goes in which row, and where the display sits in the stack. Drag icons between rows, or off a row to remove them.",
+                "Change a layout row by row: how many icons fit across, which bar goes in which row, and where the display sits in the stack. Drag icons between rows, or off a row to remove them. Take a whole bar out, or Reset back to the preset.",
+                "Find a debuff on the Layout page: only your class's debuffs are listed, and you pick the spot in the Debuffs row it goes in.",
+                "Cast bar page: your own cast bar right under your Personal Resource Display, in your bar design and colour, with the spell's icon, name and time left, and a live preview. Blizzard's cast bar is hidden while it's on. Off by default; off, your rows close up so another addon's cast bar works as before.",
                 "Trinkets, potions, your Hearthstone and ammo can go on a bar too. Search to add spells outside your spellbook by name or spell ID, or tick Show all ranks to use a lower rank.",
             } },
             { "Settings", {
-                "Profiles: each character gets its own lists, and characters can share one. Switch, copy, rename or delete them from the Profile menu.",
+                "Profiles: each character gets its own lists, and characters can share one, even across classes: each character only shows its own class's spells. Use on all characters puts one profile on every character. Switch, copy, rename or delete them from the Profile menu.",
                 "Your settings are also backed up in the game's own settings, so they come back if the game loses them, and you're told when that happens.",
                 "Pick the window's accent colour on the Look page, and find EraUI, my other addon, under More from Squirt on the General page.",
             } },
@@ -181,7 +185,7 @@ local function Build()
 
     local hint = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     hint:SetPoint("BOTTOMLEFT", 20, 21)
-    hint:SetText("/fecm new shows this again.")
+    hint:SetText("/ccm new shows this again.")
     local done = T:Button(window, "Got it", 100, 24)
     done:SetPoint("BOTTOMRIGHT", -16, 14)
     T:Paint(function(accent) done:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)

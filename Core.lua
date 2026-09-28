@@ -28,24 +28,44 @@ ns.DEFAULTS = {
     prdHealth = "default", -- its bars' colours: Blizzard's, or a bar colour
     prdPower = "default",
     prdMatch = true, -- while a layout holds your bars, the display is as wide as your widest row
+    prdCombo = false, -- the addon's own combo points under the display
+    prdComboColour = "default", -- their colour: the addon's red, or a bar colour
+    castBar = false, -- the addon's own cast bar under the display
+    castColour = "default", -- its colour: Blizzard's gold (green channelling), or a bar colour
+    castHeight = 18,
+    castIcon = true, -- the spell's icon, name and time left on it
+    castName = true,
+    castTime = true,
+    iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
+    iconShadow = "off", -- and a soft shadow, the same way
 }
+ns.DECOR_KEYS = { "off", "icon", "bar" }
+ns.DECOR_NAMES = { off = "Off", icon = "Each icon", bar = "Whole bar" }
+-- Number settings, each within its limits: min, max, default.
+ns.CAST_HEIGHT = { 10, 32, 18 }
+local NUMBERS = { castHeight = ns.CAST_HEIGHT }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
 ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
 ns.BAR_STYLE_NAMES = { glass = "Glass", split = "Split", outline = "Outline" }
 ns.BAR_COLOUR_KEYS = { "orange", "charcoal", "blue", "green", "purple", "class" } -- your class colour last
 ns.BAR_COLOUR_NAMES = { orange = "Orange", class = "Class", charcoal = "Charcoal", blue = "Blue", green = "Green", purple = "Purple" }
-local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true } }
+local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
+    prdComboColour = { default = true }, castColour = { default = true },
+    iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true } }
 for _, key in ipairs(ns.ACCENT_KEYS) do CHOICES.accent[key] = true end
 for _, key in ipairs(ns.BAR_STYLE_KEYS) do CHOICES.barStyle[key] = true end
 for _, key in ipairs(ns.BAR_COLOUR_KEYS) do
     CHOICES.barColour[key], CHOICES.prdHealth[key], CHOICES.prdPower[key] = true, true, true
+    CHOICES.prdComboColour[key], CHOICES.castColour[key] = true, true
 end
 
 function ns.Valid(key, value)
     local default = ns.DEFAULTS[key]
     if type(default) == "boolean" then return type(value) == "boolean" end
     if CHOICES[key] then return CHOICES[key][value] == true end
+    local limits = NUMBERS[key]
+    if limits then return type(value) == "number" and value >= limits[1] and value <= limits[2] end
     return type(value) == type(default)
 end
 -- Settings that only take effect after a reload.
@@ -153,6 +173,12 @@ local function Lists(profile)
     return profile
 end
 
+-- The profile chosen for every character, new ones included, if there is one.
+local function Everyone()
+    local name = db and db.everyone
+    if type(name) == "string" and Profiles()[name] then return name end
+end
+
 local function RepairProfiles()
     local profiles = Profiles()
     for name, profile in pairs(profiles) do
@@ -162,6 +188,7 @@ local function RepairProfiles()
     for guid, name in pairs(chars) do
         if type(guid) ~= "string" or type(name) ~= "string" then chars[guid] = nil end
     end
+    db.everyone = Everyone()
 end
 
 -- The list a bar shows: this character's profile, or a stand-in until the
@@ -190,9 +217,17 @@ local function PlayerGUID()
     return type(guid) == "string" and guid ~= "" and guid or nil
 end
 
-local function OwnName()
-    local name = UnitName and UnitName("player") or "Unknown"
-    local class = UnitClass and UnitClass("player") or "Unknown"
+local UNKNOWN = UNKNOWNOBJECT or "Unknown"
+
+-- "Name (Class) - Realm". On a character's very first login the game may not
+-- know its name yet: nil then, unless a name is needed now anyway.
+local function OwnName(anyway)
+    local name = UnitName and UnitName("player")
+    if type(name) ~= "string" or name == "" or name == UNKNOWN then
+        if not anyway then return nil end
+        name = UNKNOWN
+    end
+    local class = UnitClass and UnitClass("player") or UNKNOWN
     local realm = GetRealmName and GetRealmName() or ""
     if realm == "" then return ("%s (%s)"):format(name, class) end
     return ("%s (%s) - %s"):format(name, class, realm)
@@ -208,18 +243,25 @@ local function FreeName(name)
     return candidate
 end
 
--- Works out this character's profile, making its own on its first login.
--- The first character to log in after profiles arrived keeps the lists that
--- were saved before them.
-function ns.ResolveProfile()
+-- Works out this character's profile, making its own on its first login
+-- (or using the one chosen for every character). The first character to log
+-- in after profiles arrived keeps the lists that were saved before them. A
+-- new profile waits until the game knows the character's name, at login at
+-- the latest ("final").
+function ns.ResolveProfile(final)
     if active then return true end
     local guid = db and PlayerGUID()
     if not guid then return false end
     local profiles, chars = Profiles(), Chars()
     local name = chars[guid]
-    if not profiles[name] then
+    if not profiles[name] and Everyone() then
+        name = Everyone()
+        chars[guid] = name
+    elseif not profiles[name] then
+        local own = OwnName(final)
+        if not own then return false end
         local legacy = next(profiles) == nil
-        name = FreeName(OwnName())
+        name = FreeName(own)
         local profile = {}
         for _, key in ipairs(ns.BAR_KEYS) do
             local bar = type(db.bars) == "table" and db.bars[key]
@@ -326,22 +368,64 @@ function ns.CopyProfile(text)
     return Create(text, true)
 end
 
--- Renames this character's profile, for every character using it.
+-- The profile chosen for every character, if any.
+function ns.EveryoneProfile()
+    return db and Everyone()
+end
+
+-- This character's profile for every character, and for any made later.
+-- Each one only shows its own class's spells from it.
+function ns.UseOnAll()
+    local why = Blocked()
+    if why then return false, why end
+    local chars = Chars()
+    for guid in pairs(chars) do chars[guid] = active end
+    db.everyone = active
+    ns.SaveBars()
+    return true, "All your characters use " .. active .. " now, and new ones will too."
+end
+
+-- Whether every character known uses this profile, as chosen for them all.
+function ns.OnAll(name)
+    if name == nil or name ~= ns.EveryoneProfile() then return false end
+    for _, used in pairs(Chars()) do
+        if used ~= name then return false end
+    end
+    return true
+end
+
+-- Gives this character's profile a new name, for every character using it.
+local function Rename(name)
+    local profiles, chars = Profiles(), Chars()
+    profiles[name], profiles[active] = profiles[active], nil
+    for guid, used in pairs(chars) do
+        if used == active then chars[guid] = name end
+    end
+    if db.everyone == active then db.everyone = name end
+    active = name
+    ns.SaveBars()
+end
+
 function ns.RenameProfile(text)
     local why = Blocked()
     if why then return false, why end
     local name, problem = CleanName(text)
     if not name then return false, problem end
     if name == active then return true, "That's already its name." end
-    local profiles, chars = Profiles(), Chars()
-    if profiles[name] then return false, name .. " already exists." end
-    profiles[name], profiles[active] = profiles[active], nil
-    for guid, used in pairs(chars) do
-        if used == active then chars[guid] = name end
-    end
-    active = name
-    ns.SaveBars()
+    if Profiles()[name] then return false, name .. " already exists." end
+    Rename(name)
     return true, "Renamed to " .. name .. "."
+end
+
+-- A profile made before the game knew the character's name ("Unknown
+-- (Paladin)") takes the name, while it's still that character's alone.
+function ns.NameUnknownProfile()
+    local own = OwnName()
+    if not (active and own) or active == own or Profiles()[own] then return false end
+    local prefix = UNKNOWN .. " ("
+    if active:sub(1, #prefix) ~= prefix or ns.ProfileUsers(active) ~= 1 then return false end
+    Rename(own)
+    return true
 end
 
 -- Whether a profile can be deleted now: true and its name, or false and why.
@@ -367,8 +451,9 @@ function ns.DeleteProfile(text)
     if not ok then return false, name end
     local profiles = Profiles()
     profiles[name] = nil
+    if db.everyone == name then db.everyone = nil end
     if name == active then
-        local fresh = FreeName(OwnName())
+        local fresh = FreeName(OwnName(true))
         profiles[fresh] = Lists({})
         Switch(fresh)
         return true, "Deleted " .. name .. ". You're now on " .. fresh .. "."
@@ -434,8 +519,15 @@ function ns.LayoutData()
     local layout = db.layout
     layout.on = layout.on == true
     if type(layout.preset) ~= "string" then layout.preset = nil end
+    -- The preset last picked, which Reset goes back to.
+    if type(layout.base) ~= "string" then layout.base = nil end
     layout.gap = Limit(layout.gap, ns.ROW_GAP)
     layout.spacing = Limit(layout.spacing, ns.ICON_GAP)
+    -- Bars taken out: they keep their row and spells, but don't show.
+    if type(layout.hidden) ~= "table" then layout.hidden = {} end
+    for key, out in pairs(layout.hidden) do
+        if not ns.BAR_NAMES[key] or out ~= true then layout.hidden[key] = nil end
+    end
     local seen = {}
     local function Take(key)
         if ns.BAR_NAMES[key] and not seen[key] then
@@ -547,6 +639,8 @@ local function ReadBackup(name)
             values[key] = value == "1"
         elseif type(default) == "string" and ns.Valid(key, value) then
             values[key] = value
+        elseif type(default) == "number" and ns.Valid(key, tonumber(value)) then
+            values[key] = tonumber(value)
         end
     end
     return values
@@ -614,6 +708,7 @@ local function EncodeBars()
     end
     table.sort(guids)
     for _, guid in ipairs(guids) do Put("c." .. guid, index[Chars()[guid]]) end
+    if index[Everyone() or ""] then Put("all", index[Everyone()]) end
     local custom = {}
     for name in pairs(ns.CustomSpells()) do custom[#custom + 1] = name end
     table.sort(custom)
@@ -631,6 +726,12 @@ local function EncodeBars()
     Put("lay.gap", layout.gap)
     Put("lay.spacing", layout.spacing)
     if layout.preset then Put("lay.preset", layout.preset) end
+    if layout.base then Put("lay.base", layout.base) end
+    local hidden = {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if layout.hidden[key] then hidden[#hidden + 1] = key end
+    end
+    if #hidden > 0 then Put("lay.hidden", table.concat(hidden, ",")) end
     Put("lay.above", table.concat(layout.above, ","))
     Put("lay.below", table.concat(layout.below, ","))
     if layout.left then Put("lay.left", layout.left) end
@@ -684,8 +785,10 @@ local function DecodeV2(text)
             for key in (text or ""):gmatch("[^,]+") do keys[#keys + 1] = key end
             return keys
         end
+        local hidden = {}
+        for _, key in ipairs(Keys(values["lay.hidden"])) do hidden[key] = true end
         decoded.layout = { on = values["lay.on"] == "1", preset = values["lay.preset"], gap = tonumber(values["lay.gap"]),
-            spacing = tonumber(values["lay.spacing"]),
+            spacing = tonumber(values["lay.spacing"]), base = values["lay.base"], hidden = hidden,
             above = Keys(values["lay.above"]), below = Keys(values["lay.below"]),
             left = values["lay.left"], right = values["lay.right"] }
     end
@@ -711,6 +814,7 @@ local function DecodeV2(text)
         local name = guid and names[tonumber(value)]
         if name then decoded.chars[guid] = name end
     end
+    decoded.everyone = names[tonumber(values.all or "")]
     for i = 1, 500 do
         local name = values["u" .. i]
         if not name then break end
@@ -725,7 +829,7 @@ local function DecodeV2(text)
             decoded.barColours[id] = value
         end
     end
-    if next(decoded.profiles) == nil then decoded.profiles, decoded.chars = nil, nil end
+    if next(decoded.profiles) == nil then decoded.profiles, decoded.chars, decoded.everyone = nil, nil, nil end
     if values.notes and #values.notes <= 40 then decoded.notesSeen = values.notes end
     return decoded
 end
@@ -790,6 +894,8 @@ local function WriteBackup()
             flags[#flags + 1] = key .. "=" .. (ns.Get(key) and "1" or "0")
         elseif type(default) == "string" then
             flags[#flags + 1] = key .. "=" .. ns.Get(key)
+        elseif type(default) == "number" then
+            flags[#flags + 1] = key .. "=" .. math.floor(ns.Get(key) + .5)
         end
     end
     table.sort(flags)
@@ -914,7 +1020,7 @@ local function BuildOptionsEntry()
     about:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
     about:SetWidth(560)
     about:SetJustifyH("LEFT")
-    about:SetText("A charcoal look for Blizzard's Cooldown Manager, plus cooldown and buff bars of your own. Type /fecm, or click below, for the settings.")
+    about:SetText("A charcoal look for Blizzard's Cooldown Manager, plus cooldown and buff bars of your own. Type /ccm, or click below, for the settings.")
     local open = CreateFrame("Button", nil, canvas, "UIPanelButtonTemplate")
     open:SetSize(160, 24)
     open:SetPoint("TOPLEFT", about, "BOTTOMLEFT", 0, -14)
@@ -951,7 +1057,7 @@ local function Load()
     for key, value in pairs(flags) do
         if ns.restored or db[key] == nil then db[key] = value end
     end
-    for _, field in ipairs({ "bars", "profiles", "chars", "custom", "barColours", "notesSeen", "layout" }) do
+    for _, field in ipairs({ "bars", "profiles", "chars", "everyone", "custom", "barColours", "notesSeen", "layout" }) do
         if backup[field] ~= nil and (ns.restored or db[field] == nil) then db[field] = backup[field] end
     end
     db.session = math.max(session or 0, backup.session or 0) + 1
@@ -961,8 +1067,8 @@ local function Load()
     WriteBackup()
     for key in pairs(ns.RELOAD) do ns.loaded[key] = ns.Get(key) end
 
-    SLASH_FECM1 = "/fecm"
-    SLASH_FECM2 = "/ccm"
+    SLASH_FECM1 = "/ccm"
+    SLASH_FECM2 = "/fecm"
     SlashCmdList.FECM = function(msg)
         msg = type(msg) == "string" and msg or ""
         if ns.Probe and msg:match("^%s*check") then
@@ -978,6 +1084,7 @@ local function Load()
 
     if ns.loaded.skin and ns.Skin then ns.Skin:Start() end
     if ns.Resource then ns.Resource:Start() end
+    if ns.CastBar then ns.CastBar:Start() end
     if ns.Bars then ns.Bars:Start() end
     if ns.Layout then ns.Layout:Start() end
     if ns.Notes then ns.Notes:Start() end
@@ -990,11 +1097,13 @@ loader:SetScript("OnEvent", function(self, event, name)
         Load()
     elseif event == "PLAYER_LOGIN" and db then
         self:UnregisterEvent("PLAYER_LOGIN")
-        -- In case the character wasn't known yet when the settings loaded.
-        if not active and ns.ResolveProfile() then
+        -- In case the character, or its name, wasn't known yet when the
+        -- settings loaded.
+        if not active and ns.ResolveProfile(true) then
             WriteBackup()
             if ns.Bars then ns.Bars:Rebuild() end
         end
+        if ns.NameUnknownProfile() and ns.window and ns.window:IsShown() then ns.window:Refresh() end
         if ns.restored then print("|cffffd100" .. ns.TITLE .. ":|r " .. ns.RESTORED_TEXT) end
     end
 end)

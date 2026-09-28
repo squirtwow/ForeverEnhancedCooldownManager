@@ -83,14 +83,14 @@ local function Watch(frame)
 end
 
 -- The display's bars you can see now: health, power, the extra mana bar
--- unless it's tucked away, and combo points while they show. Not the frame
--- around them, which keeps a minimum height, nor the combo point holder,
--- which keeps its height when empty.
+-- unless it's tucked away, and the addon's combo points while they show
+-- (Forever's display has none of its own). Not the frame around them, which
+-- keeps a minimum height.
 local function Bars(frame)
     local health = frame.HealthBarsContainer
     local list = { health and health.healthBar or health, frame.PowerBar }
     if not (ns.Resource and ns.Resource:ExtraHidden()) then list[#list + 1] = frame.AlternatePowerBar end
-    list[#list + 1] = frame.classFrame
+    list[#list + 1] = ns.Resource and ns.Resource:ComboRow()
     return list
 end
 
@@ -138,11 +138,27 @@ function L:Display()
     return display
 end
 
+-- Whether a bar is taken out of the layout: it keeps its row and spells, but
+-- doesn't show.
+function L:IsHidden(key)
+    local layout = ns.LayoutData()
+    return layout ~= nil and layout.hidden[key] == true
+end
+
+-- The bars in a place (above or below the display) that are in the layout.
+local function Placed(layout, place)
+    local keys = {}
+    for _, key in ipairs(layout[place]) do
+        if not layout.hidden[key] then keys[#keys + 1] = key end
+    end
+    return keys
+end
+
 -- Your widest row above or below the display, with every tile filled.
 function L:WidestRow()
     local layout, widest = ns.LayoutData(), 0
     for _, place in ipairs({ "above", "below" }) do
-        for _, key in ipairs(layout[place]) do
+        for _, key in ipairs(Placed(layout, place)) do
             local data = ns.BarData(key)
             widest = math.max(widest, data.perRow * data.size + (data.perRow - 1) * data.spacing)
         end
@@ -157,12 +173,16 @@ function L:MatchWidth()
 end
 
 -- Puts the bars in place: rows above the display from the nearest upwards,
--- rows below from the nearest downwards, and the ones beside it level with
--- its middle, touching unless you've asked for space between them. A bar
--- with nothing on it takes no room, unless the bars are unlocked. The Buffs
--- and Debuffs bars catch up after a fight.
+-- your cast bar under it while that's on, rows below from the nearest
+-- downwards, and the ones beside it level with its middle, touching unless
+-- you've asked for space between them. A bar with nothing on it takes no
+-- room, unless the bars are unlocked. The Buffs and Debuffs bars catch up
+-- after a fight. Without a layout, only the cast bar is put under the display.
 function L:Stack()
-    if not self:Active() then return false end
+    if not self:Active() then
+        if ns.CastBar then ns.CastBar:Place() end
+        return false
+    end
     if InCombatLockdown() then self.pending = true end
     local layout, B = ns.LayoutData(), ns.Bars
     local gap = layout.gap
@@ -185,16 +205,19 @@ function L:Stack()
         return bar:GetHeight() + (data.showNames and NAMES or 0)
     end
     local y = display.y + display.height / 2 + gap
-    for i = #layout.above, 1, -1 do
-        local key = layout.above[i]
+    local above = Placed(layout, "above")
+    for i = #above, 1, -1 do
+        local key = above[i]
         local data = Grow(key, "centre", "up")
         -- Names hang under the icons, so the bar sits above them.
         B:PlaceAt(key, "BOTTOM", display.x, y + (data.showNames and NAMES or 0))
         local room = Room(key, data)
         if room then y = y + room + gap end
     end
-    y = display.y - display.height / 2 - gap
-    for _, key in ipairs(layout.below) do
+    local bottom = display.y - display.height / 2
+    if ns.CastBar then bottom = ns.CastBar:Under(display) end
+    y = bottom - gap
+    for _, key in ipairs(Placed(layout, "below")) do
         local data = Grow(key, "centre", "down")
         B:PlaceAt(key, "TOP", display.x, y)
         local room = Room(key, data)
@@ -202,7 +225,7 @@ function L:Stack()
     end
     for _, side in ipairs({ "left", "right" }) do
         local key = layout[side]
-        if key then
+        if key and not layout.hidden[key] then
             local data = Grow(key, side, "down")
             local x = side == "left" and display.x - display.width / 2 - gap or display.x + display.width / 2 + gap
             B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + data.size / 2)
@@ -222,8 +245,11 @@ local function Snapshot()
         copy.bars[key] = saved
     end
     local layout = ns.LayoutData()
-    copy.layout = { on = layout.on, preset = layout.preset, above = Copy(layout.above),
-        below = Copy(layout.below), left = layout.left, right = layout.right }
+    local hidden = {}
+    for key in pairs(layout.hidden) do hidden[key] = true end
+    copy.layout = { on = layout.on, preset = layout.preset, base = layout.base, above = Copy(layout.above),
+        below = Copy(layout.below), left = layout.left, right = layout.right, gap = layout.gap,
+        spacing = layout.spacing, hidden = hidden }
     return copy
 end
 
@@ -246,14 +272,14 @@ function L:Apply(key)
             table.insert(layout[row.place], row.bar)
         end
     end
-    layout.on, layout.preset = true, key
+    layout.on, layout.preset, layout.base = true, key, key
     ns.LayoutData()
     if not ns.Bars:Enabled() then ns.Set("useBars", true) end
     ns.Bars:Rebuild()
     return true, preset.name .. " is set up. Tick spells for each bar, then size them to taste."
 end
 
--- Puts back what the last preset changed.
+-- Puts back what the last preset or Reset changed.
 function L:Undo()
     local copy = self.undo
     if not copy then return false end
@@ -264,13 +290,42 @@ function L:Undo()
         for _, field in ipairs(FIELDS) do data[field] = saved[field] end
     end
     local layout = ns.LayoutData()
-    layout.on, layout.preset = copy.layout.on, copy.layout.preset
-    layout.above, layout.below = copy.layout.above, copy.layout.below
-    layout.left, layout.right = copy.layout.left, copy.layout.right
+    for field, value in pairs(copy.layout) do layout[field] = value end
+    layout.left, layout.right, layout.base = copy.layout.left, copy.layout.right, copy.layout.base
     if ns.Get("useBars") ~= copy.useBars then ns.Set("useBars", copy.useBars) end
     ns.Bars:Rebuild()
     if ns.Resource then ns.Resource:Match() end
     return true, "Put back as it was."
+end
+
+-- The layout as its preset was first set up: every bar back in, no room
+-- between rows or icons. Your spells and icon sizes stay; Undo puts it back.
+function L:Reset()
+    if InCombatLockdown() then return false, "Finish combat first." end
+    local layout = ns.LayoutData()
+    local undo = Snapshot()
+    layout.gap, layout.spacing, layout.hidden = 0, 0, {}
+    local ok, message = self:Apply(layout.base or L.PRESETS[1].key)
+    self.undo = undo
+    if ok then message = PRESET[ns.LayoutData().base].name .. " is back as it was first set up." end
+    return ok, message
+end
+
+-- Takes a bar out of the layout: its row closes up and it doesn't show, but
+-- it keeps its spells and place for when it's put back.
+function L:TakeOut(key)
+    if InCombatLockdown() then return false, "Finish combat first." end
+    local layout = ns.LayoutData()
+    layout.hidden[key] = true
+    ns.Bars:Rebuild()
+    return true, ns.BAR_NAMES[key] .. " is out of your layout. Put it back any time."
+end
+
+function L:PutBack(key)
+    if InCombatLockdown() then return false, "Finish combat first." end
+    ns.LayoutData().hidden[key] = nil
+    ns.Bars:Rebuild()
+    return true, ns.BAR_NAMES[key] .. " is back in your layout."
 end
 
 -- A change on the Layout page stacks the bars again, as your own layout.
@@ -311,14 +366,15 @@ function L:SetAcross(key, across)
     return true
 end
 
--- The rows top to bottom: those above the display, the ones beside it, then
--- those below.
+-- The rows in the layout, top to bottom: those above the display, the ones
+-- beside it, then those below.
 function L:Rows()
     local layout, rows = ns.LayoutData(), {}
-    for _, key in ipairs(layout.above) do rows[#rows + 1] = key end
-    if layout.left then rows[#rows + 1] = layout.left end
-    if layout.right then rows[#rows + 1] = layout.right end
-    for _, key in ipairs(layout.below) do rows[#rows + 1] = key end
+    for _, key in ipairs(Placed(layout, "above")) do rows[#rows + 1] = key end
+    for _, side in ipairs({ "left", "right" }) do
+        if layout[side] and not layout.hidden[layout[side]] then rows[#rows + 1] = layout[side] end
+    end
+    for _, key in ipairs(Placed(layout, "below")) do rows[#rows + 1] = key end
     return rows
 end
 
@@ -358,20 +414,25 @@ function L:Swap(key, delta)
 end
 
 function L:CanMoveDisplay(delta)
-    local layout = ns.LayoutData()
-    return #layout[delta < 0 and "above" or "below"] > 0
+    return #Placed(ns.LayoutData(), delta < 0 and "above" or "below") > 0
 end
 
--- Moves the display up or down past one row, which changes sides of it.
+-- Moves the display up or down past one row, which changes sides of it
+-- (taken-out rows on the way go with it).
 function L:MoveDisplay(delta)
     if InCombatLockdown() then return false, "Finish combat first." end
     if not self:CanMoveDisplay(delta) then return false end
     local layout = Edited()
-    if delta < 0 then
-        table.insert(layout.below, 1, table.remove(layout.above))
-    else
-        table.insert(layout.above, table.remove(layout.below, 1))
-    end
+    local moved
+    repeat
+        if delta < 0 then
+            moved = table.remove(layout.above)
+            table.insert(layout.below, 1, moved)
+        else
+            moved = table.remove(layout.below, 1)
+            table.insert(layout.above, moved)
+        end
+    until not layout.hidden[moved]
     self:Stack()
     return true
 end

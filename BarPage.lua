@@ -1,4 +1,4 @@
--- A bar's page in the /fecm window: its icons in the order they show (drag
+-- A bar's page in the /ccm window: its icons in the order they show (drag
 -- one onto another to move it, x to take it off), its options, and a
 -- searchable list of your spells with a tick box to put each on the bar.
 local _, ns = ...
@@ -28,6 +28,7 @@ function ns.BuildBarPage(window, page, width)
     title:SetPoint("TOPLEFT", 16, -16)
     local count = T:Text(page, "GameFontHighlightSmall", T.MUTED)
     count:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    page.count = count
     -- While your bars are off, a way to turn them on right here.
     local off = T:Text(page, "GameFontHighlightSmall", T.WARN)
     off:SetPoint("LEFT", title, "RIGHT", 10, 0)
@@ -40,6 +41,18 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end)
     page.turnOn = turnOn
+    -- A bar taken out of your layout says so, with a way to put it back.
+    local out = T:Text(page, "GameFontHighlightSmall", T.WARN)
+    out:SetPoint("LEFT", title, "RIGHT", 10, 0)
+    out:SetText("Taken out of your layout.")
+    local putBack = T:Button(page, "Put back", 70, 18)
+    putBack:SetPoint("LEFT", out, "RIGHT", 8, 0)
+    putBack:SetScript("OnClick", function()
+        local _, message = ns.Layout:PutBack(state.bar)
+        window:Say(message)
+        window:Refresh()
+    end)
+    page.putBack = putBack
 
     -- Clearing asks for a second click within a few seconds.
     local clear = T:Button(page, "", 130, 20)
@@ -97,8 +110,8 @@ function ns.BuildBarPage(window, page, width)
     -- Where a dragged icon lands: on another icon takes its place, anywhere
     -- else in the tray goes to the end.
     local function DropTarget()
-        for i, icon in ipairs(page.icons) do
-            if icon:IsShown() and icon:IsMouseOver() then return i end
+        for _, icon in ipairs(page.icons) do
+            if icon:IsShown() and icon:IsMouseOver() then return icon.index end
         end
         if tray:IsMouseOver() then return #ns.BarData(state.bar).spells end
     end
@@ -451,28 +464,32 @@ function ns.BuildBarPage(window, page, width)
     end
 
     local function RefreshTray()
-        local spells = ns.BarData(state.bar).spells
         local aura = ns.AURA_BARS[state.bar] ~= nil
-        for i, key in ipairs(spells) do
-            local icon = TrayIcon(i)
+        -- Your own entries: another class's, in a shared profile, stay hidden.
+        local names, places = B:Mine(state.bar)
+        for n, key in ipairs(names) do
+            local icon, i = TrayIcon(n), places[n]
             local entry = ns.Spells:Find(key)
             icon.index, icon.name = i, entry and entry.name or key
-            icon.texture:SetTexture(entry and entry.icon or 134400) -- question mark until learned
+            -- A spell you haven't learned yet shows greyed, in its own icon.
+            icon.texture:SetTexture(ns.Spells:Icon(key))
             icon.texture:SetDesaturated(entry == nil)
-            local joined = aura and B:Joined(state.bar, i)
-            icon.link:SetShown(aura and i > 1)
+            -- An entry joins the one just before it, so only to one you can see.
+            local follows = aura and n > 1 and places[n - 1] == i - 1
+            local joined = follows and B:Joined(state.bar, i)
+            icon.link:SetShown(follows)
             icon.link:SetLabel(joined and "-" or "+")
             local colour = joined and T:Accent() or T.MUTED
             icon.link.label:SetTextColor(colour[1], colour[2], colour[3])
             -- An icon starting a new row has its partner at the end of the row above.
-            icon.bridge:SetShown(joined and (i - 1) % perRow ~= 0)
+            icon.bridge:SetShown(joined and (n - 1) % perRow ~= 0)
             icon:Show()
         end
-        for i = #spells + 1, #page.icons do page.icons[i]:Hide() end
-        local lines = math.max(1, math.ceil(#spells / perRow))
+        for n = #names + 1, #page.icons do page.icons[n]:Hide() end
+        local lines = math.max(1, math.ceil(#names / perRow))
         local trayHeight = 16 + lines * ICON + (lines - 1) * GAP
         tray:SetHeight(trayHeight)
-        empty:SetShown(#spells == 0)
+        empty:SetShown(#names == 0)
         empty:SetText(EMPTY[state.bar])
     end
 
@@ -482,13 +499,16 @@ function ns.BuildBarPage(window, page, width)
             scroll:ScrollTo(0)
         end
         local data = ns.BarData(key)
-        local spells = data.spells
+        local spells = B:Mine(key)
         local name = ns.BAR_NAMES[key]
         title:SetText(name:upper())
         local on = B:Enabled()
+        local taken = on and ns.Layout ~= nil and ns.Layout:IsHidden(key)
         off:SetShown(not on)
         turnOn:SetShown(not on)
-        count:SetShown(on)
+        out:SetShown(taken)
+        putBack:SetShown(taken)
+        count:SetShown(on and not taken)
         local aura = ns.AURA_BARS[key]
         local word = aura and aura.word or "icon"
         count:SetText(#spells == 0 and "Empty" or (#spells .. " " .. word .. (#spells == 1 and "" or "s")

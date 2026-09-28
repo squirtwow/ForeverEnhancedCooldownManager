@@ -23,6 +23,9 @@ local INSET = 2
 
 local skinned = setmetatable({}, { __mode = "k" })
 local bars = setmetatable({}, { __mode = "k" }) -- restyled bar items and the pieces added to them
+local decors = setmetatable({}, { __mode = "k" }) -- each icon's border and shadow
+local rows = {} -- each icon viewer's border and shadow, round the whole row
+M.decors, M.rows = decors, rows
 local hooked = {}
 local SPLIT_BOX = 46 -- the Split design's time box
 
@@ -59,6 +62,13 @@ local function SquareSweep(cooldown, icon)
     cooldown:SetSwipeTexture(Style.FLAT)
 end
 
+-- A border and shadow round the icon art, when chosen on the Look page.
+local function Decorate(item, icon)
+    local decor = Style:Decor(item, icon)
+    decors[item] = decor
+    Style:ShowDecor(decor, Style:DecorFor("icon"))
+end
+
 local function Font(region, name)
     if region and name then region:SetFontObject(name) end
 end
@@ -69,6 +79,7 @@ end
 local function Cooldown(item, spec)
     SquareIcon(item, item.Icon)
     SquareSweep(item.Cooldown, item.Icon)
+    Decorate(item, item.Icon)
     if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
     Font(item.ChargeCount and item.ChargeCount.Current, Style:Count(spec.size))
     -- Out of range still tints the icon red; the modern shadow and the
@@ -81,6 +92,7 @@ end
 local function Buff(item, spec)
     SquareIcon(item, item.Icon)
     SquareSweep(item.Cooldown, item.Icon)
+    Decorate(item, item.Icon)
     if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
     Font(item.Applications and item.Applications.Applications, Style:Count(spec.size))
 end
@@ -236,7 +248,7 @@ function M:TrackedBars()
     return ids
 end
 
--- A Tracked Bar for the /fecm window's preview, made from the addon's own
+-- A Tracked Bar for the /ccm window's preview, made from the addon's own
 -- frames in the shape of Blizzard's so it shows exactly what each design does,
 -- in the colour for all bars.
 function M:Sample(parent, width)
@@ -268,13 +280,42 @@ function M:Sample(parent, width)
 end
 
 -- size is the item's own size in Blizzard's templates; Edit Mode's icon size
--- scales the whole viewer, fonts included.
+-- scales the whole viewer, fonts included. The cooldown rows can have a
+-- border and shadow round the whole row; Tracked Buffs come and go, so they
+-- only get them round each icon, and the Tracked Bars keep their own edges.
 M.VIEWERS = {
-    { name = "EssentialCooldownViewer", skin = Cooldown, size = 50 },
-    { name = "UtilityCooldownViewer", skin = Cooldown, size = 30 },
+    { name = "EssentialCooldownViewer", skin = Cooldown, size = 50, row = true },
+    { name = "UtilityCooldownViewer", skin = Cooldown, size = 30, row = true },
     { name = "BuffIconCooldownViewer", skin = Buff, size = 40 },
     { name = "BuffBarCooldownViewer", skin = TrackedBar, size = 30 },
 }
+
+-- Whether a row has any icons: an item with a cooldown in it. An empty row
+-- keeps two empty items and its size, so it would get an empty box.
+local function Filled(viewer)
+    local pool = viewer and viewer.itemFramePool
+    if not (pool and pool.EnumerateActive) then return false end
+    for item in pool:EnumerateActive() do
+        local id = item.cooldownID
+        if (issecretvalue and issecretvalue(id)) or id ~= nil then return true end
+    end
+    return false
+end
+
+local function ShowRow(name)
+    local decor = rows[name]
+    if not decor then return end
+    local border, shadow = Style:DecorFor("bar")
+    local filled = Filled(_G[name])
+    Style:ShowDecor(decor, border and filled, shadow and filled)
+end
+
+-- Borders and shadows as chosen, on every icon and round each cooldown row.
+function M:ApplyDecor()
+    local border, shadow = Style:DecorFor("icon")
+    for _, decor in pairs(decors) do Style:ShowDecor(decor, border, shadow) end
+    for name in pairs(rows) do ShowRow(name) end
+end
 
 -- Setup -------------------------------------------------------------------------
 
@@ -296,6 +337,13 @@ local function Watch(spec)
     if not viewer or type(viewer.OnAcquireItemFrame) ~= "function" then return false end
     hooked[spec.name] = true
     hooksecurefunc(viewer, "OnAcquireItemFrame", function(_, item) Skin(item, spec) end)
+    -- The row's icons sit INSET inside its edge, like each icon in its item.
+    -- Shown while the row has icons, checked whenever Blizzard lays it out.
+    if spec.row then
+        rows[spec.name] = Style:Decor(viewer, viewer, INSET)
+        hooksecurefunc(viewer, "RefreshLayout", function() ShowRow(spec.name) end)
+        ShowRow(spec.name)
+    end
     local pool = viewer.itemFramePool
     if pool and pool.EnumerateActive then
         for item in pool:EnumerateActive() do Skin(item, spec) end

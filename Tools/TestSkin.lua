@@ -5,7 +5,8 @@
 -- are a Tracked Bar's own status bar height, inside its unchanged item frame,
 -- the height of the Personal Resource Display's extra mana bar, and the
 -- display's width while a layout matches it to your rows (the widths its own
--- Bar Width setting changes).
+-- Bar Width setting changes). The one read allowed is whether the display's
+-- bars show, to put the addon's combo points under the lowest.
 local checks = 0
 local function Equal(actual, expected, label)
     checks = checks + 1
@@ -43,7 +44,7 @@ New = function(kind, parent, blizzard)
         __index = function(_, key)
             local method = Proto[key]
             if method then
-                if S[obj].blizzard and FORBIDDEN[key] then
+                if S[obj].blizzard and FORBIDDEN[key] and not (key == "IsShown" and S[obj].readable) then
                     return function() error("called " .. key .. " on a Blizzard frame", 2) end
                 end
                 return method
@@ -84,6 +85,8 @@ function Proto:SetColorTexture(r, g, b, a) S[self].color = { r, g, b, a } end
 function Proto:SetSwipeTexture(t) S[self].swipe = t end
 function Proto:SetStatusBarTexture(t) S[self].barTexture = t end
 function Proto:SetStatusBarColor(r, g, b, a) S[self].barColour = { r, g, b, a } end
+function Proto:SetMinMaxValues(low, high) S[self].range = low .. "-" .. high end
+function Proto:SetValue(value) S[self].value = value end
 function Proto:GetHeight() return S[self].height end
 function Proto:GetStatusBarColor() local c = S[self].barColour or { 1, 1, 1, 1 }; return c[1], c[2], c[3], c[4] end
 function Proto:SetAtlas(atlas) S[self].atlas = atlas end
@@ -107,7 +110,12 @@ function Proto:Hide() local s = S[self]; if s.shown then s.shown = false; if s.s
 function Proto:SetShown(v) if v then self:Show() else self:Hide() end end
 function Proto:IsShown() return S[self].shown end
 function Proto:SetScript(key, fn) S[self].scripts[key] = fn end
+function Proto:HookScript(key, fn)
+    local old = S[self].scripts[key]
+    S[self].scripts[key] = function(...) if old then old(...) end fn(...) end
+end
 function Proto:RegisterEvent(e) S[self].events[e] = true end
+function Proto:RegisterUnitEvent(e, unit) S[self].events[e] = unit end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:SetText(t) S[self].text = t end
@@ -185,6 +193,7 @@ local function Viewer(name, make, preexisting)
     viewer.itemFramePool = { EnumerateActive = function() return pairs(active) end }
     viewer.OnAcquireItemFrame = function(self, item) acquired[item] = (acquired[item] or 0) + 1 end
     viewer.make = make
+    viewer.RefreshLayout = function() end
     Seal(viewer)
     S[viewer.itemFramePool] = nil
     return viewer, active
@@ -274,6 +283,7 @@ local function Load(saved)
     assert(loadfile("Style.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("Skin.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("Resource.lua"))("ForeverEnhancedCooldownManager", ns)
+    assert(loadfile("CastBar.lua"))("ForeverEnhancedCooldownManager", ns)
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
     return ns
 end
@@ -302,8 +312,8 @@ Environment()
 local v = Viewers(1)
 local ns = Load(nil)
 Equal(ns.Get("skin"), true, "charcoal look is on by default")
-Equal(SlashCmdList.FECM ~= nil and SLASH_FECM1, "/fecm", "/fecm opens the settings")
-Equal(SLASH_FECM2, "/ccm", "/ccm still works")
+Equal(SlashCmdList.FECM ~= nil and SLASH_FECM1, "/ccm", "/ccm opens the settings")
+Equal(SLASH_FECM2, "/fecm", "/fecm still works")
 Equal(registeredCategory and registeredCategory.title, "Forever Enhanced Cooldown Manager", "listed under Options > AddOns")
 
 local item = First(v.essentialActive)
@@ -467,7 +477,7 @@ Equal(#printed, 0, "no errors with bars of their own colour")
 for _, viewer in ipairs({ v.essential, v.utility, v.buffs, v.bars }) do
     local keys = 0
     for key in pairs(viewer) do if key ~= "make" then keys = keys + 1 end end
-    Equal(keys, 2, "viewer holds only its pool and the hooked acquire function")
+    Equal(keys, 3, "viewer holds only its pool and its own acquire and layout functions, hooked")
 end
 Equal(#printed, 0, "no errors reported")
 
@@ -512,10 +522,10 @@ Equal(ns.Skin:IsSkinned(First(v.barsActive)), true, "bars too")
 Environment()
 Viewers(0)
 ns = Load(nil)
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup written at first login")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup written at first login")
 ns.Set("skin", false)
 ns.Set("accent", "teal")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=0;useBars=0", "backup follows a change")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=0;useBars=0", "backup follows a change")
 
 ns.SetBarColour(467, "blue")
 ns.SetBarColour(1126, "class")
@@ -535,7 +545,7 @@ Environment(true)
 Viewers(0)
 ns = Load({ skin = true })
 Equal(ns.Get("skin"), true, "saved settings win")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup brought up to date")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup brought up to date")
 
 -- Anything unexpected in the backup is ignored.
 Environment()
@@ -567,7 +577,7 @@ Equal(ns.Get("skin"), false, "old Classic look switch carried over")
 Equal(ns.Get("accent"), "teal", "accent carried over")
 Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Bash", "bars carried over")
 Equal(ns.BarData("cd").size, 40, "with their size")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;listItems=1;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=0;useBars=1", "and saved under the new name")
+Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=1;listRanks=0;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=0;useBars=1", "and saved under the new name")
 
 -- After that, the new name's own settings and backup are used.
 Environment(true)
@@ -614,6 +624,7 @@ local function PRD()
     for _, part in ipairs({ frame, container, frame.PowerBar, frame.AlternatePowerBar, frame.ClassFrameContainer }) do
         S[part].resizable = true
     end
+    for _, part in ipairs({ container, frame.PowerBar, frame.AlternatePowerBar }) do S[part].readable = true end
     for _, part in ipairs({ frame, health, frame.PowerBar, frame.AlternatePowerBar }) do Seal(part) end
     return frame, healthArt
 end
@@ -723,6 +734,125 @@ wanted = nil
 ns.Resource:Match()
 Equal(Widths(), "200,200,200,200,200", "Blizzard's own width back when it stops")
 Equal(#printed, 0, "no errors while matching")
+
+-- Combo points under the display: the addon's own, since Forever's display
+-- has none. Off by default.
+Environment()
+Viewers(0)
+power = 3
+_G.UnitPowerType = function() return power end
+local points = 2
+_G.UnitPower = function(unit, kind) assert(unit == "player" and kind == 4, "your combo points"); return points end
+prd = PRD()
+_G.PersonalResourceDisplayFrame = prd
+ns = Load(nil)
+Equal(ns.Resource:ComboRow(), nil, "off unless you tick it")
+ns.Set("prdCombo", true)
+ns.Resource:Apply()
+local row = ns.Resource:ComboRow()
+Equal(row ~= nil and S[row].shown, true, "ticked, a druid in cat form gets them")
+local top = S[row].points[1]
+Equal(top[1] .. " " .. tostring(top[2] == prd.AlternatePowerBar) .. " " .. top[3] .. " " .. top[5], "TOPLEFT true BOTTOMLEFT -4",
+    "under the lowest bar, Blizzard's padding apart")
+Equal(S[row].points[2][1] .. " " .. S[row].points[2][3] .. " " .. S[row].height, "TOPRIGHT BOTTOMRIGHT 12",
+    "as wide as the display, whatever its width, and as tall as the power bar")
+local segments = S[row].children
+local ranges, values = {}, {}
+for i, bar in ipairs(segments) do ranges[i], values[i] = S[bar].range, tostring(S[bar].value) end
+Equal(#segments .. " " .. table.concat(ranges, ","), "5 0-1,1-2,2-3,3-4,4-5", "five segments, one point each")
+Equal(table.concat(values, ","), "2,2,2,2,2", "each handed the count as it is: the game fills the first two")
+Equal(S[segments[1]].barTexture .. " " .. S[segments[1]].barColour[1], "Interface\\Buttons\\WHITE8X8 0.87", "flat, in red to start with")
+points = 4
+Fire("UNIT_POWER_FREQUENT", "player")
+Equal(S[segments[5]].value, 4, "they follow your points")
+ns.Set("prdComboColour", "blue")
+ns.Set("barStyle", "outline")
+ns.Resource:Apply()
+Equal(S[segments[1]].barColour[1] == ns.Style:BarColour("blue")[1] and S[segments[1]].barColour[4], .45,
+    "your colour, in the design you picked")
+-- Caster form: gone, and back in cat form.
+power = 0
+Fire("UPDATE_SHAPESHIFT_FORM")
+Equal(tostring(ns.Resource:ComboRow()) .. " " .. tostring(S[row].shown), "nil false", "gone out of cat form")
+power = 3
+Fire("UPDATE_SHAPESHIFT_FORM")
+Equal(S[row].shown, true, "back in cat form")
+-- A rogue has no extra mana bar: straight under the energy bar.
+S[prd.AlternatePowerBar].shown = false
+prd:UpdatePowerBar()
+Equal(S[row].points[1][2] == prd.PowerBar, true, "under the energy bar when it's the lowest")
+Equal(#printed, 0, "no errors from the combo points")
+
+-- Your cast bar: Blizzard's own is only made invisible while yours is on,
+-- never moved, hidden or written on, and gets its alpha back after.
+Environment()
+Viewers(0)
+_G.UnitCastingInfo = function() return nil end
+_G.UnitChannelInfo = function() return nil end
+_G.GetTime = function() return 0 end
+local castingBar = New("StatusBar")
+S[castingBar].alpha = 1
+-- The hold-and-fade Blizzard plays on an interrupt, as an animation group.
+local hold = New("AnimationGroup")
+castingBar.HoldFadeOutAnim = hold
+castingBar.PlayInterruptAnims = function(self) self.HoldFadeOutAnim:Play() end
+Seal(castingBar)
+_G.PlayerCastingBarFrame = castingBar
+ns = Load({ castBar = true })
+Equal(S[castingBar].alpha, 0, "Blizzard's cast bar invisible while yours is on")
+castingBar:SetAlpha(1)
+Equal(S[castingBar].alpha, 0, "and still, when Blizzard shows it for a cast")
+castingBar:PlayInterruptAnims()
+Equal(S[hold].calls.Play .. " " .. S[hold].calls.Stop .. " " .. S[castingBar].alpha, "1 1 0",
+    "its interrupt hold-and-fade is stopped as Blizzard starts it, so it can't show it")
+ns.Set("castBar", false)
+ns.CastBar:Apply()
+Equal(S[castingBar].alpha, 0, "yours off between casts: Blizzard's stays out of sight until it casts")
+castingBar:SetAlpha(1)
+Equal(S[castingBar].alpha, 1, "then shows as normal")
+castingBar:PlayInterruptAnims()
+Equal(S[hold].calls.Play .. " " .. S[hold].calls.Stop, "2 1", "and its interrupt plays as normal")
+Equal(#printed, 0, "no errors from the cast bar")
+_G.PlayerCastingBarFrame = nil
+
+-- Borders and shadows on Blizzard's icons: the addon's own textures, round
+-- each icon's art or round each icon row, nothing written on Blizzard's frames.
+Environment()
+v = Viewers(1)
+ns = Load({ iconBorder = "icon", iconShadow = "bar" })
+item = First(v.essentialActive)
+local decor, row = ns.Skin.decors[item], ns.Skin.rows.EssentialCooldownViewer
+local utilityRow = ns.Skin.rows.UtilityCooldownViewer
+Equal(tostring(S[row.shadow[1][1]].shown) .. " " .. tostring(S[utilityRow.shadow[1][1]].shown), "false false",
+    "no box round an empty row")
+rawset(item, "cooldownID", 7)
+ns.Skin:ApplyDecor()
+Equal(tostring(S[decor.border[1]].shown) .. " " .. tostring(S[decor.shadow[1][1]].shown), "true false", "a border round each icon")
+local buffIcon = First(v.buffsActive)
+Equal(tostring(S[ns.Skin.decors[buffIcon].border[1]].shown), "true", "tracked buff icons too")
+Equal(tostring(S[row.border[1]].shown) .. " " .. tostring(S[row.shadow[1][1]].shown), "false true", "a shadow round the whole row")
+local edge = S[decor.border[1]].points[1]
+Equal(edge[1] .. " " .. tostring(edge[2] == item.Icon) .. " " .. edge[4] .. " " .. edge[5], "BOTTOMLEFT true -1 0",
+    "the border right on the icon art's edge")
+local rowEdge = S[row.shadow[1][1]].points[1]
+Equal(rowEdge[4] .. " " .. rowEdge[5], "1 -2", "the row's shadow from its icons' edge, inside Blizzard's frame")
+Equal(tostring(ns.Skin.rows.BuffBarCooldownViewer) .. " " .. tostring(ns.Skin.rows.BuffIconCooldownViewer), "nil nil",
+    "the Tracked Bars keep their own edges, and Tracked Buffs (which come and go) only get them per icon")
+rawset(item, "cooldownID", nil)
+v.essential:RefreshLayout()
+Equal(tostring(S[row.shadow[1][1]].shown), "false", "emptied, its row loses the box when Blizzard lays it out")
+rawset(item, "cooldownID", 7)
+v.essential:RefreshLayout()
+ns.Set("iconShadow", "icon")
+ns.Skin:ApplyDecor()
+local first = S[decor.shadow[1][1]]
+Equal(tostring(first.shown) .. " " .. first.points[1][4] .. " " .. tostring(S[row.shadow[1][1]].shown), "true -2 false",
+    "shadow round each icon now, starting outside its border")
+ns.Set("iconBorder", "off")
+ns.Set("iconShadow", "off")
+ns.Skin:ApplyDecor()
+Equal(tostring(S[decor.border[1]].shown) .. " " .. tostring(S[decor.shadow[1][1]].shown), "false false", "and off again")
+Equal(#printed, 0, "no errors from borders and shadows")
 
 print = _G.print
 io.write("Forever Enhanced Cooldown Manager checks passed: " .. checks .. " assertions.\n")

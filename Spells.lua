@@ -233,6 +233,49 @@ function S:Find(key)
     return byKey[key]
 end
 
+-- The classes whose talents give each proc, by the proc's name.
+local procClasses
+local function ProcClasses()
+    if procClasses then return procClasses end
+    procClasses = {}
+    for class, ids in pairs(PROCS) do
+        for _, id in ipairs(ids) do
+            local name = C_Spell.GetSpellName and Text(C_Spell.GetSpellName(id))
+            if name then procClasses[name] = (procClasses[name] or "") .. " " .. class end
+        end
+    end
+    return procClasses
+end
+
+-- Whether an entry on a bar is for you. One profile can serve every class:
+-- each character passes over the other classes' spells and procs, which stay
+-- in the profile for the characters that use them. Anything in your own
+-- spellbook, procs or bags is yours, and a buff added by name stays on the
+-- Buffs bar whoever casts it (another class's buff can land on you). Racials
+-- and anything unknown are everyone's.
+function S:ForMe(key, bar)
+    if type(key) ~= "string" then return false end
+    local entry = byKey[key]
+    if entry and (not entry.added or bar == "buff") then return true end
+    local name = key:gsub("@%d+$", "")
+    local classes = ns.SPELL_CLASSES and ns.SPELL_CLASSES[name]
+    local procs = ProcClasses()[name]
+    if not classes and not procs then return true end
+    local _, mine = UnitClass("player")
+    if type(mine) ~= "string" then return true end
+    return (" " .. (classes or "") .. " " .. (procs or "") .. " "):find(" " .. mine .. " ", 1, true) ~= nil
+end
+
+-- An entry's icon, even for a spell you haven't learned yet (from the game
+-- data), so the window only shows a question mark for something unknown.
+function S:Icon(key)
+    local entry = byKey[key]
+    if entry and entry.icon then return entry.icon end
+    local ids = type(key) == "string" and ns.RANKS and ns.RANKS[(key:gsub("@%d+$", ""))]
+    local icon = ids and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(ids[1])
+    return icon or 134400
+end
+
 -- Trinkets, bag items and ammunition: nothing that puts an aura on anyone.
 function S:IsItem(entry)
     return entry.kind == "item" or entry.kind == "slot" or entry.kind == "ammo"

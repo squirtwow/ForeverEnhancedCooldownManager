@@ -1,4 +1,4 @@
--- The /fecm window: your bars listed down the left, each with a preview of
+-- The /ccm window: your bars listed down the left, each with a preview of
 -- its icons, then the Look and General pages; the chosen page fills the rest.
 -- A bar's page (BarPage.lua) shows its icons, its options and a spell list to
 -- tick from. Drawn in the flat charcoal Theme style.
@@ -30,6 +30,9 @@ end
 -- Tracked Bars to colour one by one, and the window's accent at the foot.
 local SWATCH, SWATCH_GAP = 20, 6 -- colour swatches
 local ROW, ROW_SWATCH = 24, 16 -- the list of Tracked Bars
+-- The preview's icons, for the border and shadow.
+local SAMPLE_ICONS = { "Spell_Nature_Lightning", "Ability_Rogue_Sprint", "Spell_Holy_FlashHeal", "Spell_Fire_Fireball" }
+local ICON, ICON_GAP = 26, 4
 
 local function Swatch(parent, size, onClick)
     local swatch = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -64,12 +67,21 @@ local function PaintSwatch(swatch, colour, chosen)
     local border = chosen and { 1, 1, 1, 1 } or T.CONTROL_BORDER
     T:Flat(swatch, { colour[1], colour[2], colour[3], 1 }, border)
 end
+-- Shared with the Cast bar page.
+ns.Swatch, ns.ClassIcon, ns.PaintSwatch = Swatch, ClassIcon, PaintSwatch
 
 local function BuildLook(window, page, width)
     local inner = width - 32
     local function Redraw()
         if ns.Skin then ns.Skin:ApplyBarLook() end
         if ns.Resource then ns.Resource:Apply() end
+        window:Refresh()
+    end
+    -- Borders and shadows reach Blizzard's icons, your bars and your cast bar.
+    local function Redecorate()
+        if ns.Skin then ns.Skin:ApplyDecor() end
+        if ns.Bars then ns.Bars:ApplyDecor() end
+        if ns.CastBar then ns.CastBar:Apply() end
         window:Refresh()
     end
     local function Note(text) window.note:SetText(text) end
@@ -85,26 +97,28 @@ local function BuildLook(window, page, width)
     off:SetPoint("LEFT", title, "RIGHT", 10, 0)
     off:SetText("Blizzard's Cooldown Manager is off.")
     window.off = off
-    local managerOn = T:Button(page, "Turn on", 70, 18)
-    managerOn:SetPoint("LEFT", off, "RIGHT", 8, 0)
-    managerOn:SetScript("OnClick", function()
+    local function TurnOnManager()
         local on, why = ns.TurnOn("cooldownViewerEnabled")
         window:Say(on and "Blizzard's Cooldown Manager is on." or why
             or "It couldn't be switched on here: Options > Gameplay > Advanced Options.")
         window:Refresh()
-    end)
+    end
+    local managerOn = T:Button(page, "Turn on", 70, 18)
+    managerOn:SetPoint("LEFT", off, "RIGHT", 8, 0)
+    managerOn:SetScript("OnClick", TurnOnManager)
     window.turnOnManager = managerOn
-    local reload = T:Button(page, "Reload to apply", 120, 20)
-    reload:SetPoint("TOPRIGHT", -16, -12)
     -- Straight from the click, while the window is still shown.
-    reload:SetScript("OnClick", function()
+    local function Reload()
         if InCombatLockdown() then
             window:Say("Finish combat first, then reload.")
             window:Refresh()
             return
         end
         ReloadUI()
-    end)
+    end
+    local reload = T:Button(page, "Reload to apply", 120, 20)
+    reload:SetPoint("TOPRIGHT", -16, -12)
+    reload:SetScript("OnClick", Reload)
     window.reload = reload
 
     -- The preview: a bar like Blizzard's, in the design and colour chosen.
@@ -116,15 +130,29 @@ local function BuildLook(window, page, width)
         window.preview = ns.Skin:Sample(tray, 300)
         window.preview:SetPoint("LEFT", tray, "LEFT", 12, 0)
     end
-    local previewNote = T:Text(tray, "GameFontHighlightSmall", T.MUTED)
-    previewNote:SetPoint("RIGHT", -12, 0)
-    previewNote:SetJustifyH("RIGHT")
-    previewNote:SetText("Preview. Changes show straight away.")
+    -- And a few icons, for the border and shadow.
+    local sample = CreateFrame("Frame", nil, tray)
+    sample:SetSize(#SAMPLE_ICONS * (ICON + ICON_GAP) - ICON_GAP, ICON)
+    sample:SetPoint("RIGHT", -18, 0)
+    sample.decor = ns.Style:Decor(sample, sample)
+    sample.icons = {}
+    for i, art in ipairs(SAMPLE_ICONS) do
+        local icon = CreateFrame("Frame", nil, sample)
+        icon:SetSize(ICON, ICON)
+        icon:SetPoint("LEFT", (i - 1) * (ICON + ICON_GAP), 0)
+        local texture = icon:CreateTexture(nil, "ARTWORK")
+        texture:SetAllPoints()
+        texture:SetTexture("Interface\\Icons\\" .. art)
+        ns.Style:Zoom(texture)
+        icon.decor = ns.Style:Decor(icon, icon)
+        sample.icons[i] = icon
+    end
+    window.sampleIcons = sample
 
     -- The choices: the design and colour, then what the look applies to.
     local options = CreateFrame("Frame", nil, page)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
-    options:SetSize(inner, 120)
+    options:SetSize(inner, 198)
     local function Label(text, y)
         local label = T:Text(options, "GameFontHighlight")
         label:SetPoint("TOPLEFT", 0, y)
@@ -159,6 +187,28 @@ local function BuildLook(window, page, width)
     local barChosen = T:Text(options, "GameFontHighlightSmall", T.MUTED)
     barChosen:SetPoint("TOPLEFT", 100 + #ns.BAR_COLOUR_KEYS * (SWATCH + SWATCH_GAP) + 2, -32)
 
+    -- A border and a shadow, each round every icon or round whole bars.
+    local decorItems = {}
+    for _, key in ipairs(ns.DECOR_KEYS) do decorItems[#decorItems + 1] = { key = key, label = ns.DECOR_NAMES[key] } end
+    local function Decor(label, setting, y, note)
+        Label(label, y - 4)
+        local pills = T:Segmented(options, decorItems, 210, function(key)
+            ns.Set(setting, key)
+            Redecorate()
+        end)
+        pills:SetPoint("TOPLEFT", 100, y)
+        for _, button in ipairs(pills.buttons) do
+            button:HookScript("OnEnter", function() Note(note) end)
+            button:HookScript("OnLeave", Unnote)
+        end
+        return pills
+    end
+    local border = Decor("Border", "iconBorder", -60,
+        "A thin black border round each icon, or round each whole bar: your bars and Blizzard's Cooldown Manager.")
+    local shadow = Decor("Shadow", "iconShadow", -88,
+        "A soft shadow round each icon, or round each whole bar. Your cast bar gets one too.")
+    window.iconBorder, window.iconShadow = border, shadow
+
     -- What the look applies to; the footer explains each.
     local function Choice(label, key, y, note, after)
         local check = T:Check(options, label, function(self)
@@ -171,14 +221,17 @@ local function BuildLook(window, page, width)
         check:HookScript("OnLeave", Unnote)
         return check
     end
-    local look = Choice("Apply this look to the Cooldown Manager", "skin", -60,
+    local look = Choice("Apply this look to the Cooldown Manager", "skin", -116,
         "Square icons, bold numbers and these bars. Needs a reload. Countdown numbers: Edit Mode, click a bar, untick its timer.")
-    local personal = Choice("Apply this look to the Personal Resource Display", "prdSkin", -82,
+    local personal = Choice("Apply this look to the Personal Resource Display", "prdSkin", -138,
         "Blizzard's health and power bars under you (Options > Combat). Needs a reload.")
-    local repeatMana = Choice("Extra mana bar: hide in caster form, half size in forms", "prdHideRepeat", -104,
+    local repeatMana = Choice("Extra mana bar: hide in caster form, half size in forms", "prdHideRepeat", -160,
         "The second mana bar some specs get, under your main bar.",
         function() if ns.Resource then ns.Resource:Apply() end end)
-    window.look, window.personal, window.repeatMana = look, personal, repeatMana
+    local combo = Choice("Combo points under your energy bar (Needs testing)", "prdCombo", -182,
+        "Forever's display has none, so the addon draws them: five segments as wide as the display, for rogues and druids in cat form.",
+        function() if ns.Resource then ns.Resource:Apply() end end)
+    window.look, window.personal, window.repeatMana, window.combo = look, personal, repeatMana, combo
 
     -- Each Tracked Bar in a colour of its own.
     local eachTitle = T:Heading(page, "Each bar")
@@ -208,6 +261,11 @@ local function BuildLook(window, page, width)
     empty:SetPoint("TOPLEFT", 12, -12)
     empty:SetWidth(inner - 24)
     window.eachEmpty = empty
+    -- Under the reason the list is empty, a button to sort it out.
+    local fix = T:Button(listPanel, "Turn on", 90, 20)
+    fix:SetPoint("TOPLEFT", empty, "BOTTOMLEFT", 0, -8)
+    fix:SetScript("OnClick", function(self) if self.action then self.action() end end)
+    window.eachFix = fix
     local listWidth = inner - 30
     -- Pinned by two corners, again once the page shows (see the bar page).
     local scroll = T:Scroll(listPanel, listWidth)
@@ -251,7 +309,8 @@ local function BuildLook(window, page, width)
             swatch.key = key
             if key == "class" then ClassIcon(swatch) end
             swatch:SetScript("OnEnter", function()
-                Note(row.entry and row.entry.setting and "A colour for this bar. Click it again for Blizzard's own."
+                local entry = row.entry
+                Note(entry and entry.back and ("A colour for this bar. Click it again for " .. entry.back .. ".")
                     or "A colour for this bar. Click it again to use the colour for all bars.")
             end)
             swatch:SetScript("OnLeave", Unnote)
@@ -282,15 +341,21 @@ local function BuildLook(window, page, width)
     local chosen = T:Text(page, "GameFontHighlightSmall", T.MUTED)
     chosen:SetPoint("BOTTOMLEFT", 126 + #ns.ACCENT_KEYS * (SWATCH + SWATCH_GAP) + 2, 18)
 
-    -- Why the list is empty, if it is.
+    -- Why the list is empty, if it is, and a button's label and action to
+    -- fix it where the addon can.
+    local function ApplyLook()
+        ns.Set("skin", true)
+        window:Say("Reload to apply the look, then colour your bars here.")
+        window:Refresh()
+    end
     local function EmptyText(spells)
         if not ns.loaded.skin then
-            return ns.Get("skin") and "Reload first, then colour your bars one by one here."
-                or "Tick Restyle and reload to colour your bars one by one."
+            if ns.Get("skin") then return "Reload first, then colour your bars one by one here.", "Reload", Reload end
+            return "Apply this look to the Cooldown Manager and reload to colour your bars one by one.", "Turn on", ApplyLook
         end
-        if not ns.CooldownManagerOn() then return "Blizzard's Cooldown Manager is off." end
+        if not ns.CooldownManagerOn() then return "Blizzard's Cooldown Manager is off.", "Turn on", TurnOnManager end
         if #spells == 0 then
-            return "No Tracked Bars yet. Add buffs to Tracked Bars in Blizzard's Cooldown Settings, and they'll show here."
+            return "Blizzard's Tracked Bars (buffs shown as timer bars) will be listed here to colour once you set some up in Blizzard's Cooldown Settings. Not using them? Nothing to do here."
         end
     end
 
@@ -306,7 +371,13 @@ local function BuildLook(window, page, width)
         look:SetChecked(ns.Get("skin"))
         personal:SetChecked(ns.Get("prdSkin"))
         repeatMana:SetChecked(ns.Get("prdHideRepeat"))
+        combo:SetChecked(ns.Get("prdCombo"))
         design:SetSelected(ns.Get("barStyle"))
+        border:SetSelected(ns.Get("iconBorder"))
+        shadow:SetSelected(ns.Get("iconShadow"))
+        ns.Style:ShowDecor(sample.decor, ns.Style:DecorFor("bar"))
+        local iconBorder, iconShadow = ns.Style:DecorFor("icon")
+        for _, icon in ipairs(sample.icons) do ns.Style:ShowDecor(icon.decor, iconBorder, iconShadow) end
         local barColour = ns.Get("barColour")
         for _, swatch in ipairs(barSwatches) do
             PaintSwatch(swatch, ns.Style:BarColour(swatch.key), swatch.key == barColour)
@@ -320,13 +391,19 @@ local function BuildLook(window, page, width)
 
         -- The Personal Resource Display's bars first, then your Tracked Bars.
         local entries = {}
-        if ns.loaded.prdSkin and ns.Resource and ns.Resource:Shown() then
-            entries[1] = { setting = "prdHealth", name = "Personal health", icon = "Interface\\Icons\\INV_Potion_54" }
-            entries[2] = { setting = "prdPower", name = "Personal power", icon = "Interface\\Icons\\INV_Potion_76" }
+        local display = ns.Resource and ns.Resource:Shown()
+        if ns.loaded.prdSkin and display then
+            entries[1] = { setting = "prdHealth", name = "Personal health", icon = "Interface\\Icons\\INV_Potion_54", back = "Blizzard's own" }
+            entries[2] = { setting = "prdPower", name = "Personal power", icon = "Interface\\Icons\\INV_Potion_76", back = "Blizzard's own" }
+        end
+        local _, class = UnitClass("player")
+        if display and ns.Get("prdCombo") and (class == "ROGUE" or class == "DRUID") then
+            entries[#entries + 1] = { setting = "prdComboColour", name = "Combo points",
+                icon = "Interface\\Icons\\Ability_Rogue_Eviscerate", back = "red" }
         end
         local personalRows = #entries
         local spells = ns.loaded.skin and on and ns.Skin and ns.Skin:TrackedBars() or {}
-        local why = EmptyText(spells)
+        local why, fixLabel, fixAction = EmptyText(spells)
         if not why then
             for _, id in ipairs(spells) do entries[#entries + 1] = { spell = id } end
         end
@@ -334,6 +411,9 @@ local function BuildLook(window, page, width)
         empty:SetPoint("TOPLEFT", 12, -(12 + personalRows * ROW))
         empty:SetText(why or "")
         empty:SetShown(why ~= nil)
+        fix:SetLabel(fixLabel or "")
+        fix.action = fixAction
+        fix:SetShown(fixAction ~= nil)
         local own = ns.BarColours()
         for i, entry in ipairs(entries) do
             local row = Row(i)
@@ -422,34 +502,14 @@ local function BuildGeneral(window, page)
     end)
     bars:SetPoint("TOPLEFT", 16, -36)
     window.useBars = bars
-    Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left.", 34, -56)
+    Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left. Move and arrange them on the Layout page.", 34, -56)
 
-    local unlock = T:Button(page, "Unlock bars to move", 160)
-    unlock:SetPoint("TOPLEFT", 16, -84)
-    unlock:SetScript("OnClick", function()
-        if not B:Enabled() then
-            window:Say("Tick Use my bars first.")
-        else
-            B:SetUnlocked(not B:IsUnlocked())
-        end
-        window:Refresh()
-    end)
-    window.unlock = unlock
-    local reset = T:Button(page, "Reset positions", 160)
-    reset:SetPoint("LEFT", unlock, "RIGHT", 8, 0)
-    reset:SetScript("OnClick", function()
-        B:ResetPositions()
-        window:Say("Bars moved back above your action bar.")
-        window:Refresh()
-    end)
-    Detail(page, "Unlocked bars show a box you can drag. Closing this window locks them again.", 16, -114)
-
-    T:Heading(page, "Saved settings"):SetPoint("TOPLEFT", 16, -150)
+    T:Heading(page, "Saved settings"):SetPoint("TOPLEFT", 16, -96)
 
     -- More from Squirt: the author's other addons, and a way to open them.
-    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -236)
+    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -182)
     local more = CreateFrame("Frame", nil, page, "BackdropTemplate")
-    more:SetPoint("TOPLEFT", 16, -256)
+    more:SetPoint("TOPLEFT", 16, -202)
     more:SetSize(WIDTH - NAV - 34, 74)
     T:Flat(more, T.PANEL, T.BORDER)
     local moreIcon = more:CreateTexture(nil, "ARTWORK")
@@ -483,7 +543,7 @@ local function BuildGeneral(window, page)
     end
     window.moreOpen, window.moreState, window.moreLinks = moreOpen, moreState, moreLinks
     local kept = T:Text(page, "GameFontHighlightSmall", T.MUTED)
-    kept:SetPoint("TOPLEFT", 16, -170)
+    kept:SetPoint("TOPLEFT", 16, -116)
     kept:SetWidth(440)
     window.kept = kept
 
@@ -494,7 +554,6 @@ local function BuildGeneral(window, page)
         moreState:SetText(installed and "Installed. Type /era, or click Open."
             or "Get it on CurseForge or GitHub: click one for its link.")
         bars:SetChecked(B:Enabled())
-        unlock:SetLabel(B:IsUnlocked() and "Lock bars" or "Unlock bars to move")
         if ns.restored then
             kept:SetText(ns.RESTORED_TEXT .. " This happens when the game closes without saving, for example after a crash.")
             kept:SetTextColor(T.WARN[1], T.WARN[2], T.WARN[3])
@@ -548,6 +607,57 @@ end
 
 -- Setup ------------------------------------------------------------------------------
 
+-- "Are you sure?": a small dialog over the whole window, for anything that
+-- can't simply be clicked back. window:Ask(title, detail, button, action).
+local function BuildConfirm(window)
+    local shade = CreateFrame("Frame", nil, window)
+    shade:SetAllPoints()
+    shade:SetFrameLevel(window:GetFrameLevel() + 80)
+    shade:EnableMouse(true) -- nothing behind it can be clicked meanwhile
+    local dim = shade:CreateTexture(nil, "BACKGROUND")
+    dim:SetAllPoints()
+    dim:SetColorTexture(0, 0, 0, .45)
+    shade:Hide()
+    local dialog = CreateFrame("Frame", nil, shade, "BackdropTemplate")
+    dialog:SetSize(320, 112)
+    dialog:SetPoint("CENTER")
+    T:Flat(dialog, T.PANEL, T.CONTROL_BORDER)
+    dialog.title = T:Text(dialog, "GameFontHighlight")
+    dialog.title:SetPoint("TOPLEFT", 14, -14)
+    dialog.title:SetWidth(292)
+    dialog.detail = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
+    dialog.detail:SetPoint("TOPLEFT", dialog.title, "BOTTOMLEFT", 0, -8)
+    dialog.detail:SetWidth(292)
+    local yes = T:Button(dialog, "", 90, 22)
+    yes:SetPoint("BOTTOMRIGHT", -14, 14)
+    yes.label:SetTextColor(T.WARN[1], T.WARN[2], T.WARN[3])
+    local no = T:Button(dialog, "Cancel", 90, 22)
+    no:SetPoint("RIGHT", yes, "LEFT", -6, 0)
+    window.confirm = { shade = shade, dialog = dialog, yes = yes, no = no }
+    local pending
+    local function Close()
+        pending = nil
+        shade:Hide()
+    end
+    no:SetScript("OnClick", Close)
+    yes:SetScript("OnClick", function()
+        local action = pending
+        Close()
+        if action then action() end
+    end)
+    window:HookScript("OnHide", Close)
+    function window:Ask(title, detail, label, action)
+        pending = action
+        dialog.title:SetText(title)
+        dialog.detail:SetText(detail)
+        yes:SetLabel(label)
+        -- A long profile name wraps, and the dialog grows to fit it all.
+        local text = (dialog.title:GetStringHeight() or 14) + 8 + (dialog.detail:GetStringHeight() or 14)
+        dialog:SetHeight(math.max(112, math.ceil(14 + text + 16 + 22 + 14)))
+        shade:Show()
+    end
+end
+
 local function BuildWindow()
     local window = CreateFrame("Frame", "FECMFrame", UIParent, "BackdropTemplate")
     window:SetSize(WIDTH, HEIGHT)
@@ -581,6 +691,7 @@ local function BuildWindow()
     window.fades.page:SetPoint("BOTTOMRIGHT", -1, FOOTER)
     window.close = header.close
     window.header = header
+    BuildConfirm(window)
     ns.BuildProfileMenu(window, header, header.close)
 
     -- The bar list down the left.
@@ -614,7 +725,10 @@ local function BuildWindow()
     y = y + 12
     window.nav.look = NavItem(window, nav, "look", "Look", y)
     window.nav.layout = NavItem(window, nav, "layout", "Layout", y + 32)
-    window.nav.general = NavItem(window, nav, "general", "General", y + 64)
+    -- New files only load after a full restart: until then there's no Cast bar page.
+    local castPage = ns.BuildCastBarPage ~= nil
+    if castPage then window.nav.cast = NavItem(window, nav, "cast", "Cast bar", y + 64) end
+    window.nav.general = NavItem(window, nav, "general", "General", y + (castPage and 96 or 64))
     -- What's new in this version, at the foot of the list.
     local news = T:Button(nav, "What's new", NAV - 24, 22)
     news:SetPoint("BOTTOMLEFT", 12, 12)
@@ -632,13 +746,17 @@ local function BuildWindow()
     window.pages = { look = Page(), layout = Page(), general = Page(), bar = Page() }
     BuildLook(window, window.pages.look, WIDTH - NAV - 2)
     ns.BuildLayoutPage(window, window.pages.layout, WIDTH - NAV - 2, HEIGHT - HEADER - FOOTER - 1)
+    if castPage then
+        window.pages.cast = Page()
+        ns.BuildCastBarPage(window, window.pages.cast, WIDTH - NAV - 2)
+    end
     BuildGeneral(window, window.pages.general)
     ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)
 
     -- Footer: the version, and messages from the window (or a tip).
     local version = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     version:SetPoint("BOTTOMLEFT", 12, 9)
-    version:SetText(Version() .. "   /fecm to open")
+    version:SetText(Version() .. "   /ccm to open")
     local note = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     note:SetPoint("BOTTOMRIGHT", -12, 9)
     note:SetJustifyH("RIGHT")
@@ -658,7 +776,7 @@ local function BuildWindow()
     function window:Refresh()
         self:RefreshProfiles()
         -- Settings the game didn't keep are pointed out until the next login.
-        version:SetText(ns.restored and "Settings restored from backup at login. See General." or (Version() .. "   /fecm to open"))
+        version:SetText(ns.restored and "Settings restored from backup at login. See General." or (Version() .. "   /ccm to open"))
         local colour = ns.restored and T.WARN or T.MUTED
         version:SetTextColor(colour[1], colour[2], colour[3])
         local selected = self.selected
@@ -669,11 +787,15 @@ local function BuildWindow()
             item.glow:SetShown(chosen)
             item.mark:SetShown(chosen)
             if item.icons then
-                local spells = ns.BarData(key).spells
+                -- Yours only: another class's, in a shared profile, stay hidden,
+                -- and one you haven't learned yet shows greyed in its own icon.
+                local spells = ns.Bars:Mine(key)
                 item.count:SetText(#spells)
                 for i, preview in ipairs(item.icons) do
-                    local entry = spells[i] and ns.Spells:Find(spells[i])
-                    preview:SetTexture(entry and entry.icon or 134400) -- question mark until learned
+                    if spells[i] then
+                        preview:SetTexture(ns.Spells:Icon(spells[i]))
+                        preview:SetDesaturated(ns.Spells:Find(spells[i]) == nil)
+                    end
                     preview:SetShown(spells[i] ~= nil)
                 end
             end

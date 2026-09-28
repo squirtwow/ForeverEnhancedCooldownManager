@@ -1,4 +1,4 @@
--- The /fecm window's look: flat charcoal panels, thin borders and one accent
+-- The /ccm window's look: flat charcoal panels, thin borders and one accent
 -- colour, picked from a few set colours. Every piece
 -- drawn in the accent registers a painter, so choosing a new accent repaints
 -- the whole window at once.

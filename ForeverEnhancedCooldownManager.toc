@@ -11,6 +11,7 @@ Core.lua
 Style.lua
 Skin.lua
 Resource.lua
+CastBar.lua
 Ranks.lua
 Spells.lua
 Buffs.lua
@@ -19,6 +20,7 @@ Layout.lua
 Theme.lua
 BarPage.lua
 LayoutPage.lua
+CastBarPage.lua
 ProfileMenu.lua
 Window.lua
 Notes.lua

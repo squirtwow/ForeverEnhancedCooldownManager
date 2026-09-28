@@ -48,8 +48,9 @@ local function Fit(parts, size, showTimer)
 end
 
 -- Runs once per icon, before the client restricts it in combat. Everything
--- supplied to the icon must be a descendant of its button.
-local function Look(button, size, showTimer)
+-- supplied to the icon must be a descendant of its button. A packed icon
+-- carries its own border and shadow; a fixed one's holder has them.
+local function Look(button, size, showTimer, decorate)
     button:EnableMouse(false)
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -71,6 +72,10 @@ local function Look(button, size, showTimer)
     count:SetPoint("BOTTOMRIGHT", -1, 1)
     button:SetApplicationCount(count)
     local parts = { cooldown = cooldown, count = count }
+    if decorate then
+        parts.decor = Style:Decor(button, button)
+        Style:ShowDecor(parts.decor, Style:DecorFor("icon"))
+    end
     Fit(parts, size, showTimer)
     return parts
 end
@@ -86,7 +91,7 @@ end
 local function GroupLook(bar)
     return function(button)
         button:SetSize(BASE, BASE)
-        bar.groupParts[#bar.groupParts + 1] = Look(button, BASE, bar.data.showTimer)
+        bar.groupParts[#bar.groupParts + 1] = Look(button, BASE, bar.data.showTimer, true)
     end
 end
 
@@ -104,6 +109,8 @@ function F:Create(bar)
         holder.label = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         holder.label:SetPoint("TOP", holder, "BOTTOM", 0, -3)
         holder.label:SetWordWrap(false)
+        holder.decor = Style:Decor(holder, holder)
+        Style:ShowDecor(holder.decor, Style:DecorFor("icon"))
         holder:Hide()
         bar.holders[i] = holder
     end
@@ -154,7 +161,7 @@ function F:Layout(bar, data)
         local ids, entry = {}, nil
         for _, name in ipairs(group) do
             local found = ns.Spells:Find(name)
-            if found and found.ids then
+            if found and found.ids and ns.Spells:ForMe(name, bar.key) then
                 entry = entry or found
                 for _, id in ipairs(found.ids) do ids[id] = true end
             end

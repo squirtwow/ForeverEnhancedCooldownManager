@@ -70,6 +70,8 @@ local function NewIcon(bar)
     icon.label = icon:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     icon.label:SetPoint("TOP", icon, "BOTTOM", 0, -3)
     icon.label:SetWordWrap(false)
+    icon.decor = Style:Decor(icon, icon)
+    Style:ShowDecor(icon.decor, Style:DecorFor("icon"))
     return icon
 end
 
@@ -287,6 +289,9 @@ local function NewBar(key)
     mover:SetScript("OnMouseUp", function() B:Dropped(key) end)
     mover:Hide()
     bar.mover = mover
+    -- A border and shadow round the whole bar, when chosen.
+    bar.decor = Style:Decor(bar, bar)
+    Style:ShowDecor(bar.decor, Style:DecorFor("bar"))
     bars[key] = bar
     return bar
 end
@@ -321,7 +326,7 @@ local function Layout(bar)
     local count = 0
     for _, name in ipairs(data.spells) do
         local entry = ns.Spells:Find(name)
-        if entry then
+        if entry and ns.Spells:ForMe(name, bar.key) then
             count = count + 1
             local icon = bar.icons[count] or NewIcon(bar)
             bar.icons[count] = icon
@@ -354,6 +359,17 @@ function B:Enabled()
     return ns.Get("useBars") == true
 end
 
+-- Borders and shadows as chosen on the Look page, round every icon or bar.
+function B:ApplyDecor()
+    local border, shadow = Style:DecorFor("icon")
+    for _, bar in pairs(bars) do
+        Style:ShowDecor(bar.decor, Style:DecorFor("bar"))
+        for _, list in ipairs({ bar.icons or {}, bar.holders or {}, bar.groupParts or {} }) do
+            for _, piece in ipairs(list) do Style:ShowDecor(piece.decor, border, shadow) end
+        end
+    end
+end
+
 function B:Get(key)
     return bars[key]
 end
@@ -380,17 +396,19 @@ function B:UpdateShown()
         local bar = bars[key]
         if bar then
             local mode = awake and "show" or bar.data.outOfCombat
+            -- A bar taken out of your layout doesn't show at all.
+            local out = ns.Layout ~= nil and ns.Layout:IsHidden(key)
             if bar.kind == "aura" then
                 -- Shown whenever it has entries; hiding out of combat fades it
                 -- right out instead, since the secure slots can't be hidden in
                 -- a fight.
-                local show = on and (unlocked or bar.count > 0) or false
+                local show = on and not out and (unlocked or bar.count > 0) or false
                 if bar:IsShown() ~= show then
                     if InCombatLockdown() then bar.pendingShown = true else bar:SetShown(show) end
                 end
                 bar:SetAlpha(mode == "hide" and 0 or mode == "fade" and FADE or 1)
             else
-                local show = on and (unlocked or (bar.count > 0 and mode ~= "hide"))
+                local show = on and not out and (unlocked or (bar.count > 0 and mode ~= "hide"))
                 bar:SetShown(show and true or false)
                 bar:SetAlpha(mode == "fade" and FADE or 1)
             end
@@ -460,6 +478,23 @@ end
 -- Whether a spell is on the Buffs or Debuffs bar.
 function B:HasAura(key, name)
     return IndexOf(key, name) ~= nil
+end
+
+-- Where an entry is on a bar, if it's there.
+function B:Index(key, name)
+    return IndexOf(key, name)
+end
+
+-- The entries on a bar that are for you, in order, and where each one is in
+-- the list: a profile shared with another class keeps its spells too.
+function B:Mine(key)
+    local names, places = {}, {}
+    for i, name in ipairs(ns.BarData(key).spells) do
+        if ns.Spells:ForMe(name, key) then
+            names[#names + 1], places[#places + 1] = name, i
+        end
+    end
+    return names, places
 end
 
 function B:HasBuff(name)
@@ -536,7 +571,8 @@ function B:SetAura(key, name, on)
     if on and index or not on and not index then return true end
     local spells = ns.BarData(key).spells
     if on then
-        if #spells >= ns.BUFF_SLOTS then return false end
+        -- The slots are for your own entries; the list has room for more.
+        if #self:Mine(key) >= ns.BUFF_SLOTS or #spells >= ns.BAR_MAX_SPELLS then return false end
         spells[#spells + 1] = name
     else
         Take(key, index)
@@ -554,7 +590,8 @@ local function Added(key, name)
 end
 
 -- Puts a spell, by name or ID, on a bar: true and what happened, or false
--- and why not. Spells outside your spellbook are remembered by name.
+-- and why not. Spells outside your spellbook are remembered by name. Also
+-- gives the name it's kept under.
 function B:Add(key, text)
     local found, ids = ns.Spells:Resolve(text)
     if not found then return false, ids end
@@ -567,7 +604,16 @@ function B:Add(key, text)
     if ns.AURA_BARS[key] then ok = self:SetAura(key, found, true) else ok = self:Assign(found, key) end
     ns.PruneCustom()
     if not ok then return false, ns.BAR_NAMES[key] .. " is full." end
-    return true, Added(key, entry and entry.name or found)
+    return true, Added(key, entry and entry.name or found), found
+end
+
+-- The same, at a place in the bar's list (where the entry clicked is): the
+-- entries from there on move along one.
+function B:AddAt(key, text, spot)
+    local ok, message, name = self:Add(key, text)
+    local from = ok and IndexOf(key, name)
+    if from and spot < from then self:MoveTo(key, from, spot) end
+    return ok, message
 end
 
 -- An item with a cooldown: an equipped trinket follows its slot.
@@ -699,13 +745,11 @@ function B:Relayout(key)
 end
 
 -- Empties a bar.
+-- Clears what you see on a bar; another class's entries in a shared profile
+-- stay for the characters that use them.
 function B:Clear(key)
-    local spells = ns.BarData(key).spells
-    for i = #spells, 1, -1 do spells[i] = nil end
-    if ns.AURA_BARS[key] then
-        local joins = ns.Joins(key)
-        for name in pairs(joins) do joins[name] = nil end
-    end
+    local _, places = self:Mine(key)
+    for n = #places, 1, -1 do Take(key, places[n]) end
     self:Changed()
 end
 

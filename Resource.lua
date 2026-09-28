@@ -3,7 +3,8 @@
 -- Blizzard's colour or one of yours. Some specs get a second mana bar under
 -- the main one: it's hidden while the main bar is mana too, so it never just
 -- repeats it, and half as tall in bear, cat and other forms. While a layout
--- stacks your bars around it, it can be as wide as your widest row.
+-- stacks your bars around it, it can be as wide as your widest row. Combo
+-- points, which Forever's display leaves out, can go under it.
 -- Visual only. Blizzard still decides what shows and where: only colours,
 -- textures, sizes and the addon's own pieces change, and no key is ever
 -- written on Blizzard's frames.
@@ -108,6 +109,131 @@ local function ExtraMana(frame)
     end
 end
 
+-- Combo points ---------------------------------------------------------------------
+-- Blizzard left combo points out of Forever's display, so the addon draws its
+-- own under the display's lowest bar: five segments as wide as the display, in
+-- the Tracked Bars design and a colour of your choice. Plain colour, so they
+-- stay sharp at any size, and they stretch or shrink with the display.
+-- Rogues, and druids in cat form. The count can be secret in combat, so each
+-- segment is a bar from i - 1 to i handed the count as it is: the game fills
+-- it, and the addon never reads the number.
+local COMBO = Enum and Enum.PowerType and Enum.PowerType.ComboPoints or 4
+local ENERGY = Enum and Enum.PowerType and Enum.PowerType.Energy or 3
+local COMBO_MAX = 5
+local COMBO_GAP = 3 -- between segments, clear of each one's 1px edge
+local COMBO_RED = { .87, .2, .13 } -- the colour they start in
+local combo -- the row, made once the display is there
+local comboShown = false
+
+local function ComboColour()
+    local key = ns.Get("prdComboColour")
+    if key ~= "default" then return Style:BarColour(key) end
+    return COMBO_RED
+end
+
+local function ComboLook()
+    if not combo then return end
+    local design, colour = ns.Get("barStyle"), ComboColour()
+    local outline = design == "outline"
+    for _, bar in ipairs(combo.segments) do
+        bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
+        Solid(bar.edge, outline and colour or { 0, 0, 0 })
+        bar.sheen:SetShown(design == "glass")
+    end
+end
+
+-- The segments share the row's width, whatever it is now.
+local function ComboLayout()
+    local width = combo:GetWidth()
+    if not (type(width) == "number" and width > 0) then return end
+    local each = (width - (COMBO_MAX - 1) * COMBO_GAP) / COMBO_MAX
+    for i, bar in ipairs(combo.segments) do
+        local x = (i - 1) * (each + COMBO_GAP)
+        bar:ClearAllPoints()
+        bar:SetPoint("TOPLEFT", combo, "TOPLEFT", x, 0)
+        bar:SetPoint("BOTTOMLEFT", combo, "BOTTOMLEFT", x, 0)
+        bar:SetWidth(each)
+    end
+end
+
+local function MakeCombo(frame)
+    combo = CreateFrame("Frame", nil, frame)
+    combo:SetSize(1, 1)
+    combo:Hide()
+    combo.segments = {}
+    for i = 1, COMBO_MAX do
+        local bar = CreateFrame("StatusBar", nil, combo)
+        bar:SetStatusBarTexture(Style.FLAT)
+        bar:SetMinMaxValues(i - 1, i)
+        bar:SetValue(0)
+        local track = bar:CreateTexture(nil, "BACKGROUND")
+        track:SetAllPoints()
+        Solid(track, Style.TRACK, Style.TRACK[4])
+        bar.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
+        Inset(bar.edge, bar, -1)
+        bar.sheen = bar:CreateTexture(nil, "OVERLAY", nil, -8)
+        bar.sheen:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+        bar.sheen:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
+        bar.sheen:SetColorTexture(1, 1, 1, .16)
+        combo.segments[i] = bar
+    end
+    combo:SetScript("OnSizeChanged", ComboLayout)
+    ComboLook()
+end
+
+-- Rogues always, druids while their power is energy (cat form). A power type
+-- the game won't say keeps things as they were.
+local function ComboWanted()
+    if not ns.Get("prdCombo") then return false end
+    local _, class = UnitClass("player")
+    if class == "ROGUE" then return true end
+    if class ~= "DRUID" then return false end
+    local power = UnitPowerType("player")
+    if issecretvalue and issecretvalue(power) then return comboShown end
+    return power == ENERGY
+end
+
+-- Under the lowest bar that shows, Blizzard's own padding apart, as tall as
+-- the power bar.
+local function ComboPlace(frame)
+    local below = frame.PowerBar
+    local extra = frame.AlternatePowerBar
+    if extra and extra:IsShown() and not extraHidden then below = extra end
+    if not (below and below:IsShown()) then below = frame.HealthBarsContainer or frame end
+    local padding = type(frame.GetBarPadding) == "function" and frame:GetBarPadding() or 4
+    combo:ClearAllPoints()
+    combo:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -padding)
+    combo:SetPoint("TOPRIGHT", below, "BOTTOMRIGHT", 0, -padding)
+    local height = frame.PowerBar and frame.PowerBar:GetHeight()
+    combo:SetHeight(type(height) == "number" and height > 0 and height or 8)
+end
+
+-- Your points now, handed straight to the segments.
+local function ComboPoints()
+    if not (combo and combo:IsShown()) then return end
+    local points = UnitPower("player", COMBO)
+    for _, bar in ipairs(combo.segments) do bar:SetValue(points) end
+end
+
+-- Shows or hides the row and puts it in place; a layout makes room for it.
+local function ComboUpdate()
+    local frame = _G.PersonalResourceDisplayFrame
+    if not (frame and combo) then return end
+    local want = ComboWanted()
+    if want then ComboPlace(frame) end
+    combo:SetShown(want)
+    ComboPoints()
+    if want ~= comboShown then
+        comboShown = want
+        Restack()
+    end
+end
+
+-- The row while it shows, so a layout counts it as part of the display.
+function R:ComboRow()
+    return comboShown and combo or nil
+end
+
 -- The width the display was given to match your rows, while it's matching.
 local matched
 
@@ -144,7 +270,11 @@ end
 -- back, and moves anything beside the display.
 local function Rematch()
     matched = nil
-    if ns.Layout and ns.Layout:Active() then ns.Layout:Stack() end
+    if ns.Layout and ns.Layout:Active() then
+        ns.Layout:Stack()
+    elseif ns.CastBar then
+        ns.CastBar:Place()
+    end
 end
 
 local function Hook()
@@ -156,18 +286,33 @@ local function Hook()
         Restyle(frame.PowerBar, "prdPower")
         Restyle(frame.AlternatePowerBar, "prdPower")
     end
-    -- Your power changing, and Edit Mode setting the bars' height.
-    for _, method in ipairs({ "UpdatePowerBar", "UpdateAlternatePowerBar", "SetPowerBarHeight" }) do
-        if type(frame[method]) == "function" then hooksecurefunc(frame, method, ExtraMana) end
+    -- Combo points, for the classes that have them.
+    local _, class = UnitClass("player")
+    if class == "ROGUE" or class == "DRUID" then
+        MakeCombo(frame)
+        local events = CreateFrame("Frame")
+        for _, event in ipairs({ "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" }) do
+            events:RegisterUnitEvent(event, "player")
+        end
+        for _, event in ipairs({ "PLAYER_TARGET_CHANGED", "UPDATE_SHAPESHIFT_FORM", "PLAYER_ENTERING_WORLD" }) do
+            events:RegisterEvent(event)
+        end
+        events:SetScript("OnEvent", function(_, event)
+            if event == "UNIT_POWER_FREQUENT" or event == "PLAYER_TARGET_CHANGED" then ComboPoints() else ComboUpdate() end
+        end)
+    end
+    -- Your power changing, and Edit Mode setting the bars' height, padding
+    -- and which show.
+    local function Changed(self)
+        ExtraMana(self)
+        ComboUpdate()
+    end
+    for _, method in ipairs({ "UpdatePowerBar", "UpdateAlternatePowerBar", "SetPowerBarHeight", "SetBarPadding",
+        "SetHidePower", "SetHideAltPower" }) do
+        if type(frame[method]) == "function" then hooksecurefunc(frame, method, Changed) end
     end
     if type(frame.UpdateBarWidth) == "function" then hooksecurefunc(frame, "UpdateBarWidth", Rematch) end
-    -- Combo points come and go with cat form (the holder keeps its height).
-    local class = frame.classFrame
-    if class and class.HookScript then
-        class:HookScript("OnShow", Restack)
-        class:HookScript("OnHide", Restack)
-    end
-    ExtraMana(frame)
+    Changed(frame)
     return true
 end
 
@@ -186,6 +331,8 @@ function R:Apply()
         end
     end
     ExtraMana(_G.PersonalResourceDisplayFrame)
+    ComboLook()
+    ComboUpdate()
 end
 
 function R:Start()

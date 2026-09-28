@@ -58,6 +58,8 @@ function Proto:HookScript(k, fn)
     end
 end
 function Proto:RegisterEvent(e) S[self].events[e] = true end
+function Proto:RegisterUnitEvent(e) S[self].events[e] = true end
+function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:CreateTexture() return New("Texture", self) end
 function Proto:CreateFontString() return New("FontString", self) end
@@ -112,6 +114,7 @@ local trinket, trinketCooldown, bagItems, itemCooldown, itemCount
 local ammo, ammoCount -- the equipped ammunition and how many you carry
 local bindings, cvarOn, reloads, timers
 local prdOn = true -- Blizzard's Personal Resource Display switched on
+local clock = 100 -- the game's time in seconds, for the cast bar
 -- Who is logged in: a GUID tells characters apart, even with the same name.
 local character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
 
@@ -215,6 +218,10 @@ local function Environment(keepCVars)
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
+    _G.UnitPower = function() return 0 end
+    _G.UnitCastingInfo = function() return nil end
+    _G.UnitChannelInfo = function() return nil end
+    _G.GetTime = function() return clock end
     _G.UnitGUID = function(unit) assert(unit == "player"); return character.guid end
     _G.UnitName = function(unit) assert(unit == "player"); return character.name end
     _G.GetRealmName = function() return character.realm end
@@ -305,7 +312,8 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "ProfileMenu.lua", "Window.lua", "Notes.lua" }) do
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua",
+        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Notes.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -481,7 +489,7 @@ Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 
 -- Backup ------------------------------------------------------------------------------
 
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
 Equal(cvars.FECMBackupBars0 .. " " .. #cvars.FECMBackupBars1, "2 900", "bars backed up in chunks of 900 characters")
 Environment(true)
 ns = Load(nil)
@@ -1004,7 +1012,7 @@ Equal(Row("Moonfire") ~= nil, true, "spells listed")
 page.showItems:Click()
 Equal(ns.Get("listItems"), true, "Show items remembered")
 Equal(Row("item:118") ~= nil, true, "items listed when asked")
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=1;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "and backed up")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=1;listRanks=0;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "and backed up")
 
 -- Searching filters the list and finds spells outside your spellbook.
 Equal(#S[page.list].points, 2, "the list is pinned by two corners, so the game can place it")
@@ -1200,7 +1208,7 @@ character.guid = guid
 Fire("PLAYER_LOGIN")
 Equal(ns.ProfileName(), "Zriel (Druid) - Zephras", "worked out at login")
 
--- The /fecm window ------------------------------------------------------------------------
+-- The /ccm window ------------------------------------------------------------------------
 
 Environment()
 ns = Load(nil)
@@ -1208,7 +1216,7 @@ B = ns.Bars
 SlashCmdList.FECM("")
 w = FECMFrame
 page = w.pages.bar
-Equal(S[w].shown, true, "/fecm opens the window")
+Equal(S[w].shown, true, "/ccm opens the window")
 Equal(w.nav.cd ~= nil and w.nav.util ~= nil and w.nav.buff ~= nil and w.nav.look ~= nil and w.nav.general ~= nil,
     true, "bars, Look and General listed down the left")
 Equal(S[w.yourBars].text, "YOUR BARS", "the bars headed as your own, apart from Blizzard's")
@@ -1388,13 +1396,19 @@ Equal(S[rows[1].chosen].text, "Default", "and says so")
 tracked = {}
 w:Refresh()
 Equal(S[rows[1]].shown, false, "rows go with the bars")
-Equal(S[w.eachEmpty].text:find("No Tracked Bars yet", 1, true) ~= nil, true, "and the list says how to add some")
+Equal(S[w.eachEmpty].text:find("Tracked Bars (buffs shown as timer bars)", 1, true) ~= nil, true, "and the list says what they are and where to add some")
+Equal(S[w.eachFix].shown, false, "with no button: that's done in Blizzard's Cooldown Settings")
 ns.loaded.skin = false
 w:Refresh()
-Equal(S[w.eachEmpty].text, "Reload first, then colour your bars one by one here.", "just ticked: reload first")
+Equal(S[w.eachEmpty].text .. " " .. S[w.eachFix.label].text, "Reload first, then colour your bars one by one here. Reload",
+    "just ticked: reload first, with a button for it")
 ns.Set("skin", false)
 w:Refresh()
-Equal(S[w.eachEmpty].text, "Tick Restyle and reload to colour your bars one by one.", "with the restyle off, how to turn it on")
+Equal(S[w.eachEmpty].text .. " " .. S[w.eachFix.label].text,
+    "Apply this look to the Cooldown Manager and reload to colour your bars one by one. Turn on", "with the look off, a button to turn it on")
+w.eachFix:Click()
+Equal(tostring(ns.Get("skin")) .. " " .. S[w.eachEmpty].text, "true Reload first, then colour your bars one by one here.",
+    "which ticks it, then asks for the reload")
 ns.Set("skin", true)
 ns.loaded.skin = true
 _G.BuffBarCooldownViewer = nil
@@ -1456,14 +1470,24 @@ w:Select("general")
 Equal(w.useBars:GetChecked(), true, "own bars shown as on")
 w.useBars:Click()
 Equal(B:Enabled(), false, "Use my bars turns them off")
-w.unlock:Click()
-Equal(S[w.note].text, "Tick Use my bars first.", "can't unlock while the bars are off")
+-- Unlocking lives on the Layout page.
+local unlock = w.pages.layout.unlock
+w:Select("layout")
+unlock:Click()
+Equal(S[w.note].text, "Turn your bars on first.", "can't unlock while the bars are off")
+w:Select("general")
 w.useBars:Click()
-w.unlock:Click()
+w:Select("layout")
+unlock:Click()
 Equal(B:IsUnlocked(), true, "unlocked")
-Equal(S[w.unlock.label].text, "Lock bars", "button offers to lock")
-w.unlock:Click()
+Equal(S[unlock.label].text .. " | " .. S[w.pages.layout.status].text, "Lock bars | Unlocked: drag a bar on screen to move it.",
+    "button offers to lock, and the page says so")
+unlock:Click()
 Equal(B:IsUnlocked(), false, "locked again")
+unlock:Click()
+w:Hide()
+Equal(B:IsUnlocked(), false, "closing the window locks them")
+ns.ShowWindow()
 
 Fire("PLAYER_REGEN_DISABLED")
 Equal(bindings[FECMEscButton], nil, "Escape handed back as combat starts")
@@ -1477,18 +1501,23 @@ Equal(S[w].shown, false, "Escape closes it")
 Equal(bindings[FECMEscButton], nil, "and releases the key")
 
 SlashCmdList.FECM("check")
-Equal(S[w].shown, true, "without the development check, /fecm check just toggles")
+Equal(S[w].shown, true, "without the development check, /ccm check just toggles")
 local probed
 ns.Probe = function(msg) probed = msg end
 SlashCmdList.FECM(" check Moonfire")
-Equal(probed, " check Moonfire", "/fecm check reaches the development check")
+Equal(probed, " check Moonfire", "/ccm check reaches the development check")
 Equal(S[w].shown, true, "and leaves the window alone")
 ns.Probe = nil
 cvarOn = false
 w:Select("look")
 Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
-Equal(S[w.eachEmpty].text, "Blizzard's Cooldown Manager is off.", "and the list says so")
+Equal(S[w.eachEmpty].text .. " " .. S[w.eachFix.label].text .. " " .. tostring(S[w.eachFix].shown),
+    "Blizzard's Cooldown Manager is off. Turn on true", "and the list says so, with its own Turn on")
 Equal(S[w.turnOnManager].shown, true, "with a way to turn it on")
+w.eachFix:Click()
+Equal(cvarOn, true, "the list's button switches it on too")
+cvarOn = false
+w:Refresh()
 w.turnOnManager:Click()
 Equal(cvarOn and S[w.note].text, "Blizzard's Cooldown Manager is on.", "which switches it on")
 Equal(S[w.off].shown or S[w.turnOnManager].shown, false, "and the warning goes")
@@ -1577,6 +1606,121 @@ Equal(S[w.note].text, "Type a profile name first.", "problems explained in the f
 w:Select("look")
 Equal(S[w.profilePanel].shown, false, "changing page closes the menu")
 
+-- Use on all characters: the profile you're on, for every character and new ones.
+local db = ForeverEnhancedCooldownManagerDB
+db.profiles["Kess (Rogue) - Zephras"] = { cd = {}, util = {}, buff = {}, debuff = {}, joins = {} }
+db.chars["Player-1-0009"] = "Kess (Rogue) - Zephras"
+profile:Click()
+Equal(S[w.profileEveryone.label].text .. " | " .. S[MenuRow("Kess (Rogue) - Zephras").users].text,
+    "Use on all characters | 1 character", "a button to put your profile on every character")
+w.profileEveryone:Click()
+Equal(S[confirm.dialog.title].text, 'Use "Zriel (Druid) - Zephras" on all characters?', "asked first")
+Equal(S[confirm.dialog].height > 112, true, "a long name wraps and the question grows to fit")
+confirm.yes:Click()
+Equal(db.chars["Player-1-0009"] .. " | " .. S[w.note].text,
+    "Zriel (Druid) - Zephras | All your characters use Zriel (Druid) - Zephras now, and new ones will too.", "every character moves to it")
+profile:Click()
+Equal(S[MenuRow("Zriel (Druid) - Zephras").users].text .. " | " .. S[w.profileEveryone.label].text .. " | "
+    .. S[MenuRow("Kess (Rogue) - Zephras").users].text, "all characters | On all characters | unused", "and the menu says so")
+w.profileEveryone:Click()
+Equal(tostring(S[confirm.shade].shown) .. " " .. S[w.note].text, "false All your characters already use Zriel (Druid) - Zephras.",
+    "nothing to ask once it's on them all")
+-- A character logging in for the first time starts on it.
+character = { guid = "Player-1-0042", name = "Tarn", realm = "Zephras" }
+Environment(true)
+ns = Load(db)
+Equal(ns.ProfileName() .. " | " .. tostring(db.profiles["Tarn (Druid) - Zephras"]), "Zriel (Druid) - Zephras | nil",
+    "a new character starts on it, without a profile of its own")
+Equal(ns.RenameProfile("Shared") and ns.EveryoneProfile(), "Shared", "renaming it keeps it on everyone")
+-- Kept in the backup.
+Environment(true)
+ns = Load(nil)
+Equal(tostring(ns.EveryoneProfile()) .. " " .. tostring(ForeverEnhancedCooldownManagerDB.chars["Player-1-0042"]), "Shared Shared",
+    "the backup keeps it")
+
+-- A character's very first login, before the game knows its name: its own
+-- profile waits for the name, and one already made as "Unknown" takes it.
+character = { guid = "Player-1-0077", name = "Unknown", realm = "Zephras" }
+Environment()
+ns = Load({ useBars = true }, true)
+Equal(tostring(ns.ProfileName()), "nil", "no profile made before the game knows the name")
+character.name = "Dayseeker"
+Fire("PLAYER_LOGIN")
+Equal(ns.ProfileName(), "Dayseeker (Druid) - Zephras", "made at login, with the name")
+local early = ForeverEnhancedCooldownManagerDB
+early.profiles["Unknown (Druid) - Zephras"], early.profiles["Dayseeker (Druid) - Zephras"] = early.profiles["Dayseeker (Druid) - Zephras"], nil
+early.chars["Player-1-0077"] = "Unknown (Druid) - Zephras"
+Environment(true)
+ns = Load(early)
+Equal(ns.ProfileName() .. " " .. tostring(early.profiles["Unknown (Druid) - Zephras"]), "Dayseeker (Druid) - Zephras nil",
+    "one made as Unknown takes the character's name")
+-- Still no name at login: a profile anyway. One you named yourself keeps its name.
+character = { guid = "Player-1-0078", name = "Unknown", realm = "Zephras" }
+Environment()
+ns = Load({ useBars = true })
+Equal(ns.ProfileName(), "Unknown (Druid) - Zephras", "still no name at login: a profile anyway")
+local named = ForeverEnhancedCooldownManagerDB
+named.profiles["Resto"], named.profiles["Unknown (Druid) - Zephras"] = named.profiles["Unknown (Druid) - Zephras"], nil
+named.chars["Player-1-0078"] = "Resto"
+character.name = "Tarn"
+Environment(true)
+ns = Load(named)
+Equal(ns.ProfileName(), "Resto", "a profile you named keeps its name")
+character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+
+-- A profile shared across classes -------------------------------------------------------------
+-- Another class's spells stay in the profile but don't show; your own class's
+-- spells you haven't learned yet show greyed, in their own icon.
+Environment()
+ns = Load({ useBars = true })
+B = ns.Bars
+B:Assign("Moonfire", "cd")
+local shared = ns.BarData("cd").spells
+table.insert(shared, 1, "Garrote") -- a rogue's, from the same profile
+table.insert(shared, "Rake") -- a druid spell not learned yet
+B:Changed()
+Equal(table.concat((B:Mine("cd")), ",") .. " | " .. B:Get("cd").count, "Moonfire,Rake | 1",
+    "only your class's spells are yours, and only learned ones go on the bar on screen")
+SlashCmdList.FECM("")
+w = FECMFrame
+w:Select("cd")
+page = w.pages.bar
+Equal(page.icons[1].name .. " " .. page.icons[1].index .. " " .. page.icons[2].name .. " " .. page.icons[2].index
+    .. " " .. tostring(page.icons[3] == nil or not S[page.icons[3]].shown), "Moonfire 2 Rake 3 true",
+    "the tray shows yours, each knowing its place in the list")
+Equal(S[page.icons[2].texture].texture .. " " .. tostring(S[page.icons[2].texture].desaturated), "1 true",
+    "a spell you haven't learned: its own icon, greyed, not a question mark")
+local nav = w.nav.cd
+Equal(S[nav.count].text .. " " .. tostring(S[nav.icons[2]].texture) .. " " .. tostring(S[nav.icons[2]].desaturated)
+    .. " " .. tostring(S[nav.icons[3]].shown), "2 1 true false", "the bar list on the left shows the same: yours only, no question marks")
+Equal(S[page.count].text, "2 icons, drag to reorder", "counted as yours")
+S[page.icons[2]].scripts.OnDragStart(page.icons[2])
+S[page.icons[1]].mouseOver = true
+S[page.icons[2]].scripts.OnDragStop(page.icons[2])
+S[page.icons[1]].mouseOver = nil
+Equal(table.concat(ns.BarData("cd").spells, ","), "Garrote,Rake,Moonfire", "dragged in the tray, the rogue's spell stays put")
+w:Select("layout")
+local tiles = w.pages.layout.rows.cd.tiles
+Equal(tiles[1].name .. " " .. tostring(S[tiles[1].texture].desaturated) .. " " .. tiles[2].name,
+    "Rake true Moonfire", "the Layout page draws yours, the unlearned one greyed")
+B:Clear("cd")
+Equal(table.concat(ns.BarData("cd").spells, ","), "Garrote", "Clear takes yours off and leaves the rogue's")
+-- The Buffs bar's slots are for your own buffs.
+B:SetAura("buff", "Evasion", true)
+B:SetAura("buff", "Sprint", true)
+ns.BUFF_SLOTS = 2
+Equal(tostring(B:SetAura("buff", "Thorns", true)) .. " " .. tostring(B:SetAura("buff", "Mark of the Wild", true))
+    .. " " .. tostring(B:SetAura("buff", "Clearcasting", true)), "true true false", "a rogue's buffs don't use up your slots")
+ns.BUFF_SLOTS = 16
+-- Added by name, another class's spell stays off your bars too; a buff added by
+-- name stays, since it can land on you whoever casts it. A debuff has to be yours.
+B:Add("util", "Sinister Strike")
+B:Add("buff", "Blessing of Might")
+B:Add("debuff", "Garrote")
+Equal(#(B:Mine("util")) .. " " .. B:Get("util").count .. " | " .. tostring(ns.Spells:ForMe("Blessing of Might", "buff"))
+    .. " " .. tostring(ns.Spells:ForMe("Garrote", "debuff")) .. " " .. B:Get("debuff").count, "0 0 | true false 0",
+    "a rogue's spell or debuff added by name isn't yours; a paladin's buff is")
+
 -- Settings the game didn't keep are pointed out in the window too.
 Environment(true)
 ns = Load(nil)
@@ -1657,10 +1801,10 @@ Equal(ns.restored and ns.NotesSeen(), "dev", "a lost settings file gets the vers
 for _, timer in ipairs(timers) do timer() end
 Equal(FECMNotes == notes, true, "so What's new doesn't show again")
 
--- Any time: /fecm new, or What's new in the window.
+-- Any time: /ccm new, or What's new in the window.
 SlashCmdList.FECM("new")
 notes = FECMNotes
-Equal(S[notes].shown, true, "/fecm new shows it again")
+Equal(S[notes].shown, true, "/ccm new shows it again")
 notes.done:Click()
 Equal(S[notes].shown, false, "Got it closes it")
 SlashCmdList.FECM("")
@@ -1696,7 +1840,7 @@ Equal(table.concat(rows, "|"), "ADDED|This one.|FIXED|A bug.|--|Version 1.0.0|AD
 SlashCmdList.FECM("")
 local footerVersion
 for _, f in ipairs(objects) do
-    if S[f].text == "v1.1.0   /fecm to open" then footerVersion = f end
+    if S[f].text == "v1.1.0   /ccm to open" then footerVersion = f end
 end
 Equal(footerVersion ~= nil, true, "the window's footer shows the version too")
 _G.C_AddOns = nil
@@ -1998,6 +2142,12 @@ lp.toggle:Click()
 Equal(tostring(L:Active()) .. " " .. S[lp.status].text, "false Your bars stay where you put them.", "stopped")
 lp.toggle:Click()
 Equal(L:Active(), true, "and Line up starts again")
+-- Reset positions, now on this page: back above the action bar, out of the layout.
+lp.home:Click()
+Equal(tostring(L:Active()) .. " " .. tostring(ns.BarData("cd").point) .. " " .. S[w.note].text .. " " .. S[lp.toggle.label].text,
+    "false nil Bars moved back above your action bar. Line up stacks them again. Line up", "Reset positions")
+lp.toggle:Click()
+Equal(L:Active(), true, "and Line up stacks them again")
 lp.match:Click()
 Equal(tostring(ns.Get("prdMatch")) .. string.format(" %g", S[prd].width), "false 200", "the match can be turned off")
 lp.match:Click()
@@ -2137,11 +2287,8 @@ local extra = New("Frame", prd)
 rawset(extra, "powerName", "MANA")
 S[extra].rect = { 400, 294, 200, 6 }
 rawset(prd, "AlternatePowerBar", extra)
-local combo = New("Frame", prd)
-S[combo].rect, S[combo].shown = { 400, 280, 200, 8 }, false
-rawset(prd, "classFrame", combo)
 rawset(prd, "UpdatePowerBar", function() end)
-ns = Load({ useBars = true, prdSkin = false })
+ns = Load({ useBars = true, prdSkin = false, prdCombo = true })
 B, L = ns.Bars, ns.Layout
 B:Assign("Moonfire", "cd")
 B:Assign("Attack", "util")
@@ -2151,11 +2298,18 @@ Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -80 TOP 0 -100",
 power = 1
 prd:UpdatePowerBar()
 Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -80 TOP 0 -106", "in bear form the extra mana bar shows, and Utility sits under it")
-combo:Show()
-Equal(At(B:Get("util")), "TOP 0 -120", "and under the combo points while they show")
-combo:Hide()
+Equal(ns.Resource:ComboRow(), nil, "no combo points in bear form")
+-- Cat form: the addon's combo points under the extra mana bar, and Utility under them.
+power = 3
+prd:UpdatePowerBar()
+local comboRow = ns.Resource:ComboRow()
+Equal(comboRow ~= nil and S[comboRow].shown and S[comboRow].points[1][2] == extra, true, "cat form: combo points under the lowest bar")
+S[comboRow].rect = { 400, 280, 200, 8 }
+L:Stack()
+Equal(At(B:Get("util")), "TOP 0 -120", "and Utility under the combo points while they show")
 power = 0
 prd:UpdatePowerBar()
+Equal(tostring(ns.Resource:ComboRow()) .. " " .. tostring(S[comboRow].shown), "nil false", "gone in caster form")
 Equal(At(B:Get("util")), "TOP 0 -100", "back up against the mana bar in caster form")
 -- A form change in a fight: the cooldown bars follow at once, the Buffs bar after.
 B:SetAura("buff", "Thorns", true)
@@ -2176,6 +2330,276 @@ Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -90 TOP 0 -90", "wi
 prdOn = true
 L:Stack()
 Equal(At(B:Get("util")), "TOP 0 -100", "and part again when it's back")
+
+-- Your cast bar ------------------------------------------------------------------------------
+
+Environment()
+Display()
+_G.PlayerCastingBarFrame = New("Frame")
+local native = PlayerCastingBarFrame
+ns = Load({ useBars = true, prdSkin = false })
+B, L = ns.Bars, ns.Layout
+local C = ns.CastBar
+local cb = C.row
+B:Assign("Moonfire", "cd")
+B:Assign("Attack", "util")
+L:Apply("pyramid")
+Equal(tostring(C:Room()) .. " " .. tostring(S[cb].shown) .. " " .. S[native].alpha .. " " .. At(B:Get("util")),
+    "nil false 1 TOP 0 -100", "off by default: no room, and Blizzard's cast bar left alone")
+ns.Set("castBar", true)
+C:Apply()
+Equal(At(cb) .. string.format(" %g ", S[cb].width) .. At(B:Get("util")), "TOP 0 -104 200 TOP 0 -122",
+    "on: under the display, as wide, and Utility moves down to make room")
+Equal(S[cb].shown and S[cb].alpha .. " " .. S[native].alpha, "0 0", "nothing showing between casts, and Blizzard's hidden")
+native:SetAlpha(1)
+Equal(S[native].alpha, 0, "and it stays hidden when Blizzard shows it for a cast")
+-- A cast: its name, icon and length, filling with the time left.
+clock = 100
+local casting = { "Wrath", "Wrath", 136006, 100000, 101500, false, "cast-1" }
+_G.UnitCastingInfo = function(unit) assert(unit == "player"); return table.unpack(casting) end
+Fire("UNIT_SPELLCAST_START", "player", "cast-1", 5176)
+Equal(S[cb].alpha .. " " .. S[cb.bar.name].text .. " " .. S[cb.icon].texture .. " " .. Last(cb.bar, "SetMinMaxValues", 2), "1 Wrath 136006 1.5",
+    "a cast shows its name and icon, as long as the cast")
+Equal(Last(cb.bar, "SetStatusBarColor", 1) .. " " .. Last(cb.bar, "SetStatusBarColor", 2), "1 0.7", "in Blizzard's gold")
+clock = 100.5
+S[cb].scripts.OnUpdate(cb, .5)
+Equal(string.format("%g %g", Last(cb.bar, "SetValue", 1), Last(cb.bar.time, "SetFormattedText", 2)), "0.5 1", "filling, with the time left")
+Fire("UNIT_SPELLCAST_FAILED", "player", "cast-2", 1)
+Equal(S[cb.bar.name].text, "Wrath", "another spell failing doesn't touch it")
+Fire("UNIT_SPELLCAST_STOP", "player", "cast-1", 5176)
+Equal(string.format("%g", Last(cb.bar, "SetValue", 1)), "1.5", "finished: full")
+clock = 101
+S[cb].scripts.OnUpdate(cb, .5)
+Equal(string.format("%.2f", S[cb].alpha), "0.67", "then it fades")
+clock = 101.3
+S[cb].scripts.OnUpdate(cb, .3)
+Equal(tostring(S[cb].alpha) .. " " .. tostring(S[cb].scripts.OnUpdate), "0 nil", "and it's gone")
+-- Interrupted: red, saying so.
+casting[7] = "cast-3"
+Fire("UNIT_SPELLCAST_START", "player", "cast-3", 5176)
+Fire("UNIT_SPELLCAST_INTERRUPTED", "player", "cast-3", 5176)
+Equal(S[cb.bar.name].text .. " " .. Last(cb.bar, "SetStatusBarColor", 1), "Interrupted 0.85", "interrupted: red, saying so")
+-- A channel: green, draining.
+_G.UnitChannelInfo = function() return "Tranquility", "Tranquility", 136107, 102000, 110000, false, false, 740 end
+clock = 102
+Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 740)
+clock = 104
+S[cb].scripts.OnUpdate(cb, 2)
+Equal(Last(cb.bar, "SetStatusBarColor", 2) .. " " .. string.format("%g", Last(cb.bar, "SetValue", 1)), "0.8 6",
+    "a channel: green, draining as it goes")
+Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 740, "Creature-0-1")
+Equal(S[cb.bar.name].text, "Interrupted", "a channel cut short says so too")
+_G.UnitChannelInfo = function() return nil end
+-- Times the game keeps secret: Blizzard's own bar shows that cast.
+casting = { "Wrath", "Wrath", 136006, SECRET, SECRET, false, "cast-4" }
+Fire("UNIT_SPELLCAST_START", "player", "cast-4", 5176)
+native:SetAlpha(1) -- Blizzard's own bar starting the same cast
+Equal(S[cb].alpha .. " " .. S[native].alpha, "0 1", "a cast with secret times: Blizzard's bar shows it")
+casting = { "Wrath", "Wrath", 136006, 105000, 106500, false, "cast-5" }
+Fire("UNIT_SPELLCAST_START", "player", "cast-5", 5176)
+Equal(S[cb].alpha .. " " .. S[native].alpha, "1 0", "and yours takes over again at the next")
+Fire("UNIT_SPELLCAST_STOP", "player", "cast-9", 1)
+clock = 105.5
+S[cb].scripts.OnUpdate(cb, .5)
+Equal(string.format("%g", Last(cb.bar, "SetValue", 1)), "0.5", "another spell stopping doesn't end it")
+-- Choices: icon, height and colour.
+ns.Set("castIcon", false)
+ns.Set("castHeight", 24)
+ns.Set("castColour", "blue")
+C:Apply()
+Equal(tostring(S[cb.icon].shown) .. " " .. S[cb].height .. " " .. At(B:Get("util")) .. " " .. Last(cb.bar, "SetStatusBarColor", 1),
+    "false 24 TOP 0 -128 " .. ns.Style:BarColour("blue")[1], "no icon, taller (the rows move again), in your colour")
+-- The display switched off: the bar sits where it was, between the rows.
+prdOn = false
+L:Stack()
+Equal(At(cb) .. " " .. At(B:Get("util")), "TOP 0 -90 TOP 0 -114", "with the display off, it sits where the display was")
+prdOn = true
+-- Without a layout it still goes under the display.
+L:TurnOff()
+ns.Bars:ResetPositions()
+L:Stack()
+Equal(At(cb), "TOP 0 -104", "without a layout, under the display")
+-- Off again, even mid-cast: no room, Blizzard's bar back.
+casting[7] = "cast-6"
+Fire("UNIT_SPELLCAST_START", "player", "cast-6", 5176)
+rawset(native, "casting", true) -- Blizzard's own bar has the cast too
+ns.Set("castBar", false)
+C:Apply()
+L:LineUp()
+Equal(tostring(S[cb].shown) .. " " .. S[native].alpha .. " " .. At(B:Get("util")) .. " " .. tostring(S[cb].scripts.OnUpdate),
+    "false 1 TOP 0 -100 nil", "off: the rows close up, Blizzard's bar is back mid-cast, and yours drops the cast")
+rawset(native, "casting", nil)
+-- The Cast bar page: a live preview, and the Layout page draws it.
+ns.Set("castBar", true)
+C:Apply()
+SlashCmdList.FECM("")
+w = FECMFrame
+w:Select("cast")
+local cp = w.pages.cast
+Equal(S[cp].shown and S[cp.status].text, "Under your Personal Resource Display. Blizzard's cast bar is hidden.", "its own page")
+Equal(S[cp.sample.bar.name].text .. " " .. tostring(S[cp.sample.icon].shown) .. " " .. S[cp.sample].height, "Hearthstone false 24",
+    "the preview follows your choices")
+S[cp.sample].scripts.OnUpdate(cp.sample, 1)
+Equal(string.format("%g", Last(cp.sample.bar, "SetValue", 1)), "1", "and fills as you watch")
+cp.swatches[3]:Click()
+Equal(S[cp.chosen].text, "Blizzard's gold", "clicking your colour again goes back to Blizzard's")
+cp.icon:Click()
+Equal(tostring(ns.Get("castIcon")) .. " " .. tostring(S[cp.sample.icon].shown), "true true", "the icon comes back, in the preview too")
+w:Select("layout")
+Equal(S[w.pages.layout.castStrip].shown, true, "the Layout page draws it under the display")
+Equal(w.pages.layout.drawError, nil, "the Layout page drew without errors")
+cp.shown:Click()
+Equal(tostring(ns.Get("castBar")) .. " " .. tostring(S[w.pages.layout.castStrip].shown), "false false", "switched off from its page")
+Equal(#printed, 0, "no errors from the cast bar")
+-- Its height is in the backup too, within its limits.
+Environment(true)
+ns = Load(nil)
+Equal(ns.Get("castHeight"), 24, "the height comes back from the backup")
+cvars.FECMBackup = cvars.FECMBackup:gsub("castHeight=24", "castHeight=99")
+Environment(true)
+ns = Load(nil)
+Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
+
+-- Borders and shadows on your bars -------------------------------------------------------------
+
+Environment()
+ns = Load({ useBars = true })
+B = ns.Bars
+B:Assign("Moonfire", "cd")
+B:SetAura("buff", "Thorns", true)
+local cdBar, buffBar = B:Get("cd"), B:Get("buff")
+local function Shown(ring) return tostring(S[ring[1]].shown) end
+Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown(cdBar.decor.shadow[1]), "false false", "none to start with")
+SlashCmdList.FECM("")
+w = FECMFrame
+w:Select("look")
+w.iconBorder.buttons[2]:Click()
+w.iconShadow.buttons[3]:Click()
+Equal(ns.Get("iconBorder") .. " " .. ns.Get("iconShadow"), "icon bar", "picked on the Look page")
+Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown(cdBar.decor.shadow[1]) .. " " .. Shown(cdBar.decor.border),
+    "true true false", "a border round each icon and a shadow round each bar")
+Equal(Shown(buffBar.holders[1].decor.border), "true", "the Buffs bar's icons too")
+Equal(Shown(w.sampleIcons.icons[1].decor.border) .. " " .. Shown(w.sampleIcons.decor.shadow[1]), "true true",
+    "shown in the Look page's preview")
+Equal(Shown(ns.CastBar.row.decor.shadow[1]) .. " " .. Shown(ns.CastBar.row.decor.border), "true false",
+    "your cast bar gets the shadow, keeping its own edges")
+B:Assign("Wrath", "cd")
+Equal(Shown(cdBar.icons[2].decor.border), "true", "new icons get it as they're made")
+w.iconBorder.buttons[1]:Click()
+w.iconShadow.buttons[1]:Click()
+Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown(cdBar.decor.shadow[1]) .. " " .. Shown(ns.CastBar.row.decor.shadow[1]),
+    "false false false", "and Off takes them away")
+Equal(#printed, 0, "no errors from borders and shadows")
+
+-- Each class's debuffs, from Blizzard's own spell data -------------------------------------
+
+local function Has(list, name)
+    for _, item in ipairs(list) do if item == name then return true end end
+    return false
+end
+local druid = ns.DEBUFFS.DRUID
+Equal(tostring(Has(druid, "Moonfire")) .. " " .. tostring(Has(druid, "Faerie Fire")) .. " " .. tostring(Has(druid, "Rake")),
+    "true true true", "a druid's debuffs: Moonfire, Faerie Fire, Rake")
+Equal(tostring(Has(druid, "Wrath")) .. " " .. tostring(Has(druid, "Thorns")), "false false", "not a plain nuke or a buff")
+Equal(tostring(Has(ns.DEBUFFS.ROGUE, "Rupture")) .. " " .. tostring(Has(ns.DEBUFFS.WARRIOR, "Sunder Armor")), "true true",
+    "every class has its own")
+Equal(ns.RANKS["Jeff Dummy 1"], nil, "no test dummies")
+
+-- Taking a bar out, putting it back, and Reset ----------------------------------------------
+
+Environment()
+Display()
+ns = Load({ useBars = true, prdSkin = false })
+B, L = ns.Bars, ns.Layout
+B:Assign("Moonfire", "cd")
+B:Assign("Attack", "util")
+B:SetAura("buff", "Thorns", true)
+B:SetAura("debuff", "Moonfire", true)
+L:Apply("pyramid")
+SlashCmdList.FECM("")
+w = FECMFrame
+w:Select("layout")
+lp = w.pages.layout
+local confirm = w.confirm
+lp.rows.debuff.out:Click()
+Equal(S[confirm.shade].shown and S[confirm.dialog.title].text, "Take Debuffs out of your layout?", "the x asks first")
+confirm.no:Click()
+Equal(L:IsHidden("debuff"), false, "Cancel leaves it in")
+lp.rows.debuff.out:Click()
+confirm.yes:Click()
+Equal(tostring(L:IsHidden("debuff")) .. " " .. tostring(S[B:Get("debuff")].shown), "true false",
+    "taken out: it doesn't show, even with a debuff on it")
+Equal(tostring(S[lp.rows.debuff].shown) .. " " .. tostring(S[lp.outButtons.debuff].shown), "false true",
+    "its row is gone from the drawing, with a button to put it back")
+Equal(table.concat(L:Rows(), ","), "cd,util,buff", "and from the rows you can swap")
+Equal(table.concat(ns.BarData("debuff").spells, ","), "Moonfire", "its spells stay")
+w:Select("debuff")
+Equal(S[w.pages.bar.putBack].shown, true, "its own page says it's out, with Put back")
+w:Select("layout")
+-- Kept in the backup.
+Environment(true)
+Display()
+ns = Load(nil)
+Equal(tostring(ns.Layout:IsHidden("debuff")) .. " " .. ns.LayoutData().base, "true pyramid", "the backup keeps it out")
+B, L = ns.Bars, ns.Layout
+SlashCmdList.FECM("")
+w = FECMFrame
+w:Select("layout")
+lp = w.pages.layout
+confirm = w.confirm
+lp.outButtons.debuff:Click()
+Equal(tostring(L:IsHidden("debuff")) .. " " .. tostring(S[B:Get("debuff")].shown), "false true", "put back, it shows again")
+-- All four out: the last button wraps clear of Unlock bars and Reset positions.
+for _, key in ipairs(ns.BAR_KEYS) do L:TakeOut(key) end
+w:Refresh()
+local wrapped = S[lp.outButtons.debuff].points[1]
+Equal(wrapped[4] .. " " .. wrapped[5] .. " " .. S[lp.outButtons.buff].points[1][5], "80 31 9", "the last one wraps to a second line")
+for _, key in ipairs(ns.BAR_KEYS) do L:PutBack(key) end
+w:Refresh()
+-- Reset: the preset as first set up, asked first.
+L:SetGap(4)
+L:SetSpacing(3)
+L:SetAcross("cd", 9)
+lp.reset:Click()
+Equal(S[confirm.dialog.title].text, "Reset your layout?", "Reset asks first")
+confirm.yes:Click()
+local reset = ns.LayoutData()
+Equal(reset.gap .. " " .. reset.spacing .. " " .. ns.BarData("cd").perRow .. " " .. tostring(reset.preset) .. " " .. S[w.note].text,
+    "0 0 6 pyramid Pyramid is back as it was first set up.", "the preset back as it was, rows and icons flush")
+L:Undo()
+Equal(ns.BarData("cd").perRow .. " " .. ns.LayoutData().gap, "9 4", "and Undo puts your changes back")
+
+-- Finding a debuff and picking its spot ------------------------------------------------------
+
+L:Reset()
+w:Refresh()
+local search = lp.search
+S[search].scripts.OnEditFocusGained(search)
+Equal(S[lp.results].shown and lp.found[1].spell, "Moonfire", "your class's debuffs, the ones you know first")
+search:SetText("fae")
+S[search].scripts.OnTextChanged(search, true)
+Equal(lp.found[1].spell .. " " .. tostring(S[lp.found[2]].shown), "Faerie Fire false", "narrowed as you type")
+Equal(S[lp.found[1].name].colour[1], ns.Theme.MUTED[1], "greyed while you haven't learned it")
+lp.found[1]:Click()
+Equal(S[lp.dragHint].text .. " " .. tostring(S[lp.cancel].shown) .. " " .. tostring(S[lp.rows.debuff.target].shown),
+    "Click a spot in the Debuffs row for Faerie Fire. true true", "then it asks for a spot in the Debuffs row")
+lp.rows.cd.tiles[1]:Click()
+Equal(S[w.note].text .. " " .. #ns.BarData("debuff").spells, "Debuffs go in the Debuffs row. 1", "only there")
+lp.rows.debuff.tiles[1]:Click()
+Equal(table.concat(ns.BarData("debuff").spells, ",") .. " " .. S[w.note].text, "Faerie Fire,Moonfire Added Faerie Fire to Debuffs.",
+    "put in the spot you picked")
+Equal(S[lp.dragHint].text .. " " .. tostring(S[lp.cancel].shown), "Drag spells from your spellbook onto a row. Hover a row to change it. false",
+    "and back to normal")
+-- Changed your mind: Cancel.
+search:SetText("demoral")
+S[search].scripts.OnTextChanged(search, true)
+lp.found[1]:Click()
+Equal(S[lp.dragHint].text, "Click a spot in the Debuffs row for Demoralizing Roar.", "another debuff picked")
+lp.cancel:Click()
+Equal(tostring(S[lp.cancel].shown) .. " " .. tostring(S[lp.rows.debuff.target].shown), "false false", "Cancel puts things back")
+lp.rows.debuff.tiles[1]:Click()
+Equal(table.concat(ns.BarData("debuff").spells, ","), "Faerie Fire,Moonfire", "and nothing is added")
+Equal(lp.drawError, nil, "the Layout page drew without errors")
 
 print = _G.print
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")
