@@ -40,6 +40,10 @@ ns.AURA_BARS = {
 }
 ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 } } -- min, max, default
 ns.BAR_MAX_SPELLS = 40
+-- Out of combat a bar shows, fades or hides; it comes back in full in combat,
+-- with an enemy targeted, while unlocked, or in Edit Mode.
+ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
+ns.OUT_OF_COMBAT_NAMES = { show = "Show", fade = "Fade", hide = "Hide" }
 ns.BUFF_SLOTS = 16 -- the Buffs bar has one secure slot per buff
 
 local db
@@ -366,7 +370,11 @@ function ns.BarData(key)
     bar.size = Limit(bar.size, ns.BAR_LIMITS.size)
     bar.spacing = Limit(bar.spacing, ns.BAR_LIMITS.spacing)
     bar.hideReady = bar.hideReady == true
-    bar.combatOnly = bar.combatOnly == true
+    -- Bars set to "only in combat" before this choice existed hide.
+    if not ns.OUT_OF_COMBAT_NAMES[bar.outOfCombat] then
+        bar.outOfCombat = bar.combatOnly == true and "hide" or "show"
+    end
+    bar.combatOnly = nil
     bar.showMissing = bar.showMissing == true
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
@@ -486,7 +494,7 @@ local function EncodeBars()
         Put(key .. ".size", bar.size)
         Put(key .. ".spacing", bar.spacing)
         Put(key .. ".hide", bar.hideReady and 1 or 0)
-        Put(key .. ".combat", bar.combatOnly and 1 or 0)
+        Put(key .. ".ooc", bar.outOfCombat)
         Put(key .. ".missing", bar.showMissing and 1 or 0)
         Put(key .. ".names", bar.showNames and 1 or 0)
         Put(key .. ".timer", bar.showTimer and 1 or 0)
@@ -558,7 +566,8 @@ local function DecodeV2(text)
         local function Flag(field) return values[key .. "." .. field] == "1" end
         decoded.bars[key] = {
             size = tonumber(values[key .. ".size"]), spacing = tonumber(values[key .. ".spacing"]),
-            hideReady = Flag("hide"), combatOnly = Flag("combat"), showMissing = Flag("missing"),
+            hideReady = Flag("hide"), showMissing = Flag("missing"),
+            outOfCombat = values[key .. ".ooc"] or (Flag("combat") and "hide" or nil),
             showNames = Flag("names"), showTimer = values[key .. ".timer"] ~= "0",
             x = tonumber(values[key .. ".x"]), y = tonumber(values[key .. ".y"]),
             spells = values[key .. ".spells"] and SpellNames(values[key .. ".spells"]) or nil,
@@ -622,7 +631,7 @@ local function DecodeBars(text)
             elseif field == "timer" then
                 bar.showTimer = value == "1"
             elseif field == "combat" then
-                bar.combatOnly = value == "1"
+                bar.outOfCombat = value == "1" and "hide" or "show"
             elseif field == "x" or field == "y" then
                 bar[field] = tonumber(value)
             elseif field == "spells" then

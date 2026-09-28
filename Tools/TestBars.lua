@@ -104,6 +104,7 @@ local book, usable, noMana, range, active, target, cvars, printed
 local hostile = true -- whether the target can be attacked
 local cooldownCalls, lockdown, containers, containerCallsInCombat
 local trinket, trinketCooldown, bagItems, itemCooldown, itemCount
+local ammo, ammoCount -- the equipped ammunition and how many you carry
 local bindings, cvarOn, reloads, timers
 -- Who is logged in: a GUID tells characters apart, even with the same name.
 local character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
@@ -142,8 +143,17 @@ local function Environment(keepCVars)
     end
     _G.RAID_CLASS_COLORS = { DRUID = { r = 1, g = .49, b = .04 } }
     trinket, trinketCooldown, bagItems, itemCooldown, itemCount = nil, { 0, 0, 1 }, {}, { 0, 0, 1 }, {}
-    _G.GetInventoryItemID = function(_, slot) return slot == 13 and trinket or nil end
-    _G.GetInventoryItemLink = function() return "|cff1eff00|Hitem:" .. tostring(trinket) .. "|h[Lucky Charm]|h|r" end
+    ammo, ammoCount = nil, 0
+    _G.INVSLOT_AMMO = 0
+    _G.GetInventoryItemID = function(_, slot)
+        if slot == 0 then return ammo end
+        return slot == 13 and trinket or nil
+    end
+    _G.GetInventoryItemLink = function(_, slot)
+        if slot == 0 then return "|cffffffff|Hitem:" .. tostring(ammo) .. "|h[Rough Arrow]|h|r" end
+        return "|cff1eff00|Hitem:" .. tostring(trinket) .. "|h[Lucky Charm]|h|r"
+    end
+    _G.GetInventoryItemCount = function(_, slot) assert(slot == 0); return ammoCount end
     _G.GetInventoryItemTexture = function() return 777 end
     _G.GetInventoryItemCooldown = function(_, slot) assert(slot == 13); return trinketCooldown[1], trinketCooldown[2], trinketCooldown[3] end
     _G.C_Container = {
@@ -266,6 +276,8 @@ local function Environment(keepCVars)
         return f
     end
     _G.UIParent = New("Frame")
+    _G.EditModeManagerFrame = New("Frame")
+    S[EditModeManagerFrame].shown = false
     S[UIParent].cx, S[UIParent].cy = 500, 400
     _G.GameFontHighlight = { GetFont = function() return "font", 12, "" end }
     _G.CreateFont = function(name) local font = New("Font"); _G[name] = font; return font end
@@ -409,7 +421,7 @@ Equal(#printed, 0, "no errors")
 
 -- Combat-only bars and moving -----------------------------------------------------------
 
-B:SetOption("cd", "combatOnly", true)
+B:SetOption("cd", "outOfCombat", "hide")
 Equal(S[cd].shown, false, "only in combat: hidden out of combat")
 Fire("PLAYER_REGEN_DISABLED")
 Equal(S[cd].shown, true, "shown in combat")
@@ -426,7 +438,7 @@ Equal(ns.BarData("cd").x, 20, "position saved from the centre")
 Equal(ns.BarData("cd").y, -100, "position saved")
 p = S[cd].points[1]
 Equal(p[1] == "CENTER" and p[4] == 20 and p[5], -100, "placed where it was dropped")
-B:SetOption("cd", "combatOnly", false)
+B:SetOption("cd", "outOfCombat", "show")
 ns.Set("useBars", false)
 B:Rebuild()
 Equal(B:IsUnlocked(), false, "turning the bars off locks them")
@@ -543,7 +555,7 @@ lockdown = true
 B:SetBuff("Clearcasting", false)
 Equal(containerCallsInCombat, 0, "no slot or group changes in combat")
 Equal(slots.b2.enabled, true, "Clearcasting's slot waits")
-B:SetOption("buff", "combatOnly", true)
+B:SetOption("buff", "outOfCombat", "hide")
 Equal(S[buffs].alpha, 1, "only in combat: visible in a fight")
 ns.Set("useBars", false)
 B:Rebuild()
@@ -698,6 +710,100 @@ B:Assign("Wrath", "cd")
 win:Select("cd")
 Equal(S[barPage.icons[2].link].shown, false, "cooldown bars have no join buttons")
 Equal(#printed, 1, "only the restored-settings notice was printed")
+
+-- Out of combat: show, fade or hide -------------------------------------------------------
+
+Environment()
+ns = Load({ useBars = true, bars = { cd = { combatOnly = true } } })
+B = ns.Bars
+Equal(ns.BarData("cd").outOfCombat, "hide", "bars that were only in combat now hide out of combat")
+Equal(rawget(ns.BarData("cd"), "combatOnly"), nil, "the old setting is gone")
+Equal(ns.BarData("util").outOfCombat, "show", "the rest show")
+B:Assign("Moonfire", "cd")
+B:Assign("Wrath", "util")
+B:SetAura("buff", "Thorns", true)
+local cdBar, utilBar, buffBar = B:Get("cd"), B:Get("util"), B:Get("buff")
+target, hostile = false, true
+B:UpdateShown()
+Equal(S[cdBar].shown, false, "hidden out of combat")
+Fire("PLAYER_REGEN_DISABLED")
+Equal(S[cdBar].shown and S[cdBar].alpha, 1, "back in full in combat")
+Fire("PLAYER_REGEN_ENABLED")
+Equal(S[cdBar].shown, false, "hidden again after")
+target = true
+Fire("PLAYER_TARGET_CHANGED")
+Equal(S[cdBar].shown, true, "back with an enemy targeted")
+hostile = false
+Fire("PLAYER_TARGET_CHANGED")
+Equal(S[cdBar].shown, false, "but not with a friend")
+hostile = SECRET
+Fire("PLAYER_TARGET_CHANGED")
+Equal(S[cdBar].shown, true, "a hidden answer counts as an enemy")
+hostile, target = true, false
+Fire("PLAYER_TARGET_CHANGED")
+EditModeManagerFrame:Show()
+Equal(S[cdBar].shown, true, "back in Edit Mode")
+EditModeManagerFrame:Hide()
+Equal(S[cdBar].shown, false, "and hidden once it closes")
+B:SetOption("util", "outOfCombat", "fade")
+Equal(S[utilBar].shown and S[utilBar].alpha, .3, "faded to 30% out of combat")
+Fire("PLAYER_REGEN_DISABLED")
+Equal(S[utilBar].alpha, 1, "full in combat")
+Fire("PLAYER_REGEN_ENABLED")
+B:SetOption("buff", "outOfCombat", "fade")
+Equal(S[buffBar].shown and S[buffBar].alpha, .3, "aura bars fade too")
+B:SetOption("buff", "outOfCombat", "hide")
+Equal(S[buffBar].shown and S[buffBar].alpha, 0, "and hide by fading right out, since their slots can't be hidden in a fight")
+B:SetUnlocked(true)
+Equal(S[cdBar].shown and S[utilBar].alpha == 1 and S[buffBar].alpha, 1, "unlocked, every bar shows in full")
+B:SetUnlocked(false)
+Equal(cvars.FECMBackupBars1:find("6:cd.ooc4:hide", 1, true) ~= nil, true, "the choice is backed up")
+Environment(true)
+cvars.FECMBackupBars0, cvars.FECMBackupBars1 = "1", "cd.combat=1;cd.spells=Moonfire"
+ns = Load(nil)
+Equal(ns.BarData("cd").outOfCombat, "hide", "backups from before the choice carry it over")
+Environment(true)
+cvars.FECMBackupBars1 = "v2;9:cd.combat1:1"
+ns = Load(nil)
+Equal(ns.BarData("cd").outOfCombat, "hide", "including this week's backups")
+
+-- The window's out-of-combat choice.
+Environment()
+ns = Load({ useBars = true })
+B = ns.Bars
+SlashCmdList.FECM("")
+local choice = FECMFrame.pages.bar.options.outOfCombat
+Equal(choice.selected, "show", "the page shows the bar's choice")
+choice.buttons[2]:Click()
+Equal(ns.BarData("cd").outOfCombat, "fade", "clicking Fade sets it")
+Equal(choice.selected, "fade", "and shows it")
+FECMFrame:Select("util")
+Equal(choice.selected, "show", "each bar has its own")
+
+-- Ammunition ---------------------------------------------------------------------------------
+
+Environment()
+ammo, ammoCount = 2512, 200
+ns = Load({ useBars = true })
+B = ns.Bars
+local arrows = ns.Spells:Find("ammo")
+Equal(arrows and arrows.name, "Ammo: Rough Arrow", "equipped ammunition listed")
+Equal(arrows.line, "Items", "with the items")
+B:Assign("ammo", "util")
+local quiver = B:Get("util").icons[1]
+Equal(S[quiver.count].text, 200, "its count shown")
+Equal(S[quiver.texture].desaturated, false, "in colour while you have some")
+ammoCount = 0
+B:RefreshAll()
+Equal(S[quiver.texture].desaturated, true, "greyed when you run out")
+B:SetOption("util", "showNames", true)
+Equal(S[B:Get("util").icons[1].label].text, "Rough Arrow", "named by the ammo")
+ammo = nil
+Fire("PLAYER_EQUIPMENT_CHANGED")
+Equal(ns.Spells:Find("ammo") and ns.Spells:Find("ammo").name, "Ammo", "kept on the bar with none equipped")
+Equal(S[B:Get("util").icons[1].count].text, 0, "showing none")
+Equal(ns.Spells:IsItem(ns.Spells:Find("ammo")), true, "never offered for the Buffs or Debuffs bar")
+Equal(#printed, 0, "no errors")
 
 -- Ticking spells onto bars from their pages ------------------------------------------------
 

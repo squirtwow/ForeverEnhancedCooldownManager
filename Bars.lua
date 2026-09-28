@@ -25,7 +25,8 @@ local REACTIVE = {
 }
 
 local bars = {}
-local unlocked, inCombat = false, false
+local unlocked, inCombat, editMode = false, false, false
+local FADE = .3 -- a faded bar's opacity out of combat
 
 local function Open(value)
     return not (issecretvalue and issecretvalue(value))
@@ -98,7 +99,23 @@ local function RefreshItem(icon, data)
     icon.glow:Hide()
 end
 
+-- Your ammunition: how many you carry, greyed when you're out.
+local function RefreshAmmo(icon)
+    local texture = GetInventoryItemTexture("player", icon.slot)
+    if texture then icon.texture:SetTexture(texture) end
+    local count = GetInventoryItemID("player", icon.slot) and GetInventoryItemCount("player", icon.slot) or 0
+    if Open(count) and type(count) == "number" then
+        icon.count:SetText(count)
+        icon.texture:SetDesaturated(count == 0)
+    end
+    icon.cooldown:Clear()
+    icon:SetAlpha(1)
+    icon.texture:SetVertexColor(TINT.ready[1], TINT.ready[2], TINT.ready[3])
+    icon.glow:Hide()
+end
+
 local function RefreshIcon(icon, data, hasTarget)
+    if icon.kind == "ammo" then return RefreshAmmo(icon) end
     if icon.kind == "item" or icon.kind == "slot" then return RefreshItem(icon, data) end
     local id = icon.spellID
     local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(id, true)
@@ -236,7 +253,7 @@ local function Layout(bar)
             icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
             icon.count:SetText("")
             icon.label:SetWidth(size + spacing)
-            icon.label:SetText(entry.kind == "slot" and entry.name:gsub("^Trinket %d: ", "") or entry.name)
+            icon.label:SetText((entry.name:gsub("^Trinket %d: ", ""):gsub("^Ammo: ", "")))
             icon.label:SetShown(data.showNames)
             icon:Show()
         end
@@ -266,23 +283,37 @@ function B:IsUnlocked()
     return unlocked
 end
 
+-- Bars come back in full in combat, with an enemy targeted, while unlocked
+-- and while Edit Mode is open; otherwise each follows its out-of-combat
+-- choice. A hidden answer about the target counts as an enemy.
+local function Awake()
+    if inCombat or unlocked or editMode then return true end
+    local hostile = UnitExists("target") and UnitCanAttack("player", "target")
+    if not Open(hostile) then return true end
+    return hostile and true or false
+end
+
 function B:UpdateShown()
     local on = self:Enabled()
     if not on then unlocked = false end
+    local awake = Awake()
     for _, key in ipairs(ns.BAR_KEYS) do
         local bar = bars[key]
         if bar then
+            local mode = awake and "show" or bar.data.outOfCombat
             if bar.kind == "aura" then
-                -- Shown whenever it has entries; "only in combat" fades it
-                -- instead, since the secure slots can't be hidden in a fight.
+                -- Shown whenever it has entries; hiding out of combat fades it
+                -- right out instead, since the secure slots can't be hidden in
+                -- a fight.
                 local show = on and (unlocked or bar.count > 0) or false
                 if bar:IsShown() ~= show then
                     if InCombatLockdown() then bar.pendingShown = true else bar:SetShown(show) end
                 end
-                bar:SetAlpha((unlocked or not bar.data.combatOnly or inCombat) and 1 or 0)
+                bar:SetAlpha(mode == "hide" and 0 or mode == "fade" and FADE or 1)
             else
-                local show = on and (unlocked or (bar.count > 0 and (not bar.data.combatOnly or inCombat)))
+                local show = on and (unlocked or (bar.count > 0 and mode ~= "hide"))
                 bar:SetShown(show and true or false)
+                bar:SetAlpha(mode == "fade" and FADE or 1)
             end
             bar.mover:SetShown(on and unlocked)
         end
@@ -527,7 +558,10 @@ function B:Start()
             B:Rebuild()
             if ns.window and ns.window:IsShown() then ns.window:Refresh() end
         else
-            if event == "PLAYER_TARGET_CHANGED" then ns.BuffBar:UpdateTarget(bars.debuff) end
+            if event == "PLAYER_TARGET_CHANGED" then
+                ns.BuffBar:UpdateTarget(bars.debuff)
+                B:UpdateShown()
+            end
             B:RefreshAll()
         end
     end)
@@ -540,5 +574,12 @@ function B:Start()
         if B:Enabled() and UnitExists("target") then B:RefreshAll() end
     end)
     self.driver = driver
+    -- Bars come back in full while Edit Mode is open.
+    local editor = EditModeManagerFrame
+    if editor and editor.HookScript then
+        editor:HookScript("OnShow", function() editMode = true; B:UpdateShown() end)
+        editor:HookScript("OnHide", function() editMode = false; B:UpdateShown() end)
+        editMode = editor:IsShown() and true or false
+    end
     self:Rebuild()
 end

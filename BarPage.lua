@@ -190,10 +190,27 @@ function ns.BuildBarPage(window, page, width)
     -- Buffs only show while they're on you, so their bar offers this instead.
     local showMissing = Option("Show missing buffs greyed", "showMissing", 0)
     local showNames = Option("Show spell names", "showNames", -22)
-    local combatOnly = Option("Only in combat", "combatOnly", -44)
-    local showTimer = Option("Show countdown numbers", "showTimer", -66)
+    local showTimer = Option("Show countdown numbers", "showTimer", -44)
+
+    -- Out of combat: show, fade or hide. The footer explains when bars come back.
+    local oocLabel = T:Text(options, "GameFontHighlight")
+    oocLabel:SetPoint("TOPLEFT", 0, -63)
+    oocLabel:SetText("Out of combat")
+    local choices = {}
+    for _, mode in ipairs(ns.OUT_OF_COMBAT) do choices[#choices + 1] = { key = mode, label = ns.OUT_OF_COMBAT_NAMES[mode] } end
+    local outOfCombat = T:Segmented(options, choices, 156, function(mode)
+        B:SetOption(state.bar, "outOfCombat", mode)
+        window:Refresh()
+    end)
+    outOfCombat:SetPoint("TOPLEFT", 84, -59)
+    for _, button in ipairs(outOfCombat.buttons) do
+        button:SetScript("OnEnter", function()
+            window.note:SetText("Out of combat. Bars come back in full in combat, with an enemy targeted, while unlocked, and in Edit Mode.")
+        end)
+        button:SetScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
+    end
     page.options = { hideReady = hideReady, showMissing = showMissing, showNames = showNames,
-        combatOnly = combatOnly, showTimer = showTimer }
+        showTimer = showTimer, outOfCombat = outOfCombat }
 
     -- The spell list -------------------------------------------------------------------
     local listPanel = CreateFrame("Frame", nil, page, "BackdropTemplate")
@@ -248,7 +265,7 @@ function ns.BuildBarPage(window, page, width)
             return
         end
         local entry = ns.Spells:Find(found)
-        if ns.AURA_BARS[bar] and entry and (entry.kind == "item" or entry.kind == "slot") then
+        if ns.AURA_BARS[bar] and entry and ns.Spells:IsItem(entry) then
             window:Say("Items can't go on the " .. ns.BAR_NAMES[bar] .. " bar.")
             return
         end
@@ -350,7 +367,7 @@ function ns.BuildBarPage(window, page, width)
     -- buffs on you, items put no aura on anyone, and a fixed rank adds
     -- nothing to an aura bar, which already counts every rank.
     local function Fits(entry)
-        local item = entry.kind == "item" or entry.kind == "slot"
+        local item = ns.Spells:IsItem(entry)
         if state.bar == "buff" then return not item and entry.kind ~= "rank" end
         if state.bar == "debuff" then return not item and entry.kind ~= "rank" and entry.kind ~= "proc" end
         if item then return ns.Get("listItems") end
@@ -466,7 +483,7 @@ function ns.BuildBarPage(window, page, width)
         hideReady:SetChecked(data.hideReady)
         showMissing:SetChecked(data.showMissing)
         showNames:SetChecked(data.showNames)
-        combatOnly:SetChecked(data.combatOnly)
+        outOfCombat:SetSelected(data.outOfCombat)
         showTimer:SetChecked(data.showTimer)
         showItems:SetShown(not aura)
         showRanks:SetShown(not aura)

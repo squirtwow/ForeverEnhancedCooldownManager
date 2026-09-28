@@ -158,7 +158,17 @@ local function NoCooldown(itemID)
     return classID == RECIPE or (classID == CONSUMABLE and subclassID == FOOD_AND_DRINK)
 end
 
--- Your two trinket slots, whatever is in them, then usable items in your bags.
+-- Your two trinket slots, whatever is in them, your ammunition for its
+-- count, then usable items in your bags.
+local AMMO = INVSLOT_AMMO or 0
+local AMMO_ICON = "Interface\\Icons\\INV_Ammo_Arrow_01"
+
+local function AddAmmo(itemID)
+    Add({ key = "ammo", name = itemID and ("Ammo: " .. ItemName(itemID, GetInventoryItemLink("player", AMMO))) or "Ammo",
+        kind = "ammo", line = S.LINES.items, slot = AMMO, itemID = itemID,
+        icon = itemID and GetInventoryItemTexture("player", AMMO) or AMMO_ICON, rankText = "" })
+end
+
 local function ScanItems()
     for index, slot in ipairs(TRINKETS) do
         local itemID = GetInventoryItemID("player", slot)
@@ -169,6 +179,8 @@ local function ScanItems()
                 icon = GetInventoryItemTexture("player", slot), rankText = "" })
         end
     end
+    local ammo = GetInventoryItemID("player", AMMO)
+    if ammo then AddAmmo(ammo) end
     if not (C_Container and C_Container.GetContainerNumSlots) then return end
     for bag = 0, BAGS do
         for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
@@ -189,7 +201,9 @@ local function ScanSaved()
         for _, saved in ipairs(ns.BarData(key).spells) do
             if not byKey[saved] then
                 local itemID = tonumber(saved:match("^item:(%d+)$"))
-                if itemID then
+                if saved == "ammo" then
+                    AddAmmo(nil) -- none equipped now: shown empty
+                elseif itemID then
                     AddItem(itemID)
                 elseif custom[saved] then
                     local ids = BuffIDs(saved, custom[saved])
@@ -217,6 +231,11 @@ end
 
 function S:Find(key)
     return byKey[key]
+end
+
+-- Trinkets, bag items and ammunition: nothing that puts an aura on anyone.
+function S:IsItem(entry)
+    return entry.kind == "item" or entry.kind == "slot" or entry.kind == "ammo"
 end
 
 -- Names to offer while typing in the add box. Your own spells, procs and items
