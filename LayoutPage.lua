@@ -1,20 +1,19 @@
 -- The Layout page in the /fecm window: one-click layouts for your bars, and
--- the stack they make around Blizzard's Personal Resource Display, row by
--- row with your own icons in it. Hover a row for - and + (how many icons fit
--- across) and the arrows (up or down the stack, past the display).
+-- the stack they make around Blizzard's Personal Resource Display, drawn to
+-- scale with your own icons in it. Drag a spell from your spellbook onto a
+-- row to add it; hover a row for - and + (how many icons fit across) and the
+-- arrows (up or down the stack, past the display).
 local _, ns = ...
 local T = ns.Theme
 
 local CARD_W, CARD_H, CARD_GAP = 80, 66, 6
 local TILE_GAP = 2
-local PAD = 7 -- above and below a row's tiles
 local EDGE = 118 -- room beside a row for its name and buttons
-local DISPLAY_H = 14 -- the display in the drawing: health over power
-local GAP = 6 -- between the display and the rows beside it, before scaling
+local SCALE = .7 -- the drawing's largest scale
 local HEALTH, POWER = { .1, .8, .1 }, { 0, .5, 1 } -- Blizzard's own colours
-local HINT = "Hover a row: - and + change how many icons fit across, the arrows move it past the display."
+local HINT = "- and + change how many fit across; the arrows swap rows. Drag an icon to another row, or off to remove it."
 
--- A small square button with an arrow on it.
+-- A small square button with an arrow on it, in the accent.
 local function Arrow(parent, up)
     local button = T:Square(parent, "")
     local art = button:CreateTexture(nil, "ARTWORK")
@@ -23,6 +22,8 @@ local function Arrow(parent, up)
     art:SetTexture(ns.MEDIA .. (up and "UI-ScrollBar-ScrollUpButton-Up" or "UI-ScrollBar-ScrollDownButton-Up"))
     art:SetTexCoord(.25, .75, .25, .75)
     art:SetDesaturated(true)
+    T:Paint(function(accent) art:SetVertexColor(accent[1], accent[2], accent[3]) end)
+    button.art = art
     return button
 end
 
@@ -86,15 +87,9 @@ function ns.BuildLayoutPage(window, page, width, height)
     status:SetPoint("LEFT", title, "RIGHT", 10, 0)
     local turnOn = T:Button(page, "Turn on", 70, 18)
     turnOn:SetPoint("LEFT", status, "RIGHT", 8, 0)
-    turnOn:SetScript("OnClick", function(self)
-        if self.what == "bars" then
-            ns.Set("useBars", true)
-            B:Rebuild()
-        else
-            local on, why = ns.TurnOn("nameplateShowSelf")
-            window:Say(on and "Your Personal Resource Display is on." or why
-                or "It couldn't be switched on here: Options > Combat > Personal Resource Display.")
-        end
+    turnOn:SetScript("OnClick", function()
+        ns.Set("useBars", true)
+        B:Rebuild()
         window:Refresh()
     end)
     local toggle = T:Button(page, "", 90, 20)
@@ -139,15 +134,21 @@ function ns.BuildLayoutPage(window, page, width, height)
     local top = 38 + CARD_H + 12
     local box = CreateFrame("Frame", nil, page, "BackdropTemplate")
     box:SetPoint("TOPLEFT", 16, -top)
-    box:SetPoint("BOTTOMRIGHT", -16, 44)
+    box:SetPoint("BOTTOMRIGHT", -16, 64)
     T:Box(box)
     page.box = box
-    local boxWidth, boxHeight = inner - 16, height - top - 44
+    local boxWidth, boxHeight = inner - 16, height - top - 64
+
+    local drag = T:Text(box, "GameFontHighlightSmall", T.MUTED)
+    drag:SetPoint("TOPLEFT", 12, -10)
+    drag:SetText("Drag spells from your spellbook onto a row. Hover a row to change it.")
+    page.dragHint = drag
 
     local rows = {}
     page.rows = rows
+    local display -- the resource display, drawn between the rows
     local function Hovered(row)
-        return row:IsMouseOver() or selected == row.key
+        return row:IsMouseOver() or row.buttons:IsMouseOver() or selected == row.key
     end
     -- The buttons show while the row is hovered or chosen; beside the display
     -- they take the place of the row's name.
@@ -155,10 +156,100 @@ function ns.BuildLayoutPage(window, page, width, height)
         local on = Hovered(row)
         row.hover:SetShown(on)
         row.buttons:SetShown(on)
-        local named = not (on and row.place ~= "stack")
-        row.name:SetShown(named)
-        row.across:SetShown(named)
+        if row.name then
+            local named = not (on and row.place ~= "stack")
+            row.name:SetShown(named)
+            row.across:SetShown(named)
+        end
     end
+    local function Buttons(owner, width)
+        owner.buttons = CreateFrame("Frame", nil, owner)
+        owner.buttons:SetSize(width, 18)
+        return function(button, x, onClick)
+            button:SetPoint("LEFT", x, 0)
+            button:SetScript("OnClick", function()
+                selected = owner.key
+                onClick()
+            end)
+            button:HookScript("OnEnter", function() ShowButtons(owner) end)
+            button:HookScript("OnLeave", function() ShowButtons(owner) end)
+            return button
+        end
+    end
+
+    -- An icon being dragged follows the cursor: onto another row it moves
+    -- there, anywhere else it comes off its bar.
+    local ghost = CreateFrame("Frame", nil, page)
+    ghost:SetSize(24, 24)
+    ghost:SetFrameLevel(page:GetFrameLevel() + 40)
+    ghost.texture = ghost:CreateTexture(nil, "OVERLAY")
+    ghost.texture:SetAllPoints()
+    ghost.texture:SetAlpha(.8)
+    ns.Style:Zoom(ghost.texture)
+    ghost:Hide()
+    ghost:SetScript("OnUpdate", function(self)
+        local x, y = GetCursorPosition()
+        local scale = UIParent:GetEffectiveScale()
+        self:ClearAllPoints()
+        self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+    end)
+    local picked -- { from = bar, name = entry } while an icon is dragged
+    local function DropPicked()
+        ghost:Hide()
+        local from = picked
+        picked = nil
+        if not from then return end
+        local target
+        for key, row in pairs(rows) do
+            if row:IsShown() and row:IsMouseOver() then target = key end
+        end
+        if target == from.bar then return window:Refresh() end
+        if target then
+            Done(B:Transfer(from.bar, target, from.name))
+        else
+            Done(B:TakeOff(from.bar, from.name))
+        end
+    end
+
+    local function Tile(row, i)
+        local tile = row.tiles[i]
+        if tile then return tile end
+        tile = CreateFrame("Button", nil, row.strip)
+        tile:SetSize(10, 10)
+        tile.texture = tile:CreateTexture(nil, "ARTWORK")
+        tile.texture:SetAllPoints()
+        tile:RegisterForDrag("LeftButton")
+        tile:SetScript("OnDragStart", function(self)
+            if not self.name then return end
+            picked = { bar = row.key, name = self.name }
+            ghost.texture:SetTexture(self.texture:GetTexture())
+            ghost:Show()
+            -- Picked up: its spot is empty until it lands somewhere.
+            T:Fill(self.texture, T.CONTROL_BORDER)
+        end)
+        tile:SetScript("OnDragStop", function()
+            DropPicked()
+        end)
+        -- A spell from your spellbook dropped here joins the row's bar.
+        tile:SetScript("OnReceiveDrag", function() B:Dropped(row.key) end)
+        tile:SetScript("OnClick", function()
+            if B:Dropped(row.key) then return end
+            selected = row.key
+            window:Refresh()
+        end)
+        tile:SetScript("OnEnter", function(self)
+            ShowButtons(row)
+            local entry = self.name and ns.Spells:Find(self.name)
+            Note(entry and (entry.name .. ". Drag it to another row, or off to remove it.") or HINT)
+        end)
+        tile:SetScript("OnLeave", function()
+            ShowButtons(row)
+            Unnote()
+        end)
+        row.tiles[i] = tile
+        return tile
+    end
+
     local function Row(key)
         if rows[key] then return rows[key] end
         local row = CreateFrame("Button", nil, box)
@@ -175,26 +266,15 @@ function ns.BuildLayoutPage(window, page, width, height)
         row.name:SetText(ns.BAR_NAMES[key])
         row.across = T:Text(row, "GameFontHighlightSmall", T.MUTED)
         row.more = T:Text(row, "GameFontHighlightSmall", T.MUTED)
-        row.buttons = CreateFrame("Frame", nil, row)
-        row.buttons:SetSize(84, 18)
-        local function Button(button, x, onClick)
-            button:SetPoint("LEFT", x, 0)
-            button:SetScript("OnClick", function()
-                selected = key
-                onClick()
-            end)
-            button:HookScript("OnEnter", function() ShowButtons(row) end)
-            button:HookScript("OnLeave", function() ShowButtons(row) end)
-            return button
-        end
-        row.fewer = Button(T:Square(row.buttons, "-"), 0, function()
+        local Button = Buttons(row, 84)
+        row.fewer = Button(T:Square(row.buttons, "-", true), 0, function()
             Done(L:SetAcross(key, ns.BarData(key).perRow - 1))
         end)
-        row.wider = Button(T:Square(row.buttons, "+"), 22, function()
+        row.wider = Button(T:Square(row.buttons, "+", true), 22, function()
             Done(L:SetAcross(key, ns.BarData(key).perRow + 1))
         end)
-        row.up = Button(Arrow(row.buttons, true), 44, function() Done(L:Move(key, -1)) end)
-        row.down = Button(Arrow(row.buttons, false), 66, function() Done(L:Move(key, 1)) end)
+        row.up = Button(Arrow(row.buttons, true), 44, function() Done(L:Swap(key, -1)) end)
+        row.down = Button(Arrow(row.buttons, false), 66, function() Done(L:Swap(key, 1)) end)
         row:SetScript("OnEnter", function(self)
             ShowButtons(self)
             Note(HINT)
@@ -203,7 +283,11 @@ function ns.BuildLayoutPage(window, page, width, height)
             ShowButtons(self)
             Unnote()
         end)
+        -- A spell dropped on a row joins that bar; a click without one
+        -- keeps the row's buttons up.
+        row:SetScript("OnReceiveDrag", function(self) B:Dropped(self.key) end)
         row:SetScript("OnClick", function(self)
+            if B:Dropped(self.key) then return end
             selected = self.key
             window:Refresh()
         end)
@@ -211,9 +295,14 @@ function ns.BuildLayoutPage(window, page, width, height)
         return row
     end
 
-    local display = CreateFrame("Frame", nil, box)
-    display:SetSize(100, DISPLAY_H)
-    display:EnableMouse(true)
+    -- The display, with arrows to move it up or down the stack.
+    display = CreateFrame("Button", nil, box)
+    display:SetSize(100, 14)
+    display.key = "display"
+    display.hover = display:CreateTexture(nil, "BACKGROUND")
+    display.hover:SetPoint("TOPLEFT", -3, 3)
+    display.hover:SetPoint("BOTTOMRIGHT", 3, -3)
+    display.hover:SetColorTexture(1, 1, 1, .05)
     display.health = display:CreateTexture(nil, "ARTWORK")
     display.health:SetPoint("TOPLEFT")
     display.health:SetPoint("TOPRIGHT")
@@ -221,11 +310,24 @@ function ns.BuildLayoutPage(window, page, width, height)
     display.power = display:CreateTexture(nil, "ARTWORK")
     display.power:SetPoint("BOTTOMLEFT")
     display.power:SetPoint("BOTTOMRIGHT")
-    display.power:SetHeight(4)
-    display:SetScript("OnEnter", function()
-        Note("Your Personal Resource Display. Move it in Edit Mode, and your bars follow when you close Edit Mode.")
+    display.power:SetHeight(5)
+    local Button = Buttons(display, 40)
+    display.buttons:SetPoint("LEFT", display, "RIGHT", 8, 0)
+    display.up = Button(Arrow(display.buttons, true), 0, function() Done(L:MoveDisplay(-1)) end)
+    display.down = Button(Arrow(display.buttons, false), 22, function() Done(L:MoveDisplay(1)) end)
+    local DISPLAY_NOTE = "Your Personal Resource Display. The arrows move it up or down the stack; move it on screen in Edit Mode."
+    display:SetScript("OnEnter", function(self)
+        ShowButtons(self)
+        Note(DISPLAY_NOTE)
     end)
-    display:SetScript("OnLeave", Unnote)
+    display:SetScript("OnLeave", function(self)
+        ShowButtons(self)
+        Unnote()
+    end)
+    display:SetScript("OnClick", function(self)
+        selected = self.key
+        window:Refresh()
+    end)
     page.display = display
 
     -- What's on a bar, in order: joined buff entries count once.
@@ -240,40 +342,37 @@ function ns.BuildLayoutPage(window, page, width, height)
     end
 
     -- A row's tiles: your icons, then empty spots up to how many fit across.
-    local function Fill(row, tile, fromRight)
+    local function Fill(row, size, fromRight)
         local data, entries = ns.BarData(row.key), Entries(row.key)
         for i = 1, data.perRow do
-            local square = row.tiles[i]
-            if not square then
-                square = row.strip:CreateTexture(nil, "ARTWORK")
-                row.tiles[i] = square
-            end
-            square:SetSize(tile, tile)
-            square:ClearAllPoints()
-            local offset = (i - 1) * (tile + TILE_GAP)
+            local tile = Tile(row, i)
+            tile:SetSize(size, size)
+            tile:ClearAllPoints()
+            local offset = (i - 1) * (size + TILE_GAP)
             if fromRight then
-                square:SetPoint("TOPRIGHT", row.strip, "TOPRIGHT", -offset, 0)
+                tile:SetPoint("TOPRIGHT", row.strip, "TOPRIGHT", -offset, 0)
             else
-                square:SetPoint("TOPLEFT", row.strip, "TOPLEFT", offset, 0)
+                tile:SetPoint("TOPLEFT", row.strip, "TOPLEFT", offset, 0)
             end
             local name = entries[i]
+            tile.name = name
             if name then
                 local entry = ns.Spells:Find(name)
-                square:SetTexture(entry and entry.icon or 134400) -- question mark until learned
-                ns.Style:Zoom(square)
+                tile.texture:SetTexture(entry and entry.icon or 134400) -- question mark until learned
+                ns.Style:Zoom(tile.texture)
             else
-                T:Fill(square, T.CONTROL_BORDER)
+                T:Fill(tile.texture, T.CONTROL_BORDER)
             end
-            square:Show()
+            tile:Show()
         end
         for i = data.perRow + 1, #row.tiles do row.tiles[i]:Hide() end
-        row.strip:SetSize(data.perRow * tile + (data.perRow - 1) * TILE_GAP, tile)
+        row.strip:SetSize(data.perRow * size + (data.perRow - 1) * TILE_GAP, size)
         row.more:SetText(#entries > data.perRow and ("+" .. (#entries - data.perRow)) or "")
         row.across:SetText(data.perRow .. " across")
         row.fewer:SetUsable(data.perRow > ns.BAR_LIMITS.perRow[1])
         row.wider:SetUsable(data.perRow < ns.BAR_LIMITS.perRow[2])
-        row.up:SetUsable(L:CanMove(row.key, -1))
-        row.down:SetUsable(L:CanMove(row.key, 1))
+        row.up:SetUsable(L:CanSwap(row.key, -1))
+        row.down:SetUsable(L:CanSwap(row.key, 1))
     end
 
     -- A row across the middle, its name on the left and buttons on the right.
@@ -281,7 +380,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         row.place = "stack"
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", box, "TOPLEFT", 8, -y)
-        row:SetSize(boxWidth, tile + 2 * PAD)
+        row:SetSize(boxWidth, tile)
         row.strip:ClearAllPoints()
         row.strip:SetPoint("CENTER")
         row.name:ClearAllPoints()
@@ -296,9 +395,9 @@ function ns.BuildLayoutPage(window, page, width, height)
     end
 
     -- A row beside the display: tiles against it, name and buttons outside.
-    local function Beside(row, side, y, tile, lineHeight, displayWidth)
+    local function Beside(row, side, y, tile, lineHeight, displayWidth, gap)
         row.place = side
-        local rowWidth = (boxWidth - displayWidth) / 2 - GAP
+        local rowWidth = (boxWidth - displayWidth) / 2 - gap
         row:ClearAllPoints()
         row:SetSize(rowWidth, lineHeight)
         row.strip:ClearAllPoints()
@@ -337,72 +436,103 @@ function ns.BuildLayoutPage(window, page, width, height)
             local shown = L:Display()
             displayReal = shown and shown.width or 200
         end
-        -- One scale for everything, so the rows keep their proportions.
+        -- One scale for everything, so the rows keep their proportions and
+        -- sit together as they will on screen, with your row spacing.
         local widest, middle = displayReal, displayReal
         for _, place in ipairs({ "above", "below" }) do
             for _, key in ipairs(layout[place]) do widest = math.max(widest, Real(key)) end
         end
         for _, side in ipairs({ "left", "right" }) do
-            if layout[side] then middle = middle + GAP + Real(layout[side]) end
+            if layout[side] then middle = middle + layout.gap + Real(layout[side]) end
         end
-        local scale = math.min(.6, (boxWidth - 2 * EDGE) / math.max(1, widest, middle))
+        local scale = math.min(SCALE, (boxWidth - 2 * EDGE) / math.max(1, widest, middle))
         local function Tile(key) return math.max(6, math.floor(ns.BarData(key).size * scale)) end
+        local gap = math.floor(layout.gap * scale + .5)
         local displayWidth = math.floor(displayReal * scale)
+        local shown = L:Display()
+        local displayHeight = math.max(6, math.floor((shown and shown.height or 20) * scale + .5))
         local sideTile = 0
         for _, side in ipairs({ "left", "right" }) do
             if layout[side] then sideTile = math.max(sideTile, Tile(layout[side])) end
         end
-        local lineHeight = math.max(DISPLAY_H, sideTile) + 2 * PAD
+        local lineHeight = math.max(displayHeight, sideTile)
         local total = lineHeight
         for _, place in ipairs({ "above", "below" }) do
-            for _, key in ipairs(layout[place]) do total = total + Tile(key) + 2 * PAD end
+            for _, key in ipairs(layout[place]) do total = total + Tile(key) + gap end
         end
-        local y = math.max(8, math.floor((boxHeight - total) / 2))
+        local y = math.max(28, math.floor((boxHeight - total) / 2))
         for _, key in ipairs(layout.above) do
             Stacked(Row(key), y, Tile(key))
-            y = y + Tile(key) + 2 * PAD
+            y = y + Tile(key) + gap
         end
         display:ClearAllPoints()
-        display:SetPoint("TOP", box, "TOP", 0, -(y + (lineHeight - DISPLAY_H) / 2))
-        display:SetWidth(math.max(20, displayWidth))
+        display:SetPoint("TOP", box, "TOP", 0, -(y + (lineHeight - displayHeight) / 2))
+        display:SetSize(math.max(20, displayWidth), displayHeight)
+        display.health:SetHeight(math.max(2, math.ceil(displayHeight * .6)))
+        display.power:SetHeight(math.max(2, displayHeight - math.ceil(displayHeight * .6) - 1))
         for _, side in ipairs({ "left", "right" }) do
-            if layout[side] then Beside(Row(layout[side]), side, y, Tile(layout[side]), lineHeight, displayWidth) end
+            if layout[side] then Beside(Row(layout[side]), side, y, Tile(layout[side]), lineHeight, displayWidth, gap) end
         end
-        y = y + lineHeight
+        y = y + lineHeight + gap
         for _, key in ipairs(layout.below) do
             Stacked(Row(key), y, Tile(key))
-            y = y + Tile(key) + 2 * PAD
+            y = y + Tile(key) + gap
         end
         local health, power = ns.Get("prdHealth"), ns.Get("prdPower")
         T:Fill(display.health, health ~= "default" and ns.Style:BarColour(health) or HEALTH)
         T:Fill(display.power, power ~= "default" and ns.Style:BarColour(power) or POWER)
+        display.up:SetUsable(L:CanMoveDisplay(-1))
+        display.down:SetUsable(L:CanMoveDisplay(1))
         for _, row in pairs(rows) do ShowButtons(row) end
+        ShowButtons(display)
     end
 
-    -- Below the box: the display's width.
-    local match = T:Check(page, "Match the resource display to my rows", function(self)
-        ns.Set("prdMatch", self:GetChecked())
-        if L:Active() then L:Stack() elseif ns.Resource then ns.Resource:Match() end
-        window:Refresh()
-    end)
-    match:SetPoint("BOTTOMLEFT", 16, 18)
-    match:HookScript("OnEnter", function()
-        Note("While your bars are stacked, the display is as wide as your widest row. Off, it keeps Blizzard's Bar Width from Edit Mode.")
-    end)
-    match:HookScript("OnLeave", Unnote)
+    -- Below the box: the display, and the space between rows and icons.
+    local function Tick(label, y, note, onClick)
+        local check = T:Check(page, label, onClick)
+        check:SetPoint("BOTTOMLEFT", 16, y)
+        check:HookScript("OnEnter", function() Note(note) end)
+        check:HookScript("OnLeave", Unnote)
+        return check
+    end
+    local shown = Tick("Show the Personal Resource Display", 36,
+        "Blizzard's display, as in Options > Combat. Off, your rows close up where it was.", function(self)
+            local on, why
+            if self:GetChecked() then on, why = ns.TurnOn("nameplateShowSelf") else on, why = ns.TurnOff("nameplateShowSelf") end
+            if not on then window:Say(why or "It couldn't be changed here: Options > Combat > Personal Resource Display.") end
+            L:Stack()
+            window:Refresh()
+        end)
+    page.shown = shown
+    local match = Tick("Match the resource display to my rows", 14,
+        "While your bars are stacked, the display is as wide as your widest row. Off, it keeps Blizzard's Bar Width from Edit Mode.",
+        function(self)
+            ns.Set("prdMatch", self:GetChecked())
+            if L:Active() then L:Stack() elseif ns.Resource then ns.Resource:Match() end
+            window:Refresh()
+        end)
     page.match = match
-    local hint = T:Text(page, "GameFontHighlightSmall", T.MUTED)
-    hint:SetPoint("BOTTOMRIGHT", -16, 21)
-    hint:SetJustifyH("RIGHT")
-    hint:SetText("Hover a row to change it.")
+    -- Rows and icons touch unless you give them room.
+    local function Spacing(label, limits, y, set)
+        local slider = T:Slider(page, label, limits, 1, 250, function(value)
+            local _, message = set(value)
+            if message then window:Say(message) end
+            window:Refresh()
+        end)
+        slider:SetPoint("BOTTOMRIGHT", -16, y)
+        return slider
+    end
+    local spacing = Spacing("Row spacing", ns.ROW_GAP, 34, function(value) return L:SetGap(value) end)
+    local iconSpacing = Spacing("Icon spacing", ns.ICON_GAP, 12, function(value) return L:SetSpacing(value) end)
+    page.spacing, page.iconSpacing = spacing, iconSpacing
 
     local function Refresh()
         local layout, active, on = ns.LayoutData(), L:Active(), B:Enabled()
-        local text, colour, action = nil, T.MUTED, nil
+        local text, colour, barsOff = nil, T.MUTED, false
         if not on then
-            text, colour, action = "Your bars are off.", T.WARN, "bars"
+            text, colour, barsOff = "Your bars are off.", T.WARN, true
         elseif active and not ns.PersonalDisplayOn() then
-            text, colour, action = "Your Personal Resource Display is off.", T.WARN, "display"
+            text = "Your rows sit together where your resource display would be."
         elseif active then
             text = "Your bars follow your Personal Resource Display."
         elseif L.moved then
@@ -414,8 +544,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         end
         status:SetText(text)
         status:SetTextColor(colour[1], colour[2], colour[3])
-        turnOn.what = action
-        turnOn:SetShown(action ~= nil)
+        turnOn:SetShown(barsOff)
         toggle:SetShown(on)
         toggle:SetLabel(active and "Turn off" or "Line up")
         undo:SetShown(L.undo ~= nil)
@@ -424,6 +553,9 @@ function ns.BuildLayoutPage(window, page, width, height)
             card:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         end
         match:SetChecked(ns.Get("prdMatch"))
+        shown:SetChecked(ns.PersonalDisplayOn())
+        spacing:Set(layout.gap)
+        iconSpacing:Set(layout.spacing)
         Draw()
     end
 

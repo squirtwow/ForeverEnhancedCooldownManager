@@ -8,14 +8,15 @@
 - If Blizzard's Cooldown Manager or Personal Resource Display is off, /fecm tells you and can turn it on.
 
 ### Your own bars
-- Cooldowns, Utility, Buffs and Debuffs bars, set up in /fecm by ticking spells. Each spell shows once, at your highest rank, and switches when you train a new one. Off until you tick Use my bars on the General page.
+- Cooldowns, Utility, Buffs and Debuffs bars, set up in /fecm by ticking spells or dragging them in from your spellbook. Each spell shows once, at your highest rank, and switches when you train a new one. Off until you tick Use my bars on the General page.
 - Cooldown icons show the sweep and countdown in combat: grey while cooling down, red out of range, blue without enough mana, and a gold edge when a reactive ability like Overpower is ready.
 - Buffs bar: your buffs and class procs (Clearcasting, Shadow Trance and more) with time left and stacks. Buffs from other players count at any rank, group versions too.
 - Debuffs bar: your own debuffs on your target.
 - Join entries on the Buffs and Debuffs bars to show one icon for whichever is up, for seals, auras, aspects or stings.
 - Each bar has its own icon size, spacing and options: hide when ready, spell names, countdown numbers, and show, fade or hide out of combat. Unlock to drag bars anywhere.
 - Icons per row: more icons than fit across go onto another row, and each bar grows from its centre or from either edge.
-- Layout page: one click stacks your bars around your Personal Resource Display, as a pyramid, wide rows, sides and more. Hover a row to change how many icons fit across, or move it past the display. The display widens to your widest row, and your bars follow it when you move it in Edit Mode.
+- Layout page: one click stacks your bars around your Personal Resource Display, as a pyramid, wide rows, sides and more, flush or with the room you choose between rows and icons. The display widens to your widest row, or hide it and the rows close up; your bars follow it as it moves or changes with your form.
+- Change a layout row by row: how many icons fit across, which bar goes in which row, and where the display sits in the stack. Drag icons between rows, or off a row to remove them.
 - Trinkets, potions, your Hearthstone and ammo can go on a bar too. Search to add spells outside your spellbook by name or spell ID, or tick Show all ranks to use a lower rank.
 
 ### Settings

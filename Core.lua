@@ -64,6 +64,8 @@ ns.AURA_BARS = {
     debuff = { unit = "target", filter = "HARMFUL", mine = true, word = "debuff" },
 }
 ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 }, perRow = { 1, 20, 20 } } -- min, max, default
+ns.ROW_GAP = { 0, 20, 0 } -- a layout's space between rows: touching unless you want room
+ns.ICON_GAP = { 0, 20, 0 } -- and between the icons in its rows
 ns.BAR_MAX_SPELLS = 40
 -- Which way a row grows as icons come and go, and where a new row goes when
 -- there are more icons than fit across.
@@ -432,6 +434,8 @@ function ns.LayoutData()
     local layout = db.layout
     layout.on = layout.on == true
     if type(layout.preset) ~= "string" then layout.preset = nil end
+    layout.gap = Limit(layout.gap, ns.ROW_GAP)
+    layout.spacing = Limit(layout.spacing, ns.ICON_GAP)
     local seen = {}
     local function Take(key)
         if ns.BAR_NAMES[key] and not seen[key] then
@@ -624,6 +628,8 @@ local function EncodeBars()
     if type(db.notesSeen) == "string" then Put("notes", db.notesSeen) end
     local layout = ns.LayoutData()
     Put("lay.on", layout.on and 1 or 0)
+    Put("lay.gap", layout.gap)
+    Put("lay.spacing", layout.spacing)
     if layout.preset then Put("lay.preset", layout.preset) end
     Put("lay.above", table.concat(layout.above, ","))
     Put("lay.below", table.concat(layout.below, ","))
@@ -678,7 +684,8 @@ local function DecodeV2(text)
             for key in (text or ""):gmatch("[^,]+") do keys[#keys + 1] = key end
             return keys
         end
-        decoded.layout = { on = values["lay.on"] == "1", preset = values["lay.preset"],
+        decoded.layout = { on = values["lay.on"] == "1", preset = values["lay.preset"], gap = tonumber(values["lay.gap"]),
+            spacing = tonumber(values["lay.spacing"]),
             above = Keys(values["lay.above"]), below = Keys(values["lay.below"]),
             left = values["lay.left"], right = values["lay.right"] }
     end
@@ -851,6 +858,14 @@ function ns.TurnOn(cvar)
     if not (C_CVar and C_CVar.SetCVar and C_CVar.GetCVarBool) then return false end
     pcall(C_CVar.SetCVar, cvar, "1")
     return C_CVar.GetCVarBool(cvar) == true
+end
+
+-- And off again, when you ask: true when it's off afterwards.
+function ns.TurnOff(cvar)
+    if InCombatLockdown() then return false, "Finish combat first." end
+    if not (C_CVar and C_CVar.SetCVar and C_CVar.GetCVarBool) then return false end
+    pcall(C_CVar.SetCVar, cvar, "0")
+    return C_CVar.GetCVarBool(cvar) == false
 end
 
 -- Escape closes the /ccm window and What's new. The key is borrowed only while

@@ -7,10 +7,10 @@ local T = ns.Theme
 local ICON, GAP = 32, 12 -- icons in the tray; the gap fits the join button
 local ROW, HEADER_ROW = 22, 20 -- spell list rows
 local EMPTY = {
-    cd = "Nothing here yet. Tick spells in the list below to add them.",
-    util = "Nothing here yet. Tick spells in the list below to add them.",
-    buff = "Nothing here yet. Tick spells that buff you, or your class procs, in the list below.",
-    debuff = "Nothing here yet. Tick spells that put a debuff on your target in the list below.",
+    cd = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook.",
+    util = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook.",
+    buff = "Nothing here yet. Tick spells that buff you, or your class procs, in the list below, or drag them here.",
+    debuff = "Nothing here yet. Tick spells that put a debuff on your target in the list below, or drag them here.",
 }
 
 local function Full(key)
@@ -68,6 +68,11 @@ function ns.BuildBarPage(window, page, width)
     tray:SetPoint("TOPLEFT", 16, -38)
     tray:SetSize(inner, 16 + ICON) -- a real size from the start, before the first refresh
     T:Flat(tray, T.PANEL, T.BORDER)
+    -- A spell dragged from your spellbook (any spellbook) or an action bar,
+    -- or an item, dropped here joins the bar.
+    tray:EnableMouse(true)
+    tray:SetScript("OnReceiveDrag", function() B:Dropped(state.bar) end)
+    tray:SetScript("OnMouseUp", function() B:Dropped(state.bar) end)
     local empty = T:Text(tray, "GameFontHighlightSmall", T.MUTED)
     empty:SetPoint("LEFT", 12, 0)
     empty:SetWidth(inner - 24)
@@ -141,7 +146,7 @@ function ns.BuildBarPage(window, page, width)
         icon:RegisterForDrag("LeftButton")
         icon:SetScript("OnDragStart", function(self)
             state.drag = self.index
-            self:SetAlpha(.3)
+            self:SetAlpha(0) -- picked up: its spot is empty until it lands
             ghost.texture:SetTexture(self.texture:GetTexture())
             ghost:Show()
         end)
@@ -153,8 +158,14 @@ function ns.BuildBarPage(window, page, width)
             if from and to and to ~= from then
                 B:MoveTo(state.bar, from, to)
                 window:Refresh()
+            elseif from and not to then
+                -- Dragged off the bar: taken off it.
+                local _, message = B:TakeOff(state.bar, ns.BarData(state.bar).spells[from])
+                window:Say(message)
+                window:Refresh()
             end
         end)
+        icon:SetScript("OnReceiveDrag", function() B:Dropped(state.bar) end)
         -- The footer names the icon under the mouse.
         icon:SetScript("OnEnter", function(self) window.note:SetText(self.name or "") end)
         icon:SetScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
@@ -281,22 +292,8 @@ function ns.BuildBarPage(window, page, width)
 
     -- Adds a spell that isn't in your spellbook, by name or ID, to this bar.
     local function AddOther(text)
-        local bar = state.bar
-        local found, ids = ns.Spells:Resolve(text)
-        if not found then
-            window:Say(ids)
-            return
-        end
-        local entry = ns.Spells:Find(found)
-        if ns.AURA_BARS[bar] and entry and ns.Spells:IsItem(entry) then
-            window:Say("Items can't go on the " .. ns.BAR_NAMES[bar] .. " bar.")
-            return
-        end
-        if ids and not entry then ns.AddCustom(found, ids) end
-        local ok
-        if ns.AURA_BARS[bar] then ok = B:SetAura(bar, found, true) else ok = B:Assign(found, bar) end
-        ns.PruneCustom()
-        window:Say(ok and ("Added " .. (entry and entry.name or found) .. " to " .. ns.BAR_NAMES[bar] .. ".") or Full(bar))
+        local _, message = B:Add(state.bar, text)
+        window:Say(message)
     end
 
     local function Ticked(row, checked)

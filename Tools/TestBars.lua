@@ -142,6 +142,8 @@ local function Environment(keepCVars)
     bindings, cvarOn, reloads, timers = {}, true, 0, {}
     _G.C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
     _G.GetCursorPosition = function() return 0, 0 end
+    _G.GetCursorInfo = function() end -- nothing picked up
+    _G.ClearCursor = function() end
     _G.ReloadUI = function()
         assert(not lockdown, "blocked ReloadUI in combat")
         assert(S[FECMFrame].shown, "window hidden before reload")
@@ -480,7 +482,7 @@ Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 -- Backup ------------------------------------------------------------------------------
 
 Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;listItems=0;listRanks=0;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
-Equal(cvars.FECMBackupBars0, "1", "bars backed up in one chunk")
+Equal(cvars.FECMBackupBars0 .. " " .. #cvars.FECMBackupBars1, "2 900", "bars backed up in chunks of 900 characters")
 Environment(true)
 ns = Load(nil)
 B = ns.Bars
@@ -1232,6 +1234,7 @@ Equal(S[w.nav.cd.icons[4]].shown, false, "and no more")
 Equal(page.icons[1].name == "Moonfire" and page.icons[3].name == "Overpower", true, "the tray shows the bar in order")
 local third = page.icons[3]
 S[third].scripts.OnDragStart(third)
+Equal(S[third].alpha, 0, "picked up, its spot is empty")
 S[page.icons[1]].mouseOver = true
 S[third].scripts.OnDragStop(third)
 S[page.icons[1]].mouseOver = nil
@@ -1243,7 +1246,11 @@ S[page.tray].mouseOver = nil
 Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Wrath,Overpower", "dropping on empty tray space moves it to the end")
 S[page.icons[1]].scripts.OnDragStart(page.icons[1])
 S[page.icons[1]].scripts.OnDragStop(page.icons[1])
-Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Wrath,Overpower", "dropping outside the tray changes nothing")
+Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. S[w.note].text, "Wrath,Overpower Took Moonfire off Cooldowns.",
+    "dragged off the tray, it comes off the bar")
+B:Assign("Moonfire", "cd")
+B:MoveTo("cd", 3, 1)
+w:Refresh()
 page.icons[2].remove:Click()
 Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Overpower", "x takes an icon off")
 Equal(S[page.icons[3]].shown, false, "and the tray closes up")
@@ -1796,38 +1803,47 @@ B:Assign("Attack", "util")
 local ok, message = L:Apply("pyramid")
 Equal(ok and message, "Pyramid is set up. Tick spells for each bar, then size them to taste.", "a preset in one click")
 local cd, util = ns.BarData("cd"), ns.BarData("util")
-Equal(cd.perRow .. " " .. cd.size .. " " .. util.perRow .. " " .. util.size, "6 42 5 38", "each bar's icons across and size")
-Equal(At(B:Get("cd")), "BOTTOM 0 -74", "Cooldowns just above the display")
-Equal(At(B:Get("util")), "TOP 0 -106", "Utility just below it")
-Equal(At(B:Get("buff")) .. " " .. At(B:Get("debuff")), "TOP 0 -150 TOP 0 -150", "empty bars take no room")
-Equal(string.format("%g %g", S[prd].width, S[prd.PowerBar].width), "272 272", "the display as wide as the widest row")
+Equal(cd.perRow .. " " .. cd.size .. " " .. util.perRow .. " " .. util.size .. " " .. cd.spacing, "6 36 5 36 0",
+    "each bar's icons across, its own icon size kept, and the icons flush")
+Equal(At(B:Get("cd")), "BOTTOM 0 -80", "Cooldowns right on top of the display")
+Equal(At(B:Get("util")), "TOP 0 -100", "Utility right under it")
+Equal(At(B:Get("buff")) .. " " .. At(B:Get("debuff")), "TOP 0 -136 TOP 0 -136", "empty bars take no room")
+Equal(string.format("%g %g", S[prd].width, S[prd.PowerBar].width), "216 216", "the display as wide as the widest row")
+-- The rows touch unless you give them room.
+L:SetGap(6)
+Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")) .. " " .. ns.LayoutData().gap, "BOTTOM 0 -74 TOP 0 -106 6",
+    "room between the rows and the display when asked for")
+L:SetGap(99)
+Equal(ns.LayoutData().gap, 20, "up to 20")
+L:SetGap(0)
+Equal(At(B:Get("cd")), "BOTTOM 0 -80", "and touching again")
 B:SetUnlocked(true)
-Equal(At(B:Get("debuff")), "TOP 0 -190", "unlocked, empty bars show, so they get room")
+Equal(At(B:Get("debuff")), "TOP 0 -172", "unlocked, empty bars show, so they get room")
 B:SetUnlocked(false)
 -- More spells than fit across: the row wraps, and the rows below move down.
 B:Assign("Thorns", "util")
 B:SetOption("util", "perRow", 1)
-Equal(string.format("%g", S[B:Get("util")].height), "80", "Utility wraps onto a second row")
+Equal(string.format("%g", S[B:Get("util")].height), "72", "Utility wraps onto a second row")
 B:SetAura("buff", "Thorns", true)
-Equal(At(B:Get("buff")), "TOP 0 -192", "the bar under it moves down")
+Equal(At(B:Get("buff")), "TOP 0 -172", "the bar under it moves down")
 
 -- Blizzard setting its own width puts the match back.
 prd:UpdateBarWidth()
-Equal(S[prd].width, 272, "the match comes back after Blizzard's Bar Width")
+Equal(S[prd].width, 216, "the match comes back after Blizzard's Bar Width")
 -- The display moved in Edit Mode: the bars follow once it closes.
 S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 200, 200, 20 }, { 400, 205, 200, 15 }, { 400, 200, 200, 5 }
 EditModeManagerFrame:Show()
 EditModeManagerFrame:Hide()
-Equal(At(B:Get("cd")), "BOTTOM 0 -174", "the bars follow the display")
+Equal(At(B:Get("cd")), "BOTTOM 0 -180", "the bars follow the display")
 -- Hidden until combat, the game can't say where it is: where it was last seen.
 S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = nil, nil, nil
 L:Stack()
-Equal(At(B:Get("cd")), "BOTTOM 0 -174", "a hidden display: where it was last seen")
+Equal(At(B:Get("cd")), "BOTTOM 0 -180", "a hidden display: where it was last seen")
 -- As it shows, the bars are stacked around it again.
 S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 250, 200, 20 }, { 400, 255, 200, 15 }, { 400, 250, 200, 5 }
 prd:Hide()
 prd:Show()
-Equal(At(B:Get("cd")), "BOTTOM 0 -124", "stacked again as it shows")
+Equal(At(B:Get("cd")), "BOTTOM 0 -130", "stacked again as it shows")
 S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 200, 200, 20 }, { 400, 205, 200, 15 }, { 400, 200, 200, 5 }
 L:Stack()
 
@@ -1848,28 +1864,38 @@ Equal(S[prd].width, 200, "the display's own width again")
 B:SetUnlocked(false)
 ok, message = L:LineUp()
 Equal(tostring(L:Active()) .. " " .. message, "true Your bars are stacked again.", "lined up again")
-Equal(At(B:Get("util")), "TOP 0 -206", "back under the display")
+Equal(At(B:Get("util")), "TOP 0 -200", "back under the display")
 
--- Changing rows: how many fit across, and moving one past the display.
+-- Changing rows: how many fit across, swapping bars, and moving the display.
 L:SetAcross("cd", 7)
 Equal(ns.BarData("cd").perRow .. " " .. tostring(ns.LayoutData().preset), "7 nil", "one more across, as your own layout")
-Equal(S[prd].width, 7 * 42 + 6 * 4, "the display follows the widest row")
-Equal(L:CanMove("cd", -1), false, "the top row can't go higher")
-L:Move("util", -1)
+Equal(S[prd].width, 7 * 36, "the display follows the widest row")
+Equal(L:CanSwap("cd", -1), false, "the top row can't go higher")
+L:Swap("util", -1)
 local layout = ns.LayoutData()
-Equal(table.concat(layout.above, ",") .. "|" .. table.concat(layout.below, ","), "cd,util|buff,debuff", "moved past the display")
-Equal(ns.BarData("util").wrap .. " " .. At(B:Get("util")), "up BOTTOM 0 -174", "now just above it, growing up")
-Equal(At(B:Get("cd")), "BOTTOM 0 -130", "the row above makes room")
-L:Move("util", 1)
-Equal(table.concat(layout.below, ","), "util,buff,debuff", "and back below")
+Equal(table.concat(layout.above, ",") .. "|" .. table.concat(layout.below, ","), "util|cd,buff,debuff",
+    "Utility swapped into the top row, Cooldowns into its place")
+cd, util = ns.BarData("cd"), ns.BarData("util")
+Equal(util.perRow .. " " .. util.size .. " " .. cd.perRow .. " " .. cd.size, "7 36 5 36", "the rows keep how many fit across; each bar keeps its size")
+Equal(util.wrap .. " " .. At(B:Get("util")), "up BOTTOM 0 -180", "Utility sits on the display, growing up")
+L:Swap("util", 1)
+Equal(table.concat(layout.above, ",") .. " " .. ns.BarData("cd").perRow, "cd 7", "and back")
+Equal(tostring(L:CanMoveDisplay(-1)) .. " " .. tostring(L:CanMoveDisplay(1)), "true true", "the display can move either way")
+L:MoveDisplay(1)
+Equal(table.concat(layout.above, ",") .. "|" .. table.concat(layout.below, ","), "cd,util|buff,debuff",
+    "moving the display down puts the row under it above it")
+Equal(At(B:Get("util")) .. " " .. At(B:Get("cd")), "BOTTOM 0 -180 BOTTOM 0 -144", "flush on top of it, the row above making room")
+L:MoveDisplay(-1)
+Equal(table.concat(layout.below, ","), "util,buff,debuff", "and back up")
 
 -- Beside the display.
 L:Apply("sides")
-Equal(At(B:Get("buff")) .. " " .. ns.BarData("buff").grow, "TOPRIGHT -106 -174 left", "Buffs left of the display, growing left")
-Equal(At(B:Get("debuff")) .. " " .. ns.BarData("debuff").grow, "TOPLEFT 106 -174 right", "Debuffs right of it, growing right")
-Equal(L:CanMove("buff", -1) and L:CanMove("buff", 1), true, "a row beside it can go above or below")
-L:Move("buff", 1)
-Equal(tostring(ns.LayoutData().left) .. " " .. ns.LayoutData().below[1], "nil buff", "and joins the stack just below")
+Equal(At(B:Get("buff")) .. " " .. ns.BarData("buff").grow, "TOPRIGHT -100 -172 left", "Buffs left of the display, growing left")
+Equal(At(B:Get("debuff")) .. " " .. ns.BarData("debuff").grow, "TOPLEFT 100 -172 right", "Debuffs right of it, growing right")
+Equal(table.concat(L:Rows(), ","), "cd,buff,debuff,util", "in order, the ones beside the display in the middle")
+L:Swap("buff", -1)
+Equal(ns.LayoutData().left .. " " .. ns.LayoutData().above[1] .. " " .. ns.BarData("buff").perRow, "cd buff 8",
+    "a bar beside the display swaps with the row above, taking its shape")
 
 -- Match off: Blizzard's width.
 ns.Set("prdMatch", false)
@@ -1924,12 +1950,12 @@ local row = lp.rows.cd
 local tiles = 0
 for _, tile in ipairs(row.tiles) do if S[tile].shown then tiles = tiles + 1 end end
 Equal(tiles, 12, "a tile for every icon across")
-Equal(S[row.tiles[1]].texture ~= nil and S[row.tiles[4]].texture == nil, true, "your icons first, then empty spots")
+Equal(S[row.tiles[1].texture].texture ~= nil and S[row.tiles[4].texture].texture == nil, true, "your icons first, then empty spots")
 Equal(S[row.across].text, "12 across", "and how many")
 Equal(S[row.buttons].shown, false, "buttons out of the way")
 S[row].mouseOver = true
 S[row].scripts.OnEnter(row)
-Equal(S[row.buttons].shown and S[w.note].text:find("Hover a row", 1, true) ~= nil, true, "hovering a row shows its buttons")
+Equal(S[row.buttons].shown and S[w.note].text:find("the arrows swap rows", 1, true) ~= nil, true, "hovering a row shows its buttons")
 row.wider:Click()
 Equal(ns.BarData("cd").perRow, 13, "+ fits one more across")
 row.fewer:Click()
@@ -1938,8 +1964,32 @@ Equal(ns.BarData("cd").perRow .. " " .. S[lp.rows.cd.across].text, "11 11 across
 Equal(S[lp.cards[2]].border[1] == .88, false, "changed, it's your own layout")
 S[row].mouseOver = nil
 lp.rows.util.up:Click()
-Equal(ns.LayoutData().above[#ns.LayoutData().above], "util", "an arrow moves a row past the display")
+Equal(ns.LayoutData().above[#ns.LayoutData().above], "util", "an arrow swaps a row with the one above")
 Equal(S[lp.rows.util].points[1][5] > S[lp.display].points[1][5], true, "drawn above it")
+-- The display's own arrows move it up or down the stack.
+Equal(S[lp.display.buttons].shown, false, "the display's arrows out of the way")
+S[lp.display].mouseOver = true
+S[lp.display].scripts.OnEnter(lp.display)
+Equal(S[lp.display.buttons].shown and S[w.note].text:find("move it up or down the stack", 1, true) ~= nil, true,
+    "hovering the display shows its arrows")
+S[lp.display].mouseOver = nil
+lp.display.down:Click()
+Equal(table.concat(ns.LayoutData().above, ",") .. "|" .. table.concat(ns.LayoutData().below, ","), "util,cd|buff,debuff",
+    "moved down past a row")
+Equal(S[lp.rows.cd].points[1][5] > S[lp.display].points[1][5], true, "drawn that way too")
+-- Icons dragged to another row move there; dragged off, they come off.
+local first = lp.rows.cd.tiles[1]
+local moving = first.name
+S[first].scripts.OnDragStart(first)
+S[lp.rows.util].mouseOver = true
+S[first].scripts.OnDragStop(first)
+S[lp.rows.util].mouseOver = nil
+Equal(ns.BarData("util").spells[#ns.BarData("util").spells] .. " " .. S[w.note].text, moving .. " Moved " .. moving .. " to Utility.",
+    "an icon dragged onto another row moves to that bar")
+local last = lp.rows.util.tiles[#ns.BarData("util").spells]
+S[last].scripts.OnDragStart(last)
+S[last].scripts.OnDragStop(last)
+Equal(tostring((B:Find(moving))) .. " " .. S[w.note].text, "nil Took " .. moving .. " off Utility.", "dragged off, it comes off")
 lp.undo:Click()
 Equal(ns.BarData("cd").perRow, 20, "Undo")
 lp.cards[1]:Click()
@@ -1951,13 +2001,37 @@ Equal(L:Active(), true, "and Line up starts again")
 lp.match:Click()
 Equal(tostring(ns.Get("prdMatch")) .. string.format(" %g", S[prd].width), "false 200", "the match can be turned off")
 lp.match:Click()
-Equal(S[prd].width, 6 * 42 + 5 * 4, "and on")
--- The display off, or your bars off.
-cvarOn = true
-_G.C_CVar.GetCVarBool = function(name) if name == "nameplateShowSelf" then return false end return cvarOn end
+Equal(S[prd].width, 6 * 36, "and on")
+-- Room between the icons in every row, flush unless you ask.
+Equal(S[lp.iconSpacing.value].text, 0, "icons flush to start with")
+lp.iconSpacing:Choose(3)
+Equal(ns.BarData("cd").spacing .. " " .. ns.BarData("debuff").spacing .. " " .. ns.LayoutData().spacing, "3 3 3",
+    "Icon spacing gives every row the same room")
+lp.iconSpacing:Choose(0)
+-- The row buttons are drawn in the accent, so they stand out.
+Equal(S[lp.rows.cd.up.art].tint[1] .. " " .. S[lp.rows.cd.fewer.label].colour[1], "0.88 0.88", "arrows, - and + in the accent")
+-- Picked up, an icon's spot shows empty until it lands.
+local held = lp.rows.cd.tiles[1]
+local before = table.concat(ns.BarData("cd").spells, ",")
+S[held].scripts.OnDragStart(held)
+Equal(Last(held.texture, "SetColorTexture"), ns.Theme.CONTROL_BORDER[1], "its spot empty while it's held")
+S[lp.rows.cd].mouseOver = true
+S[held].scripts.OnDragStop(held)
+S[lp.rows.cd].mouseOver = nil
+Equal(table.concat(ns.BarData("cd").spells, ","), before, "dropped back on its own row, nothing changes")
+-- The display switched off and on from here, or your bars off.
+Equal(lp.shown:GetChecked(), true, "the display shown")
+lp.shown:Click()
+Equal(tostring(prdOn) .. " " .. S[lp.status].text, "false Your rows sit together where your resource display would be.",
+    "unticked, Blizzard's display goes off and the rows close up")
+Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -90 TOP 0 -90", "where it was")
+lp.shown:Click()
+Equal(tostring(prdOn) .. " " .. At(B:Get("util")), "true TOP 0 -100", "and back on")
+lockdown = true
+lp.shown:Click()
+Equal(tostring(prdOn) .. " " .. S[w.note].text, "true Finish combat first.", "never in combat")
+lockdown = false
 w:Refresh()
-Equal(S[lp.status].text .. " " .. tostring(S[lp.turnOn].shown), "Your Personal Resource Display is off. true", "a way to turn the display on")
-_G.C_CVar.GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end
 ns.Set("useBars", false)
 w:Refresh()
 Equal(S[lp.status].text .. " " .. tostring(S[lp.toggle].shown), "Your bars are off. false", "and your bars")
@@ -1985,6 +2059,123 @@ Equal(S[bp.across].shown or S[bp.options.wrap].shown, false, "packed buffs stay 
 bp.options.showMissing:Click()
 Equal(S[bp.across].shown and S[bp.options.wrap].shown, true, "fixed spots can have rows")
 Equal(bp.listError, nil, "the bar page drew without errors")
+
+-- Dragging in from any spellbook, an action bar or your bags -------------------------------
+
+Environment()
+Display()
+trinket = 11111
+bagItems = { { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 } }
+local cursor
+_G.GetCursorInfo = function()
+    if cursor then return cursor[1], cursor[2], cursor[3], cursor[4] end
+end
+_G.ClearCursor = function() cursor = nil end
+local spellNames = { [5176] = "Wrath", [467] = "Thorns", [8921] = "Moonfire", [1243] = "Power Word: Fortitude",
+    [16870] = "Clearcasting", [16886] = "Nature's Grace" }
+_G.C_Spell.GetSpellName = function(id) return spellNames[id] end
+ns = Load({ useBars = true, prdSkin = false })
+B, L = ns.Bars, ns.Layout
+SlashCmdList.FECM("")
+w = FECMFrame
+w:Select("layout")
+lp = w.pages.layout
+Equal(S[lp.dragHint].text, "Drag spells from your spellbook onto a row. Hover a row to change it.",
+    "the Layout page says spells can be dragged in")
+cursor = { "spell", 12, "spell", 5176 }
+S[lp.rows.util].scripts.OnReceiveDrag(lp.rows.util)
+Equal(table.concat(ns.BarData("util").spells, ",") .. " " .. S[w.note].text, "Wrath Added Wrath to Utility.",
+    "a spell dropped on a row joins that bar")
+Equal(cursor, nil, "and is let go of")
+cursor = { "spell", 3, "spell", 467 }
+lp.rows.buff:Click()
+Equal(table.concat(ns.BarData("buff").spells, ","), "Thorns", "clicking a row while holding a spell works too")
+cursor = { "spell", 1, "spell", 1243 }
+S[lp.rows.buff].scripts.OnReceiveDrag(lp.rows.buff)
+Equal(table.concat(ns.BarData("buff").spells, ",") .. " " .. tostring(ns.CustomSpells()["Power Word: Fortitude"] ~= nil),
+    "Thorns,Power Word: Fortitude true", "a spell from outside your spellbook, like another class's buff")
+cursor = { "item", 118 }
+S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
+Equal(ns.BarData("cd").spells[1], "item:118", "an item with a cooldown, from your bags")
+cursor = { "item", 11111 }
+S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
+Equal(ns.BarData("cd").spells[2], "slot:13", "an equipped trinket follows its slot")
+cursor = { "item", 118 }
+S[lp.rows.buff].scripts.OnReceiveDrag(lp.rows.buff)
+Equal(S[w.note].text .. " " .. tostring(cursor), "Items can't go on the Buffs bar. nil", "no items on the Buffs bar")
+cursor = { "macro", 4 }
+S[lp.rows.util].scripts.OnReceiveDrag(lp.rows.util)
+Equal(S[w.note].text, "Only spells and items can go on a bar.", "anything else is turned away")
+lp.rows.util:Click()
+Equal(S[lp.rows.util.buttons].shown, true, "with nothing held, a click just keeps the row's buttons up")
+-- A bar's icons, and the bars on screen while unlocked, take drops too.
+w:Select("util")
+cursor = { "spell", 9, "spell", 8921 }
+S[w.pages.bar.tray].scripts.OnReceiveDrag(w.pages.bar.tray)
+Equal(ns.BarData("util").spells[2], "Moonfire", "dropped on a bar's icons")
+B:SetUnlocked(true)
+cursor = { "spell", 12, "spell", 5176 }
+S[B:Get("cd").mover].scripts.OnReceiveDrag(B:Get("cd").mover)
+Equal(ns.BarData("cd").spells[3] .. " " .. #ns.BarData("util").spells, "Wrath 1", "dropped on a bar on screen, it moves there")
+S[B:Get("cd").mover].scripts.OnMouseUp(B:Get("cd").mover)
+Equal(#ns.BarData("cd").spells, 3, "a click with nothing held adds nothing")
+Equal(lp.drawError, nil, "the Layout page drew without errors")
+
+-- Countdown numbers in the game's own font: a heavy outline on big numbers, no shadow.
+Equal(Last(FECMFont18, "SetFont", 1) .. " " .. Last(FECMFont18, "SetFont", 3) .. " " .. Last(FECMFont13, "SetFont", 3),
+    "Fonts\\FRIZQT__.TTF THICKOUTLINE OUTLINE", "Friz Quadrata, thick outline from 16 up")
+Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
+
+-- Flush against the bars you can see ------------------------------------------------------
+
+Environment()
+local power = 0 -- the main bar's power: 0 mana (caster form), 1 rage (bear form)
+_G.UnitPowerType = function() return power end
+Display()
+S[prd].rect = { 400, 280, 200, 60 } -- Blizzard's frame keeps a minimum height
+local extra = New("Frame", prd)
+rawset(extra, "powerName", "MANA")
+S[extra].rect = { 400, 294, 200, 6 }
+rawset(prd, "AlternatePowerBar", extra)
+local combo = New("Frame", prd)
+S[combo].rect, S[combo].shown = { 400, 280, 200, 8 }, false
+rawset(prd, "classFrame", combo)
+rawset(prd, "UpdatePowerBar", function() end)
+ns = Load({ useBars = true, prdSkin = false })
+B, L = ns.Bars, ns.Layout
+B:Assign("Moonfire", "cd")
+B:Assign("Attack", "util")
+L:Apply("pyramid")
+Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -80 TOP 0 -100",
+    "flush against the health and mana bars, not the frame around them or the tucked-away extra mana bar")
+power = 1
+prd:UpdatePowerBar()
+Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -80 TOP 0 -106", "in bear form the extra mana bar shows, and Utility sits under it")
+combo:Show()
+Equal(At(B:Get("util")), "TOP 0 -120", "and under the combo points while they show")
+combo:Hide()
+power = 0
+prd:UpdatePowerBar()
+Equal(At(B:Get("util")), "TOP 0 -100", "back up against the mana bar in caster form")
+-- A form change in a fight: the cooldown bars follow at once, the Buffs bar after.
+B:SetAura("buff", "Thorns", true)
+lockdown = true
+power = 1
+prd:UpdatePowerBar()
+Equal(At(B:Get("util")) .. " " .. tostring(B:Get("buff").pendingLayout), "TOP 0 -106 true",
+    "in a fight Utility moves at once; the Buffs bar waits")
+lockdown = false
+Fire("PLAYER_REGEN_ENABLED")
+Equal(At(B:Get("buff")), "TOP 0 -142", "and catches up once it's over")
+power = 0
+prd:UpdatePowerBar()
+-- The display switched off: the rows close up where it was.
+prdOn = false
+L:Stack()
+Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -90 TOP 0 -90", "with the display off, the rows meet where it was")
+prdOn = true
+L:Stack()
+Equal(At(B:Get("util")), "TOP 0 -100", "and part again when it's back")
 
 print = _G.print
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

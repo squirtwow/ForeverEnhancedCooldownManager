@@ -77,6 +77,19 @@ local function Restyle(bar, setting)
     Look(bar, state)
 end
 
+-- Whether the extra mana bar is hidden right now: a layout leaves no room for it.
+local extraHidden = false
+
+function R:ExtraHidden()
+    return extraHidden
+end
+
+-- The display's bars changed which are showing (a form change, say): a
+-- layout closes up or makes room.
+local function Restack()
+    if ns.Layout then ns.Layout:Stack() end
+end
+
 -- The extra mana bar: hidden while your main bar is mana too, and half as
 -- tall in forms, so your mana is still there but out of the way.
 local function ExtraMana(frame)
@@ -87,6 +100,11 @@ local function ExtraMana(frame)
     local full = frame.PowerBar and frame.PowerBar:GetHeight()
     if type(full) == "number" and full > 0 then
         extra:SetHeight(tidy and not caster and math.max(2, math.floor(full / 2 + .5)) or full)
+    end
+    local hidden = tidy and caster or false
+    if hidden ~= extraHidden then
+        extraHidden = hidden
+        Restack()
     end
 end
 
@@ -143,6 +161,12 @@ local function Hook()
         if type(frame[method]) == "function" then hooksecurefunc(frame, method, ExtraMana) end
     end
     if type(frame.UpdateBarWidth) == "function" then hooksecurefunc(frame, "UpdateBarWidth", Rematch) end
+    -- Combo points come and go with cat form (the holder keeps its height).
+    local class = frame.classFrame
+    if class and class.HookScript then
+        class:HookScript("OnShow", Restack)
+        class:HookScript("OnHide", Restack)
+    end
     ExtraMana(frame)
     return true
 end

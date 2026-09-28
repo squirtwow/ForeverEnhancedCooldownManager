@@ -28,18 +28,19 @@ end
 S.TRACK = { .08, .08, .09, .85 } -- behind a bar's fill
 S.ZOOM = { .08, .92, .08, .92 } -- trims the icon art's own bevelled edge
 
-local FONT = "Fonts\\ARIALN.TTF"
+local FONT = "Fonts\\FRIZQT__.TTF" -- the game's own font, as in the /fecm window
+local THICK = 16 -- from this size up, a heavier outline
 local made = {}
 
--- A bold outlined font of the given size, made once and shared.
+-- An outlined font of the given size, made once and shared. No drop shadow,
+-- so the numbers stay crisp over bright icon art.
 function S:Font(size)
     size = math.max(8, math.floor(size + .5))
     local name = "FECMFont" .. size
     if not made[size] then
         local font = CreateFont(name)
-        font:SetFont(FONT, size, "OUTLINE")
-        font:SetShadowOffset(1, -1)
-        font:SetShadowColor(0, 0, 0, 1)
+        font:SetFont(FONT, size, size >= THICK and "THICKOUTLINE" or "OUTLINE")
+        font:SetShadowOffset(0, 0)
         font:SetTextColor(1, 1, 1)
         made[size] = font
     end

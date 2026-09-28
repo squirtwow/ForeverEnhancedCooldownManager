@@ -282,6 +282,9 @@ local function NewBar(key)
         if bar.SetUserPlaced then bar:SetUserPlaced(false) end
         SavePosition(bar)
     end)
+    -- A spell or item dragged from anywhere onto an unlocked bar joins it.
+    mover:SetScript("OnReceiveDrag", function() B:Dropped(key) end)
+    mover:SetScript("OnMouseUp", function() B:Dropped(key) end)
     mover:Hide()
     bar.mover = mover
     bars[key] = bar
@@ -546,6 +549,69 @@ function B:SetBuff(name, on)
     return self:SetAura("buff", name, on)
 end
 
+local function Added(key, name)
+    return "Added " .. name .. " to " .. ns.BAR_NAMES[key] .. "."
+end
+
+-- Puts a spell, by name or ID, on a bar: true and what happened, or false
+-- and why not. Spells outside your spellbook are remembered by name.
+function B:Add(key, text)
+    local found, ids = ns.Spells:Resolve(text)
+    if not found then return false, ids end
+    local entry = ns.Spells:Find(found)
+    if ns.AURA_BARS[key] and entry and ns.Spells:IsItem(entry) then
+        return false, "Items can't go on the " .. ns.BAR_NAMES[key] .. " bar."
+    end
+    if ids and not entry then ns.AddCustom(found, ids) end
+    local ok
+    if ns.AURA_BARS[key] then ok = self:SetAura(key, found, true) else ok = self:Assign(found, key) end
+    ns.PruneCustom()
+    if not ok then return false, ns.BAR_NAMES[key] .. " is full." end
+    return true, Added(key, entry and entry.name or found)
+end
+
+-- An item with a cooldown: an equipped trinket follows its slot.
+function B:AddItem(key, itemID)
+    if ns.AURA_BARS[key] then return false, "Items can't go on the " .. ns.BAR_NAMES[key] .. " bar." end
+    local item = "item:" .. itemID
+    for _, slot in ipairs({ 13, 14 }) do
+        if GetInventoryItemID("player", slot) == itemID then item = "slot:" .. slot end
+    end
+    local entry = ns.Spells:Find(item)
+    if not entry then return false, "That item has no cooldown to show." end
+    if not self:Assign(item, key) then return false, ns.BAR_NAMES[key] .. " is full." end
+    return true, Added(key, entry.name)
+end
+
+-- What's on the cursor, dropped on a bar: a spell from any spellbook or an
+-- action bar, or an item. Nil when the cursor holds nothing.
+function B:AddFromCursor(key)
+    local kind, first, _, spellID = GetCursorInfo()
+    if not kind then return nil end
+    local ok, message
+    if kind == "spell" and type(spellID) == "number" then
+        ok, message = self:Add(key, tostring(spellID))
+    elseif kind == "item" and type(first) == "number" then
+        ok, message = self:AddItem(key, first)
+    else
+        ok, message = false, "Only spells and items can go on a bar."
+    end
+    ClearCursor()
+    return ok, message
+end
+
+-- A drop on one of the addon's own frames for a bar; says what happened in
+-- the window. False when nothing was dropped.
+function B:Dropped(key)
+    local ok, message = self:AddFromCursor(key)
+    if ok == nil then return false end
+    if ns.window and ns.window:IsShown() then
+        ns.window:Say(message)
+        ns.window:Refresh()
+    end
+    return true
+end
+
 function B:Move(key, index, delta)
     self:MoveTo(key, index, index + delta)
 end
@@ -566,6 +632,36 @@ end
 function B:Remove(key, index)
     if not Take(key, index) then return end
     self:Changed()
+end
+
+local function Named(name)
+    local entry = ns.Spells:Find(name)
+    return entry and entry.name or name
+end
+
+-- An entry dragged off a bar: true and what happened.
+function B:TakeOff(key, name)
+    local index = IndexOf(key, name)
+    if not index then return false end
+    self:Remove(key, index)
+    return true, "Took " .. Named(name) .. " off " .. ns.BAR_NAMES[key] .. "."
+end
+
+-- An entry dragged from one bar onto another: true and what happened, or
+-- false and why not.
+function B:Transfer(from, to, name)
+    if from == to or not IndexOf(from, name) then return false end
+    local entry = ns.Spells:Find(name)
+    if ns.AURA_BARS[to] and entry and ns.Spells:IsItem(entry) then
+        return false, "Items can't go on the " .. ns.BAR_NAMES[to] .. " bar."
+    end
+    local ok
+    if ns.AURA_BARS[to] then ok = self:SetAura(to, name, true) else ok = self:Assign(name, to) end
+    if not ok then return false, ns.BAR_NAMES[to] .. " is full." end
+    -- Between the two cooldown bars it's already moved; otherwise take it off.
+    local index = IndexOf(from, name)
+    if index then self:Remove(from, index) end
+    return true, "Moved " .. Named(name) .. " to " .. ns.BAR_NAMES[to] .. "."
 end
 
 -- An option only changes how one bar looks, so only that bar is redrawn;

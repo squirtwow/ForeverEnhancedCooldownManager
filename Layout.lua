@@ -1,61 +1,58 @@
 -- Layouts: your own bars stacked in rows around Blizzard's Personal Resource
--- Display, above it, below it or beside it. One click sets up a preset; each
--- row's width and place can then be changed on the Layout page. The addon
--- only reads where the display is (Edit Mode places it) and, if asked,
--- widens its bars to your widest row (Resource.lua). A bar dragged by hand
--- leaves the layout.
+-- Display, above it, below it or beside it, flush against it and each other
+-- unless you ask for room. One click sets up a preset; on the Layout page
+-- each row's width can change, bars can swap rows (the rows keep their
+-- shape) and the display can move up or down the stack. The addon only reads
+-- where the display is (Edit Mode places it) and, if asked, widens its bars
+-- to your widest row (Resource.lua). A bar dragged by hand leaves the layout.
 local _, ns = ...
 
 local L = {}
 ns.Layout = L
 
-local GAP = 6 -- between the rows, and between the rows and the display
 local NAMES = 14 -- room for spell names under a row
 local FALLBACK_Y = -150 -- where the stack goes with no display: under the middle
--- The display's parts, all counted whether or not they're up right now, so
--- the stack doesn't shift as forms change.
-local PARTS = { "HealthBarsContainer", "PowerBar", "AlternatePowerBar", "ClassFrameContainer" }
 -- What a layout changes on a bar, and Undo puts back.
 local FIELDS = { "x", "y", "point", "size", "spacing", "perRow", "grow", "wrap" }
 
 -- Each row: the bar, above or below the display (top to bottom) or beside
--- it, how many icons fit across and their size.
+-- it, and how many icons fit across. Your icon sizes stay as you set them.
 L.PRESETS = {
     { key = "pyramid", name = "Pyramid", about = "6, 5, 4 and 3 across.", rows = {
-        { bar = "cd", place = "above", across = 6, size = 42 },
-        { bar = "util", place = "below", across = 5, size = 38 },
-        { bar = "buff", place = "below", across = 4, size = 34 },
-        { bar = "debuff", place = "below", across = 3, size = 30 } } },
+        { bar = "cd", place = "above", across = 6 },
+        { bar = "util", place = "below", across = 5 },
+        { bar = "buff", place = "below", across = 4 },
+        { bar = "debuff", place = "below", across = 3 } } },
     { key = "wide", name = "Wide", about = "12, 7, 5 and 4 across.", rows = {
-        { bar = "cd", place = "above", across = 12, size = 36 },
-        { bar = "util", place = "below", across = 7, size = 34 },
-        { bar = "buff", place = "below", across = 5, size = 30 },
-        { bar = "debuff", place = "below", across = 4, size = 28 } } },
+        { bar = "cd", place = "above", across = 12 },
+        { bar = "util", place = "below", across = 7 },
+        { bar = "buff", place = "below", across = 5 },
+        { bar = "debuff", place = "below", across = 4 } } },
     { key = "stack", name = "Centre stack", about = "Buffs on top, then cooldowns; utility and debuffs underneath.", rows = {
-        { bar = "buff", place = "above", across = 4, size = 30 },
-        { bar = "cd", place = "above", across = 6, size = 42 },
-        { bar = "util", place = "below", across = 5, size = 36 },
-        { bar = "debuff", place = "below", across = 4, size = 30 } } },
-    { key = "compact", name = "Compact", spacing = 2, about = "Smaller icons, 8 across, close together.", rows = {
-        { bar = "cd", place = "above", across = 8, size = 32 },
-        { bar = "util", place = "below", across = 8, size = 28 },
-        { bar = "buff", place = "below", across = 8, size = 26 },
-        { bar = "debuff", place = "below", across = 8, size = 26 } } },
+        { bar = "buff", place = "above", across = 4 },
+        { bar = "cd", place = "above", across = 6 },
+        { bar = "util", place = "below", across = 5 },
+        { bar = "debuff", place = "below", across = 4 } } },
+    { key = "even", name = "Even", about = "8 across on every row.", rows = {
+        { bar = "cd", place = "above", across = 8 },
+        { bar = "util", place = "below", across = 8 },
+        { bar = "buff", place = "below", across = 8 },
+        { bar = "debuff", place = "below", across = 8 } } },
     { key = "sides", name = "Sides", about = "Buffs left of the display, debuffs right.", rows = {
-        { bar = "cd", place = "above", across = 8, size = 38 },
-        { bar = "buff", place = "left", across = 4, size = 32 },
-        { bar = "debuff", place = "right", across = 4, size = 32 },
-        { bar = "util", place = "below", across = 6, size = 34 } } },
+        { bar = "cd", place = "above", across = 8 },
+        { bar = "buff", place = "left", across = 4 },
+        { bar = "debuff", place = "right", across = 4 },
+        { bar = "util", place = "below", across = 6 } } },
     { key = "twin", name = "Twin rows", about = "Two rows of 10 above the display.", rows = {
-        { bar = "util", place = "above", across = 10, size = 34 },
-        { bar = "cd", place = "above", across = 10, size = 34 },
-        { bar = "buff", place = "below", across = 6, size = 28 },
-        { bar = "debuff", place = "below", across = 6, size = 28 } } },
+        { bar = "util", place = "above", across = 10 },
+        { bar = "cd", place = "above", across = 10 },
+        { bar = "buff", place = "below", across = 6 },
+        { bar = "debuff", place = "below", across = 6 } } },
     { key = "funnel", name = "Funnel", about = "Everything above the display, widest nearest: 3, 4, 5 and 6.", rows = {
-        { bar = "debuff", place = "above", across = 3, size = 28 },
-        { bar = "buff", place = "above", across = 4, size = 32 },
-        { bar = "util", place = "above", across = 5, size = 36 },
-        { bar = "cd", place = "above", across = 6, size = 42 } } },
+        { bar = "debuff", place = "above", across = 3 },
+        { bar = "buff", place = "above", across = 4 },
+        { bar = "util", place = "above", across = 5 },
+        { bar = "cd", place = "above", across = 6 } } },
 }
 local PRESET = {}
 for _, preset in ipairs(L.PRESETS) do PRESET[preset.key] = preset end
@@ -85,39 +82,60 @@ local function Watch(frame)
     frame:HookScript("OnShow", function() L:Stack() end)
 end
 
+-- The display's bars you can see now: health, power, the extra mana bar
+-- unless it's tucked away, and combo points while they show. Not the frame
+-- around them, which keeps a minimum height, nor the combo point holder,
+-- which keeps its height when empty.
+local function Bars(frame)
+    local health = frame.HealthBarsContainer
+    local list = { health and health.healthBar or health, frame.PowerBar }
+    if not (ns.Resource and ns.Resource:ExtraHidden()) then list[#list + 1] = frame.AlternatePowerBar end
+    list[#list + 1] = frame.classFrame
+    return list
+end
+
 -- The display's middle and size, from the middle of the screen, in the bars'
--- own units. While the game can't say (it's hidden until combat, say), where
--- it was last seen. Nil when it's never been there.
+-- own units, edges included, so rows sit flush against it. While the game
+-- can't say (it's hidden until combat, say), where it was last seen. Switched
+-- off, it takes no room, so the rows close up where it was. Nil when it's
+-- never been there.
 function L:Display()
     local frame = _G.PersonalResourceDisplayFrame
     local layout = ns.LayoutData()
+    local display
     if frame then
         Watch(frame)
         local screen = UIParent:GetEffectiveScale()
         local left, right, bottom, top
-        local function Add(region)
-            if not (region and region.GetRect) then return end
-            local ok, x, y, width, height = pcall(region.GetRect, region)
-            if not (ok and x and y and width and height) or width <= 0 or height <= 0 then return end
-            local scale = region:GetEffectiveScale() / screen
-            x, y, width, height = x * scale, y * scale, width * scale, height * scale
-            left, right = math.min(left or x, x), math.max(right or x + width, x + width)
-            bottom, top = math.min(bottom or y, y), math.max(top or y + height, y + height)
+        for _, region in ipairs(Bars(frame)) do
+            local shown = region and region.GetRect and region:IsShown()
+            local ok, x, y, width, height
+            if shown then ok, x, y, width, height = pcall(region.GetRect, region) end
+            if ok and x and y and width and height and width > 0 and height > 0 then
+                local scale = region:GetEffectiveScale() / screen
+                x, y, width, height = x * scale, y * scale, width * scale, height * scale
+                left, right = math.min(left or x, x), math.max(right or x + width, x + width)
+                bottom, top = math.min(bottom or y, y), math.max(top or y + height, y + height)
+            end
         end
-        Add(frame)
-        for _, name in ipairs(PARTS) do Add(frame[name]) end
         if left then
+            -- The restyle draws a 1px edge round each bar.
+            local edge = ns.loaded.prdSkin and 1 or 0
             local cx, cy = UIParent:GetCenter()
-            local display = { x = (left + right) / 2 - cx, y = (bottom + top) / 2 - cy, width = right - left, height = top - bottom }
+            display = { x = (left + right) / 2 - cx, y = (bottom + top) / 2 - cy,
+                width = right - left + 2 * edge, height = top - bottom + 2 * edge }
             if layout then layout.display = display end
-            return display
         end
     end
     local seen = layout and layout.display
-    if type(seen) == "table" and type(seen.x) == "number" and type(seen.y) == "number"
+    if not display and type(seen) == "table" and type(seen.x) == "number" and type(seen.y) == "number"
         and type(seen.width) == "number" and type(seen.height) == "number" then
-        return seen
+        display = seen
     end
+    if display and not ns.PersonalDisplayOn() then
+        return { x = display.x, y = display.y, width = display.width, height = 0, off = true }
+    end
+    return display
 end
 
 -- Your widest row above or below the display, with every tile filled.
@@ -140,12 +158,14 @@ end
 
 -- Puts the bars in place: rows above the display from the nearest upwards,
 -- rows below from the nearest downwards, and the ones beside it level with
--- its middle. A bar with nothing on it takes no room, unless the bars are
--- unlocked. The Buffs and Debuffs bars catch up after a fight.
+-- its middle, touching unless you've asked for space between them. A bar
+-- with nothing on it takes no room, unless the bars are unlocked. The Buffs
+-- and Debuffs bars catch up after a fight.
 function L:Stack()
     if not self:Active() then return false end
     if InCombatLockdown() then self.pending = true end
     local layout, B = ns.LayoutData(), ns.Bars
+    local gap = layout.gap
     if ns.Resource then ns.Resource:Match() end
     local display = self:Display()
     self.found = display ~= nil
@@ -164,31 +184,32 @@ function L:Stack()
         if not (bar and (bar.count > 0 or B:IsUnlocked())) then return nil end
         return bar:GetHeight() + (data.showNames and NAMES or 0)
     end
-    local y = display.y + display.height / 2 + GAP
+    local y = display.y + display.height / 2 + gap
     for i = #layout.above, 1, -1 do
         local key = layout.above[i]
         local data = Grow(key, "centre", "up")
         -- Names hang under the icons, so the bar sits above them.
         B:PlaceAt(key, "BOTTOM", display.x, y + (data.showNames and NAMES or 0))
         local room = Room(key, data)
-        if room then y = y + room + GAP end
+        if room then y = y + room + gap end
     end
-    y = display.y - display.height / 2 - GAP
+    y = display.y - display.height / 2 - gap
     for _, key in ipairs(layout.below) do
         local data = Grow(key, "centre", "down")
         B:PlaceAt(key, "TOP", display.x, y)
         local room = Room(key, data)
-        if room then y = y - room - GAP end
+        if room then y = y - room - gap end
     end
     for _, side in ipairs({ "left", "right" }) do
         local key = layout[side]
         if key then
             local data = Grow(key, side, "down")
-            local x = side == "left" and display.x - display.width / 2 - GAP or display.x + display.width / 2 + GAP
+            local x = side == "left" and display.x - display.width / 2 - gap or display.x + display.width / 2 + gap
             B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + data.size / 2)
         end
     end
-    ns.SaveBars()
+    -- In a fight (a form change, say) the places are saved once it's over.
+    if not InCombatLockdown() then ns.SaveBars() end
     return true
 end
 
@@ -206,8 +227,9 @@ local function Snapshot()
     return copy
 end
 
--- Sets your bars up as a preset: each bar's place, how many icons fit
--- across and their size. Your spells stay as they are.
+-- Sets your bars up as a preset: each bar's place and how many icons fit
+-- across, with the layout's icon spacing. Your spells and icon sizes stay
+-- as they are.
 function L:Apply(key)
     local preset = PRESET[key]
     if not preset then return false, "There's no layout called that." end
@@ -217,7 +239,7 @@ function L:Apply(key)
     layout.above, layout.below, layout.left, layout.right = {}, {}, nil, nil
     for _, row in ipairs(preset.rows) do
         local data = ns.BarData(row.bar)
-        data.perRow, data.size, data.spacing = row.across, row.size, preset.spacing or 4
+        data.perRow, data.spacing = row.across, layout.spacing
         if row.place == "left" or row.place == "right" then
             layout[row.place] = row.bar
         else
@@ -259,6 +281,27 @@ local function Edited()
     return layout
 end
 
+-- The space between rows, and between the rows and the display.
+function L:SetGap(gap)
+    if InCombatLockdown() then return false, "Finish combat first." end
+    ns.LayoutData().gap = gap
+    ns.LayoutData()
+    ns.SaveBars()
+    self:Stack()
+    return true
+end
+
+-- The space between the icons in every row of the layout.
+function L:SetSpacing(spacing)
+    if InCombatLockdown() then return false, "Finish combat first." end
+    local layout = ns.LayoutData()
+    layout.spacing = spacing
+    layout = ns.LayoutData()
+    for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key).spacing = layout.spacing end
+    ns.Bars:Rebuild()
+    return true
+end
+
 -- How many icons fit across a row.
 function L:SetAcross(key, across)
     if InCombatLockdown() then return false, "Finish combat first." end
@@ -268,14 +311,15 @@ function L:SetAcross(key, across)
     return true
 end
 
--- The rows top to bottom, with false for the display: the bars beside it
--- aren't in it.
-function L:Order()
-    local layout, order = ns.LayoutData(), {}
-    for _, key in ipairs(layout.above) do order[#order + 1] = key end
-    order[#order + 1] = false
-    for _, key in ipairs(layout.below) do order[#order + 1] = key end
-    return order
+-- The rows top to bottom: those above the display, the ones beside it, then
+-- those below.
+function L:Rows()
+    local layout, rows = ns.LayoutData(), {}
+    for _, key in ipairs(layout.above) do rows[#rows + 1] = key end
+    if layout.left then rows[#rows + 1] = layout.left end
+    if layout.right then rows[#rows + 1] = layout.right end
+    for _, key in ipairs(layout.below) do rows[#rows + 1] = key end
+    return rows
 end
 
 local function IndexOf(list, value)
@@ -284,33 +328,49 @@ local function IndexOf(list, value)
     end
 end
 
--- Whether a row can move that way: past the display it changes sides of it,
--- and a row beside the display can go just above or below it.
-function L:CanMove(key, delta)
-    local layout = ns.LayoutData()
-    if layout.left == key or layout.right == key then return true end
-    local order = self:Order()
-    local at = IndexOf(order, key)
-    return at ~= nil and order[at + delta] ~= nil
+function L:CanSwap(key, delta)
+    local rows = self:Rows()
+    local at = IndexOf(rows, key)
+    return at ~= nil and rows[at + delta] ~= nil
 end
 
-function L:Move(key, delta)
+-- Swaps a bar with the row above or below it. The rows keep how many fit
+-- across, so a preset's shape stays with the bars in a new order; each bar
+-- keeps its own icon size.
+function L:Swap(key, delta)
     if InCombatLockdown() then return false, "Finish combat first." end
-    if not self:CanMove(key, delta) then return false end
+    if not self:CanSwap(key, delta) then return false end
     local layout = Edited()
-    local order = self:Order()
-    if layout.left == key or layout.right == key then
-        if layout.left == key then layout.left = nil else layout.right = nil end
-        local display = IndexOf(order, false)
-        table.insert(order, delta < 0 and display or display + 1, key)
-    else
-        local at = IndexOf(order, key)
-        order[at], order[at + delta] = order[at + delta], order[at]
+    local rows = self:Rows()
+    local other = rows[IndexOf(rows, key) + delta]
+    local function Trade(value)
+        if value == key then return other elseif value == other then return key end
+        return value
     end
-    local below = false
-    layout.above, layout.below = {}, {}
-    for _, item in ipairs(order) do
-        if item == false then below = true else table.insert(below and layout.below or layout.above, item) end
+    for _, place in ipairs({ "above", "below" }) do
+        for i, value in ipairs(layout[place]) do layout[place][i] = Trade(value) end
+    end
+    layout.left, layout.right = Trade(layout.left), Trade(layout.right)
+    local a, b = ns.BarData(key), ns.BarData(other)
+    a.perRow, b.perRow = b.perRow, a.perRow
+    ns.Bars:Rebuild()
+    return true
+end
+
+function L:CanMoveDisplay(delta)
+    local layout = ns.LayoutData()
+    return #layout[delta < 0 and "above" or "below"] > 0
+end
+
+-- Moves the display up or down past one row, which changes sides of it.
+function L:MoveDisplay(delta)
+    if InCombatLockdown() then return false, "Finish combat first." end
+    if not self:CanMoveDisplay(delta) then return false end
+    local layout = Edited()
+    if delta < 0 then
+        table.insert(layout.below, 1, table.remove(layout.above))
+    else
+        table.insert(layout.above, table.remove(layout.below, 1))
     end
     self:Stack()
     return true
