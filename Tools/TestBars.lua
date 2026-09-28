@@ -81,6 +81,7 @@ function Proto:SetTexture(t) S[self].texture = t end
 function Proto:SetVertexColor(r, g, b) S[self].tint = { r, g, b } end
 function Proto:SetDesaturated(v) S[self].desaturated = v end
 function Proto:SetAlphaFromBoolean(v) S[self].alphaFrom = v end
+function Proto:IsMouseOver() return S[self].mouseOver == true end
 
 local function Fire(event, ...)
     for _, f in ipairs(frames) do
@@ -261,7 +262,7 @@ end
 local function Load(saved)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarsPanel.lua", "Window.lua" }) do
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua", "Theme.lua", "BarPage.lua", "Window.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -493,6 +494,11 @@ B:SetOption("buff", "size", 44)
 Equal(S[box].scale, 44 / 36, "icon size scales the packed row")
 Equal(math.abs(groups.g1.layout.groupSpacing - 4 * 36 / 44) < 1e-9, true, "spacing kept in screen units")
 B:SetOption("buff", "size", 36)
+local g1Timer = groups.g1.supplied.SetDurationCooldown
+Equal(Last(g1Timer, "SetHideCountdownNumbers"), false, "buff countdowns shown by default")
+B:SetOption("buff", "showTimer", false)
+Equal(Last(g1Timer, "SetHideCountdownNumbers"), true, "and hidden when asked")
+B:SetOption("buff", "showTimer", true)
 B:Move("buff", 2, -1)
 B:Assign("Thorns", "cd")
 Equal(B:HasBuff("Thorns"), true, "a spell can be on a cooldown bar and the Buffs bar")
@@ -537,38 +543,56 @@ B:SetOption("buff", "showMissing", false)
 Equal(groups.g1.enabled and slots.b1.enabled == false, true, "back to packed")
 Equal(groups.g2.enabled, false, "Clearcasting's group off after being unticked")
 Equal(#printed, 0, "no errors")
-Equal(cvars.FECMBackupBars1:find("buff.missing=0;buff.names=0;buff.spells=Thorns", 1, true) ~= nil, true, "Buffs bar backed up")
+Equal(cvars.FECMBackupBars1:find("buff.missing=0;buff.names=0;buff.timer=1;buff.spells=Thorns", 1, true) ~= nil, true, "Buffs bar backed up")
 Equal(S[buffs.mover.label].text, "Buffs", "mover label is the bar's name")
 Equal(S[buffs.mover.label].points[1][1], "CENTER", "inside the highlight")
 
--- Settings panel ------------------------------------------------------------------------
+-- Ticking spells onto bars from their pages ------------------------------------------------
 
 Environment()
 ns = Load({ useBars = true })
 B = ns.Bars
 ns.Toggle()
 local w = FECMFrame
+local page = w.pages.bar
 
--- Find the Moonfire row and tick CD.
+-- The shown list row for a spell.
 local function Row(name)
     for _, f in ipairs(frames) do
         if f.spell == name and S[f].shown then return f end
     end
 end
+local function Other(name)
+    for _, f in ipairs(frames) do
+        if f.other == name and S[f].shown then return f end
+    end
+end
+local function Search(text)
+    page.search:SetText(text)
+    S[page.search].scripts.OnTextChanged(page.search, true)
+end
+
+Equal(w.selected, "cd", "opens on the Cooldowns bar")
+Equal(S[page].shown, true, "its page shown")
 local row = Row("Moonfire")
 Equal(row ~= nil, true, "Moonfire listed")
-row.cd:Click()
-Equal(ns.BarData("cd").spells[1], "Moonfire", "ticking CD adds it")
-row.util:Click()
-Equal(ns.BarData("util").spells[1], "Moonfire", "ticking Util moves it")
-Equal(row.cd:GetChecked(), false, "and unticks CD")
-Equal(#ns.BarData("cd").spells, 0, "CD bar emptied")
-row.buff:Click()
-Equal(ns.BarData("buff").spells[1], "Moonfire", "ticking Buff adds it to the Buffs bar")
-Equal(ns.BarData("util").spells[1], "Moonfire", "without taking it off Utility")
-local proc = Row("Clearcasting")
-Equal(S[proc.cd].shown or S[proc.util].shown, false, "procs offer only the Buff tick")
-Equal(S[proc.buff].shown, true, "Buff tick shown for procs")
+row.check:Click()
+Equal(ns.BarData("cd").spells[1], "Moonfire", "ticking it adds it to Cooldowns")
+w:Select("util")
+row = Row("Moonfire")
+Equal(row.check:GetChecked(), false, "not ticked on Utility")
+Equal(S[row.where].text, "on Cooldowns", "which says where it is")
+row.check:Click()
+Equal(ns.BarData("util").spells[1], "Moonfire", "ticking it on Utility moves it")
+Equal(#ns.BarData("cd").spells, 0, "off Cooldowns")
+Equal(S[row.where].text, "", "and the note goes")
+w:Select("buff")
+Row("Moonfire").check:Click()
+Equal(ns.BarData("buff").spells[1], "Moonfire", "ticked on the Buffs bar too")
+Equal(ns.BarData("util").spells[1], "Moonfire", "without leaving Utility")
+Equal(Row("Clearcasting") ~= nil, true, "procs listed on the Buffs bar")
+w:Select("cd")
+Equal(Row("Clearcasting"), nil, "but not on cooldown bars")
 
 -- Items, added spells, names and cooldown ends ---------------------------------------------
 
@@ -638,6 +662,12 @@ Equal(S[cdBar.icons[1].label].text, "Lucky Charm", "trinkets named by the item")
 B:SetOption("cd", "showNames", false)
 Equal(S[cdBar.icons[1].label].shown, false, "names off by default")
 
+Equal(Last(cdBar.icons[1].cooldown, "SetHideCountdownNumbers"), false, "countdown numbers on by default")
+B:SetOption("cd", "showTimer", false)
+Equal(Last(cdBar.icons[1].cooldown, "SetHideCountdownNumbers"), true, "and off when asked")
+Equal(cvars.FECMBackupBars1:find("cd.timer=0", 1, true) ~= nil, true, "that choice backed up")
+B:SetOption("cd", "showTimer", true)
+
 local found = ns.Spells:Suggest("mo", 50)
 local names, firstContains = {}, nil
 for i, item in ipairs(found) do
@@ -681,51 +711,41 @@ Equal(ns.Spells:Suggest("minor heal")[1].name, "Minor Healing Potion", "items su
 
 ns.Toggle()
 w = FECMFrame
+page = w.pages.bar
 Equal(Row("item:118"), nil, "items left out of the list by default")
 Equal(Row("Moonfire") ~= nil, true, "spells listed")
-local function ShowItemsBox()
-    for _, f in ipairs(frames) do
-        if f.text and S[f.text].text == "Show items" then return f end
-    end
-end
-local itemsBox = ShowItemsBox()
-itemsBox:Click()
+page.showItems:Click()
 Equal(ns.Get("listItems"), true, "Show items remembered")
 Equal(Row("item:118") ~= nil, true, "items listed when asked")
 Equal(cvars.FECMBackup, "accent=orange;listItems=1;listRanks=0;skin=1;useBars=1", "and backed up")
 
-w.add:SetText("thor")
-S[w.add].scripts.OnTextChanged(w.add, true)
-Equal(S[w.add.suggest].shown, true, "matches appear while typing")
-Equal(w.add.suggest.rows[1].name, "Thorns", "best match first")
-local anchor = S[w.add.suggest.rows[1]].points[1]
-Equal(anchor[1] == "BOTTOMLEFT" and anchor[3], 4, "best match sits right above the box")
-Equal(S[w.add.suggest.rows[2]].points[1][3], 24, "the rest stack upwards")
-w.add.suggest.rows[1]:Click()
-Equal(w.add:GetText(), "Thorns", "clicking a match fills in its exact name")
-Equal(S[w.add.suggest].shown, false, "and closes the list")
-w.add:SetText("power word: fort")
-S[w.add].scripts.OnTextChanged(w.add, true)
-S[w.add].scripts.OnEnterPressed(w.add)
-Equal(w.add:GetText(), "Power Word: Fortitude", "Enter takes the first match")
-w.add:SetText("zzzz")
-S[w.add].scripts.OnTextChanged(w.add, true)
-Equal(S[w.add.suggest].shown, false, "no list when nothing matches")
-w.add:SetText("nonsense")
-w.addButtons.cd:Click()
-Equal(S[w.note].text, 'No spell called "nonsense" was found.', "unknown names explained")
-w.add:SetText("Minor Healing Potion")
-w.addButtons.buff:Click()
-Equal(S[w.note].text, "Items can't go on the Buffs bar.", "items kept off the Buffs bar")
-w.add:SetText("Power Word: Fortitude")
-w.addButtons.buff:Click()
-Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "added from the box")
-Equal(S[w.note].text, "Added Power Word: Fortitude to Buffs.", "and confirmed")
-Equal(w.add:GetText(), "", "box cleared")
+-- Searching filters the list and finds spells outside your spellbook.
+Equal(#S[page.list].points, 2, "the list is pinned by two corners, so the game can place it")
+page.list:SetVerticalScroll(500)
+Search("thor")
+Equal(Row("Thorns") ~= nil and Row("Moonfire") == nil, true, "search narrows the list")
+Equal(page.list:GetVerticalScroll(), 0, "a short result scrolls back to the top, so it can be seen")
+Search("16870")
+w:Select("buff")
+Equal(Row("Clearcasting") ~= nil, true, "your own spells found by ID too")
+Search("power word: fort")
+local pwfRow = Other("Power Word: Fortitude")
+Equal(pwfRow ~= nil, true, "another class's spell offered under Other spells")
+Equal(pwfRow.check:GetChecked(), false, "unticked")
+pwfRow.check:Click()
+Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "ticking it adds it")
+Equal(S[w.note].text, "Added Power Word: Fortitude to Buffs.", "and confirms")
+Equal(Row("Power Word: Fortitude") ~= nil and Row("Power Word: Fortitude").check:GetChecked(), true, "now listed as your own, ticked")
 local pwf = ns.Spells:Find("Power Word: Fortitude")
 Equal(pwf and pwf.line, "Added", "added spells listed under Added")
 local slotIDs = S[containers[1]].groups.g1.filters.includeSpellIDs
 Equal(slotIDs[1243] and slotIDs[10938] and slotIDs[21564], true, "any rank, and Prayer of Fortitude, counts")
+Search("minor heal")
+Equal(Row("item:118") == nil and Other("Minor Healing Potion") == nil, true, "items never offered on the Buffs bar")
+Search("zzzz")
+Equal(Row("Moonfire") == nil, true, "nothing listed when nothing matches")
+Search("")
+Equal(Row("Thorns") ~= nil, true, "clearing the search lists everything again")
 Equal(#printed, 0, "no errors")
 
 Environment(true)
@@ -758,43 +778,114 @@ Equal(#ns.Spells:Find("Moonfire").lower, 2, "rank 2 now also listed on its own")
 
 SlashCmdList.FECM("")
 w = FECMFrame
+page = w.pages.bar
 Equal(Row("Moonfire@1"), nil, "lower ranks hidden by default")
-local ranksBox
-for _, f in ipairs(frames) do
-    if f.text and S[f.text].text == "Show all ranks" then ranksBox = f end
-end
-ranksBox:Click()
+page.showRanks:Click()
 Equal(ns.Get("listRanks"), true, "Show all ranks remembered")
 local fixedRow = Row("Moonfire@1")
 Equal(fixedRow ~= nil, true, "lower ranks listed when asked")
 Equal(S[fixedRow.name].text, "Rank 1", "under the spell as its rank")
-Equal(S[fixedRow.cd].shown and S[fixedRow.util].shown, true, "with CD and Util ticks")
-Equal(S[fixedRow.buff].shown, false, "but no Buff tick")
-Equal(fixedRow.cd:GetChecked(), true, "ticked where it's tracked")
+Equal(fixedRow.check:GetChecked(), true, "ticked where it's tracked")
 Equal(S[Row("Moonfire").rank].text, "Highest (Rank 3)", "the normal row says it follows the highest")
-Row("Moonfire@2").util:Click()
+w:Select("util")
+Row("Moonfire@2").check:Click()
 Equal(ns.BarData("util").spells[2], "Moonfire@2", "a lower rank ticked onto a bar")
+w:Select("buff")
+Equal(Row("Moonfire@1"), nil, "fixed ranks not offered on the Buffs bar")
+Equal(S[page.showRanks].shown, false, "nor the ranks box")
 Environment(true)
 ns = Load(nil)
 Equal(table.concat(ns.BarData("util").spells, ","), "Moonfire,Moonfire@2", "fixed ranks restored from the backup")
 
--- The /ccm window ------------------------------------------------------------------------
+-- The /fecm window ------------------------------------------------------------------------
 
 Environment()
 ns = Load(nil)
 B = ns.Bars
 SlashCmdList.FECM("")
 w = FECMFrame
-Equal(S[w].shown, true, "/ccm opens the window")
-Equal(#w.panels, 3, "Spellbook, Bars and Settings side by side")
-Equal(w.look:GetChecked(), true, "charcoal look shown as on")
-Equal(w.useBars:GetChecked(), false, "own bars shown as off")
-Equal(S[w.off].shown, false, "no Cooldown Manager warning while it is on")
-Equal(S[w.reload].shown, false, "no reload needed yet")
+page = w.pages.bar
+Equal(S[w].shown, true, "/fecm opens the window")
+Equal(w.nav.cd ~= nil and w.nav.util ~= nil and w.nav.buff ~= nil and w.nav.look ~= nil and w.nav.general ~= nil,
+    true, "bars, Look and General listed down the left")
+Equal(S[w.nav.cd.fill].shown and not S[w.nav.util.fill].shown, true, "the chosen one highlighted")
 Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape closes the window")
 Equal(S[w.close.label].text, "X", "a plain X")
 Equal(S[w.note].text, "Each spell shows once, at your highest rank.", "footer tip")
 
+-- Your bars off: each bar page offers to turn them on.
+Equal(S[page.turnOn].shown, true, "bar page offers to turn your bars on")
+page.turnOn:Click()
+Equal(B:Enabled(), true, "and does")
+Equal(S[page.turnOn].shown, false, "then the offer goes")
+
+-- The tray: previews, removing, dragging.
+B:Assign("Moonfire", "cd")
+B:Assign("Wrath", "cd")
+B:Assign("Overpower", "cd")
+w:Refresh()
+Equal(S[w.nav.cd.count].text, 3, "the list shows how many icons each bar has")
+Equal(S[w.nav.cd.icons[1]].texture, 136096, "with a preview of them")
+Equal(S[w.nav.cd.icons[4]].shown, false, "and no more")
+Equal(page.icons[1].name == "Moonfire" and page.icons[3].name == "Overpower", true, "the tray shows the bar in order")
+local third = page.icons[3]
+S[third].scripts.OnDragStart(third)
+S[page.icons[1]].mouseOver = true
+S[third].scripts.OnDragStop(third)
+S[page.icons[1]].mouseOver = nil
+Equal(table.concat(ns.BarData("cd").spells, ","), "Overpower,Moonfire,Wrath", "dragging onto an icon takes its place")
+S[page.icons[1]].scripts.OnDragStart(page.icons[1])
+S[page.tray].mouseOver = true
+S[page.icons[1]].scripts.OnDragStop(page.icons[1])
+S[page.tray].mouseOver = nil
+Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Wrath,Overpower", "dropping on empty tray space moves it to the end")
+S[page.icons[1]].scripts.OnDragStart(page.icons[1])
+S[page.icons[1]].scripts.OnDragStop(page.icons[1])
+Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Wrath,Overpower", "dropping outside the tray changes nothing")
+page.icons[2].remove:Click()
+Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Overpower", "x takes an icon off")
+Equal(S[page.icons[3]].shown, false, "and the tray closes up")
+
+-- Options.
+S[page.size].scripts.OnMouseWheel(page.size, 1)
+Equal(ns.BarData("cd").size, 38, "the size slider steps by 2")
+page.size:Choose(100)
+Equal(ns.BarData("cd").size, 64, "and stays within its limits")
+Equal(S[page.size.value].text, 64, "showing the value")
+page.spacing:Choose(7)
+Equal(ns.BarData("cd").spacing, 7, "spacing set")
+page.options.showTimer:Click()
+Equal(ns.BarData("cd").showTimer, false, "countdown numbers switched off for this bar")
+Equal(Last(B:Get("cd").icons[1].cooldown, "SetHideCountdownNumbers"), true, "and hidden on its icons")
+Equal(S[page.options.hideReady].shown and not S[page.options.showMissing].shown, true, "cooldown bars offer Hide when ready")
+w:Select("buff")
+Equal(S[page.options.showMissing].shown and not S[page.options.hideReady].shown, true, "the Buffs bar offers missing buffs greyed")
+Equal(page.options.showTimer:GetChecked(), true, "each bar keeps its own countdown choice")
+Equal(page.size.current, 36, "and its own size")
+
+-- Clearing a bar takes two clicks.
+w:Select("cd")
+Equal(S[page.clear.label].text, "Clear Cooldowns", "clear names the bar")
+page.clear:Click()
+Equal(#ns.BarData("cd").spells, 2, "one click only asks")
+Equal(S[page.clear.label].text, "Click again to clear", "and says so")
+page.clear:Click()
+Equal(#ns.BarData("cd").spells, 0, "the second click clears")
+Equal(S[w.note].text, "Cooldowns cleared.", "and confirms")
+Equal(S[page.clear].shown, false, "nothing left to clear")
+B:Assign("Moonfire", "cd")
+w:Refresh()
+page.clear:Click()
+for _, timer in ipairs(timers) do timer() end
+page.clear:Click()
+Equal(#ns.BarData("cd").spells, 1, "after a pause, the next click asks again")
+
+-- Look: the charcoal look, reload and accent.
+w:Select("look")
+Equal(S[w.pages.look].shown and not S[page].shown, true, "Look page shown")
+Equal(w.look:GetChecked(), true, "charcoal look shown as on")
+Equal(S[w.off].shown, false, "no Cooldown Manager warning while it is on")
+Equal(S[w.reload].shown, false, "no reload needed yet")
 w.look:Click()
 Equal(ForeverEnhancedCooldownManagerDB.skin, false, "unticking saves the choice")
 Equal(S[w.reload].shown, true, "reload offered after a change")
@@ -809,60 +900,43 @@ Equal(reloads, 1, "reloads straight from the click")
 w.look:Click()
 Equal(S[w.reload].shown, false, "changing back needs no reload")
 
-w.unlock:Click()
-Equal(S[w.note].text, "Tick Use my bars first.", "can't unlock while the bars are off")
-w.useBars:Click()
-Equal(B:Enabled(), true, "Use my bars turns them on")
-w.unlock:Click()
-Equal(B:IsUnlocked(), true, "unlocked")
-Equal(S[w.unlock.label].text, "Lock bars", "button offers to lock")
-w.unlock:Click()
-Equal(B:IsUnlocked(), false, "locked again")
-
--- Accent: orange by default, or another set colour.
 local function Heading(text)
     for i = #objects, 1, -1 do
         if S[objects[i]] and S[objects[i]].text == text then return objects[i] end
     end
 end
-local spellbook = Heading("SPELLBOOK")
-Equal(spellbook ~= nil, true, "headings in small capitals")
-Equal(S[spellbook].colour[1] == .88 and S[spellbook].colour[2], .47, "headings in orange by default")
+local accentHeading = Heading("ACCENT")
+Equal(accentHeading ~= nil, true, "headings in small capitals")
+Equal(S[accentHeading].colour[1] == .88 and S[accentHeading].colour[2], .47, "headings in orange by default")
 Equal(#w.swatches, 5, "five set colours")
 Equal(w.swatches[1].key, "orange", "orange first")
 w.swatches[3]:Click()
 Equal(ns.Get("accent"), "teal", "a set colour chosen")
-Equal(S[spellbook].colour[1] == .17 and S[spellbook].colour[2], .70, "the whole window repaints")
+Equal(S[accentHeading].colour[1] == .17 and S[accentHeading].colour[2], .70, "the whole window repaints")
 Equal(S[w.swatches[3]].border[1], 1, "chosen swatch outlined")
-local function Segment(label)
-    for i = #objects, 1, -1 do
-        local o = objects[i]
-        if S[o] and S[o].text == label and S[o].shadow ~= nil then return o end
-    end
-end
-local chosenTab, otherTab = Segment("Cooldowns"), Segment("Utility")
-Equal(S[chosenTab].colour[1] < .5 and S[chosenTab].shadow, 0, "dark text on a light accent has no smeared shadow")
-Equal(S[otherTab].shadow, 1, "light text on dark keeps its shadow")
 Equal(S[w.swatches[1]].border[1] < 1, true, "the others not")
 w.swatches[1]:Click()
 Equal(ns.Get("accent"), "orange", "back to orange")
 
--- Clearing a bar takes two clicks.
-B:Assign("Moonfire", "cd")
-B:Assign("Wrath", "cd")
-w:Refresh()
-Equal(S[w.clear.label].text, "Clear Cooldowns", "clear names the bar")
-w.clear:Click()
-Equal(#ns.BarData("cd").spells, 2, "one click only asks")
-Equal(S[w.clear.label].text, "Click again to clear", "and says so")
-w.clear:Click()
-Equal(#ns.BarData("cd").spells, 0, "the second click clears")
-Equal(S[w.note].text, "Cooldowns cleared.", "and confirms")
-B:Assign("Moonfire", "cd")
-w.clear:Click()
-for _, timer in ipairs(timers) do timer() end
-w.clear:Click()
-Equal(#ns.BarData("cd").spells, 1, "after a pause, the next click asks again")
+-- Joined buttons (for the pill choices): no smeared shadow on a light accent.
+local pills = ns.Theme:Segmented(UIParent, { { key = "a", label = "Show" }, { key = "b", label = "Fade" } }, 120, function() end)
+pills:SetSelected("a")
+Equal(S[pills.buttons[1].label].shadow, 0, "dark text on a light accent has no smeared shadow")
+Equal(S[pills.buttons[2].label].shadow, 1, "light text on dark keeps its shadow")
+
+-- General: your bars and moving them.
+w:Select("general")
+Equal(w.useBars:GetChecked(), true, "own bars shown as on")
+w.useBars:Click()
+Equal(B:Enabled(), false, "Use my bars turns them off")
+w.unlock:Click()
+Equal(S[w.note].text, "Tick Use my bars first.", "can't unlock while the bars are off")
+w.useBars:Click()
+w.unlock:Click()
+Equal(B:IsUnlocked(), true, "unlocked")
+Equal(S[w.unlock.label].text, "Lock bars", "button offers to lock")
+w.unlock:Click()
+Equal(B:IsUnlocked(), false, "locked again")
 
 Fire("PLAYER_REGEN_DISABLED")
 Equal(bindings[FECMEscButton], nil, "Escape handed back as combat starts")
@@ -876,16 +950,15 @@ Equal(S[w].shown, false, "Escape closes it")
 Equal(bindings[FECMEscButton], nil, "and releases the key")
 
 SlashCmdList.FECM("check")
-Equal(S[w].shown, true, "without the development check, /ccm check just toggles")
+Equal(S[w].shown, true, "without the development check, /fecm check just toggles")
 local probed
 ns.Probe = function(msg) probed = msg end
 SlashCmdList.FECM(" check Moonfire")
-Equal(probed, " check Moonfire", "/ccm check reaches the development check")
+Equal(probed, " check Moonfire", "/fecm check reaches the development check")
 Equal(S[w].shown, true, "and leaves the window alone")
 ns.Probe = nil
-ns.Toggle()
 cvarOn = false
-ns.Toggle()
+w:Select("look")
 Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
 Equal(#printed, 0, "no errors")
 

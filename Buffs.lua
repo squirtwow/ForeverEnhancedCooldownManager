@@ -28,15 +28,16 @@ function F:Packed(data)
     return not data.showMissing
 end
 
--- Sizes an icon's numbers for its size.
-local function Fit(parts, size)
+-- Sizes an icon's numbers for its size, and shows or hides the countdown.
+local function Fit(parts, size, showTimer)
     parts.cooldown:SetCountdownFont(Style:Countdown(size))
+    parts.cooldown:SetHideCountdownNumbers(not showTimer)
     parts.count:SetFontObject(Style:Count(size))
 end
 
 -- Runs once per icon, before the client restricts it in combat. Everything
 -- supplied to the icon must be a descendant of its button.
-local function Look(button, size)
+local function Look(button, size, showTimer)
     button:EnableMouse(false)
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -58,7 +59,7 @@ local function Look(button, size)
     count:SetPoint("BOTTOMRIGHT", -1, 1)
     button:SetApplicationCount(count)
     local parts = { cooldown = cooldown, count = count }
-    Fit(parts, size)
+    Fit(parts, size, showTimer)
     return parts
 end
 
@@ -66,17 +67,20 @@ end
 local function SlotLook(holder)
     return function(button)
         button:SetAllPoints(holder)
-        holder.slot = Look(button, holder.size or BASE)
+        holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false)
     end
 end
 
-local function GroupLook(button)
-    button:SetSize(BASE, BASE)
-    Look(button, BASE)
+local function GroupLook(bar)
+    return function(button)
+        button:SetSize(BASE, BASE)
+        bar.groupParts[#bar.groupParts + 1] = Look(button, BASE, bar.data.showTimer)
+    end
 end
 
 function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
+    bar.groupParts = {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -125,8 +129,8 @@ function F:Layout(bar, data)
             count = count + 1
             local holder = bar.holders[count]
             holder:SetSize(size, size)
-            holder.size = size
-            if holder.slot then Fit(holder.slot, size) end
+            holder.size, holder.showTimer = size, data.showTimer
+            if holder.slot then Fit(holder.slot, size, data.showTimer) end
             holder:ClearAllPoints()
             holder:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
             holder.icon:SetTexture(entry.icon)
@@ -143,6 +147,7 @@ function F:Layout(bar, data)
         bar.holders[i]:Hide()
         bar.slotIDs[i] = nil
     end
+    for _, parts in ipairs(bar.groupParts) do parts.cooldown:SetHideCountdownNumbers(not data.showTimer) end
     bar.count = count
     self:Apply(bar)
 end
@@ -187,7 +192,7 @@ function F:Apply(bar)
     local spacing = data.spacing / scale
     if on and packed then
         for i = bar.groups + 1, bar.count do
-            container:AddAuraGroup("g" .. i, "HELPFUL", { initializeFrame = GroupLook, maxFrameCount = 1,
+            container:AddAuraGroup("g" .. i, "HELPFUL", { initializeFrame = GroupLook(bar), maxFrameCount = 1,
                 candidateFilters = { includeSpellIDs = bar.slotIDs[i] }, layout = { layoutIndex = i, groupSpacing = spacing } })
             bar.groups = i
             bar.appliedGroups[i] = Signature(bar.slotIDs[i]) .. "|" .. spacing

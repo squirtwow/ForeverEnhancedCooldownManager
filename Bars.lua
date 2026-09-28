@@ -227,6 +227,7 @@ local function Layout(bar)
             bar.icons[count] = icon
             icon:SetSize(size, size)
             icon.cooldown:SetCountdownFont(Style:Countdown(size))
+            icon.cooldown:SetHideCountdownNumbers(not data.showTimer)
             icon.count:SetFontObject(Style:Count(size))
             icon:ClearAllPoints()
             icon:SetPoint("LEFT", bar, "LEFT", (count - 1) * (size + spacing), 0)
@@ -385,6 +386,14 @@ function B:Move(key, index, delta)
     self:Changed()
 end
 
+-- Moves a spell to another place on its bar, as dragged in the window.
+function B:MoveTo(key, from, to)
+    local spells = ns.BarData(key).spells
+    if from == to or not spells[from] or not spells[to] then return end
+    table.insert(spells, to, table.remove(spells, from))
+    self:Changed()
+end
+
 function B:Remove(key, index)
     local spells = ns.BarData(key).spells
     if not spells[index] then return end
@@ -392,9 +401,15 @@ function B:Remove(key, index)
     self:Changed()
 end
 
+-- An option only changes how one bar looks, so only that bar is redrawn;
+-- the size slider sends a change for every step it's dragged.
 function B:SetOption(key, field, value)
     ns.BarData(key)[field] = value
-    self:Changed()
+    ns.SaveBars()
+    if not self.started then return end
+    Layout(bars[key] or NewBar(key))
+    self:UpdateShown()
+    self:RefreshAll()
 end
 
 -- Empties a bar.

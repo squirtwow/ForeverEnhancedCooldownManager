@@ -15,6 +15,6 @@ Spells.lua
 Buffs.lua
 Bars.lua
 Theme.lua
-BarsPanel.lua
+BarPage.lua
 Window.lua
 Probe.lua

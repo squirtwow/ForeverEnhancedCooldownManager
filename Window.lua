@@ -1,13 +1,13 @@
--- The /ccm window: one screen in three columns, Spellbook, Bars and Settings,
--- drawn in the flat Theme style. This file builds the frame, header, footer
--- and Settings column; BarsPanel.lua fills the Spellbook and Bars columns and
--- the "Add a spell" box.
+-- The /fecm window: your bars listed down the left, each with a preview of
+-- its icons, then the Look and General pages; the chosen page fills the rest.
+-- A bar's page (BarPage.lua) shows its icons, its options and a spell list to
+-- tick from. Drawn in the flat charcoal Theme style.
 local ADDON, ns = ...
 local T = ns.Theme
 
-local WIDTH, HEIGHT = 800, 520
-local TOP, BOTTOM = 44, 30
-local COLUMNS = { { 10, 330 }, { 348, 250 }, { 606, 184 } } -- x, width
+local WIDTH, HEIGHT = 820, 560
+local HEADER, FOOTER, NAV = 42, 28, 180
+local PREVIEW = 9 -- icons previewed under each bar's name
 local HINT = "Each spell shows once, at your highest rank."
 
 local function Version()
@@ -17,63 +17,44 @@ local function Version()
     return "v" .. version
 end
 
-local function BuildSettings(window, panel)
-    local B = ns.Bars
-    T:Heading(panel, "Settings"):SetPoint("TOPLEFT", 8, -9)
+-- Pages ----------------------------------------------------------------------------
 
-    local bars = T:Check(panel, "Use my bars", function(self)
-        ns.Set("useBars", self:GetChecked())
-        B:Rebuild()
-        window:Refresh()
-    end)
-    bars:SetPoint("TOPLEFT", 8, -28)
-    window.useBars = bars
+local function Detail(page, text, x, y, width)
+    local detail = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    detail:SetPoint("TOPLEFT", x, y)
+    detail:SetWidth(width or 420)
+    detail:SetText(text)
+    return detail
+end
 
-    local look = T:Check(panel, "Charcoal look", function(self)
+local function BuildLook(window, page)
+    T:Heading(page, "Blizzard's Cooldown Manager"):SetPoint("TOPLEFT", 16, -16)
+    local look = T:Check(page, "Charcoal look", function(self)
         ns.Set("skin", self:GetChecked())
         window:Refresh()
     end)
-    look:SetPoint("TOPLEFT", 8, -50)
+    look:SetPoint("TOPLEFT", 16, -36)
     window.look = look
-    local lookDetail = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
-    lookDetail:SetPoint("TOPLEFT", 26, -67)
-    lookDetail:SetWidth(150)
-    lookDetail:SetText("For Blizzard's Cooldown Manager. Needs a reload.")
+    Detail(page, "Square frameless icons, big bold countdown numbers and charcoal bars on Blizzard's own "
+        .. "Cooldown Manager. Needs a reload.", 34, -56)
 
     -- Shown when Blizzard's Cooldown Manager is switched off.
-    local off = T:Text(panel, "GameFontHighlightSmall", { 1, .45, .3 })
-    off:SetPoint("TOPLEFT", 8, -92)
-    off:SetWidth(168)
+    local off = T:Text(page, "GameFontHighlightSmall", T.WARN)
+    off:SetPoint("TOPLEFT", 16, -92)
+    off:SetWidth(440)
     off:SetText("Blizzard's Cooldown Manager is off: Options > Gameplay > Advanced Options.")
     window.off = off
+    Detail(page, "To hide Blizzard's countdown numbers, open Edit Mode, click one of its bars and untick "
+        .. "its timer option.", 16, -112, 440)
 
-    local unlock = T:Button(panel, "Unlock bars to move", 168)
-    unlock:SetPoint("TOPLEFT", 8, -126)
-    unlock:SetScript("OnClick", function()
-        if not B:Enabled() then
-            window:Say("Tick Use my bars first.")
-        else
-            B:SetUnlocked(not B:IsUnlocked())
-        end
-        window:Refresh()
-    end)
-    window.unlock = unlock
-    local reset = T:Button(panel, "Reset positions", 168)
-    reset:SetPoint("TOPLEFT", 8, -152)
-    reset:SetScript("OnClick", function()
-        B:ResetPositions()
-        window:Say("Bars moved back above your action bar.")
-        window:Refresh()
-    end)
-
-    T:Heading(panel, "Accent"):SetPoint("TOPLEFT", 8, -188)
+    T:Heading(page, "Accent"):SetPoint("TOPLEFT", 16, -156)
     local swatches = {}
-    local chosen = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
-    chosen:SetPoint("TOPLEFT", 8, -230)
+    local chosen = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    chosen:SetPoint("TOPLEFT", 16 + #ns.ACCENT_KEYS * 28 + 6, -180)
     for i, key in ipairs(ns.ACCENT_KEYS) do
-        local swatch = CreateFrame("Button", nil, panel, "BackdropTemplate")
+        local swatch = CreateFrame("Button", nil, page, "BackdropTemplate")
         swatch:SetSize(20, 20)
-        swatch:SetPoint("TOPLEFT", 8 + (i - 1) * 26, -204)
+        swatch:SetPoint("TOPLEFT", 16 + (i - 1) * 28, -176)
         local colour = T.ACCENTS[key].colour
         T:Flat(swatch, { colour[1], colour[2], colour[3], 1 }, T.CONTROL_BORDER)
         swatch.key = key
@@ -86,13 +67,13 @@ local function BuildSettings(window, panel)
     end
     window.swatches = swatches
 
-    -- The reload a changed charcoal look needs, at the foot of the column.
-    local hint = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
-    hint:SetPoint("BOTTOMLEFT", 8, 38)
-    hint:SetWidth(168)
+    -- The reload a changed charcoal look needs, at the foot of the page.
+    local hint = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    hint:SetPoint("BOTTOMLEFT", 16, 44)
+    hint:SetWidth(300)
     window.hint = hint
-    local reload = T:Button(panel, "Reload UI", 168)
-    reload:SetPoint("BOTTOMLEFT", 8, 10)
+    local reload = T:Button(page, "Reload UI", 140)
+    reload:SetPoint("BOTTOMLEFT", 16, 16)
     -- Straight from the click, while the window is still shown.
     reload:SetScript("OnClick", function()
         if InCombatLockdown() then
@@ -103,16 +84,14 @@ local function BuildSettings(window, panel)
     end)
     window.reload = reload
 
-    function window:RefreshSettings()
-        self.useBars:SetChecked(B:Enabled())
-        self.look:SetChecked(ns.Get("skin"))
-        self.off:SetShown(not ns.CooldownManagerOn())
-        self.unlock:SetLabel(B:IsUnlocked() and "Lock bars" or "Unlock bars to move")
+    function page:Refresh()
+        look:SetChecked(ns.Get("skin"))
+        off:SetShown(not ns.CooldownManagerOn())
         local needsReload = ns.NeedsReload()
-        self.reload:SetShown(needsReload)
-        self.hint:SetText(needsReload and "Reload UI to apply your change." or "")
+        reload:SetShown(needsReload)
+        hint:SetText(needsReload and "Reload UI to apply your change." or "")
         local current = ns.Get("accent")
-        for _, swatch in ipairs(self.swatches) do
+        for _, swatch in ipairs(swatches) do
             local border = swatch.key == current and { 1, 1, 1, 1 } or T.CONTROL_BORDER
             swatch:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         end
@@ -120,10 +99,89 @@ local function BuildSettings(window, panel)
     end
 end
 
+local function BuildGeneral(window, page)
+    local B = ns.Bars
+    T:Heading(page, "Your bars"):SetPoint("TOPLEFT", 16, -16)
+    local bars = T:Check(page, "Use my bars", function(self)
+        ns.Set("useBars", self:GetChecked())
+        B:Rebuild()
+        window:Refresh()
+    end)
+    bars:SetPoint("TOPLEFT", 16, -36)
+    window.useBars = bars
+    Detail(page, "Cooldowns, Utility and Buffs bars of your own, set up on the left.", 34, -56)
+
+    local unlock = T:Button(page, "Unlock bars to move", 160)
+    unlock:SetPoint("TOPLEFT", 16, -84)
+    unlock:SetScript("OnClick", function()
+        if not B:Enabled() then
+            window:Say("Tick Use my bars first.")
+        else
+            B:SetUnlocked(not B:IsUnlocked())
+        end
+        window:Refresh()
+    end)
+    window.unlock = unlock
+    local reset = T:Button(page, "Reset positions", 160)
+    reset:SetPoint("LEFT", unlock, "RIGHT", 8, 0)
+    reset:SetScript("OnClick", function()
+        B:ResetPositions()
+        window:Say("Bars moved back above your action bar.")
+        window:Refresh()
+    end)
+    Detail(page, "Unlocked bars show a box you can drag. Closing this window locks them again.", 16, -114)
+
+    function page:Refresh()
+        bars:SetChecked(B:Enabled())
+        unlock:SetLabel(B:IsUnlocked() and "Lock bars" or "Unlock bars to move")
+    end
+end
+
+-- The bar list ---------------------------------------------------------------------
+
+local function NavItem(window, nav, key, label, y, previews)
+    local item = CreateFrame("Button", nil, nav)
+    item:SetPoint("TOPLEFT", 0, -y)
+    item:SetPoint("RIGHT")
+    item:SetHeight(previews and 46 or 30)
+    item.fill = item:CreateTexture(nil, "BACKGROUND")
+    item.fill:SetAllPoints()
+    T:Fill(item.fill, T.SELECTED)
+    item.mark = item:CreateTexture(nil, "ARTWORK")
+    item.mark:SetPoint("TOPLEFT")
+    item.mark:SetPoint("BOTTOMLEFT")
+    item.mark:SetWidth(3)
+    T:Paint(function(accent) T:Fill(item.mark, accent) end)
+    local hover = item:CreateTexture(nil, "HIGHLIGHT")
+    hover:SetAllPoints()
+    hover:SetColorTexture(1, 1, 1, .04)
+    item.label = T:Text(item, "GameFontHighlight")
+    item.label:SetPoint("TOPLEFT", 14, -9)
+    item.label:SetText(label)
+    item.count = T:Text(item, "GameFontHighlightSmall", T.MUTED)
+    item.count:SetPoint("TOPRIGHT", -12, -10)
+    item.count:SetJustifyH("RIGHT")
+    if previews then
+        item.icons = {}
+        for i = 1, PREVIEW do
+            local icon = item:CreateTexture(nil, "ARTWORK")
+            icon:SetSize(14, 14)
+            icon:SetPoint("TOPLEFT", 14 + (i - 1) * 16, -26)
+            ns.Style:Zoom(icon)
+            item.icons[i] = icon
+        end
+    end
+    item.key = key
+    item:SetScript("OnClick", function() window:Select(key) end)
+    return item
+end
+
+-- Setup ------------------------------------------------------------------------------
+
 local function BuildWindow()
     local window = CreateFrame("Frame", "FECMFrame", UIParent, "BackdropTemplate")
     window:SetSize(WIDTH, HEIGHT)
-    window:SetPoint("CENTER", 0, 60)
+    window:SetPoint("CENTER", 0, 40)
     window:SetFrameStrata("FULLSCREEN_DIALOG")
     window:SetToplevel(true)
     window:SetClampedToScreen(true)
@@ -132,58 +190,116 @@ local function BuildWindow()
     window:RegisterForDrag("LeftButton")
     window:SetScript("OnDragStart", window.StartMoving)
     window:SetScript("OnDragStop", window.StopMovingOrSizing)
-    T:Flat(window, T.BG, { .22, .22, .22, 1 })
+    T:Flat(window, T.BG, T.CONTROL_BORDER)
     window:Hide()
 
     -- Header: the icon on an accent square, and "Enhanced" in the accent.
-    local logo = CreateFrame("Frame", nil, window, "BackdropTemplate")
+    local header = CreateFrame("Frame", nil, window, "BackdropTemplate")
+    header:SetPoint("TOPLEFT", 1, -1)
+    header:SetPoint("TOPRIGHT", -1, -1)
+    header:SetHeight(HEADER)
+    T:Flat(header, T.HEADER, T.HEADER)
+    local logo = CreateFrame("Frame", nil, header, "BackdropTemplate")
     logo:SetSize(24, 24)
-    logo:SetPoint("TOPLEFT", 12, -10)
+    logo:SetPoint("LEFT", 12, 0)
     local icon = logo:CreateTexture(nil, "ARTWORK")
     icon:SetPoint("TOPLEFT", 2, -2)
     icon:SetPoint("BOTTOMRIGHT", -2, 2)
     icon:SetTexture("Interface\\Icons\\INV_Misc_PocketWatch_01")
-    local title = T:Text(window, "GameFontNormalLarge")
+    local title = T:Text(header, "GameFontNormalLarge")
     title:SetPoint("LEFT", logo, "RIGHT", 8, 0)
     T:Paint(function(accent)
         T:Flat(logo, { accent[1], accent[2], accent[3], 1 }, { accent[1], accent[2], accent[3], 1 })
         title:SetText("Forever |cff" .. T:Hex(accent) .. "Enhanced|r Cooldown Manager")
     end)
-    local close = T:Square(window, "X")
+    local close = T:Square(header, "X")
     close:SetSize(22, 22)
-    close:SetPoint("TOPRIGHT", -10, -11)
+    close:SetPoint("RIGHT", -10, 0)
     close:SetScript("OnClick", function() window:Hide() end)
     window.close = close
+    window.header = header
 
-    local panels = {}
-    for i, column in ipairs(COLUMNS) do
-        local panel = T:Panel(window)
-        panel:SetPoint("TOPLEFT", column[1], -TOP)
-        panel:SetSize(column[2], HEIGHT - TOP - BOTTOM)
-        panels[i] = panel
+    -- The bar list down the left.
+    local nav = CreateFrame("Frame", nil, window, "BackdropTemplate")
+    nav:SetPoint("TOPLEFT", 1, -(HEADER + 1))
+    nav:SetPoint("BOTTOMLEFT", 1, FOOTER)
+    nav:SetWidth(NAV)
+    T:Flat(nav, T.NAV, T.NAV)
+    local edge = nav:CreateTexture(nil, "BORDER")
+    edge:SetPoint("TOPRIGHT")
+    edge:SetPoint("BOTTOMRIGHT")
+    edge:SetWidth(1)
+    T:Fill(edge, T.BORDER)
+    window.nav = {}
+    local y = 8
+    for _, key in ipairs(ns.BAR_KEYS) do
+        window.nav[key] = NavItem(window, nav, key, ns.BAR_NAMES[key], y, true)
+        y = y + 48
     end
-    window.panels = panels
+    local rule = nav:CreateTexture(nil, "BORDER")
+    rule:SetPoint("TOPLEFT", 12, -(y + 4))
+    rule:SetPoint("RIGHT", -12, 0)
+    rule:SetHeight(1)
+    T:Fill(rule, T.BORDER)
+    y = y + 12
+    window.nav.look = NavItem(window, nav, "look", "Look", y)
+    window.nav.general = NavItem(window, nav, "general", "General", y + 32)
+
+    -- Pages fill the rest.
+    local function Page()
+        local page = CreateFrame("Frame", nil, window)
+        page:SetPoint("TOPLEFT", NAV + 1, -(HEADER + 1))
+        page:SetPoint("BOTTOMRIGHT", -1, FOOTER)
+        page:Hide()
+        return page
+    end
+    window.pages = { look = Page(), general = Page(), bar = Page() }
+    BuildLook(window, window.pages.look)
+    BuildGeneral(window, window.pages.general)
+    ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)
 
     -- Footer: the version, and messages from the window (or a tip).
     local version = T:Text(window, "GameFontHighlightSmall", T.MUTED)
-    version:SetPoint("BOTTOMLEFT", 12, 10)
+    version:SetPoint("BOTTOMLEFT", 12, 9)
     version:SetText(Version() .. "   /fecm to open")
     local note = T:Text(window, "GameFontHighlightSmall", T.MUTED)
-    note:SetPoint("BOTTOMRIGHT", -12, 10)
+    note:SetPoint("BOTTOMRIGHT", -12, 9)
     note:SetJustifyH("RIGHT")
-    note:SetWidth(520)
+    note:SetWidth(560)
     window.note = note
     function window:Say(text)
         self.message = text
     end
 
-    BuildSettings(window, panels[3])
-    if ns.BuildBarsPanels then ns.BuildBarsPanels(window, panels[1], panels[2], panels[3]) end
+    window.selected = "cd"
+    function window:Select(key)
+        self.selected = key
+        self:Refresh()
+    end
 
     function window:Refresh()
-        self:RefreshSettings()
-        if self.RefreshBars then self:RefreshBars() end
-        self.note:SetText(self.message or HINT)
+        local selected = self.selected
+        local barPage = ns.BAR_NAMES[selected] ~= nil
+        for key, item in pairs(self.nav) do
+            local chosen = key == selected
+            item.fill:SetShown(chosen)
+            item.mark:SetShown(chosen)
+            if item.icons then
+                local spells = ns.BarData(key).spells
+                item.count:SetText(#spells)
+                for i, preview in ipairs(item.icons) do
+                    local entry = spells[i] and ns.Spells:Find(spells[i])
+                    preview:SetTexture(entry and entry.icon or 134400) -- question mark until learned
+                    preview:SetShown(spells[i] ~= nil)
+                end
+            end
+        end
+        for key, page in pairs(self.pages) do
+            page:SetShown(key == (barPage and "bar" or selected))
+        end
+        if barPage then self.pages.bar:Refresh(selected) else self.pages[selected]:Refresh() end
+        self.lastNote = self.message or HINT
+        self.note:SetText(self.lastNote)
         self.message = nil
     end
 

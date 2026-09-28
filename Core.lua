@@ -76,6 +76,7 @@ function ns.BarData(key)
     bar.combatOnly = bar.combatOnly == true
     bar.showMissing = bar.showMissing == true
     bar.showNames = bar.showNames == true
+    bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     if not (Finite(bar.x) and Finite(bar.y) and math.abs(bar.x) < 4000 and math.abs(bar.y) < 4000) then
         bar.x, bar.y = nil, nil
     end
@@ -164,9 +165,10 @@ local function EncodeBars()
         for _, name in ipairs(bar.spells) do
             if not name:find("[;=|]") then names[#names + 1] = name end
         end
-        parts[#parts + 1] = ("%s.size=%d;%s.spacing=%d;%s.hide=%d;%s.combat=%d;%s.missing=%d;%s.names=%d;%s.spells=%s"):format(
+        parts[#parts + 1] = ("%s.size=%d;%s.spacing=%d;%s.hide=%d;%s.combat=%d;%s.missing=%d;%s.names=%d;%s.timer=%d;%s.spells=%s"):format(
             key, bar.size, key, bar.spacing, key, bar.hideReady and 1 or 0, key, bar.combatOnly and 1 or 0,
-            key, bar.showMissing and 1 or 0, key, bar.showNames and 1 or 0, key, table.concat(names, "|"))
+            key, bar.showMissing and 1 or 0, key, bar.showNames and 1 or 0, key, bar.showTimer and 1 or 0,
+            key, table.concat(names, "|"))
         if bar.x and bar.y then parts[#parts + 1] = ("%s.x=%.1f;%s.y=%.1f"):format(key, bar.x, key, bar.y) end
     end
     local custom = {}
@@ -199,6 +201,8 @@ local function DecodeBars(text)
                 bar.showMissing = value == "1"
             elseif field == "names" then
                 bar.showNames = value == "1"
+            elseif field == "timer" then
+                bar.showTimer = value == "1"
             elseif field == "combat" then
                 bar.combatOnly = value == "1"
             elseif field == "x" or field == "y" then

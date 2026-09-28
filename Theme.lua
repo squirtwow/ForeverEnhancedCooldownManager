@@ -1,4 +1,4 @@
--- The /ccm window's look: flat dark panels, thin borders and one accent
+-- The /fecm window's look: flat charcoal panels, thin borders and one accent
 -- colour, picked from a few set colours. Every piece
 -- drawn in the accent registers a painter, so choosing a new accent repaints
 -- the whole window at once.
@@ -9,16 +9,20 @@ ns.Theme = T
 
 local FLAT = "Interface\\Buttons\\WHITE8X8"
 
-T.BG = { .07, .07, .07, .97 }
-T.PANEL = { .10, .10, .10, 1 }
-T.BORDER = { .18, .18, .18, 1 }
-T.ROW = { .08, .08, .08, 1 }
-T.CONTROL = { .14, .14, .14, 1 }
-T.HOVER = { .20, .20, .20, 1 }
-T.CONTROL_BORDER = { .24, .24, .24, 1 }
-T.FIELD = { .055, .055, .055, 1 }
-T.TEXT = { .9, .9, .9 }
-T.MUTED = { .55, .55, .55 }
+T.BG = { .106, .110, .122, .98 }
+T.HEADER = { .125, .129, .145, 1 }
+T.NAV = { .118, .122, .137, 1 }
+T.PANEL = { .09, .094, .102, 1 }
+T.BORDER = { .173, .180, .200, 1 }
+T.ROW = { .08, .084, .092, 1 }
+T.SELECTED = { .149, .157, .176, 1 }
+T.CONTROL = { .15, .155, .17, 1 }
+T.HOVER = { .20, .205, .225, 1 }
+T.CONTROL_BORDER = { .20, .208, .227, 1 }
+T.FIELD = { .075, .078, .086, 1 }
+T.TEXT = { .84, .843, .851 }
+T.MUTED = { .545, .553, .573 }
+T.WARN = { 1, .45, .3 }
 
 T.ACCENTS = {
     orange = { name = "Orange", colour = { .88, .47, .16 } },
@@ -62,6 +66,10 @@ end
 
 local function Colour(region, colour)
     region:SetColorTexture(colour[1], colour[2], colour[3], colour[4] or 1)
+end
+
+function T:Fill(region, colour)
+    Colour(region, colour)
 end
 
 function T:Flat(frame, fill, border)
@@ -220,6 +228,71 @@ function T:Input(parent, placeholder, width)
     return input
 end
 
+-- A flat slider: the label, a thin track filled with the accent up to a
+-- square thumb, and the value. Drag it, click the track, or use the wheel.
+function T:Slider(parent, label, limits, step, width, onChange)
+    local slider = CreateFrame("Frame", nil, parent)
+    slider:SetSize(width, 20)
+    slider.label = self:Text(slider, "GameFontHighlight")
+    slider.label:SetPoint("LEFT")
+    slider.label:SetText(label)
+    slider.value = self:Text(slider, "GameFontHighlight")
+    slider.value:SetPoint("RIGHT")
+    slider.value:SetWidth(28)
+    slider.value:SetJustifyH("RIGHT")
+    local track = CreateFrame("Frame", nil, slider)
+    track:SetPoint("LEFT", 84, 0)
+    track:SetPoint("RIGHT", -40, 0)
+    track:SetHeight(16)
+    track:EnableMouse(true)
+    local groove = track:CreateTexture(nil, "BACKGROUND")
+    groove:SetPoint("LEFT")
+    groove:SetPoint("RIGHT")
+    groove:SetHeight(4)
+    Colour(groove, T.CONTROL_BORDER)
+    local fill = track:CreateTexture(nil, "ARTWORK")
+    fill:SetPoint("LEFT")
+    fill:SetHeight(4)
+    self:Paint(function(accent) Colour(fill, accent) end)
+    local thumb = track:CreateTexture(nil, "OVERLAY")
+    thumb:SetSize(10, 10)
+    Colour(thumb, T.TEXT)
+    slider.track, slider.fill, slider.thumb = track, fill, thumb
+
+    function slider:Set(value)
+        self.current = value
+        self.value:SetText(value)
+        local length = track:GetWidth() or 0
+        local share = (value - limits[1]) / (limits[2] - limits[1])
+        fill:SetWidth(math.max(1, length * share))
+        thumb:ClearAllPoints()
+        thumb:SetPoint("CENTER", track, "LEFT", length * share, 0)
+    end
+    -- Snapped to the step and kept within the limits; only a new value is sent.
+    function slider:Choose(value)
+        value = limits[1] + math.floor((value - limits[1]) / step + .5) * step
+        value = math.max(limits[1], math.min(limits[2], value))
+        if value == self.current then return end
+        self:Set(value)
+        onChange(value)
+    end
+    local function FromCursor()
+        local x = GetCursorPosition() / track:GetEffectiveScale()
+        local length = math.max(1, track:GetWidth() or 1)
+        slider:Choose(limits[1] + (x - (track:GetLeft() or 0)) / length * (limits[2] - limits[1]))
+    end
+    track:SetScript("OnMouseDown", function()
+        FromCursor()
+        track:SetScript("OnUpdate", FromCursor)
+    end)
+    track:SetScript("OnMouseUp", function() track:SetScript("OnUpdate", nil) end)
+    -- The track's width is only known once it's drawn.
+    track:SetScript("OnSizeChanged", function() if slider.current then slider:Set(slider.current) end end)
+    slider:EnableMouseWheel(true)
+    slider:SetScript("OnMouseWheel", function(self, delta) self:Choose((self.current or limits[1]) + delta * step) end)
+    return slider
+end
+
 -- A list that scrolls with the mouse wheel, with a thin accent thumb that can
 -- also be dragged.
 function T:Scroll(parent, width)
@@ -236,8 +309,12 @@ function T:Scroll(parent, width)
     self:Paint(function(accent) Colour(thumb.texture, accent) end)
     scroll.thumb = thumb
 
+    -- Until the game has measured the list there's nothing to scroll; this
+    -- keeps a short list from being scrolled out of view before then.
     local function Range()
-        return math.max(0, (content:GetHeight() or 0) - (scroll:GetHeight() or 0))
+        local view = scroll:GetHeight() or 0
+        if view <= 0 then return 0 end
+        return math.max(0, (content:GetHeight() or 0) - view)
     end
     function scroll:ScrollTo(offset)
         self:SetVerticalScroll(math.max(0, math.min(Range(), offset)))
@@ -257,6 +334,8 @@ function T:Scroll(parent, width)
         thumb:SetPoint("TOPLEFT", self, "TOPRIGHT", 4, -offset)
         thumb:Show()
     end
+    -- Once the game measures the list, keep the position within its range.
+    scroll:SetScript("OnSizeChanged", function(self) self:ScrollTo(self:GetVerticalScroll() or 0) end)
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel", function(self, delta) self:ScrollTo((self:GetVerticalScroll() or 0) - delta * 44) end)
     thumb:SetScript("OnMouseDown", function()

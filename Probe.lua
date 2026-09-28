@@ -99,7 +99,77 @@ local function Stop()
     Say("done. Please screenshot the chat.")
 end
 
+-- /fecm check list: what the window's spell list holds, and where the game
+-- has placed it. Also kept in the saved settings (probe), read after a reload.
+local function Rect(frame)
+    if not frame then return "missing" end
+    local left, bottom, width, height = frame:GetRect()
+    return ("shown=%s visible=%s level=%s strata=%s alpha=%.2f rect=%s,%s %sx%s"):format(
+        tostring(frame:IsShown()), tostring(frame:IsVisible()), tostring(frame:GetFrameLevel()),
+        tostring(frame:GetFrameStrata()), frame:GetEffectiveAlpha() or -1,
+        tostring(left and math.floor(left)), tostring(bottom and math.floor(bottom)),
+        tostring(width and math.floor(width)), tostring(height and math.floor(height)))
+end
+
+local function ProbeList()
+    local window = ns.window
+    local page = window and window.pages and window.pages.bar
+    if not page then Say("open /fecm first.") return end
+    local lines = {}
+    local function Add(text)
+        lines[#lines + 1] = text
+        Say(text)
+    end
+    local scroll = page.list
+    Add(("page=%s entries=%d error=%s search=%q"):format(tostring(window.selected), #ns.Spells:List(),
+        tostring(page.listError), tostring(page.search:GetText())))
+    Add("window " .. Rect(window))
+    Add("page " .. Rect(page))
+    Add("panel " .. Rect(page.listPanel))
+    Add("scroll " .. Rect(scroll) .. (" offset=%s range=%s clips=%s"):format(tostring(scroll:GetVerticalScroll()),
+        tostring(scroll:GetVerticalScrollRange()), tostring(scroll.DoesClipChildren and scroll:DoesClipChildren())))
+    Add("content " .. Rect(scroll.content) .. " child=" .. tostring(scroll:GetScrollChild() == scroll.content)
+        .. " kids=" .. tostring(scroll.content:GetNumChildren()))
+    local shown, listed = 0, 0
+    for _, row in ipairs(page.rows) do
+        if row:IsShown() then
+            shown = shown + 1
+            if listed < 3 then
+                listed = listed + 1
+                local text = row.header:IsShown() and row.header:GetText() or row.name:GetText()
+                Add(("row%d %s text=%s"):format(listed, Rect(row), tostring(text)))
+                local label = row.header:IsShown() and row.header or row.name
+                local left, bottom, width, height = label:GetRect()
+                Add(("  label visible=%s rect=%s,%s %sx%s font=%s"):format(tostring(label:IsVisible()),
+                    tostring(left and math.floor(left)), tostring(bottom and math.floor(bottom)),
+                    tostring(width and math.floor(width)), tostring(height and math.floor(height)),
+                    tostring(label:GetFont())))
+            end
+        end
+    end
+    Add(("rows made=%d shown=%d"):format(#page.rows, shown))
+
+    local key = window.selected
+    local data = ns.BarData(key)
+    local timer = page.options and page.options.showTimer
+    if data then
+        Add(("data %s showTimer=%s ticked=%s hideReady=%s size=%s"):format(key, tostring(data.showTimer),
+            tostring(timer and timer.checked), tostring(data.hideReady), tostring(data.size)))
+    end
+    Add("tray " .. Rect(page.tray) .. " options " .. Rect(page.size and page.size:GetParent()))
+    C_Timer.After(.3, function()
+        local left, bottom, width, height = scroll:GetRect()
+        Add(("later: scroll points=%d rect=%s"):format(scroll:GetNumPoints(),
+            left and (math.floor(width) .. "x" .. math.floor(height)) or "nil"))
+        if type(ForeverEnhancedCooldownManagerDB) == "table" then
+            ForeverEnhancedCooldownManagerDB.probe = lines
+            Say("saved. /reload so the results reach the settings file.")
+        end
+    end)
+end
+
 function ns.Probe(msg)
+    if msg:match("^%s*check%s+list%s*$") then return ProbeList() end
     if running then Say("already running.") return end
     local _, class = UnitClass("player")
     local spell = msg:match("^%s*check%s+(.-)%s*$")
@@ -127,3 +197,12 @@ function ns.Probe(msg)
         end
     end)
 end
+
+-- Old /fecm check list results are cleared at the next login.
+local cleaner = CreateFrame("Frame")
+cleaner:RegisterEvent("ADDON_LOADED")
+cleaner:SetScript("OnEvent", function(self, _, name)
+    if name ~= "ForeverEnhancedCooldownManager" then return end
+    self:UnregisterAllEvents()
+    if type(ForeverEnhancedCooldownManagerDB) == "table" then ForeverEnhancedCooldownManagerDB.probe = nil end
+end)
