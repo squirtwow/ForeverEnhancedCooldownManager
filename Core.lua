@@ -1,6 +1,6 @@
--- Forever Enhanced Cooldown Manager: saved settings and their backup, the /ccm command,
--- Escape for the window and the entry in Options > AddOns. Each feature lives
--- in its own file and starts from here once the saved settings are loaded.
+-- Forever Enhanced Cooldown Manager: saved settings, the /ccm command, Escape
+-- for the window and the entry in Options > AddOns. Each feature lives in its
+-- own file and starts from here once the saved settings are loaded.
 local ADDON, ns = ...
 
 ns.TITLE = "Forever Enhanced Cooldown Manager"
@@ -36,6 +36,8 @@ ns.DEFAULTS = {
     castIcon = true, -- the spell's icon, name and time left on it
     castName = true,
     castTime = true,
+    swingTimer = false, -- a swing timer in the cast bar's spot: Auto Shot for hunters, the main hand for everyone
+    swingColour = "default", -- its colour: silver, or a bar colour
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
     minimap = true, -- the minimap button
@@ -54,13 +56,13 @@ ns.BAR_STYLE_NAMES = { glass = "Glass", split = "Split", outline = "Outline" }
 ns.BAR_COLOUR_KEYS = { "orange", "charcoal", "blue", "green", "purple", "class" } -- your class colour last
 ns.BAR_COLOUR_NAMES = { orange = "Orange", class = "Class", charcoal = "Charcoal", blue = "Blue", green = "Green", purple = "Purple" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
-    prdComboColour = { default = true }, castColour = { default = true },
+    prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true } }
 for _, key in ipairs(ns.ACCENT_KEYS) do CHOICES.accent[key] = true end
 for _, key in ipairs(ns.BAR_STYLE_KEYS) do CHOICES.barStyle[key] = true end
 for _, key in ipairs(ns.BAR_COLOUR_KEYS) do
     CHOICES.barColour[key], CHOICES.prdHealth[key], CHOICES.prdPower[key] = true, true, true
-    CHOICES.prdComboColour[key], CHOICES.castColour[key] = true, true
+    CHOICES.prdComboColour[key], CHOICES.castColour[key], CHOICES.swingColour[key] = true, true, true
 end
 
 function ns.Valid(key, value)
@@ -222,8 +224,19 @@ end
 
 local UNKNOWN = UNKNOWNOBJECT or "Unknown"
 
--- "Name (Class) - Realm". On a character's very first login the game may not
--- know its name yet: nil then, unless a name is needed now anyway.
+-- Text cut to at most max bytes, never through the middle of a letter, and
+-- without a space left at the end.
+local function Cut(text, max)
+    if #text <= max then return text end
+    local cut = max
+    -- A byte from 128 to 191 carries on the letter before it.
+    while cut > 0 and (text:byte(cut + 1) or 0) >= 128 and (text:byte(cut + 1) or 0) < 192 do cut = cut - 1 end
+    return (text:sub(1, cut):gsub("%s+$", ""))
+end
+
+-- "Name (Class) - Realm", cut to fit a profile name. On a character's very
+-- first login the game may not know its name yet: nil then, unless a name is
+-- needed now anyway.
 local function OwnName(anyway)
     local name = UnitName and UnitName("player")
     if type(name) ~= "string" or name == "" or name == UNKNOWN then
@@ -232,16 +245,18 @@ local function OwnName(anyway)
     end
     local class = UnitClass and UnitClass("player") or UNKNOWN
     local realm = GetRealmName and GetRealmName() or ""
-    if realm == "" then return ("%s (%s)"):format(name, class) end
-    return ("%s (%s) - %s"):format(name, class, realm)
+    if realm == "" then return Cut(("%s (%s)"):format(name, class), ns.PROFILE_MAX) end
+    return Cut(("%s (%s) - %s"):format(name, class, realm), ns.PROFILE_MAX)
 end
 
--- The name itself if it's free, otherwise with a number after it.
+-- The name itself if it's free, otherwise with a number after it, cut
+-- shorter where needed so it still fits.
 local function FreeName(name)
     local profiles, candidate, n = Profiles(), name, 1
     while profiles[candidate] do
         n = n + 1
-        candidate = name .. " " .. n
+        local suffix = " " .. n
+        candidate = Cut(name, ns.PROFILE_MAX - #suffix) .. suffix
     end
     return candidate
 end
@@ -324,7 +339,7 @@ end
 local function Switch(name)
     Chars()[PlayerGUID()] = name
     active = name
-    if ns.Bars and ns.Bars.started then ns.Bars:Changed() else ns.SaveBars() end
+    if ns.Bars and ns.Bars.started then ns.Bars:Changed() end
 end
 
 function ns.UseProfile(name)
@@ -384,7 +399,6 @@ function ns.UseOnAll()
     local chars = Chars()
     for guid in pairs(chars) do chars[guid] = active end
     db.everyone = active
-    ns.SaveBars()
     return true, "All your characters use " .. active .. " now, and new ones will too."
 end
 
@@ -406,7 +420,6 @@ local function Rename(name)
     end
     if db.everyone == active then db.everyone = name end
     active = name
-    ns.SaveBars()
 end
 
 function ns.RenameProfile(text)
@@ -431,29 +444,38 @@ function ns.NameUnknownProfile()
     return true
 end
 
--- Whether a profile can be deleted now: true and its name, or false and why.
+-- Whether a profile can be deleted now: true, its name and how many other
+-- characters use it, or false and why. The exact name is looked up first, so
+-- a profile named before names were kept short can still go.
 function ns.CanDeleteProfile(text)
     local why = Blocked()
     if why then return false, why end
-    local name, problem = CleanName(text)
-    if not name then return false, problem end
-    if not Profiles()[name] then return false, ('No profile is called "%s".'):format(name) end
-    local me = PlayerGUID()
-    for guid, used in pairs(Chars()) do
-        if used == name and guid ~= me then
-            return false, "Another character uses " .. name .. ", so it can't be deleted."
-        end
+    local name = type(text) == "string" and Profiles()[text] and text
+    if not name then
+        local problem
+        name, problem = CleanName(text)
+        if not name then return false, problem end
+        if not Profiles()[name] then return false, ('No profile is called "%s".'):format(name) end
     end
-    return true, name
+    local me, others = PlayerGUID(), 0
+    for guid, used in pairs(Chars()) do
+        if used == name and guid ~= me then others = others + 1 end
+    end
+    return true, name, others
 end
 
--- Deletes the named profile, unless another character uses it. Deleting your
--- own leaves you on a new, empty profile of your own.
+-- Deletes the named profile. Other characters that used it, even ones since
+-- deleted, are let go of: at their next login they get a profile as a new
+-- character would. Deleting your own leaves you on a new, empty profile of
+-- your own.
 function ns.DeleteProfile(text)
     local ok, name = ns.CanDeleteProfile(text)
     if not ok then return false, name end
-    local profiles = Profiles()
+    local profiles, chars = Profiles(), Chars()
     profiles[name] = nil
+    for guid, used in pairs(chars) do
+        if used == name then chars[guid] = nil end
+    end
     if db.everyone == name then db.everyone = nil end
     if name == active then
         local fresh = FreeName(OwnName(true))
@@ -462,7 +484,6 @@ function ns.DeleteProfile(text)
         return true, "Deleted " .. name .. ". You're now on " .. fresh .. "."
     end
     ns.PruneCustom()
-    ns.SaveBars()
     return true, "Deleted " .. name .. "."
 end
 
@@ -605,315 +626,13 @@ function ns.PruneCustom()
     end
 end
 
--- Backup ------------------------------------------------------------------------
--- The Forever client can lose addon saved settings after a restart, so every
--- choice is also kept in game settings registered by the addon, and read back
--- at login for anything missing. Plain settings are stored as "key=1" pairs and
--- the bars as "cd.size=36;cd.spells=Moonfire|Bash" text split into chunks;
--- everything read back is checked, and nothing is ever run as code.
-ns.BACKUP = "FECMBackup"
-local BARS_BACKUP = ns.BACKUP .. "Bars"
--- The backup this addon kept under its first name, read once to carry a
--- setup over, with the two settings that were renamed.
-local LEGACY = "ClassicCooldownManagerBackup"
-local LEGACY_KEYS = { classicLook = "skin", classicBars = "useBars" }
-local CHUNK, MAX_CHUNKS = 900, 48
-
-local function ReadCVar(name)
-    if not (C_CVar and C_CVar.GetCVar) then return nil end
-    local ok, value = pcall(C_CVar.GetCVar, name)
-    if ok and type(value) == "string" then return value end
-end
-
-local function WriteCVar(name, value)
-    if not (C_CVar and C_CVar.SetCVar and C_CVar.RegisterCVar) then return end
-    if ReadCVar(name) == nil then pcall(C_CVar.RegisterCVar, name, "") end
-    pcall(C_CVar.SetCVar, name, value)
-end
-
-local function ReadBackup(name)
-    local values = {}
-    local text = ReadCVar(name or ns.BACKUP)
-    if not text then return values end
-    for key, value in text:gmatch("(%w+)=(%w+)") do
-        key = LEGACY_KEYS[key] or key
-        local default = ns.DEFAULTS[key]
-        if type(default) == "boolean" and (value == "0" or value == "1") then
-            values[key] = value == "1"
-        elseif type(default) == "string" and ns.Valid(key, value) then
-            values[key] = value
-        elseif type(default) == "number" and ns.Valid(key, tonumber(value)) then
-            values[key] = tonumber(value)
-        end
-    end
-    return values
-end
-
--- The bars backup: "v2;" then key and value pairs, each written as its length,
--- a colon and the text, so profile and spell names can hold any character.
-local V2 = "v2;"
-local TOKEN_MAX = 4000
-
-local function Token(text)
-    text = tostring(text)
-    return #text .. ":" .. text
-end
-
-local function SpellText(list)
-    local names = {}
-    for _, name in ipairs(list) do
-        if not name:find("|", 1, true) then names[#names + 1] = name end
-    end
-    return table.concat(names, "|")
-end
-
-local function EncodeBars()
-    local out = { V2 }
-    local function Put(key, value) out[#out + 1] = Token(key) .. Token(value) end
-    Put("session", db.session or 0)
-    for _, key in ipairs(ns.BAR_KEYS) do
-        local bar = ns.BarData(key)
-        Put(key .. ".size", bar.size)
-        Put(key .. ".spacing", bar.spacing)
-        Put(key .. ".hide", bar.hideReady and 1 or 0)
-        Put(key .. ".ooc", bar.outOfCombat)
-        Put(key .. ".missing", bar.showMissing and 1 or 0)
-        Put(key .. ".names", bar.showNames and 1 or 0)
-        Put(key .. ".timer", bar.showTimer and 1 or 0)
-        Put(key .. ".row", bar.perRow)
-        Put(key .. ".grow", bar.grow)
-        Put(key .. ".wrap", bar.wrap)
-        if bar.x and bar.y then
-            Put(key .. ".x", ("%.1f"):format(bar.x))
-            Put(key .. ".y", ("%.1f"):format(bar.y))
-            if bar.point then Put(key .. ".point", bar.point) end
-        end
-        -- Lists saved before profiles, until the character is known.
-        local old = rawget(bar, "spells")
-        if type(old) == "table" then Put(key .. ".spells", SpellText(old)) end
-    end
-    local index = {}
-    for i, name in ipairs(ns.ProfileNames()) do
-        index[name] = i
-        Put("p" .. i, name)
-        local profile = Profiles()[name]
-        for _, key in ipairs(ns.BAR_KEYS) do Put("p" .. i .. "." .. key, SpellText(profile[key])) end
-        for key in pairs(ns.AURA_BARS) do
-            local joined = {}
-            for spell in pairs(profile.joins and profile.joins[key] or {}) do joined[#joined + 1] = spell end
-            table.sort(joined)
-            if #joined > 0 then Put("p" .. i .. "." .. key .. ".joins", SpellText(joined)) end
-        end
-    end
-    local guids = {}
-    for guid, name in pairs(Chars()) do
-        if index[name] then guids[#guids + 1] = guid end
-    end
-    table.sort(guids)
-    for _, guid in ipairs(guids) do Put("c." .. guid, index[Chars()[guid]]) end
-    if index[Everyone() or ""] then Put("all", index[Everyone()]) end
-    local custom = {}
-    for name in pairs(ns.CustomSpells()) do custom[#custom + 1] = name end
-    table.sort(custom)
-    for i, name in ipairs(custom) do
-        Put("u" .. i, name)
-        Put("u" .. i .. ".ids", table.concat(ns.CustomSpells()[name], ","))
-    end
-    local coloured = {}
-    for id in pairs(ns.BarColours()) do coloured[#coloured + 1] = id end
-    table.sort(coloured)
-    for _, id in ipairs(coloured) do Put("bc." .. id, ns.BarColours()[id]) end
-    if type(db.notesSeen) == "string" then Put("notes", db.notesSeen) end
-    local layout = ns.LayoutData()
-    Put("lay.on", layout.on and 1 or 0)
-    Put("lay.gap", layout.gap)
-    Put("lay.spacing", layout.spacing)
-    if layout.preset then Put("lay.preset", layout.preset) end
-    if layout.base then Put("lay.base", layout.base) end
-    local hidden = {}
-    for _, key in ipairs(ns.BAR_KEYS) do
-        if layout.hidden[key] then hidden[#hidden + 1] = key end
-    end
-    if #hidden > 0 then Put("lay.hidden", table.concat(hidden, ",")) end
-    Put("lay.above", table.concat(layout.above, ","))
-    Put("lay.below", table.concat(layout.below, ","))
-    if layout.left then Put("lay.left", layout.left) end
-    if layout.right then Put("lay.right", layout.right) end
-    return table.concat(out)
-end
-
-local function SpellNames(text)
-    local names = {}
-    for name in (text or ""):gmatch("[^|]+") do
-        if #name <= 60 and #names < ns.BAR_MAX_SPELLS then names[#names + 1] = name end
-    end
-    return names
-end
-
-local function DecodeV2(text)
-    local pos = #V2 + 1
-    local function Read()
-        local length, start = text:match("^(%d+):()", pos)
-        length = tonumber(length)
-        if not length or length > TOKEN_MAX then return nil end
-        local piece = text:sub(start, start + length - 1)
-        if #piece ~= length then return nil end
-        pos = start + length
-        return piece
-    end
-    local values = {}
-    while pos <= #text do
-        local key = Read()
-        local value = key and Read()
-        if not value then break end
-        values[key] = value
-    end
-    local decoded = { session = tonumber(values.session), bars = {}, profiles = {}, chars = {}, custom = {} }
-    for _, key in ipairs(ns.BAR_KEYS) do
-        local function Flag(field) return values[key .. "." .. field] == "1" end
-        decoded.bars[key] = {
-            size = tonumber(values[key .. ".size"]), spacing = tonumber(values[key .. ".spacing"]),
-            hideReady = Flag("hide"), showMissing = Flag("missing"),
-            outOfCombat = values[key .. ".ooc"] or (Flag("combat") and "hide" or nil),
-            showNames = Flag("names"), showTimer = values[key .. ".timer"] ~= "0",
-            x = tonumber(values[key .. ".x"]), y = tonumber(values[key .. ".y"]),
-            point = values[key .. ".point"], perRow = tonumber(values[key .. ".row"]),
-            grow = values[key .. ".grow"], wrap = values[key .. ".wrap"],
-            spells = values[key .. ".spells"] and SpellNames(values[key .. ".spells"]) or nil,
-        }
-    end
-    if values["lay.on"] then
-        local function Keys(text)
-            local keys = {}
-            for key in (text or ""):gmatch("[^,]+") do keys[#keys + 1] = key end
-            return keys
-        end
-        local hidden = {}
-        for _, key in ipairs(Keys(values["lay.hidden"])) do hidden[key] = true end
-        decoded.layout = { on = values["lay.on"] == "1", preset = values["lay.preset"], gap = tonumber(values["lay.gap"]),
-            spacing = tonumber(values["lay.spacing"]), base = values["lay.base"], hidden = hidden,
-            above = Keys(values["lay.above"]), below = Keys(values["lay.below"]),
-            left = values["lay.left"], right = values["lay.right"] }
-    end
-    local names = {}
-    for i = 1, 500 do
-        local name = values["p" .. i]
-        if not name then break end
-        if not CleanName(name) or CleanName(name) ~= name then break end
-        names[i] = name
-        local profile = { joins = {} }
-        for _, key in ipairs(ns.BAR_KEYS) do profile[key] = SpellNames(values["p" .. i .. "." .. key]) end
-        for key in pairs(ns.AURA_BARS) do
-            local joined = values["p" .. i .. "." .. key .. ".joins"]
-            if joined then
-                profile.joins[key] = {}
-                for _, spell in ipairs(SpellNames(joined)) do profile.joins[key][spell] = true end
-            end
-        end
-        decoded.profiles[name] = profile
-    end
-    for key, value in pairs(values) do
-        local guid = key:match("^c%.(.+)$")
-        local name = guid and names[tonumber(value)]
-        if name then decoded.chars[guid] = name end
-    end
-    decoded.everyone = names[tonumber(values.all or "")]
-    for i = 1, 500 do
-        local name = values["u" .. i]
-        if not name then break end
-        local ids = {}
-        for id in (values["u" .. i .. ".ids"] or ""):gmatch("%d+") do ids[#ids + 1] = tonumber(id) end
-        if #name <= 60 and #ids > 0 then decoded.custom[name] = ids end
-    end
-    for key, value in pairs(values) do
-        local id = tonumber(key:match("^bc%.(%d+)$") or "")
-        if id and id > 0 and ns.Valid("barColour", value) then
-            decoded.barColours = decoded.barColours or {}
-            decoded.barColours[id] = value
-        end
-    end
-    if next(decoded.profiles) == nil then decoded.profiles, decoded.chars, decoded.everyone = nil, nil, nil end
-    if values.notes and #values.notes <= 40 then decoded.notesSeen = values.notes end
-    return decoded
-end
-
--- The backup written before profiles: "cd.size=36;cd.spells=Moonfire|Bash".
-local function DecodeBars(text)
-    local bars, custom = {}, nil
-    for key, field, value in text:gmatch("(%a+)%.(%a+)=([^;]*)") do
-        if key == "extra" and field == "custom" then
-            custom = {}
-            for name, list in value:gmatch("([^|~]+)~([%d,]+)") do
-                local ids = {}
-                for id in list:gmatch("%d+") do ids[#ids + 1] = tonumber(id) end
-                if #name <= 60 and #ids > 0 then custom[name] = ids end
-            end
-        elseif ns.BAR_NAMES[key] then
-            local bar = bars[key] or { spells = {} }
-            bars[key] = bar
-            if field == "size" or field == "spacing" then
-                bar[field] = tonumber(value)
-            elseif field == "hide" then
-                bar.hideReady = value == "1"
-            elseif field == "missing" then
-                bar.showMissing = value == "1"
-            elseif field == "names" then
-                bar.showNames = value == "1"
-            elseif field == "timer" then
-                bar.showTimer = value == "1"
-            elseif field == "combat" then
-                bar.outOfCombat = value == "1" and "hide" or "show"
-            elseif field == "x" or field == "y" then
-                bar[field] = tonumber(value)
-            elseif field == "spells" then
-                for name in value:gmatch("[^|]+") do
-                    if #name <= 60 and #bar.spells < ns.BAR_MAX_SPELLS then bar.spells[#bar.spells + 1] = name end
-                end
-            end
-        end
-    end
-    return next(bars) and bars or nil, custom
-end
-
-local function ReadBarsBackup(prefix)
-    prefix = prefix or BARS_BACKUP
-    local count = tonumber(ReadCVar(prefix .. "0") or "")
-    if not count or count < 1 or count > MAX_CHUNKS then return nil end
-    local parts = {}
-    for i = 1, count do
-        parts[i] = ReadCVar(prefix .. i)
-        if not parts[i] then return nil end
-    end
-    local text = table.concat(parts)
-    if text:sub(1, #V2) == V2 then return DecodeV2(text) end
-    local bars, custom = DecodeBars(text)
-    if bars or custom then return { bars = bars, custom = custom } end
-end
-
-local function WriteBackup()
-    local flags = {}
-    for key, default in pairs(ns.DEFAULTS) do
-        if type(default) == "boolean" then
-            flags[#flags + 1] = key .. "=" .. (ns.Get(key) and "1" or "0")
-        elseif type(default) == "string" then
-            flags[#flags + 1] = key .. "=" .. ns.Get(key)
-        elseif type(default) == "number" then
-            flags[#flags + 1] = key .. "=" .. math.floor(ns.Get(key) + .5)
-        end
-    end
-    table.sort(flags)
-    WriteCVar(ns.BACKUP, table.concat(flags, ";"))
-    if not db then return end
-    local text = EncodeBars()
-    local count = math.min(MAX_CHUNKS, math.ceil(#text / CHUNK))
-    for i = 1, count do WriteCVar(BARS_BACKUP .. i, text:sub((i - 1) * CHUNK + 1, i * CHUNK)) end
-    WriteCVar(BARS_BACKUP .. "0", tostring(count))
-end
+-- Changes ---------------------------------------------------------------------------
+-- Everything lives in the saved settings, which the game writes at logout and
+-- on a reload; a change only needs the window redrawn.
 
 function ns.Set(key, value)
     if not db then return end
     db[key] = value
-    WriteBackup()
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 
@@ -921,13 +640,7 @@ end
 function ns.SetBarColour(spellID, key)
     if not db or not (Finite(spellID) and spellID > 0) then return end
     ns.BarColours()[spellID] = key ~= nil and ns.Valid("barColour", key) and key or nil
-    WriteBackup()
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
-end
-
--- Called after any change to a bar's data.
-function ns.SaveBars()
-    WriteBackup()
 end
 
 -- What's new: the version whose notes were last shown, or passed over on a
@@ -939,7 +652,6 @@ end
 function ns.SetNotesSeen(version)
     if not db then return end
     db.notesSeen = version
-    WriteBackup()
 end
 
 function ns.NeedsReload()
@@ -982,8 +694,11 @@ end
 -- combat; this keeps the addon out of the game's own Escape handling.
 local escButton
 
+-- On screen: a window left open while the interface is hidden (Alt+Z)
+-- doesn't count, so Escape goes back to the game and brings the interface
+-- back. The window takes the key again as it reappears.
 local function Shown(frame)
-    return frame ~= nil and frame:IsShown()
+    return frame ~= nil and frame:IsVisible()
 end
 
 function ns.EscUpdate()
@@ -1006,6 +721,9 @@ local function BuildEscape()
         elseif ns.window then
             ns.window:Hide()
         end
+        -- Checked again here too: hiding a frame that's already off screen
+        -- runs no OnHide, so the key would otherwise stay borrowed.
+        ns.EscUpdate()
     end)
     escButton:RegisterEvent("PLAYER_REGEN_DISABLED")
     escButton:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -1046,36 +764,20 @@ local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
 loader:RegisterEvent("PLAYER_LOGIN")
 
-ns.RESTORED_TEXT = "The game didn't keep this addon's settings from your last session, so they were restored from its backup."
-
 local function Load()
     ForeverEnhancedCooldownManagerDB = type(ForeverEnhancedCooldownManagerDB) == "table" and ForeverEnhancedCooldownManagerDB or {}
     db = ForeverEnhancedCooldownManagerDB
-    -- A first login under the new name picks up the old backup.
-    local hadBackup = ReadCVar(ns.BACKUP) ~= nil
-    local fresh = next(db) == nil and not hadBackup
-    ns.firstInstall = fresh
-    local flags = ReadBackup(fresh and LEGACY or nil)
-    local backup = ReadBarsBackup(fresh and LEGACY .. "Bars" or nil) or {}
-    -- Each login is numbered in both the saved settings and the backup. An
-    -- empty settings file next to a backup, or one older than the backup,
-    -- means the game didn't keep the last session's settings; the newer
-    -- backup is then used for everything. Otherwise saved settings win and
-    -- the backup only fills in what's missing.
-    local session = tonumber(db.session)
-    ns.restored = hadBackup and not fresh and (next(db) == nil or (session ~= nil and (backup.session or 0) > session))
-    for key, value in pairs(flags) do
-        if ns.restored or db[key] == nil then db[key] = value end
-    end
-    for _, field in ipairs({ "bars", "profiles", "chars", "everyone", "custom", "barColours", "notesSeen", "layout" }) do
-        if backup[field] ~= nil and (ns.restored or db[field] == nil) then db[field] = backup[field] end
-    end
-    db.session = math.max(session or 0, backup.session or 0) + 1
+    -- An empty settings file: the addon's first login on this account.
+    ns.firstInstall = next(db) == nil
     db.probe = nil -- results of a development check the released addon doesn't have
+    db.session = nil -- a login count earlier builds kept
+    -- Everything saved is checked and repaired now, before anything uses it.
     RepairProfiles()
     for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key) end
+    ns.LayoutData()
+    ns.CustomSpells()
+    ns.BarColours()
     ns.ResolveProfile()
-    WriteBackup()
     for key in pairs(ns.RELOAD) do ns.loaded[key] = ns.Get(key) end
 
     SLASH_FECM1 = "/ccm"
@@ -1113,11 +815,7 @@ loader:SetScript("OnEvent", function(self, event, name)
         self:UnregisterEvent("PLAYER_LOGIN")
         -- In case the character, or its name, wasn't known yet when the
         -- settings loaded.
-        if not active and ns.ResolveProfile(true) then
-            WriteBackup()
-            if ns.Bars then ns.Bars:Rebuild() end
-        end
+        if not active and ns.ResolveProfile(true) and ns.Bars then ns.Bars:Rebuild() end
         if ns.NameUnknownProfile() and ns.window and ns.window:IsShown() then ns.window:Refresh() end
-        if ns.restored then print("|cffffd100" .. ns.TITLE .. ":|r " .. ns.RESTORED_TEXT) end
     end
 end)

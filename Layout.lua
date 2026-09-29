@@ -12,8 +12,9 @@ ns.Layout = L
 
 local NAMES = 14 -- room for spell names under a row
 local FALLBACK_Y = -150 -- where the stack goes with no display: under the middle
--- What a layout changes on a bar, and Undo puts back.
-local FIELDS = { "x", "y", "point", "size", "spacing", "perRow", "grow", "wrap" }
+-- What a layout changes on a bar, and Undo puts back. Not icon sizes: a
+-- layout never changes them, so ones you set after it stay.
+local FIELDS = { "x", "y", "point", "spacing", "perRow", "grow", "wrap" }
 
 -- Each row: the bar, above or below the display (top to bottom) or beside
 -- it, and how many icons fit across. Your icon sizes stay as you set them.
@@ -74,12 +75,14 @@ function L:Active()
 end
 
 -- The display showing (say it's set to show only in combat) stacks the bars
--- around it again. A post-hook on Blizzard's frame, set once.
+-- around it again, and hiding (switched off in Options, say) closes the rows
+-- up. Post-hooks on Blizzard's frame, set once.
 local watching
 local function Watch(frame)
     if watching or not frame.HookScript then return end
     watching = true
     frame:HookScript("OnShow", function() L:Stack() end)
+    frame:HookScript("OnHide", function() L:Stack() end)
 end
 
 -- The display's bars you can see now: health, power, the extra mana bar
@@ -87,8 +90,11 @@ end
 -- (Forever's display has none of its own). Not the frame around them, which
 -- keeps a minimum height.
 local function Bars(frame)
+    local list = {}
+    -- Edit Mode's Hide Health Bar hides the container, not the bar in it.
     local health = frame.HealthBarsContainer
-    local list = { health and health.healthBar or health, frame.PowerBar }
+    if health and health:IsShown() then list[#list + 1] = health.healthBar or health end
+    list[#list + 1] = frame.PowerBar
     if not (ns.Resource and ns.Resource:ExtraHidden()) then list[#list + 1] = frame.AlternatePowerBar end
     list[#list + 1] = ns.Resource and ns.Resource:ComboRow()
     return list
@@ -231,8 +237,6 @@ function L:Stack()
             B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + data.size / 2)
         end
     end
-    -- In a fight (a form change, say) the places are saved once it's over.
-    if not InCombatLockdown() then ns.SaveBars() end
     return true
 end
 
@@ -291,7 +295,9 @@ function L:Undo()
     end
     local layout = ns.LayoutData()
     for field, value in pairs(copy.layout) do layout[field] = value end
+    -- These can be empty, which the copy leaves out.
     layout.left, layout.right, layout.base = copy.layout.left, copy.layout.right, copy.layout.base
+    layout.preset = copy.layout.preset
     if ns.Get("useBars") ~= copy.useBars then ns.Set("useBars", copy.useBars) end
     ns.Bars:Rebuild()
     if ns.Resource then ns.Resource:Match() end
@@ -341,7 +347,6 @@ function L:SetGap(gap)
     if InCombatLockdown() then return false, "Finish combat first." end
     ns.LayoutData().gap = gap
     ns.LayoutData()
-    ns.SaveBars()
     self:Stack()
     return true
 end
@@ -442,7 +447,6 @@ function L:TurnOff()
     local layout = ns.LayoutData()
     if not (layout and layout.on) then return end
     layout.on = false
-    ns.SaveBars()
     if ns.Resource then ns.Resource:Match() end
 end
 
@@ -468,7 +472,7 @@ function L:Start()
     self.started = true
     local events = CreateFrame("Frame")
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_REGEN_ENABLED", "ADDON_LOADED",
-        "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }) do
+        "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "CVAR_UPDATE" }) do
         events:RegisterEvent(event)
     end
     events:SetScript("OnEvent", function(_, event, name)
@@ -476,6 +480,13 @@ function L:Start()
             if ns.Resource and ns.Resource.pendingMatch then ns.Resource:Match() end
             if L.pending then
                 L.pending = nil
+                L:Stack()
+            end
+        elseif event == "CVAR_UPDATE" then
+            -- The display switched on or off in Options: the rows make room
+            -- or close up.
+            if type(name) == "string" and not (issecretvalue and issecretvalue(name))
+                and name:lower() == "nameplateshowself" then
                 L:Stack()
             end
         elseif event ~= "ADDON_LOADED" or name == "Blizzard_PersonalResourceDisplay" then

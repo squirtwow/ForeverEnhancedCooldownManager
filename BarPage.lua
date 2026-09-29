@@ -100,11 +100,19 @@ function ns.BuildBarPage(window, page, width)
     ghost.texture:SetAlpha(.8)
     ns.Style:Zoom(ghost.texture)
     ghost:Hide()
+    page.ghost = ghost
     ghost:SetScript("OnUpdate", function(self)
         local x, y = GetCursorPosition()
         local scale = UIParent:GetEffectiveScale()
         self:ClearAllPoints()
         self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+    end)
+    -- The window closing mid-drag drops nothing: the icon's spot comes back,
+    -- and no icon is left on the cursor for next time.
+    page:HookScript("OnHide", function()
+        state.drag = nil
+        ghost:Hide()
+        for _, icon in ipairs(page.icons) do icon:SetAlpha(1) end
     end)
 
     -- Where a dragged icon lands: on another icon takes its place, anywhere
@@ -143,7 +151,9 @@ function ns.BuildBarPage(window, page, width)
         icon.link:SetPoint("CENTER", icon, "LEFT", -GAP / 2, 0)
         icon.link:SetFrameLevel(icon:GetFrameLevel() + 3)
         icon.link:SetScript("OnClick", function()
-            B:SetJoined(state.bar, icon.index, not B:Joined(state.bar, icon.index))
+            -- Split off, it needs an icon of its own: a full bar says so.
+            local _, message = B:SetJoined(state.bar, icon.index, not B:Joined(state.bar, icon.index))
+            if message then window:Say(message) end
             window:Refresh()
         end)
         icon.link:SetScript("OnEnter", function()
@@ -169,7 +179,8 @@ function ns.BuildBarPage(window, page, width)
             local from, to = state.drag, DropTarget()
             state.drag = nil
             if from and to and to ~= from then
-                B:MoveTo(state.bar, from, to)
+                local _, message = B:MoveTo(state.bar, from, to)
+                if message then window:Say(message) end
                 window:Refresh()
             elseif from and not to then
                 -- Dragged off the bar: taken off it.
@@ -486,7 +497,14 @@ function ns.BuildBarPage(window, page, width)
             icon.bridge:SetShown(joined and (n - 1) % perRow ~= 0)
             icon:Show()
         end
-        for n = #names + 1, #page.icons do page.icons[n]:Hide() end
+        -- Icons not in use go, with their join button and line: those sit on
+        -- the tray, so hiding the icon alone would leave them behind.
+        for n = #names + 1, #page.icons do
+            local icon = page.icons[n]
+            icon:Hide()
+            icon.link:Hide()
+            icon.bridge:Hide()
+        end
         local lines = math.max(1, math.ceil(#names / perRow))
         local trayHeight = 16 + lines * ICON + (lines - 1) * GAP
         tray:SetHeight(trayHeight)

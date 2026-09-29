@@ -154,6 +154,9 @@ local function Look(item, parts)
             name:SetPoint("RIGHT", duration, "LEFT", -6, 0)
         end
         name:SetJustifyH("LEFT")
+        -- One line, cut short when too long, as Blizzard's own look does;
+        -- without a height it would wrap and spill out of the bar.
+        name:SetWordWrap(false)
     end
 end
 
@@ -290,24 +293,38 @@ M.VIEWERS = {
     { name = "BuffBarCooldownViewer", skin = TrackedBar, size = 30 },
 }
 
--- Whether a row has any icons: an item with a cooldown in it. An empty row
--- keeps two empty items and its size, so it would get an empty box.
+-- How many of a row's items have a cooldown in them, how many items it has,
+-- and the last filled one. Blizzard always keeps at least two items and room
+-- for them, so an empty row would get an empty box, and a row with one
+-- cooldown a box with an empty slot in it.
 local function Filled(viewer)
     local pool = viewer and viewer.itemFramePool
-    if not (pool and pool.EnumerateActive) then return false end
+    if not (pool and pool.EnumerateActive) then return 0, 0 end
+    local filled, active, last = 0, 0, nil
     for item in pool:EnumerateActive() do
+        active = active + 1
         local id = item.cooldownID
-        if (issecretvalue and issecretvalue(id)) or id ~= nil then return true end
+        if (issecretvalue and issecretvalue(id)) or id ~= nil then
+            filled, last = filled + 1, item
+        end
     end
-    return false
+    return filled, active, last
 end
 
+-- The box goes round the whole row, or round the one icon's art when a row
+-- has only one cooldown, and shows only while the row has any.
 local function ShowRow(name)
     local decor = rows[name]
     if not decor then return end
     local border, shadow = Style:DecorFor("bar")
-    local filled = Filled(_G[name])
-    Style:ShowDecor(decor, border and filled, shadow and filled)
+    local viewer = _G[name]
+    local filled, active, last = Filled(viewer)
+    if filled == 1 and active > 1 and last.Icon then
+        decor.region, decor.inset = last.Icon, 0
+    else
+        decor.region, decor.inset = viewer, INSET
+    end
+    Style:ShowDecor(decor, border and filled > 0, shadow and filled > 0)
 end
 
 -- Borders and shadows as chosen, on every icon and round each cooldown row.
@@ -338,10 +355,16 @@ local function Watch(spec)
     hooked[spec.name] = true
     hooksecurefunc(viewer, "OnAcquireItemFrame", function(_, item) Skin(item, spec) end)
     -- The row's icons sit INSET inside its edge, like each icon in its item.
-    -- Shown while the row has icons, checked whenever Blizzard lays it out.
+    -- Checked whenever Blizzard lays the row out or refreshes its cooldowns:
+    -- going between none, one and two cooldowns in Cooldown Settings keeps
+    -- two items, so Blizzard only refreshes them and never lays the row out.
     if spec.row then
         rows[spec.name] = Style:Decor(viewer, viewer, INSET)
-        hooksecurefunc(viewer, "RefreshLayout", function() ShowRow(spec.name) end)
+        for _, method in ipairs({ "RefreshLayout", "RefreshData" }) do
+            if type(viewer[method]) == "function" then
+                hooksecurefunc(viewer, method, function() ShowRow(spec.name) end)
+            end
+        end
         ShowRow(spec.name)
     end
     local pool = viewer.itemFramePool

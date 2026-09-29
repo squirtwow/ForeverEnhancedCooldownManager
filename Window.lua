@@ -205,9 +205,9 @@ local function BuildLook(window, page, width)
         return pills
     end
     local border = Decor("Border", "iconBorder", -60,
-        "A thin black border round each icon, or round each whole bar: your bars and Blizzard's Cooldown Manager.")
+        "A thin black border round each icon, or each whole bar whose icons stay put. Yours and Blizzard's.")
     local shadow = Decor("Shadow", "iconShadow", -88,
-        "A soft shadow round each icon, or round each whole bar. Your cast bar gets one too.")
+        "A soft shadow round each icon, or each whole bar whose icons stay put. Your cast bar gets one too.")
     window.iconBorder, window.iconShadow = border, shadow
 
     -- What the look applies to; the footer explains each.
@@ -536,12 +536,10 @@ local function BuildGeneral(window, page)
     helpAbout:SetPoint("LEFT", discord, "RIGHT", 10, 0)
     helpAbout:SetText("A tour of the basics, or the Discord for bugs and ideas.")
 
-    T:Heading(page, "Saved settings"):SetPoint("TOPLEFT", 16, -236)
-
     -- More from Squirt: the author's other addons, and a way to open them.
-    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -322)
+    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -236)
     local more = CreateFrame("Frame", nil, page, "BackdropTemplate")
-    more:SetPoint("TOPLEFT", 16, -342)
+    more:SetPoint("TOPLEFT", 16, -256)
     more:SetSize(WIDTH - NAV - 34, 74)
     T:Flat(more, T.PANEL, T.BORDER)
     local moreIcon = more:CreateTexture(nil, "ARTWORK")
@@ -574,10 +572,6 @@ local function BuildGeneral(window, page)
         moreLinks[i] = button
     end
     window.moreOpen, window.moreState, window.moreLinks = moreOpen, moreState, moreLinks
-    local kept = T:Text(page, "GameFontHighlightSmall", T.MUTED)
-    kept:SetPoint("TOPLEFT", 16, -256)
-    kept:SetWidth(440)
-    window.kept = kept
 
     function page:Refresh()
         local installed = C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("EraUI")
@@ -589,13 +583,6 @@ local function BuildGeneral(window, page)
         minimap:SetChecked(ns.Get("minimap"))
         -- New files only load after a full restart: until then, no tour.
         tour:SetShown(ns.Tour ~= nil)
-        if ns.restored then
-            kept:SetText(ns.RESTORED_TEXT .. " This happens when the game closes without saving, for example after a crash.")
-            kept:SetTextColor(T.WARN[1], T.WARN[2], T.WARN[3])
-        else
-            kept:SetText("Saved normally. The addon also keeps a backup in the game's own settings, in case the game loses them.")
-            kept:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
-        end
     end
 end
 
@@ -713,7 +700,9 @@ local function BuildWindow()
         self:Refresh()
         ns.EscUpdate()
     end)
-    window:SetScript("OnHide", function()
+    window:SetScript("OnHide", function(self)
+        -- Closed mid-drag, it never hears the mouse let go: stop moving now.
+        self:StopMovingOrSizing()
         ns.EscUpdate()
         if ns.Bars then ns.Bars:SetUnlocked(false) end
     end)
@@ -813,10 +802,6 @@ local function BuildWindow()
 
     function window:Refresh()
         self:RefreshProfiles()
-        -- Settings the game didn't keep are pointed out until the next login.
-        version:SetText(ns.restored and "Settings restored from backup at login. See General." or (Version() .. "   /ccm to open"))
-        local colour = ns.restored and T.WARN or T.MUTED
-        version:SetTextColor(colour[1], colour[2], colour[3])
         local selected = self.selected
         local barPage = ns.BAR_NAMES[selected] ~= nil
         for key, item in pairs(self.nav) do

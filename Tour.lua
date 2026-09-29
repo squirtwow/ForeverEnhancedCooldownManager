@@ -40,11 +40,20 @@ local function MinimapButton()
     if button and button:IsVisible() and button:GetAlpha() > .5 then return button end
 end
 
+-- Whether the profile menu in the header is open.
+local function ProfilesOpen(w)
+    return w.profilePanel ~= nil and w.profilePanel:IsShown()
+end
+
+-- The end of the Look step, once the look is on or waiting for a reload.
+local PICK = " Pick its design, colour, border and shadow here. Your own bars use them too."
+
 -- The steps. page: the page it opens (none keeps the one showing). target:
 -- the part it outlines, or the first and last of a row of them. side: where
--- the box goes, "right", "below" or "above"; align "end" lines the box up
--- with the far end. A Try it step has watch, a count that goes up once it's
--- done, unless already says it was done before the step began.
+-- the box goes, "right", "left", "below" or "above"; align "end" lines the
+-- box up with the far end, where the side has one. A Try it step has watch,
+-- a count that goes up once it's done, unless already says it was done
+-- before the step began.
 local STEPS = {
     {
         title = "The menu",
@@ -96,7 +105,18 @@ local STEPS = {
             if not ns.CooldownManagerOn() then
                 return "Blizzard's Cooldown Manager is off, and its new look needs it. Turn on switches it on."
             end
-            return "Blizzard's Cooldown Manager already has the new look. Pick its design, colour, border and shadow here. Your own bars use them too."
+            -- Only say it has the look when the look really started at login.
+            if not ns.loaded.skin then
+                if ns.Get("skin") then
+                    return "Reload to apply, and Blizzard's Cooldown Manager gets the new look." .. PICK
+                end
+                return "Tick Apply this look to the Cooldown Manager, then reload, for its new look." .. PICK
+            end
+            if not ns.Get("skin") then
+                return "Blizzard's Cooldown Manager goes back to its own look when you reload, as Apply this look is unticked."
+                    .. " Your own bars still use the design, colour, border and shadow picked here."
+            end
+            return "Blizzard's Cooldown Manager already has the new look." .. PICK
         end,
         target = function(w)
             if ns.CooldownManagerOn() then return w.lookOptions end
@@ -108,15 +128,18 @@ local STEPS = {
         page = "cast",
         when = function(w) return w.pages.cast ~= nil end,
         title = "Cast bar",
-        text = "Tick this for your own cast bar under your resource display. Leave it off if you use a cast bar addon.",
-        target = function(w) return w.pages.cast.shown end,
+        text = "Tick the first for your own cast bar under your resource display, or leave it off if you use a cast bar addon."
+            .. " The second adds a swing timer in the same spot.",
+        -- Both ticks, so the box goes under the swing timer's, not over it.
+        target = function(w) return w.pages.cast.ticks end,
         side = "below",
     },
     {
         title = "Profiles",
         text = "Each character has its own spell lists. Share one between characters, even across classes, or use one on all of them.",
-        target = function(w) return w.profileButton end,
-        side = "below",
+        -- Once the menu is open the box moves beside it, so it never covers it.
+        target = function(w) return ProfilesOpen(w) and w.profilePanel or w.profileButton end,
+        side = function(w) return ProfilesOpen(w) and "left" or "below" end,
         align = "end",
     },
     {
@@ -137,6 +160,7 @@ local STEPS = {
 -- on the box and its offset, and which way the arrow faces.
 local PLACES = {
     right = { "TOPLEFT", "TOPRIGHT", GAP, 0, "RIGHT", "TOPLEFT", 0, -20, "left" },
+    left = { "TOPRIGHT", "TOPLEFT", -GAP, 0, "LEFT", "TOPRIGHT", 0, -20, "right" },
     below = { "TOPLEFT", "BOTTOMLEFT", 0, -GAP, "BOTTOM", "TOPLEFT", 24, 0, "up" },
     above = { "BOTTOMLEFT", "TOPLEFT", 0, GAP, "TOP", "BOTTOMLEFT", 24, 0, "down" },
     belowEnd = { "TOPRIGHT", "BOTTOMRIGHT", 0, -GAP, "BOTTOM", "TOPRIGHT", -24, 0, "up" },
@@ -237,6 +261,11 @@ local function Build()
     box:Hide()
     -- Closing the window ends the tour.
     window:HookScript("OnHide", function() Tour:Stop() end)
+    -- Opening or closing the profile menu moves the box beside it, or back.
+    if window.profilePanel then
+        window.profilePanel:HookScript("OnShow", function() Tour:Repoint() end)
+        window.profilePanel:HookScript("OnHide", function() Tour:Repoint() end)
+    end
 end
 
 local function Ready()
@@ -270,8 +299,8 @@ local function Point(step)
     outline:SetPoint("TOPLEFT", first, "TOPLEFT", -OUTLINE, OUTLINE)
     outline:SetPoint("BOTTOMRIGHT", last, "BOTTOMRIGHT", OUTLINE, -OUTLINE)
     outline:Show()
-    local side = Value(step.side) or "below"
-    local place = PLACES[Value(step.align) == "end" and side .. "End" or side] or PLACES.below
+    local side = Value(step.side, window) or "below"
+    local place = (Value(step.align, window) == "end" and PLACES[side .. "End"]) or PLACES[side] or PLACES.below
     local anchor = place[2]:find("RIGHT") and last or first
     box:ClearAllPoints()
     box:SetPoint(place[1], anchor, place[2], place[3], place[4])
@@ -281,6 +310,9 @@ local function Point(step)
     if place[9] == "left" then
         arrow:SetSize(9, 16)
         arrow:SetTexCoord(1, 0, 0, 0, 1, 1, 0, 1)
+    elseif place[9] == "right" then
+        arrow:SetSize(9, 16)
+        arrow:SetTexCoord(1, 1, 0, 1, 1, 0, 0, 0)
     else
         arrow:SetSize(16, 9)
         if place[9] == "up" then arrow:SetTexCoord(0, 1, 0, 1) else arrow:SetTexCoord(0, 1, 1, 0) end
@@ -372,4 +404,13 @@ function Tour:Sync()
     local here = not step.page or Same(step.page, window.selected)
     outline:SetShown(here and Value(step.target, window) ~= nil)
     box.arrow:SetShown(here)
+end
+
+-- Points the step showing at its part again, for a part that moved or
+-- changed (the Profiles step, once the profile menu opens or closes).
+function Tour:Repoint()
+    local step = steps and index and steps[index]
+    if not (step and box and box:IsShown()) then return end
+    Point(step)
+    self:Sync()
 end

@@ -7,6 +7,11 @@
 -- bar works as before. On, it keeps its room between casts, since the Buffs
 -- and Debuffs bars under it can't move in a fight. Should the game ever keep
 -- a cast's times secret, Blizzard's own bar shows that cast instead.
+--
+-- A swing timer can share the spot (also off by default): Auto Shot for
+-- hunters, the main hand for everyone, from the game's PLAYER_SWING. A cast
+-- takes the spot while it lasts, then the swing timer comes back. With only
+-- the swing timer on, casts are left to Blizzard's own bar.
 local _, ns = ...
 
 local C = {}
@@ -14,13 +19,20 @@ ns.CastBar = C
 
 local Style = ns.Style
 local GOLD, GREEN, RED = { 1, .7, 0 }, { 0, .8, 0 }, { .85, .15, .1 } -- casting, channelling, broken off
-local HOLD, FADE = .4, .3 -- a finished or broken cast stays up this long, then fades
+local SILVER = { .66, .68, .72 } -- the swing timer's own colour
+local HOLD, FADE = .4, .3 -- a finished or broken cast, or a swing run out, stays up this long, then fades
 local PAD = 4 -- under the display: the gap Blizzard leaves between its own bars
 local ALONE = { x = 0, y = -150, width = 200, height = 0 } -- with no display to go under
+local MAIN_HAND, RANGED = 16, 18 -- equipment slots
+local SWORD, BOW = "Interface\\Icons\\INV_Sword_04", "Interface\\Icons\\INV_Weapon_Bow_05"
+local LONGEST = 60 -- seconds: a swing any longer isn't a real one
 
 local row -- your cast bar, once made
 local cast -- the cast on it now: { channel, id, start, finish }
 local fading -- when the last cast ended, while it fades
+local swing -- the swing timer's latest swing: { ranged, total, finish }
+local swingEnd -- when the last swing ran out with no new one, while it fades
+local drawn -- what the bar is drawn for: "cast", "channel", "broken", "swing" or nil
 
 -- Secret values can be handed to the game, but never read.
 local function Open(value)
@@ -83,8 +95,41 @@ local function Colour(channel)
     return channel and GREEN or GOLD
 end
 
+-- The swing timer's colour: yours, or silver.
+function C:SwingColour()
+    local key = ns.Get("swingColour")
+    if key ~= "default" then return Style:BarColour(key) end
+    return SILVER
+end
+
+-- The spot's colour, as the Layout page draws it: the cast bar's, or the
+-- swing timer's while only that's on.
 function C:Colour()
+    if not ns.Get("castBar") and ns.Get("swingTimer") then return self:SwingColour() end
     return Colour(false)
+end
+
+function C:Hunter()
+    local _, class = UnitClass("player")
+    return class == "HUNTER"
+end
+
+-- What a swing is called: Auto Shot for hunters, and the main hand.
+function C:SwingName(ranged)
+    if not ranged then return "Main hand" end
+    return self:Hunter() and "Auto Shot" or "Ranged"
+end
+
+-- A bow or a sword, for the preview and when the weapon's own icon isn't to hand.
+function C:SwingIcon(ranged)
+    return ranged and BOW or SWORD
+end
+
+-- The weapon's own icon.
+function C:WeaponIcon(ranged)
+    local texture = GetInventoryItemTexture and GetInventoryItemTexture("player", ranged and RANGED or MAIN_HAND)
+    if Open(texture) and texture then return texture end
+    return self:SwingIcon(ranged)
 end
 
 -- A cast bar's parts, for yours and for the window's preview: the spell's
@@ -130,10 +175,10 @@ function C:Make(parent)
 end
 
 -- Sizes and colours a cast bar from your choices: its height, the design,
--- the colour (red once a cast is broken off) and which parts show.
-function C:Look(frame, channel, broken)
+-- the colour and which parts show.
+local function Dress(frame, colour)
     local height = ns.Get("castHeight")
-    local design, colour = ns.Get("barStyle"), broken and RED or Colour(channel)
+    local design = ns.Get("barStyle")
     local outline = design == "outline"
     local withIcon, withTime = ns.Get("castIcon"), ns.Get("castTime")
     local bar = frame.bar
@@ -159,7 +204,34 @@ function C:Look(frame, channel, broken)
     Style:ShowDecor(frame.decor, false, ns.Get("iconShadow") ~= "off")
 end
 
--- Casting ------------------------------------------------------------------------------
+-- A cast's colour: red once it's broken off.
+function C:Look(frame, channel, broken)
+    Dress(frame, broken and RED or Colour(channel))
+end
+
+function C:SwingLook(frame)
+    Dress(frame, self:SwingColour())
+end
+
+-- Drawing ------------------------------------------------------------------------------
+-- One bar, drawn for a cast or a swing. It only ticks while something shows
+-- or fades.
+
+local function DrawSwing()
+    drawn = "swing"
+    C:SwingLook(row)
+    row.bar:SetMinMaxValues(0, swing.total)
+    row.icon:SetTexture(C:WeaponIcon(swing.ranged))
+    row.bar.name:SetText(C:SwingName(swing.ranged))
+    row:SetAlpha(1)
+end
+
+-- The cast has left the spot: a swing still running takes it back, but one
+-- that ran out meanwhile doesn't come back just to fade.
+local function Handover(now)
+    if swing and swing.finish <= now then swing = nil end
+    swingEnd, drawn = nil, nil
+end
 
 local function Tick()
     local now = GetTime()
@@ -167,23 +239,75 @@ local function Tick()
         local bar, left = row.bar, math.max(0, cast.finish - now)
         bar:SetValue(cast.channel and left or math.min(cast.total, now - cast.start))
         bar.time:SetFormattedText("%.1f", left)
-    elseif fading then
+        return
+    end
+    if fading then
         local gone = now - fading
-        if gone >= HOLD + FADE then
-            fading = nil
-            row:SetAlpha(0)
-            row:SetScript("OnUpdate", nil)
-        elseif gone > HOLD then
-            row:SetAlpha(1 - (gone - HOLD) / FADE)
+        if gone < HOLD + FADE then
+            if gone > HOLD then row:SetAlpha(1 - (gone - HOLD) / FADE) end
+            return
+        end
+        fading = nil
+        Handover(now)
+    end
+    if swing then
+        if drawn ~= "swing" then DrawSwing() end
+        local left = swing.finish - now
+        if left > 0 then
+            row.bar:SetValue(swing.total - left)
+            row.bar.time:SetFormattedText("%.1f", left)
+            return
+        end
+        -- Run out with no new swing yet: full and held, then it fades, so it
+        -- never blinks out between shots.
+        row.bar:SetValue(swing.total)
+        row.bar.time:SetFormattedText("%.1f", 0)
+        swing, swingEnd = nil, swing.finish
+    end
+    if swingEnd and drawn == "swing" then
+        local gone = now - swingEnd
+        if gone < HOLD + FADE then
+            row:SetAlpha(gone > HOLD and 1 - (gone - HOLD) / FADE or 1)
+            return
         end
     end
-end
-
-local function Clear()
-    cast, fading = nil, nil
+    -- Nothing left to show: no more work each frame.
+    swingEnd, drawn = nil, nil
     row:SetAlpha(0)
     row:SetScript("OnUpdate", nil)
 end
+
+local function Wake()
+    row:SetScript("OnUpdate", Tick)
+    Tick()
+end
+
+-- No cast on the bar any more; a swing timer carries on.
+local function DropCast()
+    if not (cast or fading) then return end
+    cast, fading = nil, nil
+    Handover(GetTime())
+    Wake()
+end
+
+local function DropSwing()
+    swing, swingEnd = nil, nil
+    if drawn == "swing" then
+        drawn = nil
+        Wake()
+    end
+end
+
+-- Whatever's on the bar now, restyled after a choice changes.
+local function Restyle()
+    if drawn == "swing" then
+        C:SwingLook(row)
+    else
+        C:Look(row, drawn == "channel", drawn == "broken")
+    end
+end
+
+-- Casting ------------------------------------------------------------------------------
 
 local function Begin(channel)
     local name, text, texture, startMS, endMS, id, _
@@ -194,13 +318,14 @@ local function Begin(channel)
     end
     if Open(name) and not name then return end
     if not (Open(startMS) and Open(endMS) and Open(id)) then
-        Clear()
+        DropCast()
         Native(true)
         return
     end
     Native(false)
     local start, finish = startMS / 1000, endMS / 1000
     cast, fading = { channel = channel, id = id, start = start, finish = finish, total = math.max(.001, finish - start) }, nil
+    drawn = channel and "channel" or "cast"
     C:Look(row, channel)
     row.bar:SetMinMaxValues(0, cast.total)
     row.icon:SetTexture(texture)
@@ -220,6 +345,7 @@ end
 local function Broken(text)
     local channel, total = cast.channel, cast.total
     cast, fading = nil, GetTime()
+    drawn = "broken"
     C:Look(row, channel, true)
     row.bar:SetValue(total)
     row.bar.name:SetText(text)
@@ -229,7 +355,10 @@ end
 local INTERRUPT_TEXT, FAIL_TEXT = INTERRUPTED or "Interrupted", FAILED or "Failed"
 
 function C:Event(event, id, interruptedBy)
-    if not (row and ns.Get("castBar")) then return end
+    if not row then return end
+    -- A new world or weapon: the last swing is over.
+    if event == "PLAYER_ENTERING_WORLD" or event == "WEAPON_SLOT_CHANGED" then DropSwing() end
+    if event == "WEAPON_SLOT_CHANGED" or not ns.Get("castBar") then return end
     if event == "PLAYER_ENTERING_WORLD" then
         local channelling, casting = UnitChannelInfo("player"), UnitCastingInfo("player")
         if not Open(channelling) or channelling then
@@ -237,7 +366,7 @@ function C:Event(event, id, interruptedBy)
         elseif not Open(casting) or casting then
             Begin(false)
         else
-            Clear()
+            DropCast()
         end
     elseif event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_DELAYED" then
         Begin(false)
@@ -258,11 +387,29 @@ function C:Event(event, id, interruptedBy)
     end
 end
 
+-- Swinging -----------------------------------------------------------------------------
+
+-- The game's PLAYER_SWING: the seconds until the next swing, and which hand
+-- (0 main hand, 1 off hand, 2 ranged). The newest main hand or ranged swing
+-- shows, filling until the next; the off hand doesn't. A swing the game keeps
+-- secret is skipped, never guessed at.
+function C:Swing(duration, kind)
+    if not (row and ns.Get("swingTimer")) then return end
+    if not (Open(duration) and Open(kind)) then return end
+    if (kind ~= 0 and kind ~= 2) or type(duration) ~= "number" or not (duration > 0 and duration < LONGEST) then return end
+    swing, swingEnd = { ranged = kind == 2, total = duration, finish = GetTime() + duration }, nil
+    -- A cast keeps the spot until it's gone.
+    if not (cast or fading) then DrawSwing() end
+    Wake()
+end
+
 -- Its place ----------------------------------------------------------------------------
 
--- How much room it takes under the display while it's on.
+-- How much room it takes under the display while the cast bar or the swing
+-- timer is on.
 function C:Room()
-    return ns.Get("castBar") and ns.Get("castHeight") or nil
+    if ns.Get("castBar") or ns.Get("swingTimer") then return ns.Get("castHeight") end
+    return nil
 end
 
 -- Puts the bar under the display (and its combo points), as wide as it, and
@@ -289,15 +436,16 @@ function C:Place()
     self:Under(ns.Layout and ns.Layout:Display() or ALONE)
 end
 
--- After a choice changes: shown or not (Blizzard's bar back while it's off),
--- restyled, and the rows moved to make room or close up.
+-- After a choice changes: shown or not (Blizzard's bar back while the cast
+-- bar is off), restyled, and the rows moved to make room or close up.
 function C:Apply()
     if not row then return end
-    local on = ns.Get("castBar") == true
-    row:SetShown(on)
-    if not on then Clear() end
-    Native(not on)
-    self:Look(row, cast and cast.channel)
+    local casts, swings = ns.Get("castBar") == true, ns.Get("swingTimer") == true
+    row:SetShown(casts or swings)
+    if not casts then DropCast() end
+    if not swings then DropSwing() end
+    Native(not casts)
+    Restyle()
     if ns.Layout then ns.Layout:Stack() else self:Place() end
 end
 
@@ -313,7 +461,17 @@ function C:Start()
         events:RegisterUnitEvent(event, "player")
     end
     events:RegisterEvent("PLAYER_ENTERING_WORLD")
-    events:SetScript("OnEvent", function(_, event, _, id, _, interruptedBy) C:Event(event, id, interruptedBy) end)
+    -- Forever's own swing events; a client without them just has no swing timer.
+    pcall(events.RegisterEvent, events, "PLAYER_SWING")
+    pcall(events.RegisterEvent, events, "WEAPON_SLOT_CHANGED")
+    events:SetScript("OnEvent", function(_, event, ...)
+        if event == "PLAYER_SWING" then
+            C:Swing(...)
+        else
+            local _, id, _, interruptedBy = ...
+            C:Event(event, id, interruptedBy)
+        end
+    end)
     self.row = row
     self:Apply()
 end

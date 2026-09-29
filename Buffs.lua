@@ -139,6 +139,20 @@ function F:Create(bar)
     end
 end
 
+-- The border and shadow round each fixed spot, when chosen. They go with
+-- the Debuffs bar's greyed spots while there's no enemy, so no empty boxes
+-- are left behind. Only changed when something about them has.
+function F:HolderDecor(bar)
+    if not (bar and bar.holders) then return end
+    local border, shadow = Style:DecorFor("icon")
+    local shown = bar.enemy ~= false
+    border, shadow = border and shown, shadow and shown
+    local state = (border and "b" or "") .. (shadow and "s" or "")
+    if bar.holderDecor == state then return end
+    bar.holderDecor = state
+    for _, holder in ipairs(bar.holders) do Style:ShowDecor(holder.decor, border, shadow) end
+end
+
 -- The Debuffs bar's greyed spots only show while you have a target you can
 -- attack, and its icons follow a new target at once. Only the addon's own
 -- textures change here, so this is fine in combat, as is the refresh, which
@@ -147,7 +161,9 @@ function F:UpdateTarget(bar)
     if not (bar and bar.holders and ns.AURA_BARS[bar.key].unit == "target") then return end
     local hostile = UnitExists("target") and UnitCanAttack("player", "target")
     if not Open(hostile) then hostile = true end
-    for _, holder in ipairs(bar.holders) do holder.icon:SetAlpha(hostile and .45 or 0) end
+    bar.enemy = hostile and true or false
+    for _, holder in ipairs(bar.holders) do holder.icon:SetAlpha(bar.enemy and .45 or 0) end
+    self:HolderDecor(bar)
     if bar.container then bar.container:UpdateAllAuras() end
 end
 

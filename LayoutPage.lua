@@ -350,6 +350,7 @@ function ns.BuildLayoutPage(window, page, width, height)
     ghost.texture:SetAlpha(.8)
     ns.Style:Zoom(ghost.texture)
     ghost:Hide()
+    page.ghost = ghost
     ghost:SetScript("OnUpdate", function(self)
         local x, y = GetCursorPosition()
         local scale = UIParent:GetEffectiveScale()
@@ -361,7 +362,8 @@ function ns.BuildLayoutPage(window, page, width, height)
         ghost:Hide()
         local from = picked
         picked = nil
-        if not from then return end
+        -- Dropped after the window closed (Escape, say): it stays where it was.
+        if not (from and page:IsVisible()) then return end
         local target
         for key, row in pairs(rows) do
             if row:IsShown() and row:IsMouseOver() then target = key end
@@ -373,6 +375,12 @@ function ns.BuildLayoutPage(window, page, width, height)
             Done(B:TakeOff(from.bar, from.name))
         end
     end
+    -- The window closing mid-drag drops nothing, and no icon is left on the
+    -- cursor for next time.
+    page:HookScript("OnHide", function()
+        picked = nil
+        ghost:Hide()
+    end)
 
     local function Tile(row, i)
         local tile = row.tiles[i]
@@ -383,6 +391,9 @@ function ns.BuildLayoutPage(window, page, width, height)
         tile.texture:SetAllPoints()
         tile:RegisterForDrag("LeftButton")
         tile:SetScript("OnDragStart", function(self)
+            -- Nothing is still held from a drag that never landed.
+            picked = nil
+            ghost:Hide()
             if not self.name then return end
             picked = { bar = row.key, name = self.name }
             ghost.texture:SetTexture(self.texture:GetTexture())
@@ -768,7 +779,7 @@ function ns.BuildLayoutPage(window, page, width, height)
             text = "Your bars follow your Personal Resource Display."
         elseif L.moved then
             text = "You moved a bar, so they're no longer stacked."
-        elseif layout.preset then
+        elseif layout.preset or layout.base then -- picked once, even if edited since
             text = "Your bars stay where you put them."
         else
             text = "Pick a layout to stack your bars around your resource display."

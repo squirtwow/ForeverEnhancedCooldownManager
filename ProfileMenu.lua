@@ -6,6 +6,8 @@ local _, ns = ...
 local T = ns.Theme
 
 local WIDTH, ROW = 300, 22
+local LIST_ROWS = 8 -- profiles listed at once; more scroll
+local LIST_WIDTH = WIDTH - 28 -- the list, clear of its scroll thumb
 
 local function Users(name)
     if ns.OnAll(name) then return "all characters" end
@@ -28,24 +30,47 @@ function ns.BuildProfileMenu(window, header, anchor)
     panel:SetPoint("TOPRIGHT", button, "BOTTOMRIGHT", 0, -4)
     panel:SetSize(WIDTH, 200) -- sized again on every refresh
     panel:SetFrameLevel(window:GetFrameLevel() + 60)
+    panel:SetClampedToScreen(true)
     T:Flat(panel, T.PANEL, T.CONTROL_BORDER)
     panel:EnableMouse(true)
     panel:Hide()
     window.profilePanel = panel
     T:Heading(panel, "Profiles"):SetPoint("TOPLEFT", 10, -10)
 
-    -- Deleting asks first, in the window's own dialog.
+    -- The profiles scroll in a list of up to LIST_ROWS, so however many there
+    -- are, the name box and buttons under it stay in reach. Pinned by two
+    -- corners, again a moment after the menu opens (see the bar page).
+    local list = T:Scroll(panel, LIST_WIDTH)
+    local tall = 1 -- rows the list is tall enough for
+    local function Pin()
+        list:ClearAllPoints()
+        list:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -28)
+        list:SetPoint("BOTTOMRIGHT", panel, "TOPLEFT", 10 + LIST_WIDTH, -(28 + tall * ROW))
+        list:ScrollTo(list:GetVerticalScroll() or 0)
+    end
+    Pin()
+    panel:HookScript("OnShow", function() C_Timer.After(0, Pin) end)
+    window.profileList = list
+
+    -- Deleting asks first, in the window's own dialog, saying what happens to
+    -- any other character using it: at its next login it gets a profile as a
+    -- new character would, even one since deleted that only left its name.
     local function Ask(name)
-        -- A profile another character uses can't go: say so rather than ask.
-        local ok, why = ns.CanDeleteProfile(name)
+        local ok, why, others = ns.CanDeleteProfile(name)
         if not ok then
             window:Say(why)
             return window:Refresh()
         end
         local mine = name == ns.ProfileName()
-        window:Ask(('Delete "%s"?'):format(name), mine
-            and "You're using it, so you'll move to a new, empty profile of your own. This can't be undone."
-            or "This can't be undone.", "Delete", function()
+        local detail = mine and "You're using it, so you'll move to a new, empty profile of your own. " or ""
+        if others > 0 then
+            local everyone = ns.EveryoneProfile()
+            local fate = everyone and everyone ~= name and ("loads " .. everyone)
+                or "gets a new, empty profile of its own"
+            detail = detail .. (others == 1 and "Another character uses it, and " or (others .. " other characters use it, and each "))
+                .. fate .. " at its next login. "
+        end
+        window:Ask(('Delete "%s"?'):format(name), detail .. "This can't be undone.", "Delete", function()
             local done, message = ns.DeleteProfile(name)
             window:Say(message)
             -- Deleting your own profile moves you, so the menu closes as for any switch.
@@ -57,9 +82,9 @@ function ns.BuildProfileMenu(window, header, anchor)
     local rows = {}
     local function Row(i)
         if rows[i] then return rows[i] end
-        local row = CreateFrame("Button", nil, panel)
-        row:SetSize(WIDTH - 20, ROW - 2)
-        row:SetPoint("TOPLEFT", 10, -28 - (i - 1) * ROW)
+        local row = CreateFrame("Button", nil, list.content)
+        row:SetSize(LIST_WIDTH, ROW - 2)
+        row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW)
         row.fill = row:CreateTexture(nil, "BACKGROUND")
         row.fill:SetAllPoints()
         T:Fill(row.fill, T.SELECTED)
@@ -177,8 +202,12 @@ function ns.BuildProfileMenu(window, header, anchor)
             row:Show()
         end
         for i = #names + 1, #rows do rows[i]:Hide() end
-        -- The box, buttons and hint follow the list.
-        local y = 32 + #names * ROW
+        -- The list is as tall as its profiles, up to LIST_ROWS; the box,
+        -- buttons and hint follow it.
+        tall = math.max(1, math.min(#names, LIST_ROWS))
+        list.content:SetHeight(math.max(1, #names * ROW))
+        Pin()
+        local y = 32 + tall * ROW
         input:ClearAllPoints()
         input:SetPoint("TOPLEFT", 10, -y)
         for _, action in pairs(buttons) do

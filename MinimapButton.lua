@@ -33,6 +33,17 @@ local function Follow()
     M:Place()
 end
 
+-- Saved once, where it was let go.
+local function Drop(self)
+    self:SetScript("OnUpdate", nil)
+    self.isMoving = nil
+    dropped = GetTime()
+    local angle = dragAngle
+    dragAngle = nil
+    if angle then ns.Set("minimapAngle", angle) end
+    M:Place()
+end
+
 function M:Apply()
     if not button then return end
     button:SetShown(ns.Get("minimap"))
@@ -73,18 +84,17 @@ function M:Start()
             ns.Toggle()
         end
     end)
+    -- isMoving tells minimap tidiers (EraUI's Clean minimap) not to fade it
+    -- mid-drag, when the cursor can be well off the button.
     button:SetScript("OnDragStart", function(self)
         GameTooltip:Hide()
+        self.isMoving = true
         self:SetScript("OnUpdate", Follow)
     end)
-    -- Saved once, where it was let go.
-    button:SetScript("OnDragStop", function(self)
-        self:SetScript("OnUpdate", nil)
-        dropped = GetTime()
-        local angle = dragAngle
-        dragAngle = nil
-        if angle then ns.Set("minimapAngle", angle) end
-        M:Place()
+    button:SetScript("OnDragStop", Drop)
+    -- Hidden mid-drag: let go there, so it doesn't trail the cursor later.
+    button:SetScript("OnHide", function(self)
+        if self.isMoving then Drop(self) end
     end)
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")

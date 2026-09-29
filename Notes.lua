@@ -30,6 +30,7 @@ ns.NOTES = {
                 "Change a layout row by row: how many icons fit across, which bar goes in which row, and where the display sits in the stack. Drag icons between rows, or off a row to remove them. Take a whole bar out, or Reset back to the preset.",
                 "Find a debuff on the Layout page: only your class's debuffs are listed, and you pick the spot in the Debuffs row it goes in.",
                 "Cast bar page: your own cast bar right under your Personal Resource Display, in your bar design and colour, with the spell's icon, name and time left, and a live preview. Blizzard's cast bar is hidden while it's on. Off by default; off, your rows close up so another addon's cast bar works as before.",
+                "Swing timer on the Cast bar page: your main hand and ranged swings (Auto Shot for hunters), in the cast bar's spot under your Personal Resource Display, in your bar design and a colour of its own, with a live preview. A cast takes the spot while it lasts. Off by default.",
                 "Trinkets, potions, your Hearthstone and ammo can go on a bar too. Search to add spells outside your spellbook by name or spell ID, or tick Show all ranks to use a lower rank.",
             } },
             { "Settings", {
@@ -37,7 +38,6 @@ ns.NOTES = {
                 "A minimap button: click it for the settings, right-click for What's new, and drag it round the minimap. Turn it off on the General page.",
                 "Found a bug or have an idea? The Discord button on the General page and in What's new gives you the invite, or type /ccm discord.",
                 "Profiles: each character gets its own lists, and characters can share one, even across classes: each character only shows its own class's spells. Use on all characters puts one profile on every character. Switch, copy, rename or delete them from the Profile menu.",
-                "Your settings are also backed up in the game's own settings, so they come back if the game loses them, and you're told when that happens.",
                 "Pick the window's accent colour on the Look page, and find EraUI, my other addon, under More from Squirt on the General page.",
             } },
         },
@@ -92,7 +92,10 @@ local function Build()
     window:Hide()
     -- Set before anything hooks them: setting a script later drops hooks.
     window:SetScript("OnShow", function() ns.EscUpdate() end)
-    window:SetScript("OnHide", function() ns.EscUpdate() end)
+    window:SetScript("OnHide", function(self)
+        self:StopMovingOrSizing() -- closed mid-drag, it never hears the mouse let go
+        ns.EscUpdate()
+    end)
     ns.notes = window
 
     local header = T:TitleBar(window, HEADER)

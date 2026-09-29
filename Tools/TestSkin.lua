@@ -95,6 +95,7 @@ function Proto:SetWidth(w)
     S[self].width = w
 end
 function Proto:SetFontObject(o) S[self].font = o end
+function Proto:SetWordWrap(v) S[self].wordWrap = v end
 function Proto:SetCountdownFont(o) S[self].countdownFont = o end
 function Proto:SetTexCoord(...)
     S[self].coords = table.concat({ ... }, ",")
@@ -186,6 +187,14 @@ local function BarItem()
 end
 
 local acquired = {}
+-- Blizzard's own refreshes, run by the test as the game would. The addon may
+-- only post-hook them, never call them itself.
+local blizzardCalling = false
+local function Blizzard(viewer, method)
+    blizzardCalling = true
+    viewer[method](viewer)
+    blizzardCalling = false
+end
 local function Viewer(name, make, preexisting)
     local viewer = New("Frame")
     local active = {}
@@ -193,7 +202,8 @@ local function Viewer(name, make, preexisting)
     viewer.itemFramePool = { EnumerateActive = function() return pairs(active) end }
     viewer.OnAcquireItemFrame = function(self, item) acquired[item] = (acquired[item] or 0) + 1 end
     viewer.make = make
-    viewer.RefreshLayout = function() end
+    viewer.RefreshLayout = function() assert(blizzardCalling, "called RefreshLayout on a Blizzard viewer") end
+    viewer.RefreshData = function() assert(blizzardCalling, "called RefreshData on a Blizzard viewer") end
     Seal(viewer)
     S[viewer.itemFramePool] = nil
     return viewer, active
@@ -203,7 +213,7 @@ end
 
 local frames, printed, reloads, combat, cvarOn
 local bindings
-local cvars = {} -- addon-registered game settings survive a restart
+local cvars = {} -- the game's own settings (the addon keeps none of its own there)
 
 local function Fire(event, ...)
     for _, frame in ipairs(frames) do
@@ -392,6 +402,7 @@ Equal(S[box].shown, false, "no time box")
 Equal(S[bar.Bar.Pip].alpha, 1, "and Blizzard's spark at the end of the fill")
 Equal(S[bar.Bar.Duration].points[1][1], "RIGHT", "time on the right")
 Equal(S[bar.Bar.Name].points[2][2], bar.Bar.Duration, "the name stops short of it")
+Equal(S[bar.Bar.Name].wordWrap, false, "a long name stays on one line, cut short, as in Blizzard's look")
 
 ns.Set("barStyle", "split")
 ns.Skin:ApplyBarLook()
@@ -399,6 +410,7 @@ Equal(S[sheen].shown == false and S[box].shown, true, "Split: a dark box instead
 local at = S[bar.Bar.Duration].points[1]
 Equal(at[1] == "CENTER" and at[2], box, "the time centred in it")
 Equal(S[bar.Bar.Name].points[2][2], box, "the name stops before it")
+Equal(S[bar.Bar.Name].wordWrap, false, "still on one line")
 Equal(S[bar.Bar.Pip].alpha, 0, "no spark")
 
 ns.Set("barStyle", "outline")
@@ -477,7 +489,7 @@ Equal(#printed, 0, "no errors with bars of their own colour")
 for _, viewer in ipairs({ v.essential, v.utility, v.buffs, v.bars }) do
     local keys = 0
     for key in pairs(viewer) do if key ~= "make" then keys = keys + 1 end end
-    Equal(keys, 3, "viewer holds only its pool and its own acquire and layout functions, hooked")
+    Equal(keys, 4, "viewer holds only its pool and its own acquire, layout and refresh functions, hooked")
 end
 Equal(#printed, 0, "no errors reported")
 
@@ -517,44 +529,43 @@ Fire("ADDON_LOADED", "Blizzard_CooldownViewer")
 Equal(ns.Skin:IsSkinned(First(v.essentialActive)), true, "restyles once Blizzard's viewers load")
 Equal(ns.Skin:IsSkinned(First(v.barsActive)), true, "bars too")
 
--- Settings backup -----------------------------------------------------------------------
+-- Saved settings -------------------------------------------------------------------------
+-- Kept in the addon's saved settings only; nothing goes into the game's own.
 
 Environment()
 Viewers(0)
 ns = Load(nil)
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;minimap=1;minimapAngle=225;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup written at first login")
 ns.Set("skin", false)
 ns.Set("accent", "teal")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;minimap=1;minimapAngle=225;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=0;useBars=0", "backup follows a change")
-
 ns.SetBarColour(467, "blue")
 ns.SetBarColour(1126, "class")
+Equal(next(cvars), nil, "no game settings written")
 
--- The client loses the saved settings on restart; the backup survives.
+-- A reload keeps them.
+local saved = ForeverEnhancedCooldownManagerDB
 Environment(true)
 v = Viewers(1)
-ns = Load(nil)
-Equal(ns.Get("skin"), false, "choice restored from the backup")
-Equal(ForeverEnhancedCooldownManagerDB.skin, false, "and saved again")
+ns = Load(saved)
+Equal(ns.Get("skin"), false, "the choice kept over a reload")
 Equal(ns.Skin.started, nil, "so the charcoal look stays off")
-Equal(ns.Get("accent"), "teal", "accent restored too")
+Equal(ns.Get("accent"), "teal", "accent kept too")
 Equal(ns.BarColours()[467] == "blue" and ns.BarColours()[1126], "class", "and each bar's own colour")
 
--- Saved settings win over an older backup.
-Environment(true)
-Viewers(0)
-ns = Load({ skin = true })
-Equal(ns.Get("skin"), true, "saved settings win")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;minimap=1;minimapAngle=225;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=0", "backup brought up to date")
-
--- Anything unexpected in the backup is ignored.
+-- A lost settings file starts afresh: game settings an earlier build kept
+-- are never read, under either name.
 Environment()
-cvars.FECMBackup = "skin=maybe;os=1;print(1);accent=pink"
+cvars.FECMBackup = "skin=0;accent=teal"
+cvars.ClassicCooldownManagerBackup = "accent=teal;classicBars=1;classicLook=0;listItems=1"
+cvars.ClassicCooldownManagerBackupBars0 = "1"
+cvars.ClassicCooldownManagerBackupBars1 = "cd.size=40;cd.spells=Moonfire|Bash"
 Viewers(0)
 ns = Load(nil)
-Equal(ns.Get("skin"), true, "junk ignored; default used")
-Equal(ForeverEnhancedCooldownManagerDB.os, nil, "unknown keys never copied")
-Equal(ns.Get("accent"), "orange", "unknown accents ignored")
+Equal(tostring(ns.firstInstall) .. " " .. tostring(ns.Get("skin")) .. " " .. tostring(ns.Get("useBars")) .. " " .. ns.Get("accent"),
+    "true true false orange", "defaults, as a first install")
+Equal(#ns.BarData("cd").spells .. " " .. ns.BarData("cd").size, "0 36", "with empty bars")
+Equal(#printed, 0, "and nothing to say")
+
+-- Anything unexpected in the saved settings is ignored.
 ForeverEnhancedCooldownManagerDB.accent = "pink"
 Equal(ns.Get("accent"), "orange", "an invalid saved accent reads as the default")
 ForeverEnhancedCooldownManagerDB.barColours = { [467] = "pink", [0] = "blue", foo = "green", [1126] = "green" }
@@ -564,27 +575,6 @@ Equal(kept == 1 and ns.BarColours()[1126], "green", "only real spells with a rea
 ns.SetBarColour("Thorns", "blue")
 ns.SetBarColour(467, "pink")
 Equal(ns.BarColours()[467], nil, "nothing else can be set")
-
--- The first login under the new name carries the old name's backup over.
-Environment()
-cvars.ClassicCooldownManagerBackup = "accent=teal;classicBars=1;classicLook=0;listItems=1"
-cvars.ClassicCooldownManagerBackupBars0 = "1"
-cvars.ClassicCooldownManagerBackupBars1 = "cd.size=40;cd.spells=Moonfire|Bash"
-Viewers(0)
-ns = Load(nil)
-Equal(ns.Get("useBars"), true, "old Classic Bars switch carried over")
-Equal(ns.Get("skin"), false, "old Classic look switch carried over")
-Equal(ns.Get("accent"), "teal", "accent carried over")
-Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Bash", "bars carried over")
-Equal(ns.BarData("cd").size, 40, "with their size")
-Equal(cvars.FECMBackup, "accent=teal;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=1;listRanks=0;minimap=1;minimapAngle=225;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=0;useBars=1", "and saved under the new name")
-
--- After that, the new name's own settings and backup are used.
-Environment(true)
-cvars.ClassicCooldownManagerBackup = "classicBars=0"
-Viewers(0)
-ns = Load({ useBars = true })
-Equal(ns.Get("useBars"), true, "the old backup is never read again")
 
 -- Blizzard's Personal Resource Display ------------------------------------------------------
 
@@ -839,10 +829,40 @@ Equal(rowEdge[4] .. " " .. rowEdge[5], "1 -2", "the row's shadow from its icons'
 Equal(tostring(ns.Skin.rows.BuffBarCooldownViewer) .. " " .. tostring(ns.Skin.rows.BuffIconCooldownViewer), "nil nil",
     "the Tracked Bars keep their own edges, and Tracked Buffs (which come and go) only get them per icon")
 rawset(item, "cooldownID", nil)
-v.essential:RefreshLayout()
+Blizzard(v.essential, "RefreshLayout")
 Equal(tostring(S[row.shadow[1][1]].shown), "false", "emptied, its row loses the box when Blizzard lays it out")
 rawset(item, "cooldownID", 7)
-v.essential:RefreshLayout()
+Blizzard(v.essential, "RefreshLayout")
+-- Cooldown Settings going between none, one and two cooldowns only refreshes
+-- the row in place (Blizzard keeps two items): the box follows at once.
+ns.Set("iconBorder", "bar")
+ns.Skin:ApplyDecor()
+rawset(item, "cooldownID", nil)
+Blizzard(v.essential, "RefreshData")
+Equal(tostring(S[row.border[1]].shown) .. " " .. tostring(S[row.shadow[1][1]].shown), "false false",
+    "emptied in Cooldown Settings, the box goes with no relayout")
+rawset(item, "cooldownID", 7)
+Blizzard(v.essential, "RefreshData")
+Equal(tostring(S[row.border[1]].shown) .. " " .. tostring(S[row.shadow[1][1]].shown), "true true", "and comes back when one is added")
+-- One cooldown and Blizzard's empty second item: the box goes round the one
+-- icon, not the empty slot.
+local spare = CooldownItem()
+v.essential:OnAcquireItemFrame(spare)
+v.essentialActive[spare] = true
+Blizzard(v.essential, "RefreshData")
+local top = S[row.border[1]].points[1]
+Equal(tostring(top[2] == item.Icon) .. " " .. top[4] .. " " .. top[5], "true -1 0", "one cooldown: the border round its icon art")
+Equal(tostring(S[row.shadow[1][1]].points[1][2] == item.Icon) .. " " .. tostring(S[row.shadow[1][1]].shown), "true true", "and the shadow")
+-- A cooldown the game keeps secret still counts as one.
+_G.issecretvalue = function(value) return value == SECRET end
+rawset(spare, "cooldownID", SECRET)
+Blizzard(v.essential, "RefreshLayout")
+top = S[row.border[1]].points[1]
+Equal(tostring(top[2] == v.essential) .. " " .. top[4] .. " " .. top[5], "true 1 -2", "two cooldowns, one secret: round the whole row again")
+_G.issecretvalue = nil
+rawset(spare, "cooldownID", nil)
+v.essentialActive[spare] = nil
+ns.Set("iconBorder", "icon")
 ns.Set("iconShadow", "icon")
 ns.Skin:ApplyDecor()
 local first = S[decor.shadow[1][1]]

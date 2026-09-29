@@ -238,7 +238,6 @@ local function SavePosition(bar)
     bar.data.x, bar.data.y, bar.data.point = Round(x - cx + offsetX), Round(y - cy + offsetY), point
     -- A bar moved by hand leaves the layout it was stacked in.
     if ns.Layout then ns.Layout:Moved() end
-    ns.SaveBars()
     Place(bar)
 end
 
@@ -246,6 +245,53 @@ end
 -- only ever shown, hidden, moved or resized outside combat.
 local function Locked(bar)
     return bar.kind == "aura" and InCombatLockdown()
+end
+
+-- Lets go of a bar being dragged, where it is now.
+local function Drop(bar)
+    if not bar.dragging then return end
+    bar.dragging = nil
+    bar:StopMovingOrSizing()
+    if bar.SetUserPlaced then bar:SetUserPlaced(false) end
+    SavePosition(bar)
+end
+
+-- The border and shadow round a whole bar, when chosen, only go round icons
+-- that stay put. Packed Buffs and Debuffs and a bar that hides when ready
+-- come and go (like Blizzard's Tracked Buffs), so they'd leave an empty box
+-- behind, as would the greyed Debuffs spots while there's no enemy.
+local function BarDecor(bar)
+    -- A layout waiting for the fight to end still has the old shape: keep the
+    -- box as it is until then.
+    if bar.pendingLayout then return end
+    local border, shadow = Style:DecorFor("bar")
+    local steady
+    if bar.kind == "aura" then
+        steady = not ns.BuffBar:Packed(bar.data) and bar.enemy ~= false
+    else
+        steady = not HidesReady(bar.data)
+    end
+    border, shadow = border and steady, shadow and steady
+    local state = (border and "b" or "") .. (shadow and "s" or "")
+    if bar.decorState == state then return end
+    bar.decorState = state
+    Style:ShowDecor(bar.decor, border, shadow)
+end
+
+-- Blizzard's packed Buffs and Debuffs icons can't be used by the addon while
+-- auras are secret (in combat), so theirs change once the fight is over.
+local function GroupDecor(bar)
+    if not (bar.groupParts and bar.groupParts[1]) then
+        bar.pendingDecor = nil
+        return
+    end
+    if InCombatLockdown() then
+        bar.pendingDecor = true
+        return
+    end
+    bar.pendingDecor = nil
+    local border, shadow = Style:DecorFor("icon")
+    for _, parts in ipairs(bar.groupParts) do Style:ShowDecor(parts.decor, border, shadow) end
 end
 
 local function NewBar(key)
@@ -277,13 +323,7 @@ local function NewBar(key)
             bar:StartMoving()
         end
     end)
-    mover:SetScript("OnDragStop", function()
-        if not bar.dragging then return end
-        bar.dragging = nil
-        bar:StopMovingOrSizing()
-        if bar.SetUserPlaced then bar:SetUserPlaced(false) end
-        SavePosition(bar)
-    end)
+    mover:SetScript("OnDragStop", function() Drop(bar) end)
     -- A spell or item dragged from anywhere onto an unlocked bar joins it.
     mover:SetScript("OnReceiveDrag", function() B:Dropped(key) end)
     mover:SetScript("OnMouseUp", function() B:Dropped(key) end)
@@ -291,7 +331,7 @@ local function NewBar(key)
     bar.mover = mover
     -- A border and shadow round the whole bar, when chosen.
     bar.decor = Style:Decor(bar, bar)
-    Style:ShowDecor(bar.decor, Style:DecorFor("bar"))
+    BarDecor(bar)
     bars[key] = bar
     return bar
 end
@@ -363,10 +403,10 @@ end
 function B:ApplyDecor()
     local border, shadow = Style:DecorFor("icon")
     for _, bar in pairs(bars) do
-        Style:ShowDecor(bar.decor, Style:DecorFor("bar"))
-        for _, list in ipairs({ bar.icons or {}, bar.holders or {}, bar.groupParts or {} }) do
-            for _, piece in ipairs(list) do Style:ShowDecor(piece.decor, border, shadow) end
-        end
+        BarDecor(bar)
+        for _, icon in ipairs(bar.icons or {}) do Style:ShowDecor(icon.decor, border, shadow) end
+        ns.BuffBar:HolderDecor(bar)
+        GroupDecor(bar)
     end
 end
 
@@ -413,6 +453,7 @@ function B:UpdateShown()
                 bar:SetAlpha(mode == "fade" and FADE or 1)
             end
             bar.mover:SetShown(on and unlocked)
+            BarDecor(bar)
         end
     end
 end
@@ -451,11 +492,10 @@ function B:Rebuild()
     if ns.Layout then ns.Layout:Stack() end
 end
 
--- Setup changes. Each saves the backup and redraws the bars.
+-- Setup changes. Each redraws the bars.
 
 function B:Changed()
     ns.PruneCustom()
-    ns.SaveBars()
     self:Rebuild()
 end
 
@@ -510,12 +550,8 @@ function B:Joined(key, index)
     return ns.AURA_BARS[key] ~= nil and index > 1 and spells[index] ~= nil and ns.Joins(key)[spells[index]] == true
 end
 
-function B:SetJoined(key, index, on)
-    local spells = ns.BarData(key).spells
-    if not ns.AURA_BARS[key] or index < 2 or not spells[index] then return false end
-    ns.Joins(key)[spells[index]] = on and true or nil
-    self:Changed()
-    return true
+local function Full(key)
+    return ns.BAR_NAMES[key] .. " is full."
 end
 
 -- The bar's entries in order, with joined ones gathered into one group.
@@ -529,6 +565,37 @@ function B:Units(key)
         end
     end
     return units
+end
+
+-- How many of an aura bar's slots your entries take: one per icon, so a
+-- joined group counts once, and another class's entries take none.
+function B:SlotsUsed(key)
+    local used = 0
+    for _, unit in ipairs(self:Units(key)) do
+        for _, name in ipairs(unit) do
+            if ns.Spells:ForMe(name, key) then
+                used = used + 1
+                break
+            end
+        end
+    end
+    return used
+end
+
+-- Split off, an entry needs an icon of its own; not past the bar's slots.
+function B:SetJoined(key, index, on)
+    local spells = ns.BarData(key).spells
+    if not ns.AURA_BARS[key] or index < 2 or not spells[index] then return false end
+    local joins, name = ns.Joins(key), spells[index]
+    local was, used = joins[name], self:SlotsUsed(key)
+    joins[name] = on and true or nil
+    local now = self:SlotsUsed(key)
+    if now > used and now > ns.BUFF_SLOTS then
+        joins[name] = was
+        return false, Full(key)
+    end
+    self:Changed()
+    return true
 end
 
 -- Takes an entry off a bar. When it heads a joined group, the next entry
@@ -571,8 +638,9 @@ function B:SetAura(key, name, on)
     if on and index or not on and not index then return true end
     local spells = ns.BarData(key).spells
     if on then
-        -- The slots are for your own entries; the list has room for more.
-        if #self:Mine(key) >= ns.BUFF_SLOTS or #spells >= ns.BAR_MAX_SPELLS then return false end
+        -- The slots are for your own icons, one per joined group; the list
+        -- has room for more.
+        if self:SlotsUsed(key) >= ns.BUFF_SLOTS or #spells >= ns.BAR_MAX_SPELLS then return false end
         spells[#spells + 1] = name
     else
         Take(key, index)
@@ -589,6 +657,25 @@ local function Added(key, name)
     return "Added " .. name .. " to " .. ns.BAR_NAMES[key] .. "."
 end
 
+-- Whether an entry can show on a bar: true, or false and why not. Items put
+-- no aura on anyone, a fixed rank adds nothing to an aura bar (it counts
+-- every rank already), and procs are buffs on you with no cooldown of their
+-- own. Anything not known here (another class's, say) may go anywhere.
+function B:Fits(key, entry)
+    if not entry then return true end
+    local bar = ns.BAR_NAMES[key]
+    if ns.AURA_BARS[key] and ns.Spells:IsItem(entry) then
+        return false, "Items can't go on the " .. bar .. " bar."
+    end
+    if ns.AURA_BARS[key] and entry.kind == "rank" then
+        return false, "Fixed ranks can't go on the " .. bar .. " bar, which counts every rank already."
+    end
+    if entry.kind == "proc" and key ~= "buff" then
+        return false, "Procs only go on the Buffs bar."
+    end
+    return true
+end
+
 -- Puts a spell, by name or ID, on a bar: true and what happened, or false
 -- and why not. Spells outside your spellbook are remembered by name. Also
 -- gives the name it's kept under.
@@ -596,14 +683,13 @@ function B:Add(key, text)
     local found, ids = ns.Spells:Resolve(text)
     if not found then return false, ids end
     local entry = ns.Spells:Find(found)
-    if ns.AURA_BARS[key] and entry and ns.Spells:IsItem(entry) then
-        return false, "Items can't go on the " .. ns.BAR_NAMES[key] .. " bar."
-    end
+    local fits, why = self:Fits(key, entry)
+    if not fits then return false, why end
     if ids and not entry then ns.AddCustom(found, ids) end
     local ok
     if ns.AURA_BARS[key] then ok = self:SetAura(key, found, true) else ok = self:Assign(found, key) end
     ns.PruneCustom()
-    if not ok then return false, ns.BAR_NAMES[key] .. " is full." end
+    if not ok then return false, Full(key) end
     return true, Added(key, entry and entry.name or found), found
 end
 
@@ -664,15 +750,31 @@ end
 
 -- Moves a spell to another place on its bar, as dragged in the window. A
 -- moved entry leaves its joined group; dropped inside another group, it
--- joins that one rather than splitting it.
+-- joins that one rather than splitting it. On its own it needs an icon of
+-- its own, so a full bar keeps it where it was.
 function B:MoveTo(key, from, to)
     local spells = ns.BarData(key).spells
     if from == to or not spells[from] or not spells[to] then return end
+    local aura = ns.AURA_BARS[key] ~= nil
+    local joins, saved, used = aura and ns.Joins(key), {}, 0
+    if joins then
+        for entry, on in pairs(joins) do saved[entry] = on end
+        used = self:SlotsUsed(key)
+    end
     local name = Take(key, from)
     table.insert(spells, to, name)
     local after = spells[to + 1]
-    if ns.AURA_BARS[key] and to > 1 and after and ns.Joins(key)[after] then ns.Joins(key)[name] = true end
+    if aura and to > 1 and after and joins[after] then joins[name] = true end
+    local now = aura and self:SlotsUsed(key) or 0
+    if now > used and now > ns.BUFF_SLOTS then
+        table.remove(spells, to)
+        table.insert(spells, from, name)
+        for entry in pairs(joins) do joins[entry] = nil end
+        for entry, on in pairs(saved) do joins[entry] = on end
+        return false, Full(key)
+    end
     self:Changed()
+    return true
 end
 
 function B:Remove(key, index)
@@ -697,13 +799,11 @@ end
 -- false and why not.
 function B:Transfer(from, to, name)
     if from == to or not IndexOf(from, name) then return false end
-    local entry = ns.Spells:Find(name)
-    if ns.AURA_BARS[to] and entry and ns.Spells:IsItem(entry) then
-        return false, "Items can't go on the " .. ns.BAR_NAMES[to] .. " bar."
-    end
+    local fits, why = self:Fits(to, ns.Spells:Find(name))
+    if not fits then return false, why end
     local ok
     if ns.AURA_BARS[to] then ok = self:SetAura(to, name, true) else ok = self:Assign(name, to) end
-    if not ok then return false, ns.BAR_NAMES[to] .. " is full." end
+    if not ok then return false, Full(to) end
     -- Between the two cooldown bars it's already moved; otherwise take it off.
     local index = IndexOf(from, name)
     if index then self:Remove(from, index) end
@@ -714,7 +814,6 @@ end
 -- the size slider sends a change for every step it's dragged.
 function B:SetOption(key, field, value)
     ns.BarData(key)[field] = value
-    ns.SaveBars()
     if not self.started then return end
     Layout(bars[key] or NewBar(key))
     self:UpdateShown()
@@ -776,10 +875,14 @@ function B:Start()
     driver:SetScript("OnEvent", function(_, event)
         if event == "PLAYER_REGEN_DISABLED" then
             inCombat = true
+            -- A Buffs or Debuffs bar still being dragged is let go where it
+            -- is, just before the fight locks it in place.
+            for key in pairs(ns.AURA_BARS) do
+                if bars[key] then Drop(bars[key]) end
+            end
             B:UpdateShown()
         elseif event == "PLAYER_REGEN_ENABLED" then
             inCombat = false
-            -- Anything the Buffs bar had to wait for during the fight.
             -- Anything the aura bars had to wait for during the fight.
             for key in pairs(ns.AURA_BARS) do
                 local bar = bars[key]
@@ -788,6 +891,7 @@ function B:Start()
                 elseif bar and bar.pending then
                     ns.BuffBar:Apply(bar)
                 end
+                if bar and bar.pendingDecor then GroupDecor(bar) end
                 if bar then bar.pendingShown = nil end
             end
             B:UpdateShown()

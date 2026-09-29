@@ -1,6 +1,6 @@
 -- Run the actual bars files (Core, Style, Spells, Buffs, Bars, the window) against a
 -- mock game: spellbook ranks, secret cooldowns in combat, usable and range
--- tints, showing and hiding, dragging, the settings backup, and the panel.
+-- tints, showing and hiding, dragging, settings kept over a reload, and the panel.
 local checks = 0
 local function Equal(actual, expected, label)
     checks = checks + 1
@@ -503,28 +503,33 @@ Fire("SPELLS_CHANGED")
 Equal(cd.icons[2].spellID, 8925, "trained rank 3: the bar uses it")
 Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 
--- Backup ------------------------------------------------------------------------------
+-- Kept over a reload ----------------------------------------------------------------------
+-- Everything lives in the saved settings; nothing goes into the game's own.
 
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;minimap=1;minimapAngle=225;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
-Equal(cvars.FECMBackupBars0 .. " " .. #cvars.FECMBackupBars1, "2 900", "bars backed up in chunks of 900 characters")
-Environment(true)
-ns = Load(nil)
-B = ns.Bars
-Equal(B:Enabled(), true, "bars on again after lost settings")
-Equal(table.concat(ns.BarData("cd").spells, ","), "Overpower,Moonfire", "bar spells restored")
-Equal(ns.BarData("cd").x, 20, "bar position restored")
-Equal(ns.BarData("util").x, nil, "unmoved bar keeps its default spot")
-Equal(B:Get("cd").count, 2, "and drawn")
+do
+    Equal(next(cvars), nil, "no game settings written")
+    local saved = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    ns = Load(saved)
+    B = ns.Bars
+    Equal(B:Enabled(), true, "bars on again after a reload")
+    Equal(table.concat(ns.BarData("cd").spells, ","), "Overpower,Moonfire", "bar spells kept")
+    Equal(ns.BarData("cd").x, 20, "bar position kept")
+    Equal(ns.BarData("util").x, nil, "unmoved bar keeps its default spot")
+    Equal(B:Get("cd").count, 2, "and drawn")
+    Equal(ns.firstInstall, false, "a kept settings file isn't a first install")
 
-Environment(true)
-cvars.FECMBackupBars1 = "cd.size=9999;cd.spells=A|B;cd.x=nope;evil.size=3;cd.hide=maybe"
-ns = Load(nil)
-local data = ns.BarData("cd")
-Equal(data.size, 64, "bad sizes clamped")
-Equal(table.concat(data.spells, ","), "A,B", "names read as plain text")
-Equal(data.x, nil, "bad positions dropped")
-Equal(data.hideReady, false, "bad flags off")
-Equal(ns.BarData("evil"), nil, "unknown bars ignored")
+    -- Anything unexpected in the saved settings is put right at load.
+    Environment()
+    ns = Load({ useBars = true, bars = { cd = { size = 9999, spells = { "A", 7, "", "B" }, x = "nope", y = 3, hideReady = "maybe" },
+        evil = { size = 3 } } })
+    local data = ns.BarData("cd")
+    Equal(data.size, 64, "bad sizes clamped")
+    Equal(table.concat(data.spells, ","), "A,B", "only names kept in a list")
+    Equal(data.x, nil, "bad positions dropped")
+    Equal(data.hideReady, false, "bad flags off")
+    Equal(ns.BarData("evil"), nil, "unknown bars ignored")
+end
 
 -- Buffs bar -------------------------------------------------------------------------------
 
@@ -624,9 +629,9 @@ B:SetOption("buff", "showMissing", false)
 Equal(groups.g1.enabled and slots.b1.enabled == false, true, "back to packed")
 Equal(groups.g2.enabled, false, "Clearcasting's group off after being unticked")
 Equal(#printed, 0, "no errors")
-local text = cvars.FECMBackupBars1
-Equal(text:find("12:buff.missing1:0", 1, true) ~= nil and text:find("10:buff.timer1:1", 1, true) ~= nil, true, "Buffs bar options backed up")
-Equal(text:find("7:p1.buff6:Thorns", 1, true) ~= nil, true, "and its list, in your profile")
+local kept = ForeverEnhancedCooldownManagerDB
+Equal(tostring(kept.bars.buff.showMissing) .. " " .. tostring(kept.bars.buff.showTimer), "false true", "Buffs bar options saved")
+Equal(table.concat(kept.profiles[ns.ProfileName()].buff, ","), "Thorns", "and its list, in your profile")
 Equal(S[buffs.mover.label].text, "Buffs", "mover label is the bar's name")
 Equal(S[buffs.mover.label].points[1][1], "CENTER", "inside the highlight")
 
@@ -723,10 +728,11 @@ Equal(B:SetJoined("cd", 2, true), false, "cooldown bars don't join")
 
 ns.CopyProfile("Joined copy")
 Equal(Shape("buff"), "Thorns, Walk on Air+Nature's Grace+Clearcasting", "a copied profile keeps its joins")
+kept = ForeverEnhancedCooldownManagerDB
 Environment(true)
-ns = Load(nil)
+ns = Load(kept)
 B = ns.Bars
-Equal(Shape("buff"), "Thorns, Walk on Air+Nature's Grace+Clearcasting", "joins come back from the backup")
+Equal(Shape("buff"), "Thorns, Walk on Air+Nature's Grace+Clearcasting", "joins kept over a reload")
 Equal(Shape("debuff"), "Moonfire+Wrath", "on both bars")
 
 -- The window: the Debuffs page and the join buttons.
@@ -759,7 +765,47 @@ B:Assign("Moonfire", "cd")
 B:Assign("Wrath", "cd")
 win:Select("cd")
 Equal(S[barPage.icons[2].link].shown, false, "cooldown bars have no join buttons")
-Equal(#printed, 1, "only the restored-settings notice was printed")
+-- Icons the Buffs page used and this one doesn't go with their join buttons
+-- and lines, which sit on the tray, not the icon.
+Equal(#barPage.icons >= 4, true, "the Buffs page drew more icons than Cooldowns has")
+for n = 3, #barPage.icons do
+    local icon = barPage.icons[n]
+    Equal(tostring(S[icon].shown) .. " " .. tostring(S[icon.link].shown) .. " " .. tostring(S[icon.bridge].shown), "false false false",
+        "an icon not in use goes with its join button and line")
+end
+do
+    -- Taking the last of a group off with its x leaves no line or button behind.
+    win:Select("buff")
+    local last = barPage.icons[4]
+    Equal(tostring(S[last.link].shown) .. " " .. tostring(S[last.bridge].shown), "true true", "the last Buffs icon is joined")
+    last.remove:Click()
+    Equal(#ns.BarData("buff").spells .. " " .. tostring(S[last.link].shown) .. " " .. tostring(S[last.bridge].shown), "3 false false",
+        "taken off, its join button and line go too")
+    -- A full bar: splitting a group or dragging one out of it would need
+    -- another icon, so it's refused, saying why.
+    ns.BUFF_SLOTS = 2
+    barPage.icons[3].link:Click()
+    Equal(tostring(B:Joined("buff", 3)) .. " " .. S[win.note].text, "true Buffs is full.", "a split past the bar's slots is refused")
+    S[barPage.icons[3]].scripts.OnDragStart(barPage.icons[3])
+    S[barPage.icons[1]].mouseOver = true
+    S[barPage.icons[3]].scripts.OnDragStop(barPage.icons[3])
+    S[barPage.icons[1]].mouseOver = nil
+    Equal(Shape("buff") .. " " .. S[win.note].text, "Thorns, Walk on Air+Nature's Grace Buffs is full.",
+        "and so is dragging one out of its group")
+    ns.BUFF_SLOTS = 16
+    -- Closing the window mid-drag: the icon's spot comes back, nothing is
+    -- left on the cursor, and a late drop takes nothing off.
+    local held = barPage.icons[1]
+    S[held].scripts.OnDragStart(held)
+    Equal(tostring(S[held].alpha) .. " " .. tostring(S[barPage.ghost].shown), "0 true", "picked up, it follows the cursor")
+    barPage:Hide()
+    Equal(tostring(S[held].alpha) .. " " .. tostring(S[barPage.ghost].shown), "1 false",
+        "closed mid-drag, its spot shows again and nothing is left on the cursor")
+    S[held].scripts.OnDragStop(held)
+    Equal(#ns.BarData("buff").spells, 3, "a late drop takes nothing off")
+    barPage:Show()
+end
+Equal(#printed, 0, "no errors")
 
 -- Out of combat: show, fade or hide -------------------------------------------------------
 
@@ -807,15 +853,7 @@ Equal(S[buffBar].shown and S[buffBar].alpha, 0, "and hide by fading right out, s
 B:SetUnlocked(true)
 Equal(S[cdBar].shown and S[utilBar].alpha == 1 and S[buffBar].alpha, 1, "unlocked, every bar shows in full")
 B:SetUnlocked(false)
-Equal(cvars.FECMBackupBars1:find("6:cd.ooc4:hide", 1, true) ~= nil, true, "the choice is backed up")
-Environment(true)
-cvars.FECMBackupBars0, cvars.FECMBackupBars1 = "1", "cd.combat=1;cd.spells=Moonfire"
-ns = Load(nil)
-Equal(ns.BarData("cd").outOfCombat, "hide", "backups from before the choice carry it over")
-Environment(true)
-cvars.FECMBackupBars1 = "v2;9:cd.combat1:1"
-ns = Load(nil)
-Equal(ns.BarData("cd").outOfCombat, "hide", "including this week's backups")
+Equal(ForeverEnhancedCooldownManagerDB.bars.cd.outOfCombat, "hide", "the choice is saved")
 
 -- The window's out-of-combat choice.
 Environment()
@@ -976,7 +1014,7 @@ Equal(S[cdBar.icons[1].label].shown, false, "names off by default")
 Equal(Last(cdBar.icons[1].cooldown, "SetHideCountdownNumbers"), false, "countdown numbers on by default")
 B:SetOption("cd", "showTimer", false)
 Equal(Last(cdBar.icons[1].cooldown, "SetHideCountdownNumbers"), true, "and off when asked")
-Equal(cvars.FECMBackupBars1:find("8:cd.timer1:0", 1, true) ~= nil, true, "that choice backed up")
+Equal(ForeverEnhancedCooldownManagerDB.bars.cd.showTimer, false, "that choice saved")
 B:SetOption("cd", "showTimer", true)
 
 local found = ns.Spells:Suggest("mo", 50)
@@ -1028,7 +1066,7 @@ Equal(Row("Moonfire") ~= nil, true, "spells listed")
 page.showItems:Click()
 Equal(ns.Get("listItems"), true, "Show items remembered")
 Equal(Row("item:118") ~= nil, true, "items listed when asked")
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=1;listRanks=0;minimap=1;minimapAngle=225;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "and backed up")
+Equal(ForeverEnhancedCooldownManagerDB.listItems, true, "and saved")
 
 -- Searching filters the list and finds spells outside your spellbook.
 Equal(#S[page.list].points, 2, "the list is pinned by two corners, so the game can place it")
@@ -1059,9 +1097,10 @@ Search("")
 Equal(Row("Thorns") ~= nil, true, "clearing the search lists everything again")
 Equal(#printed, 0, "no errors")
 
+kept = ForeverEnhancedCooldownManagerDB
 Environment(true)
-ns = Load(nil)
-Equal(ns.CustomSpells()["Power Word: Fortitude"][1], 1243, "added spells restored from the backup")
+ns = Load(kept)
+Equal(ns.CustomSpells()["Power Word: Fortitude"][1], 1243, "added spells kept over a reload")
 Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "with their bar")
 Equal(ns.Spells:Find("item:118").name, "Minor Healing Potion", "items on a bar stay listed when your bags run out")
 ns.Bars:SetBuff("Power Word: Fortitude", false)
@@ -1104,9 +1143,10 @@ Equal(ns.BarData("util").spells[2], "Moonfire@2", "a lower rank ticked onto a ba
 w:Select("buff")
 Equal(Row("Moonfire@1"), nil, "fixed ranks not offered on the Buffs bar")
 Equal(S[page.showRanks].shown, false, "nor the ranks box")
+kept = ForeverEnhancedCooldownManagerDB
 Environment(true)
-ns = Load(nil)
-Equal(table.concat(ns.BarData("util").spells, ","), "Moonfire,Moonfire@2", "fixed ranks restored from the backup")
+ns = Load(kept)
+Equal(table.concat(ns.BarData("util").spells, ","), "Moonfire,Moonfire@2", "fixed ranks kept over a reload")
 
 -- Profiles --------------------------------------------------------------------------------
 
@@ -1155,13 +1195,17 @@ ns.UseProfile(mine .. " 2")
 Equal(#ns.BarData("util").spells, 1, "a copy is its own list")
 Equal(select(2, ns.UseProfile("Nope")), 'No profile is called "Nope".', "unknown names explained")
 
--- Sharing: renaming follows every character; deleting a shared one is refused.
+-- Sharing: renaming follows every character; a shared one can be deleted
+-- too, and says how many others use it (the menu asks first).
 ns.UseProfile(mine)
 Equal(ns.ProfileUsers(mine), 2, "two characters can share a profile")
 ok, message = ns.RenameProfile("Balance")
 Equal(ok and saved.chars["Player-1-0001"], "Balance", "renaming updates every character using it")
 Equal(saved.profiles[mine], nil, "the old name is gone")
-Equal(select(2, ns.DeleteProfile("Balance")), "Another character uses Balance, so it can't be deleted.", "a profile another character uses can't be deleted")
+do
+    local can, name, others = ns.CanDeleteProfile("Balance")
+    Equal(tostring(can) .. " " .. name .. " " .. others, "true Balance 1", "a profile another character uses can be deleted, counting them")
+end
 ok = ns.DeleteProfile("Healing")
 Equal(ok and saved.profiles.Healing, nil, "an unused profile can be deleted by name")
 ns.UseProfile("Thorns copy")
@@ -1182,37 +1226,53 @@ ns.UseProfile(mine .. " 2")
 ns.PruneCustom()
 Equal(ns.CustomSpells()["Power Word: Fortitude"] ~= nil, true, "an added spell in another profile is remembered")
 
--- The backup keeps profiles, and a lost settings file is noticed ------------------------
+-- Profiles are kept over a reload; a lost settings file is a first install -----------------
 
 character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
 Environment(true)
-ns = Load(nil) -- the game lost the settings file
-Equal(ns.ProfileName(), "Balance", "profile restored for this character")
+ns = Load(saved)
+Equal(ns.ProfileName(), "Balance", "each character's profile kept over a reload")
 Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "with its lists")
 Equal(ns.CustomSpells()["Power Word: Fortitude"][1], 1243, "and added spells")
 Equal(ForeverEnhancedCooldownManagerDB.chars["Player-1-0002"], mine .. " 2", "who uses what, too")
-Equal(ns.restored, true, "the loss is noticed")
-Equal(printed[#printed], "|cffffd100Forever Enhanced Cooldown Manager:|r " .. ns.RESTORED_TEXT, "and you're told at login")
+Equal(tostring(ns.firstInstall) .. " " .. #printed, "false 0", "a normal reload, with nothing to say")
 
--- A settings file older than the backup means the last session wasn't kept.
-saved = ForeverEnhancedCooldownManagerDB
-local stale = {}
-for key, value in pairs(saved) do stale[key] = value end
-stale.session = saved.session - 1
-stale.accent = "green"
-Environment(true)
-ns = Load(stale)
-Equal(ns.restored, true, "an older settings file is noticed")
-Equal(ns.Get("accent"), "orange", "and the newer backup is used")
+-- Only the saved settings count: game settings an earlier build kept are
+-- never read, so a lost file starts afresh.
+Environment()
+cvars.FECMBackup = "accent=teal;useBars=1"
+cvars.FECMBackupBars0, cvars.FECMBackupBars1 = "1", "cd.size=40;cd.spells=Moonfire"
+cvars.ClassicCooldownManagerBackup = "accent=blue;classicBars=1"
+ns = Load(nil)
+Equal(tostring(ns.firstInstall) .. " " .. ns.Get("accent") .. " " .. tostring(ns.Get("useBars")), "true orange false",
+    "a lost settings file is a first install; old backups aren't read")
+Equal(#ns.BarData("cd").spells .. " " .. ns.BarData("cd").size .. " " .. ns.ProfileName(), "0 36 Zriel (Druid) - Zephras",
+    "starting empty, on a profile of your own")
+Equal(#printed, 0, "with nothing printed")
+ns.Set("accent", "blue")
+ns.SetBarColour(123, "blue")
+ns.SetNotesSeen("x")
+do
+    local count = 0
+    for _ in pairs(cvars) do count = count + 1 end
+    Equal(count .. " " .. cvars.FECMBackup, "4 accent=teal;useBars=1", "and changes are never written there")
+end
 
--- A normal reload keeps the file and says nothing.
-saved = ForeverEnhancedCooldownManagerDB
-local before = saved.session
-Environment(true)
-ns = Load(saved)
-Equal(ns.restored, false, "a kept settings file is trusted")
-Equal(#printed, 0, "with no warning")
-Equal(saved.session, before + 1, "each login is numbered")
+-- A kept file: an old login count dropped, and everything checked at load.
+do
+    Environment()
+    ns = Load({ session = 63, accent = "pink", castHeight = 99, useBars = true, bars = { cd = { size = 9999, x = "no" } },
+        layout = { on = "yes", above = { "cd", "cd", "nope" } }, custom = { [""] = { 1 }, Good = { 5 } },
+        barColours = { [5] = "nope", [6] = "blue" } })
+    local db = ForeverEnhancedCooldownManagerDB
+    Equal(tostring(ns.firstInstall) .. " " .. tostring(db.session), "false nil", "not a first install, and the login count is gone")
+    Equal(ns.Get("accent") .. " " .. ns.Get("castHeight") .. " " .. tostring(ns.Get("useBars")), "orange 18 true",
+        "bad settings fall back, good ones stay")
+    Equal(db.bars.cd.size .. " " .. tostring(db.bars.cd.x), "64 nil", "bar data put right at load")
+    Equal(tostring(db.layout.on) .. " " .. table.concat(db.layout.above, ","), "false cd", "the layout too")
+    Equal(tostring(db.custom[""]) .. " " .. tostring(db.custom.Good ~= nil), "nil true", "added spells too")
+    Equal(tostring(db.barColours[5]) .. " " .. db.barColours[6], "nil blue", "and each bar's colour")
+end
 
 -- A character that logs in before its GUID is known is sorted out at login.
 Environment()
@@ -1240,6 +1300,9 @@ Equal(S[w.nav.cd.fill].shown and not S[w.nav.util.fill].shown, true, "the chosen
 Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape closes the window")
 Equal(S[w.close.label].text, "X", "a plain X")
 Equal(S[w.note].text, "Each spell shows once, at your highest rank.", "footer tip")
+Equal(S[w.versionText].text, "dev   /ccm to open", "the footer shows the version")
+w:Refresh()
+Equal(S[w.versionText].text, "dev   /ccm to open", "and keeps it")
 
 -- Your bars off: each bar page offers to turn them on.
 Equal(S[page.turnOn].shown, true, "bar page offers to turn your bars on")
@@ -1454,6 +1517,9 @@ Equal(S[pills.buttons[2].label].shadow, 1, "light text on dark keeps its shadow"
 
 -- General: your bars and moving them.
 w:Select("general")
+-- No saved-settings section: More from Squirt sits under the tour and Discord.
+Equal(tostring(w.kept) .. " " .. tostring(Heading("SAVED SETTINGS") ~= nil), "nil false", "no saved-settings text or heading")
+Equal(S[Heading("MORE FROM SQUIRT")].points[1][3], -236, "More from Squirt closes the gap")
 -- More from Squirt: EraUI, and a way to open it.
 Equal(S[w.moreOpen].shown, false, "EraUI not installed: no Open button")
 Equal(S[w.moreLinks[1]].shown and S[w.moreLinks[2]].shown, true, "but CurseForge and GitHub buttons")
@@ -1515,6 +1581,47 @@ Equal(bindings[FECMEscButton] ~= nil, true, "and taken again after combat while 
 FECMEscButton:Click()
 Equal(S[w].shown, false, "Escape closes it")
 Equal(bindings[FECMEscButton], nil, "and releases the key")
+
+-- Alt+Z hides the interface, running the window's OnHide though it's still
+-- shown: Escape goes back to the game, which brings the interface back.
+do
+    ns.ShowWindow()
+    Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "open again, Escape is borrowed")
+    S[UIParent].shown = false
+    S[w].scripts.OnHide(w)
+    Equal(bindings[FECMEscButton], nil, "the interface hidden: Escape handed back")
+    S[UIParent].shown = true
+    S[w].scripts.OnShow(w)
+    Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "and borrowed again as it comes back")
+    -- Closing a window that's already off screen runs no OnHide: the key is
+    -- still handed back.
+    local onHide = S[w].scripts.OnHide
+    S[w].scripts.OnHide = nil
+    S[UIParent].shown = false
+    FECMEscButton:Click()
+    S[w].scripts.OnHide = onHide
+    S[UIParent].shown = true
+    Equal(tostring(S[w].shown) .. " " .. tostring(bindings[FECMEscButton]), "false nil", "Escape closes it and doesn't keep the key")
+
+    -- Closed mid-drag, nothing keeps following the cursor: the window, a
+    -- slider or a list's scroll thumb.
+    ns.ShowWindow()
+    S[w].last.StopMovingOrSizing = nil
+    w:Hide()
+    Equal(S[w].last.StopMovingOrSizing ~= nil, true, "closing the window stops it moving")
+    local slider = ns.Theme:Slider(UIParent, "Size", { 1, 10 }, 1, 200, function() end)
+    slider:Set(5)
+    S[slider.track].scripts.OnMouseDown(slider.track)
+    Equal(S[slider.track].scripts.OnUpdate ~= nil, true, "a slider follows the cursor while held")
+    slider.track:Hide()
+    Equal(S[slider.track].scripts.OnUpdate, nil, "and stops once hidden")
+    local thumb = ns.Theme:Scroll(UIParent, 100).thumb
+    S[thumb].shown = true
+    S[thumb].scripts.OnMouseDown(thumb)
+    Equal(thumb.drag ~= nil, true, "a scroll thumb follows it while held")
+    thumb:Hide()
+    Equal(thumb.drag, nil, "and stops once hidden")
+end
 
 SlashCmdList.FECM("check")
 Equal(S[w].shown, true, "anything after /ccm but new just opens the window")
@@ -1596,8 +1703,10 @@ Equal(S[w.profilePanel].shown, true, "the menu stays open, showing the shorter l
 ForeverEnhancedCooldownManagerDB.chars["Player-1-0009"] = "Zriel (Druid) - Zephras"
 w:Refresh()
 MenuRow("Zriel (Druid) - Zephras").remove:Click()
-Equal(S[confirm.shade].shown, false, "a profile another character uses isn't asked about")
-Equal(S[w.note].text, "Another character uses Zriel (Druid) - Zephras, so it can't be deleted.", "the reason is given instead")
+Equal(S[confirm.dialog.detail].text, "You're using it, so you'll move to a new, empty profile of your own. Another character uses it, "
+    .. "and gets a new, empty profile of its own at its next login. This can't be undone.",
+    "a profile another character uses is asked about too, saying what happens to that character")
+confirm.no:Click()
 ForeverEnhancedCooldownManagerDB.chars["Player-1-0009"] = nil
 w:Refresh()
 MenuRow("Zriel (Druid) - Zephras").remove:Click()
@@ -1642,11 +1751,11 @@ ns = Load(db)
 Equal(ns.ProfileName() .. " | " .. tostring(db.profiles["Tarn (Druid) - Zephras"]), "Zriel (Druid) - Zephras | nil",
     "a new character starts on it, without a profile of its own")
 Equal(ns.RenameProfile("Shared") and ns.EveryoneProfile(), "Shared", "renaming it keeps it on everyone")
--- Kept in the backup.
+-- Kept over a reload.
 Environment(true)
-ns = Load(nil)
+ns = Load(db)
 Equal(tostring(ns.EveryoneProfile()) .. " " .. tostring(ForeverEnhancedCooldownManagerDB.chars["Player-1-0042"]), "Shared Shared",
-    "the backup keeps it")
+    "kept over a reload")
 
 -- A character's very first login, before the game knows its name: its own
 -- profile waits for the name, and one already made as "Unknown" takes it.
@@ -1677,6 +1786,121 @@ Environment(true)
 ns = Load(named)
 Equal(ns.ProfileName(), "Resto", "a profile you named keeps its name")
 character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+
+-- A profile other characters use, even ones since deleted, can be deleted:
+-- they get a profile of their own at their next login.
+do
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {}, joins = {} } end
+    Environment()
+    ns = Load({ useBars = true, profiles = { Mine = Lists(), Dead = Lists(), Shared = Lists() },
+        chars = { ["Player-1-0001"] = "Mine", ["Player-1-0099"] = "Dead", ["Player-1-0002"] = "Shared", ["Player-1-0003"] = "Shared" } })
+    local db = ForeverEnhancedCooldownManagerDB
+    local can, name, others = ns.CanDeleteProfile("Dead")
+    Equal(tostring(can) .. " " .. name .. " " .. others, "true Dead 1", "a profile a deleted character used can go")
+    Equal(select(3, ns.CanDeleteProfile("Mine")), 0, "your own counts no others")
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    w.profileButton:Click()
+    MenuRow("Dead").remove:Click()
+    Equal(tostring(S[w.confirm.shade].shown) .. " " .. S[w.confirm.dialog.detail].text,
+        "true Another character uses it, and gets a new, empty profile of its own at its next login. This can't be undone.",
+        "asked first, saying what happens to that character")
+    w.confirm.yes:Click()
+    Equal(tostring(db.profiles.Dead) .. " " .. tostring(db.chars["Player-1-0099"]) .. " " .. S[w.note].text, "nil nil Deleted Dead.",
+        "deleted, and the character let go")
+    MenuRow("Shared").remove:Click()
+    Equal(S[w.confirm.dialog.detail].text,
+        "2 other characters use it, and each gets a new, empty profile of its own at its next login. This can't be undone.",
+        "several characters")
+    w.confirm.no:Click()
+    db.everyone = "Mine"
+    MenuRow("Shared").remove:Click()
+    Equal(S[w.confirm.dialog.detail].text, "2 other characters use it, and each loads Mine at its next login. This can't be undone.",
+        "with a profile for every character, they load that")
+    w.confirm.yes:Click()
+    Equal(tostring(db.chars["Player-1-0002"]) .. " " .. tostring(db.chars["Player-1-0003"]), "nil nil", "both let go")
+    -- Your own, shared: you move to a new one, and the other is let go.
+    db.everyone = nil
+    db.profiles.Shared = Lists()
+    db.chars["Player-1-0002"] = "Mine"
+    w:Refresh()
+    MenuRow("Mine").remove:Click()
+    Equal(S[w.confirm.dialog.detail].text, "You're using it, so you'll move to a new, empty profile of your own. Another character uses it, "
+        .. "and gets a new, empty profile of its own at its next login. This can't be undone.", "your own, shared")
+    w.confirm.yes:Click()
+    Equal(ns.ProfileName() .. " " .. tostring(db.chars["Player-1-0002"]), "Zriel (Druid) - Zephras nil", "you move, it's let go")
+    -- That character logs in and gets a profile as a new one would.
+    character = { guid = "Player-1-0002", name = "Kess", realm = "Zephras" }
+    Environment(true)
+    ns = Load(db)
+    Equal(ns.ProfileName() .. " " .. #ns.BarData("cd").spells, "Kess (Druid) - Zephras 0", "a profile of its own at its next login, empty")
+    lockdown = true
+    Equal(select(2, ns.CanDeleteProfile("Shared")), "Profiles can't change in combat.", "never in combat")
+    lockdown = false
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+
+    -- Names made for you fit the 48 characters a profile name can have, and
+    -- are never cut through a letter.
+    Environment()
+    character = { guid = "Player-1-0001", name = "Abcdefghijkl", realm = "An Extremely Long Realm Name For Testing" }
+    ns = Load({ useBars = true })
+    local own = ns.ProfileName()
+    Equal(own .. " " .. #own, "Abcdefghijkl (Druid) - An Extremely Long Realm N 48", "a long name cut to fit, with no space left at the end")
+    local saved = ForeverEnhancedCooldownManagerDB
+    character = { guid = "Player-1-0002", name = "Abcdefghijkl", realm = "An Extremely Long Realm Name For Testing" }
+    Environment(true)
+    ns = Load(saved)
+    Equal(ns.ProfileName(), "Abcdefghijkl (Druid) - An Extremely Long Realm 2", "a numbered one fits too")
+    Equal((ns.CanDeleteProfile(own)), true, "and it can be deleted")
+    Environment()
+    character = { guid = "Player-1-0001", name = "Zri\195\169l", realm = "R" .. string.rep("\195\169", 24) }
+    ns = Load({ useBars = true })
+    own = ns.ProfileName()
+    Equal(tostring(#own <= ns.PROFILE_MAX) .. " " .. tostring(utf8.len(own) ~= nil), "true true", "never cut through a letter")
+    -- A long name from before names were kept short can still be deleted.
+    Environment()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local long = string.rep("x", 60)
+    ns = Load({ useBars = true, profiles = { [long] = Lists() }, chars = { ["Player-1-0005"] = long } })
+    can, name = ns.CanDeleteProfile(long)
+    Equal(tostring(can) .. " " .. tostring(name == long), "true true", "a long old name can be deleted")
+    Equal(tostring((ns.DeleteProfile(long))) .. " " .. tostring(ForeverEnhancedCooldownManagerDB.profiles[long]), "true nil", "and is")
+    Equal(select(2, ns.CanDeleteProfile("  ")), "Type a profile name first.", "typed names are still checked")
+
+    -- Many profiles: the list scrolls, and the name box and buttons stay
+    -- under it, in reach.
+    Environment()
+    local profiles = {}
+    for i = 1, 30 do profiles[("Profile %02d"):format(i)] = Lists() end
+    ns = Load({ useBars = true, profiles = profiles, notesSeen = "dev" }) -- no What's new
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    w.profileButton:Click()
+    local list = w.profileList
+    local shown, inList = 0, 0
+    for _, f in ipairs(frames) do
+        if f.profile and S[f].shown then
+            shown = shown + 1
+            if S[f].parent == list.content then inList = inList + 1 end
+        end
+    end
+    Equal(shown .. " " .. inList .. " " .. S[list.content].height, "31 31 682", "every profile listed, in a list that scrolls")
+    local bottom = S[list].points[2]
+    Equal(bottom[1] .. " " .. bottom[3] .. " " .. bottom[4] .. " " .. bottom[5], "BOTTOMRIGHT TOPLEFT 282 -204",
+        "pinned by two corners, eight rows tall")
+    Equal(S[w.profileInput].points[1][3], -208, "the name box right under those eight")
+    Equal(tostring(S[w.profilePanel].height <= 420) .. " " .. tostring(Last(w.profilePanel, "SetClampedToScreen")), "true true",
+        "the menu stays short and on screen")
+    for _, timer in ipairs(timers) do timer() end
+    Equal(S[list].points[2][5], -204, "pinned again a moment after opening")
+    -- A short list is as tall as its profiles.
+    Environment()
+    ns = Load({ useBars = true })
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    w.profileButton:Click()
+    Equal(S[w.profileList].points[2][5] .. " " .. S[w.profileInput].points[1][3], "-50 -54", "one profile: a one-row list, the box right under it")
+end
 
 -- A profile shared across classes -------------------------------------------------------------
 -- Another class's spells stay in the profile but don't show; your own class's
@@ -1731,19 +1955,6 @@ Equal(#(B:Mine("util")) .. " " .. B:Get("util").count .. " | " .. tostring(ns.Sp
     .. " " .. tostring(ns.Spells:ForMe("Garrote", "debuff")) .. " " .. B:Get("debuff").count, "0 0 | true false 0",
     "a rogue's spell or debuff added by name isn't yours; a paladin's buff is")
 
--- Settings the game didn't keep are pointed out in the window too.
-Environment(true)
-ns = Load(nil)
-SlashCmdList.FECM("")
-w = FECMFrame
-local footer
-for _, f in ipairs(objects) do
-    if S[f].text == "Settings restored from backup at login. See General." then footer = f end
-end
-Equal(footer ~= nil and S[footer].colour[1], 1, "the footer warns, in orange")
-w:Select("general")
-Equal(S[w.kept].text:find(ns.RESTORED_TEXT, 1, true) ~= nil, true, "and General explains")
-
 -- What's new -------------------------------------------------------------------------------
 
 -- A first install has nothing new: the version is noted and nothing shows.
@@ -1795,21 +2006,18 @@ Equal(S[notes].height, 620, "the window grows to fit, up to its limit")
 UIParent:SetHeight(300)
 Fire("UI_SCALE_CHANGED")
 Equal(S[notes].height, 260, "and stays on a small screen, the notes scrolling")
+S[notes].last.StopMovingOrSizing = nil
 FECMEscButton:Click()
 Equal(S[notes].shown, false, "Escape closes What's new")
+Equal(S[notes].last.StopMovingOrSizing ~= nil, true, "stopping it moving, if it was dragged")
 Equal(bindings[FECMEscButton], nil, "and hands the key back")
 
--- Once per version, even if the settings file is lost.
+-- Once per version.
 local saved = ForeverEnhancedCooldownManagerDB
 Environment(true)
 ns = Load(saved)
 for _, timer in ipairs(timers) do timer() end
 Equal(FECMNotes == notes and not S[notes].shown, true, "shown once per version")
-Environment(true)
-ns = Load(nil)
-Equal(ns.restored and ns.NotesSeen(), "dev", "a lost settings file gets the version seen back from the backup")
-for _, timer in ipairs(timers) do timer() end
-Equal(FECMNotes == notes, true, "so What's new doesn't show again")
 
 -- Any time: /ccm new, or What's new in the window.
 SlashCmdList.FECM("new")
@@ -1905,14 +2113,14 @@ Equal(S[buffRows.container].points[1][1], "RIGHT", "packed buffs line up from th
 Equal(S[buffRows.container].groups.g1.layout.layoutIndex, ns.BUFF_SLOTS, "the first one on the right")
 Equal(string.format("%gx%g", S[buffRows].width, S[buffRows].height), "116x36", "in one row: the game lays those out")
 
--- Kept in the backup with everything else.
+-- Kept over a reload with everything else.
 cdData.perRow, cdData.grow, cdData.wrap = 3, "right", "up"
-ns.SaveBars()
+saved = ForeverEnhancedCooldownManagerDB
 Environment(true)
-ns = Load(nil)
+ns = Load(saved)
 cdData = ns.BarData("cd")
 Equal(cdData.perRow .. " " .. cdData.grow .. " " .. cdData.wrap .. " " .. tostring(cdData.point), "3 right up BOTTOMLEFT",
-    "rows and grow come back from the backup, the position held by the edge it grows from")
+    "rows and grow kept over a reload, the position held by the edge it grows from")
 
 -- Layouts around the Personal Resource Display --------------------------------------------
 
@@ -2000,12 +2208,39 @@ prd:Show()
 Equal(At(B:Get("cd")), "BOTTOM 0 -130", "stacked again as it shows")
 S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 200, 200, 20 }, { 400, 205, 200, 15 }, { 400, 200, 200, 5 }
 L:Stack()
+-- Edit Mode's Hide Health Bar hides the container, not the health bar in
+-- it: the rows then sit flush on the power bar.
+do
+    local health = New("Frame", prd.HealthBarsContainer)
+    S[health].rect = { 400, 205, 200, 15 }
+    rawset(prd.HealthBarsContainer, "healthBar", health)
+    L:Stack()
+    Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -180 TOP 0 -200", "the health bar counts while it shows")
+    prd.HealthBarsContainer:Hide()
+    L:Stack()
+    Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -195 TOP 0 -200", "Hide Health Bar: flush on the power bar")
+    prd.HealthBarsContainer:Show()
+    rawset(prd.HealthBarsContainer, "healthBar", nil)
+    L:Stack()
+    Equal(At(B:Get("cd")), "BOTTOM 0 -180", "and on the health bar again once it shows")
+end
 
 -- Undo puts back what the preset changed.
 ok, message = L:Undo()
 Equal(message .. " " .. ns.BarData("cd").perRow .. " " .. tostring(L:Active()), "Put back as it was. 20 false", "Undo")
 Equal(S[prd].width, 200, "and the display gets Blizzard's width back")
 Equal(L.undo, nil, "once")
+Equal(tostring(ns.LayoutData().preset), "nil", "from no layout, no preset is left marked")
+-- Undo back to your own layout: no preset marked, and icon sizes you set
+-- after picking one stay, since a layout never changes them.
+L:Apply("pyramid")
+L:SetAcross("cd", 7)
+L:Apply("wide")
+B:SetOption("cd", "size", 48)
+L:Undo()
+Equal(tostring(ns.LayoutData().preset) .. " " .. ns.BarData("cd").size .. " " .. ns.BarData("cd").perRow, "nil 48 7",
+    "Undo puts your own layout back, keeping the size you set")
+B:SetOption("cd", "size", 36)
 
 -- Dragging a bar leaves the layout; Line up stacks them again.
 L:Apply("pyramid")
@@ -2069,15 +2304,15 @@ lockdown = false
 Fire("PLAYER_REGEN_ENABLED")
 Equal(L.pending, nil, "and it's stacked again then")
 
--- Reset positions ends the layout; the backup keeps it.
+-- Reset positions ends the layout; it's kept over a reload.
 L:Apply("funnel")
-local kept = ns.LayoutData()
-Equal(table.concat(kept.above, ","), "debuff,buff,util,cd", "everything above the display")
+Equal(table.concat(ns.LayoutData().above, ","), "debuff,buff,util,cd", "everything above the display")
+saved = ForeverEnhancedCooldownManagerDB
 Environment(true)
 Display()
-ns = Load(nil)
+ns = Load(saved)
 Equal(tostring(ns.LayoutData().on) .. " " .. ns.LayoutData().preset .. " " .. table.concat(ns.LayoutData().above, ","),
-    "true funnel debuff,buff,util,cd", "the layout comes back from the backup")
+    "true funnel debuff,buff,util,cd", "the layout kept over a reload")
 ns.Bars:ResetPositions()
 Equal(ns.Layout:Active(), false, "Reset positions ends the layout")
 
@@ -2146,6 +2381,31 @@ S[last].scripts.OnDragStop(last)
 Equal(tostring((B:Find(moving))) .. " " .. S[w.note].text, "nil Took " .. moving .. " off Utility.", "dragged off, it comes off")
 lp.undo:Click()
 Equal(ns.BarData("cd").perRow, 20, "Undo")
+-- Escape mid-drag closes the window: the spell stays where it was, and no
+-- icon is left on the cursor for next time.
+do
+    local tile = lp.rows.cd.tiles[1]
+    local name = tile.name
+    S[tile].scripts.OnDragStart(tile)
+    Equal(S[lp.ghost].shown, true, "a picked-up icon follows the cursor")
+    w:Hide()
+    S[tile].scripts.OnDragStop(tile)
+    Equal(tostring(B:Find(name) ~= nil) .. " " .. tostring(S[lp.ghost].shown), "true false", "closed mid-drag, the spell stays on its bar")
+    w:Show()
+    w:Select("layout")
+    S[tile].scripts.OnDragStart(tile)
+    lp:Hide()
+    Equal(S[lp.ghost].shown, false, "the page closing lets go of what was held")
+    lp:Show()
+    w:Select("layout")
+    -- A drag that never landed can't be dropped by a later one.
+    S[tile].scripts.OnDragStart(tile)
+    local spare = lp.rows.cd.tiles[6]
+    Equal(spare.name, nil, "an empty spot")
+    S[spare].scripts.OnDragStart(spare)
+    S[spare].scripts.OnDragStop(spare)
+    Equal(tostring(B:Find(name) ~= nil) .. " " .. tostring(S[lp.ghost].shown), "true false", "nothing taken off by a drag from an empty spot")
+end
 lp.cards[1]:Click()
 Equal(S[lp.toggle.label].text, "Turn off", "a way to stop")
 lp.toggle:Click()
@@ -2187,6 +2447,21 @@ Equal(tostring(prdOn) .. " " .. S[lp.status].text, "false Your rows sit together
 Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -90 TOP 0 -90", "where it was")
 lp.shown:Click()
 Equal(tostring(prdOn) .. " " .. At(B:Get("util")), "true TOP 0 -100", "and back on")
+-- Switched off in Blizzard's Options instead: the rows close up too.
+prdOn = false
+Fire("CVAR_UPDATE", "nameplateShowSelf", "0")
+Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -90 TOP 0 -90", "switched off in Options, the rows close up")
+prdOn = true
+Fire("CVAR_UPDATE", "nameplateShowSelf", "1")
+Equal(At(B:Get("util")), "TOP 0 -100", "and part again when it's back")
+prdOn = false
+Fire("CVAR_UPDATE", "cooldownViewerEnabled", "1")
+Equal(At(B:Get("util")), "TOP 0 -100", "other game settings don't restack")
+prd:Hide()
+Equal(At(B:Get("util")), "TOP 0 -90", "the display hiding closes them up too")
+prdOn = true
+prd:Show()
+Equal(At(B:Get("util")), "TOP 0 -100", "and showing again parts them")
 lockdown = true
 lp.shown:Click()
 Equal(tostring(prdOn) .. " " .. S[w.note].text, "true Finish combat first.", "never in combat")
@@ -2461,14 +2736,297 @@ Equal(w.pages.layout.drawError, nil, "the Layout page drew without errors")
 cp.shown:Click()
 Equal(tostring(ns.Get("castBar")) .. " " .. tostring(S[w.pages.layout.castStrip].shown), "false false", "switched off from its page")
 Equal(#printed, 0, "no errors from the cast bar")
--- Its height is in the backup too, within its limits.
+-- Its height is kept over a reload, within its limits.
+saved = ForeverEnhancedCooldownManagerDB
 Environment(true)
-ns = Load(nil)
-Equal(ns.Get("castHeight"), 24, "the height comes back from the backup")
-cvars.FECMBackup = cvars.FECMBackup:gsub("castHeight=24", "castHeight=99")
+ns = Load(saved)
+Equal(ns.Get("castHeight"), 24, "the height kept over a reload")
+saved.castHeight = 99
 Environment(true)
-ns = Load(nil)
+ns = Load(saved)
 Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
+
+-- The swing timer in the cast bar's spot ---------------------------------------------------------
+
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+;(function()
+    Environment()
+    Display()
+    _G.PlayerCastingBarFrame = New("Frame")
+    local native = PlayerCastingBarFrame
+    -- Forever's own swing timers: the addon never touches them.
+    local forever = {}
+    for _, name in ipairs({ "SwingTimerMainHandFrame", "SwingTimerOffHandFrame", "SwingTimerRangedFrame" }) do
+        _G[name] = New("Frame")
+        forever[#forever + 1] = _G[name]
+    end
+    -- A sword in the main hand and a bow in the ranged slot.
+    local weapons = { [16] = 135274, [18] = 135490 }
+    _G.GetInventoryItemTexture = function(unit, slot) assert(unit == "player"); return weapons[slot] end
+    local class = "DRUID"
+    _G.UnitClass = function() return class:sub(1, 1) .. class:sub(2):lower(), class end
+    ns = Load({ useBars = true, prdSkin = false })
+    local B, L, C = ns.Bars, ns.Layout, ns.CastBar
+    local sw = C.row
+    B:Assign("Moonfire", "cd")
+    B:Assign("Attack", "util")
+    L:Apply("pyramid")
+    local function Gone() return S[sw].alpha .. " " .. tostring(S[sw].scripts.OnUpdate) end
+    local function Time() return Last(sw.bar.time, "SetFormattedText", 2) end
+    Equal(tostring(ns.Get("swingTimer")) .. " " .. ns.Get("swingColour") .. " " .. tostring(C:Room()) .. " " .. tostring(S[sw].shown),
+        "false default nil false", "off by default: no room, nothing shown")
+    class = "HUNTER"
+    clock = 200
+    Fire("PLAYER_SWING", 2.5, 2)
+    Equal(Gone(), "0 nil", "off, a swing does nothing")
+    ns.Set("swingTimer", true)
+    C:Apply()
+    Equal(At(sw) .. string.format(" %g ", S[sw].width) .. At(B:Get("util")) .. " " .. Gone(), "TOP 0 -104 200 TOP 0 -122 0 nil",
+        "on: the cast bar's spot under the display, Utility under it, and nothing ticking until you swing")
+    native:SetAlpha(.5)
+    Equal(tostring(C:Room()) .. " " .. S[native].alpha, "18 0.5", "its room kept, and Blizzard's cast bar left alone")
+    native:SetAlpha(1)
+    -- Auto Shot: the bow's icon, filling from empty, in silver.
+    Fire("PLAYER_SWING", 2.5, 2)
+    Equal(S[sw].alpha .. " " .. S[sw.bar.name].text .. " " .. S[sw.icon].texture .. " " .. Last(sw.bar, "SetMinMaxValues", 2),
+        "1 Auto Shot 135490 2.5", "Auto Shot for a hunter: the ranged weapon's icon, as long as the swing")
+    Equal(string.format("%g %g %g", Last(sw.bar, "SetStatusBarColor", 1), Last(sw.bar, "SetStatusBarColor", 3), Last(sw.bar, "SetValue", 1)),
+        "0.66 0.72 0", "in silver, starting empty")
+    clock = 201
+    S[sw].scripts.OnUpdate(sw, 1)
+    Equal(string.format("%g %g", Last(sw.bar, "SetValue", 1), Time()), "1 1.5", "filling, with the seconds left")
+    -- The off hand, and swings the game keeps secret, are skipped.
+    Fire("PLAYER_SWING", 1.8, 1)
+    Fire("PLAYER_SWING", SECRET, 2)
+    Fire("PLAYER_SWING", 1.2, SECRET)
+    Fire("PLAYER_SWING", SECRET, SECRET)
+    -- Secret numbers too: the game says so, whatever they'd read as.
+    local plain = issecretvalue
+    _G.issecretvalue = function(v) return v == 1.7 or plain(v) end
+    Fire("PLAYER_SWING", 1.7, 2)
+    _G.issecretvalue = function(v) return v == 2 or plain(v) end
+    Fire("PLAYER_SWING", 1.9, 2)
+    _G.issecretvalue = plain
+    for _, odd in ipairs({ 0, -1, 0 / 0, math.huge, "2" }) do Fire("PLAYER_SWING", odd, 0) end
+    Fire("PLAYER_SWING", nil, 0)
+    Fire("PLAYER_SWING", 2, nil)
+    clock = 201.5
+    S[sw].scripts.OnUpdate(sw, .5)
+    Equal(string.format("%s %g %g", S[sw.bar.name].text, Last(sw.bar, "SetMinMaxValues", 2), Last(sw.bar, "SetValue", 1)),
+        "Auto Shot 2.5 1.5", "the off hand, secret swings and odd times are skipped, never guessed at")
+    -- Shot after shot: held full as each runs out, so the bar never blinks.
+    local lowest = 1
+    rawset(sw, "SetAlpha", function(self, alpha)
+        lowest = math.min(lowest, alpha)
+        S[self].alpha = alpha
+    end)
+    clock = 202.6 -- ran out at 202.5
+    S[sw].scripts.OnUpdate(sw, 1.1)
+    Equal(string.format("%g %g %g", Last(sw.bar, "SetValue", 1), Time(), S[sw].alpha), "2.5 0 1", "run out: full, and held")
+    clock = 202.8
+    S[sw].scripts.OnUpdate(sw, .2)
+    Fire("PLAYER_SWING", 2.5, 2)
+    Equal(string.format("%g %g", lowest, Last(sw.bar, "SetValue", 1)), "1 0", "the next shot starts it again, with no blink between")
+    rawset(sw, "SetAlpha", nil)
+    clock = 205.8 -- ran out at 205.3
+    S[sw].scripts.OnUpdate(sw, 3)
+    Equal(string.format("%.2f", S[sw].alpha), "0.67", "no next shot: it fades like a finished cast")
+    clock = 206.1
+    S[sw].scripts.OnUpdate(sw, .3)
+    Equal(Gone(), "0 nil", "and it's gone, with nothing left ticking")
+    -- The main hand, and other classes' ranged swings.
+    Fire("PLAYER_SWING", 3.2, 0)
+    Equal(S[sw.bar.name].text .. " " .. S[sw.icon].texture .. " " .. Last(sw.bar, "SetMinMaxValues", 2) .. " " .. S[sw].alpha,
+        "Main hand 135274 3.2 1", "a melee swing: Main hand, with the main hand weapon's icon")
+    class = "DRUID"
+    Fire("PLAYER_SWING", 2, 2)
+    Equal(S[sw.bar.name].text, "Ranged", "a ranged swing for any other class")
+    weapons[16], weapons[18] = nil, SECRET
+    Fire("PLAYER_SWING", 3.2, 0)
+    local sword = S[sw.icon].texture
+    Fire("PLAYER_SWING", 2, 2)
+    Equal(sword .. " " .. S[sw.icon].texture, "Interface\\Icons\\INV_Sword_04 Interface\\Icons\\INV_Weapon_Bow_05",
+        "no weapon icon to hand, or a secret one: a sword or a bow")
+    weapons[16], weapons[18] = 135274, 135490
+    class = "HUNTER"
+    -- The height and parts are the cast bar's.
+    ns.Set("castHeight", 24)
+    ns.Set("castIcon", false)
+    C:Apply()
+    Equal(S[sw].height .. " " .. tostring(S[sw.icon].shown) .. " " .. At(B:Get("util")) .. " " .. Last(sw.bar, "SetStatusBarColor", 1),
+        "24 false TOP 0 -128 0.66", "the swing timer follows the height and parts, and keeps its colour")
+    ns.Set("castHeight", 18)
+    ns.Set("castIcon", true)
+    C:Apply()
+    -- A new weapon or a loading screen clears it.
+    Fire("WEAPON_SLOT_CHANGED")
+    Equal(Gone(), "0 nil", "a weapon change clears it")
+    Fire("PLAYER_SWING", 2.5, 2)
+    Fire("PLAYER_ENTERING_WORLD")
+    Equal(Gone(), "0 nil", "and so does a loading screen")
+    -- The cast bar off: casts stay on Blizzard's bar, and the swing keeps the spot.
+    clock = 207
+    Fire("PLAYER_SWING", 2.5, 2)
+    local casting = { "Wrath", "Wrath", 136006, 207000, 208500, false, "cast-1" }
+    _G.UnitCastingInfo = function() return table.unpack(casting) end
+    Fire("UNIT_SPELLCAST_START", "player", "cast-1", 5176)
+    Equal(S[sw.bar.name].text .. " " .. S[native].alpha, "Auto Shot 1",
+        "with the cast bar off, casts are left to Blizzard's bar and the swing timer keeps the spot")
+    -- Both on: one spot, and a cast takes it while it lasts.
+    ns.Set("castBar", true)
+    C:Apply()
+    Equal(tostring(C:Room()) .. " " .. At(B:Get("util")) .. " " .. S[native].alpha .. " " .. S[sw.bar.name].text,
+        "18 TOP 0 -122 0 Auto Shot", "both on: one spot, Blizzard's cast bar hidden, the swing still showing")
+    clock = 210
+    Fire("PLAYER_SWING", 3, 0)
+    casting = { "Wrath", "Wrath", 136006, 210500, 212000, false, "cast-2" }
+    clock = 210.5
+    Fire("UNIT_SPELLCAST_START", "player", "cast-2", 5176)
+    Equal(S[sw.bar.name].text .. " " .. Last(sw.bar, "SetStatusBarColor", 1), "Wrath 1", "a cast takes the spot, in gold")
+    clock = 211
+    Fire("PLAYER_SWING", 3, 0)
+    S[sw].scripts.OnUpdate(sw, .5)
+    Equal(S[sw.bar.name].text .. " " .. string.format("%g", Last(sw.bar, "SetValue", 1)), "Wrath 0.5", "a swing meanwhile waits its turn")
+    clock = 212
+    Fire("UNIT_SPELLCAST_STOP", "player", "cast-2", 5176)
+    clock = 212.5
+    S[sw].scripts.OnUpdate(sw, .5)
+    Equal(S[sw.bar.name].text .. string.format(" %.2f", S[sw].alpha), "Wrath 0.67", "the finished cast holds and fades as before")
+    clock = 212.8
+    S[sw].scripts.OnUpdate(sw, .3)
+    Equal(string.format("%s %g %g %.1f", S[sw.bar.name].text, S[sw].alpha, Last(sw.bar, "SetStatusBarColor", 1), Last(sw.bar, "SetValue", 1)),
+        "Main hand 1 0.66 1.8", "then the swing timer comes back, in its own colour, where it's got to")
+    -- A swing that runs out during a cast doesn't come back just to fade.
+    clock = 215
+    Fire("PLAYER_SWING", 2.5, 0) -- runs out at 217.5, just before the cast has faded
+    casting = { "Wrath", "Wrath", 136006, 215000, 218000, false, "cast-3" }
+    Fire("UNIT_SPELLCAST_START", "player", "cast-3", 5176)
+    clock = 217
+    S[sw].scripts.OnUpdate(sw, 2)
+    Fire("UNIT_SPELLCAST_STOP", "player", "cast-3", 5176)
+    clock = 217.8
+    S[sw].scripts.OnUpdate(sw, .8)
+    Equal(Gone(), "0 nil", "a swing that ran out during the cast stays gone")
+    -- Broken off: red, then the swing timer again.
+    clock = 220
+    Fire("PLAYER_SWING", 3, 0)
+    casting = { "Wrath", "Wrath", 136006, 220000, 222000, false, "cast-4" }
+    Fire("UNIT_SPELLCAST_START", "player", "cast-4", 5176)
+    Fire("UNIT_SPELLCAST_INTERRUPTED", "player", "cast-4", 5176)
+    Equal(S[sw.bar.name].text .. " " .. Last(sw.bar, "SetStatusBarColor", 1), "Interrupted 0.85", "an interrupted cast shows red as before")
+    clock = 220.8
+    S[sw].scripts.OnUpdate(sw, .8)
+    Equal(S[sw.bar.name].text .. " " .. S[sw].alpha, "Main hand 1", "and the swing timer comes back after")
+    -- The Layout page draws the spot while either is on.
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("layout")
+    local strip = w.pages.layout.castStrip
+    Equal(tostring(S[strip].shown) .. " " .. Last(strip, "SetColorTexture", 1), "true 1", "the Layout page draws the spot, in the cast bar's colour")
+    w:Select("cast")
+    local cp = w.pages.cast
+    Equal(S[cp.status].text, "Cast bar and swing timer under your resource display. Blizzard's cast bar is hidden.", "the page says both are on")
+    cp.shown:Click()
+    native:SetAlpha(1) -- Blizzard's own bar starting a cast
+    w:Select("layout")
+    Equal(tostring(S[strip].shown) .. " " .. Last(strip, "SetColorTexture", 1) .. " " .. tostring(C:Room()) .. " " .. S[native].alpha,
+        "true 0.66 18 1", "only the swing timer: the spot in its silver, and Blizzard's cast bar back")
+    w:Select("cast")
+    cp.swing:Click()
+    w:Select("layout")
+    Equal(tostring(S[strip].shown) .. " " .. tostring(C:Room()) .. " " .. At(B:Get("util")) .. " " .. tostring(S[sw].shown) .. " " .. Gone(),
+        "false nil TOP 0 -100 false 0 nil", "both off from the page: no spot, the rows close up, nothing ticking")
+    -- The Cast bar page: a tick, a colour and a preview for the swing timer.
+    w:Select("cast")
+    Equal(S[cp.swing.text].text .. "|" .. S[cp.icon.text].text .. "|" .. S[cp.name.text].text .. "|" .. S[cp.timer.text].text,
+        "Swing timer in this spot|Icon|Name|Time left", "the ticks read right for both")
+    Equal(tostring(cp.swing:GetChecked()) .. " " .. S[cp.sample].alpha .. " " .. S[cp.swingSample].alpha, "false 0.35 0.35",
+        "both off: both preview bars dimmed")
+    Equal(S[cp.swingSample.bar.name].text .. " " .. S[cp.swingSample.icon].texture, "Auto Shot Interface\\Icons\\INV_Weapon_Bow_05",
+        "a hunter's preview swings Auto Shot, with a bow")
+    cp.swing:Click()
+    Equal(tostring(ns.Get("swingTimer")) .. " " .. S[cp.swingSample].alpha .. " " .. S[cp.sample].alpha .. " " .. S[cp.status].text,
+        "true 1 0.35 Swing timer under your resource display. Casts show on Blizzard's cast bar.", "ticked: its preview lights up")
+    Equal(tostring(C:Room()) .. " " .. tostring(S[sw].shown), "18 true", "and the spot is back")
+    S[cp.swing].scripts.OnEnter(cp.swing)
+    local note = S[w.note].text
+    Equal(note:find("Main hand and ranged swings: Auto Shot for hunters, Ranged for other classes.", 1, true) ~= nil
+        and note:find("A cast takes the spot", 1, true) ~= nil and note:find("EraUI", 1, true) ~= nil, true,
+        "its note: main hand and ranged, as shown above, casts first, and the other swing timers")
+    S[cp.swing].scripts.OnLeave(cp.swing)
+    -- The Name tick names all three a swing can be called.
+    S[cp.name].scripts.OnEnter(cp.name)
+    note = S[w.note].text
+    Equal(note:find("Main hand, Auto Shot or Ranged for the swing timer", 1, true) ~= nil, true, "the Name tick's note lists Ranged too")
+    S[cp.name].scripts.OnLeave(cp.name)
+    -- What's new says what it does: the main hand for everyone, hunters too,
+    -- and ranged swings, called Auto Shot for hunters.
+    local bullet
+    for _, section in ipairs(ns.NOTES[1].sections) do
+        for _, item in ipairs(section[2]) do
+            if item:find("^Swing timer") then bullet = item end
+        end
+    end
+    Equal(bullet:find("your main hand and ranged swings (Auto Shot for hunters)", 1, true) ~= nil
+        and bullet:find("everyone else", 1, true) == nil, true, "What's new: main hand and ranged, not Auto Shot only for hunters")
+    cp.swingSwatches[3]:Click()
+    Equal(ns.Get("swingColour") .. " " .. S[cp.swingChosen].text .. " " .. Last(cp.swingSample.bar, "SetStatusBarColor", 1) .. " " .. ns.Get("castColour"),
+        "blue Blue " .. ns.Style:BarColour("blue")[1] .. " default", "a colour of its own, in the preview, leaving the cast bar's")
+    Fire("PLAYER_SWING", 2.5, 2)
+    Equal(Last(sw.bar, "SetStatusBarColor", 1), ns.Style:BarColour("blue")[1], "and on the real one")
+    cp.swingSwatches[3]:Click()
+    Equal(ns.Get("swingColour") .. " " .. S[cp.swingChosen].text, "default Silver", "clicking it again goes back to silver")
+    S[cp.swingSample].scripts.OnUpdate(cp.swingSample, 1)
+    Equal(string.format("%g %.1f", Last(cp.swingSample.bar, "SetValue", 1), Last(cp.swingSample.bar.time, "SetFormattedText", 2)), "1 1.8",
+        "the preview swings as you watch")
+    S[cp.swingSample].scripts.OnUpdate(cp.swingSample, 2)
+    Equal(string.format("%.1f", Last(cp.swingSample.bar, "SetValue", 1)), "0.2", "over and over")
+    class = "DRUID"
+    w:Refresh()
+    Equal(S[cp.swingSample.bar.name].text .. " " .. S[cp.swingSample.icon].texture, "Main hand Interface\\Icons\\INV_Sword_04",
+        "anyone else's preview swings the main hand, with a sword")
+    class = "HUNTER"
+    -- Everything fits the page, top to bottom, none overlapping.
+    local tray = S[cp.options].points[1][2]
+    local top = -S[tray].points[1][3] + S[tray].height - S[cp.options].points[1][5]
+    local rows = { cp.shown, cp.swing, cp.swatches[1], cp.swingSwatches[1], cp.height, cp.icon, cp.name, cp.timer }
+    local bottom, clear = 0, true
+    for _, row in ipairs(rows) do
+        local y = -S[row].points[1][3]
+        if y < bottom + 4 then clear = false end
+        bottom = y + S[row].height
+    end
+    local aboutTop = -S[cp.about].points[1][3]
+    local last = aboutTop + cp.about:GetStringHeight()
+    Equal(tostring(clear and aboutTop >= bottom + 4) .. " " .. tostring(top + last <= 489), "true true", "the page's rows don't overlap and fit the window")
+    Equal(S[tray].height / 2 >= 3 + ns.CAST_HEIGHT[2] + 5 and S[cp.sample].points[1][1] .. " " .. S[cp.swingSample].points[1][1],
+        "BOTTOMLEFT TOPLEFT", "both preview bars fit the tray at the tallest height, one above the middle and one below")
+    -- Forever's own swing timers are never touched.
+    local untouched = true
+    for _, frame in ipairs(forever) do
+        if next(S[frame].last) ~= nil or S[frame].alpha ~= 1 or not S[frame].shown then untouched = false end
+    end
+    Equal(untouched, true, "Forever's own swing timers untouched")
+    Equal(#printed, 0, "no errors from the swing timer")
+    -- Kept over a reload; anything else is ignored.
+    ns.Set("swingColour", "purple")
+    local kept = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    ns = Load(kept)
+    Equal(tostring(ns.Get("swingTimer")) .. " " .. ns.Get("swingColour"), "true purple", "kept over a reload")
+    kept.swingTimer, kept.swingColour = "yes", "pink"
+    Environment(true)
+    ns = Load(kept)
+    Equal(tostring(ns.Get("swingTimer")) .. " " .. ns.Get("swingColour") .. " " .. tostring(ns.Valid("swingColour", "class"))
+        .. " " .. tostring(ns.Valid("swingColour", "default")) .. " " .. tostring(ns.Valid("swingColour", 3)),
+        "false default true true false", "anything else is ignored: off, and silver")
+    Environment()
+    ns = Load(nil)
+    Equal(tostring(ns.Get("swingTimer")) .. " " .. tostring(S[ns.CastBar.row].shown), "false false", "a new install: off")
+    for _, name in ipairs({ "SwingTimerMainHandFrame", "SwingTimerOffHandFrame", "SwingTimerRangedFrame", "PlayerCastingBarFrame" }) do
+        _G[name] = nil
+    end
+end)()
 
 -- Borders and shadows on your bars -------------------------------------------------------------
 
@@ -2500,6 +3058,186 @@ w.iconShadow.buttons[1]:Click()
 Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown(cdBar.decor.shadow[1]) .. " " .. Shown(ns.CastBar.row.decor.shadow[1]),
     "false false false", "and Off takes them away")
 Equal(#printed, 0, "no errors from borders and shadows")
+
+-- A whole-bar box only goes round icons that stay put: not packed Buffs or
+-- Debuffs, a bar hiding its ready icons, or greyed Debuffs spots with no enemy.
+do
+    Environment()
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    ns.Set("iconBorder", "bar")
+    ns.Set("iconShadow", "bar")
+    B:ApplyDecor()
+    local cd, buff, debuff = B:Get("cd"), B:Get("buff"), B:Get("debuff")
+    Equal(Shown(cd.decor.border) .. " " .. Shown(cd.decor.shadow[1]), "true true", "a cooldown bar gets the whole-bar box")
+    Equal(Shown(buff.decor.border) .. " " .. Shown(buff.decor.shadow[1]) .. " " .. Shown(debuff.decor.border), "false false false",
+        "packed Buffs and Debuffs don't: their icons come and go")
+    B:SetOption("cd", "hideReady", true)
+    Equal(Shown(cd.decor.border), "false", "nor a bar that hides its ready icons")
+    B:SetUnlocked(true)
+    Equal(Shown(cd.decor.border), "true", "unless every icon shows, unlocked")
+    B:SetUnlocked(false)
+    Equal(Shown(cd.decor.border), "false", "locked again, it goes")
+    B:SetOption("cd", "hideReady", false)
+    Equal(Shown(cd.decor.border), "true", "and it's back with Hide when ready off")
+    B:SetOption("buff", "showMissing", true)
+    Equal(Shown(buff.decor.border), "true", "fixed Buffs spots always show, so they get it")
+    target, hostile = false, true
+    B:SetOption("debuff", "showMissing", true)
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Shown(debuff.decor.border) .. " " .. tostring(debuff.enemy), "false false", "fixed Debuffs spots with no enemy don't")
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Shown(debuff.decor.border), "true", "until you target one")
+    -- Each icon: a greyed Debuffs spot's rings go with it.
+    ns.Set("iconBorder", "icon")
+    ns.Set("iconShadow", "icon")
+    B:ApplyDecor()
+    local spot = debuff.holders[1]
+    Equal(Shown(spot.decor.border) .. " " .. Shown(spot.decor.shadow[1]) .. " " .. Shown(debuff.decor.border), "true true false",
+        "each icon: the spots ringed while there's an enemy")
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Shown(spot.decor.border) .. " " .. tostring(S[spot.icon].alpha), "false 0", "no enemy: the greyed spot goes, rings and all")
+    B:ApplyDecor()
+    Equal(Shown(spot.decor.border) .. " " .. Shown(buff.holders[1].decor.border), "false true",
+        "the Look page doesn't bring them back, and Buffs spots keep theirs")
+    hostile, target = SECRET, true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Shown(spot.decor.border), "true", "a hidden answer counts as an enemy")
+    hostile = true
+    Equal(#printed, 0, "no errors from whole-bar boxes")
+
+    -- Blizzard's packed icons can't be used while auras are secret, so the
+    -- Look page changes theirs once the fight is over; yours change at once.
+    Environment()
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:SetAura("buff", "Thorns", true)
+    local packed = B:Get("buff").groupParts
+    Equal(#packed .. " " .. Shown(packed[1].decor.border), "1 false", "a packed icon, no border yet")
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    ns.Set("iconBorder", "icon")
+    B:ApplyDecor()
+    Equal(Shown(B:Get("cd").icons[1].decor.border) .. " " .. Shown(packed[1].decor.border) .. " " .. tostring(B:Get("buff").pendingDecor),
+        "true false true", "in a fight your icons change at once; Blizzard's packed ones wait")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Shown(packed[1].decor.border) .. " " .. tostring(B:Get("buff").pendingDecor), "true nil", "and change once it's over")
+    Equal(#printed, 0, "no errors from redrawing in a fight")
+end
+
+-- Joined entries take one slot between them ------------------------------------------------
+
+do
+    Environment()
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    ns.BUFF_SLOTS = 2
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("buff", "Clearcasting", true)
+    B:SetJoined("buff", 2, true)
+    Equal(B:SlotsUsed("buff"), 1, "a joined pair takes one slot")
+    Equal(B:SetAura("buff", "Nature's Grace", true), true, "so a second icon still fits")
+    Equal(B:SetAura("buff", "Walk on Air", true), false, "but not a third")
+    local ok, why = B:SetJoined("buff", 2, false)
+    Equal(tostring(ok) .. " " .. tostring(why) .. " " .. tostring(B:Joined("buff", 2)), "false Buffs is full. true",
+        "splitting past the slots is refused")
+    ok, why = B:MoveTo("buff", 2, 3)
+    Equal(tostring(ok) .. " " .. tostring(why) .. " | " .. Shape("buff"), "false Buffs is full. | Thorns+Clearcasting, Nature's Grace",
+        "so is dragging one out of its group, which puts everything back")
+    Equal(B:MoveTo("buff", 3, 1), true, "a move that needs no more icons is fine")
+    Equal(Shape("buff"), "Nature's Grace, Thorns+Clearcasting", "and happens")
+    ns.BUFF_SLOTS = 16
+    Equal(B:SetJoined("buff", 3, false), true, "with room, a split goes through")
+    Equal(Shape("buff"), "Nature's Grace, Thorns, Clearcasting", "split")
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "cd")
+    Equal(B:MoveTo("cd", 1, 2), true, "cooldown bars move as before")
+    Equal(table.concat(ns.BarData("cd").spells, ","), "Wrath,Moonfire", "moved")
+    Equal(#printed, 0, "no errors from slots")
+end
+
+-- Only what a bar can show goes on it -------------------------------------------------------
+
+do
+    Environment()
+    Book(true)
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    B:Assign("Moonfire@1", "cd")
+    local ok, why = B:Transfer("cd", "buff", "Moonfire@1")
+    Equal(tostring(ok) .. " " .. tostring(why), "false Fixed ranks can't go on the Buffs bar, which counts every rank already.",
+        "a fixed rank can't be dragged onto Buffs")
+    Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire@1", "and stays on Cooldowns")
+    Equal(B:Transfer("cd", "debuff", "Moonfire@1"), false, "nor onto Debuffs")
+    Equal(B:Transfer("cd", "util", "Moonfire@1"), true, "Utility is fine")
+    B:SetAura("buff", "Clearcasting", true)
+    ok, why = B:Transfer("buff", "cd", "Clearcasting")
+    Equal(tostring(ok) .. " " .. tostring(why), "false Procs only go on the Buffs bar.", "a proc can't go onto Cooldowns")
+    Equal(tostring(B:Transfer("buff", "debuff", "Clearcasting")) .. " " .. tostring(B:HasAura("buff", "Clearcasting")), "false true",
+        "nor Debuffs, and it stays on Buffs")
+    ok, why = B:Add("debuff", "Clearcasting")
+    Equal(tostring(ok) .. " " .. tostring(why), "false Procs only go on the Buffs bar.", "added by name, it says why")
+    Equal((B:Add("buff", "Moonfire (Rank 1)")), false, "a fixed rank added to Buffs by name is refused")
+    Equal((B:Add("util", "Moonfire (Rank 2)")), true, "but it's fine on a cooldown bar")
+    Equal((B:Add("buff", "Thorns")), true, "a buff on Buffs is fine")
+    Equal(B:Transfer("buff", "debuff", "Thorns"), true, "and plain spells move between aura bars as before")
+    Equal(#printed, 0, "no errors from what fits")
+
+    -- On the Layout page: refused, the spell stays and the footer says why.
+    Environment()
+    Book(true)
+    Display()
+    ns = Load({ useBars = true, prdSkin = false })
+    B = ns.Bars
+    B:Assign("Moonfire@1", "cd")
+    B:SetAura("buff", "Thorns", true)
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    w:Select("layout")
+    local lp = w.pages.layout
+    local tile = lp.rows.cd.tiles[1]
+    S[tile].scripts.OnDragStart(tile)
+    S[lp.rows.buff].mouseOver = true
+    S[tile].scripts.OnDragStop(tile)
+    S[lp.rows.buff].mouseOver = nil
+    Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. S[w.note].text,
+        "Moonfire@1 Fixed ranks can't go on the Buffs bar, which counts every rank already.", "dragged onto the Buffs row, it stays")
+end
+
+-- A Buffs or Debuffs bar dragged as a fight starts is let go first ---------------------------
+
+do
+    Environment()
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetUnlocked(true)
+    local bar = B:Get("buff")
+    S[bar.mover].scripts.OnDragStart(bar.mover)
+    Equal(bar.dragging, true, "dragging")
+    S[bar].cx, S[bar].cy = 620, 450
+    Fire("PLAYER_REGEN_DISABLED")
+    Equal(tostring(bar.dragging) .. " " .. tostring(S[bar].last.StopMovingOrSizing ~= nil), "nil true",
+        "let go as the fight starts, before it's locked")
+    Equal(ns.BarData("buff").x, 120, "and placed where it was")
+    lockdown = true
+    local points = #S[bar].points
+    S[bar].last.StopMovingOrSizing = nil
+    S[bar.mover].scripts.OnDragStop(bar.mover)
+    Equal(tostring(S[bar].last.StopMovingOrSizing) .. " " .. #S[bar].points, "nil " .. points, "the late drag stop moves nothing in the fight")
+    S[bar.mover].scripts.OnDragStart(bar.mover)
+    Equal(bar.dragging, nil, "and no drag starts in one")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(#printed, 0, "no errors from dragging into a fight")
+end
 
 -- Each class's debuffs, from Blizzard's own spell data -------------------------------------
 
@@ -2546,11 +3284,12 @@ Equal(table.concat(ns.BarData("debuff").spells, ","), "Moonfire", "its spells st
 w:Select("debuff")
 Equal(S[w.pages.bar.putBack].shown, true, "its own page says it's out, with Put back")
 w:Select("layout")
--- Kept in the backup.
+-- Kept over a reload.
+saved = ForeverEnhancedCooldownManagerDB
 Environment(true)
 Display()
-ns = Load(nil)
-Equal(tostring(ns.Layout:IsHidden("debuff")) .. " " .. ns.LayoutData().base, "true pyramid", "the backup keeps it out")
+ns = Load(saved)
+Equal(tostring(ns.Layout:IsHidden("debuff")) .. " " .. ns.LayoutData().base, "true pyramid", "still out after a reload")
 B, L = ns.Bars, ns.Layout
 SlashCmdList.FECM("")
 w = FECMFrame
@@ -2646,11 +3385,17 @@ end
 
 -- The tour --------------------------------------------------------------------------------
 
-do
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+;(function()
     Environment()
     _G.FECMFrame, _G.FECMTour = nil, nil
     ns = Load({ useBars = false })
+    -- Ticks as wide as their labels while the window is made, so the Cast bar
+    -- step's two ticks differ.
+    local fixedWidth = Proto.GetStringWidth
+    Proto.GetStringWidth = function(self) return #(S[self].text or "") * 6 end
     SlashCmdList.FECM("tour")
+    Proto.GetStringWidth = fixedWidth
     local tw, box = FECMFrame, FECMTour
     local function Outlined() return S[box.outline].points[1][2] end
     local function Anchor() local p = S[box].points[1]; return p[1] .. " " .. p[3] end
@@ -2691,12 +3436,65 @@ do
     box.next:Click()
     Equal(tw.selected .. " " .. S[box.title].text, "look THE LOOK", "then the Look page")
     Equal(Outlined(), tw.lookOptions, "its choices")
+    Equal(S[box.text].text:find("already has the new look", 1, true) ~= nil, true, "the look on: the Cooldown Manager has it")
+    -- Only said when it's true: ticked but not reloaded yet, unticked, or
+    -- unticked since login, the step says what happens.
+    local function Again()
+        box.back:Click()
+        box.next:Click()
+        return S[box.text].text
+    end
+    ns.loaded.skin = false
+    Equal(Again():find("Reload to apply, and Blizzard's Cooldown Manager gets the new look.", 1, true), 1,
+        "ticked but not reloaded: reload to apply")
+    ns.Set("skin", false)
+    Equal(Again():find("Tick Apply this look to the Cooldown Manager, then reload", 1, true), 1, "unticked: tick it, then reload")
+    ns.loaded.skin = true
+    local text = Again()
+    Equal(tostring(text:find("goes back to its own look when you reload", 1, true) ~= nil) .. " " .. tostring(text:find("already has", 1, true)),
+        "true nil", "unticked since login: it goes back to its own look at the next reload")
+    ns.Set("skin", true)
+    Equal(Again():find("already has the new look", 1, true) ~= nil and tw.selected .. " " .. S[box.title].text, "look THE LOOK",
+        "ticked again: as before")
     box.next:Click()
     Equal(tw.selected .. " " .. S[box.title].text, "cast CAST BAR", "the Cast bar page")
-    Equal(Outlined(), tw.pages.cast.shown, "its tick")
+    -- Both its ticks outlined as one part, with the box and its arrow under
+    -- the swing timer's tick, never over it.
+    local cp = tw.pages.cast
+    local ticks = S[cp.ticks]
+    Equal(Outlined() == cp.ticks and S[box.outline].points[2][2] == cp.ticks, true, "outlining both ticks")
+    Equal(ticks.points[1][1] .. " " .. tostring(ticks.points[1][2] == cp.shown) .. " " .. ticks.points[2][1] .. " "
+        .. tostring(ticks.points[2][2] == cp.swing) .. " " .. ticks.points[2][3] .. " " .. tostring(ticks.shown),
+        "TOPLEFT true BOTTOMLEFT true BOTTOMLEFT true", "from the top of the cast bar's tick to the bottom of the swing timer's")
+    Equal(S[cp.shown].width ~= S[cp.swing].width and ticks.width == math.max(S[cp.shown].width, S[cp.swing].width), true,
+        "as wide as the wider tick")
+    local swingBottom = S[cp.swing].points[1][3] - S[cp.swing].height
+    local p = S[box].points[1]
+    Equal(p[1] .. " " .. tostring(p[2] == cp.ticks) .. " " .. p[3] .. " " .. tostring(swingBottom + p[5] + 9 < swingBottom),
+        "TOPLEFT true BOTTOMLEFT true", "the box and its arrow sit under the swing timer's tick")
+    Equal(S[box.text].text:find("The second adds a swing timer", 1, true) ~= nil, true, "saying what the second tick is")
     box.next:Click()
     Equal(S[box.title].text .. " " .. Anchor(), "PROFILES TOPRIGHT BOTTOMRIGHT", "Profiles, the box lined up with its right end")
     Equal(Outlined(), tw.profileButton, "outlining the profile menu")
+    -- Opened, the menu isn't covered: the box moves to its left, pointing at it.
+    tw.profileButton:Click()
+    Equal(tostring(S[tw.profilePanel].shown) .. " " .. Anchor() .. " " .. tostring(S[box].points[1][2] == tw.profilePanel)
+        .. " " .. tostring(Outlined() == tw.profilePanel), "true TOPRIGHT TOPLEFT true true", "the menu open: the box beside it, outlining it")
+    local arrow = S[box.arrow]
+    Equal(tostring(arrow.shown) .. " " .. arrow.points[1][1] .. " " .. arrow.points[1][3] .. " "
+        .. table.concat({ table.unpack(arrow.last.SetTexCoord, 1, 8) }, ","), "true LEFT TOPRIGHT 1,1,0,1,1,0,0,0",
+        "its arrow on the right, facing the menu")
+    tw.profileButton:Click()
+    Equal(tostring(S[tw.profilePanel].shown) .. " " .. Anchor() .. " " .. tostring(Outlined() == tw.profileButton),
+        "false TOPRIGHT BOTTOMRIGHT true", "closed again, the box goes back under the button")
+    -- The menu already open as the step starts: beside it from the start.
+    box.back:Click()
+    tw.profileButton:Click()
+    Equal(S[box.title].text .. " " .. Anchor(), "CAST BAR TOPLEFT BOTTOMLEFT", "other steps don't move for the menu")
+    box.next:Click()
+    Equal(S[box.title].text .. " " .. Anchor(), "PROFILES TOPRIGHT TOPLEFT", "the Profiles step starts beside the open menu")
+    tw.profileButton:Click()
+    Equal(Anchor(), "TOPRIGHT BOTTOMRIGHT", "and moves back as it closes")
     box.next:Click()
     Equal(S[box.count].text .. " " .. S[box.title].text, "9 of 9 THAT'S THE BASICS", "the last step")
     Equal(Outlined(), FECMMinimapButton, "pointing at the minimap button")
@@ -2742,7 +3540,7 @@ do
     box.next:Click()
     tw.minimap:Click()
     Equal(S[FECMMinimapButton].shown, true, "ticking it brings the button back")
-end
+end)()
 
 -- The minimap button --------------------------------------------------------------------
 
@@ -2766,12 +3564,13 @@ do
     FECMNotes:Hide()
     -- Dragging: it follows the cursor round the edge, saved where it's let go.
     S[mm].scripts.OnDragStart(mm)
+    Equal(mm.isMoving, true, "flagged while it's dragged, so a minimap tidier (EraUI's) doesn't fade it")
     _G.GetCursorPosition = function() return 900, 800 end
     S[mm].scripts.OnUpdate(mm, .01)
     Equal(At() .. " " .. ns.Get("minimapAngle"), "CENTER 0.0 74.0 225", "following the cursor")
     S[mm].scripts.OnDragStop(mm)
-    Equal(ns.Get("minimapAngle") .. " " .. At(), "90 CENTER 0.0 74.0", "saved where it's let go")
-    Equal(cvars.FECMBackup:find("minimapAngle=90", 1, true) ~= nil, true, "and backed up")
+    Equal(ns.Get("minimapAngle") .. " " .. At() .. " " .. tostring(mm.isMoving), "90 CENTER 0.0 74.0 nil", "saved where it's let go")
+    Equal(ForeverEnhancedCooldownManagerDB.minimapAngle, 90, "in the saved settings")
     S[mm].scripts.OnClick(mm, "LeftButton")
     Equal(S[FECMFrame].shown, false, "letting go isn't a click")
     clock = clock + 1
@@ -2781,6 +3580,18 @@ do
     S[Minimap].scripts.OnSizeChanged(Minimap)
     Equal(At(), "CENTER 0.0 104.0", "a bigger minimap: still on its edge")
     Equal(ns.Valid("minimapAngle", 360), false, "angles stay within a turn")
+    -- Hidden mid-drag, it's let go there and doesn't trail the cursor later.
+    S[mm].scripts.OnDragStart(mm)
+    _G.GetCursorPosition = function() return 800, 700 end
+    S[mm].scripts.OnUpdate(mm, .01)
+    mm:Hide()
+    Equal(ns.Get("minimapAngle") .. " " .. tostring(S[mm].scripts.OnUpdate) .. " " .. tostring(mm.isMoving), "180 nil nil",
+        "hidden mid-drag, it's let go where it was")
+    mm:Show()
+    S[mm].scripts.OnDragStart(mm)
+    _G.GetCursorPosition = function() return 900, 800 end
+    S[mm].scripts.OnUpdate(mm, .01)
+    S[mm].scripts.OnDragStop(mm)
     local saved = ForeverEnhancedCooldownManagerDB
     Environment(true)
     ns = Load(saved)

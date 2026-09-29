@@ -27,6 +27,9 @@ right at home next to EraUI.
   Forever's display leaves out (off by default)
 - Your own cast bar right under it, with the spell's icon, name and time left
   (off by default)
+- A swing timer in the same spot: your main hand and ranged swings (Auto Shot
+  for hunters), in a colour of its own. A cast takes the spot while it lasts
+  (off by default)
 
 ## Your own bars
 - Cooldowns, Utility, Buffs and Debuffs bars: tick spells, or drag them in from
@@ -57,8 +60,6 @@ right at home next to EraUI.
 - Spell lists live in profiles. Characters can share one, even across classes:
   each only shows its own class's spells. Use on all characters puts one profile
   on every character
-- Settings are also backed up in the game's own settings, in case the game loses
-  them
 - An accent colour for the window, and What's new after each update
 
 ## Getting around

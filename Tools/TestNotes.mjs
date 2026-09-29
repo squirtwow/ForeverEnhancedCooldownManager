@@ -1,8 +1,8 @@
 // What's new in the game (Notes.lua) must say what CHANGELOG.txt says, version
-// by version. Run with: node --test Tools/TestNotes.mjs
+// by version, and nothing unused ships in Media/. Run with: node --test Tools/TestNotes.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 
 const read = name => readFile(new URL(`../${name}`, import.meta.url), 'utf8');
 const STRING = '"((?:[^"\\\\]|\\\\.)*)"'; // a Lua string in double quotes
@@ -59,5 +59,25 @@ test('every section has bullets, and none use em dashes', async () => {
       assert.ok(section.items.length > 0, `${entry.version} ${section.title} has bullets`);
       for (const item of section.items) assert.doesNotMatch(item, /—/, item);
     }
+  }
+});
+
+// The swing timer shows the main hand for everyone, hunters too, and ranged
+// swings for any class: Auto Shot for hunters, Ranged for the rest.
+test('the swing timer is described as it works wherever players read about it', async () => {
+  for (const name of ['CHANGELOG.txt', 'README.md', 'Tools/CurseForgeDescription.html']) {
+    const text = (await read(name)).replace(/\s+/g, ' ');
+    assert.match(text, /main hand and ranged swings \(Auto Shot for hunters\)/, name);
+    assert.doesNotMatch(text, /main hand for everyone else/, name);
+  }
+});
+
+test('every file in Media is used by the addon, so none ship unused', async () => {
+  const files = await readdir(new URL('../', import.meta.url));
+  const code = (await Promise.all(files.filter(name => /\.(lua|toc|xml)$/i.test(name)).map(read))).join('\n').toLowerCase();
+  const media = await readdir(new URL('../Media/', import.meta.url));
+  assert.ok(media.length > 0, 'media to check');
+  for (const name of media) {
+    assert.ok(code.includes(name.replace(/\.[^.]+$/, '').toLowerCase()), `Media/${name} is used`);
   }
 });

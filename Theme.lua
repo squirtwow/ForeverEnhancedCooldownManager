@@ -343,6 +343,8 @@ function T:Slider(parent, label, limits, step, width, onChange)
         track:SetScript("OnUpdate", FromCursor)
     end)
     track:SetScript("OnMouseUp", function() track:SetScript("OnUpdate", nil) end)
+    -- Hidden mid-drag (the window closed), it never hears the mouse let go.
+    track:SetScript("OnHide", function() track:SetScript("OnUpdate", nil) end)
     -- The track's width is only known once it's drawn.
     track:SetScript("OnSizeChanged", function() if slider.current then slider:Set(slider.current) end end)
     slider:EnableMouseWheel(true)
@@ -400,6 +402,7 @@ function T:Scroll(parent, width)
         thumb.drag = { y = y / scroll:GetEffectiveScale(), from = scroll:GetVerticalScroll() or 0 }
     end)
     thumb:SetScript("OnMouseUp", function() thumb.drag = nil end)
+    thumb:SetScript("OnHide", function() thumb.drag = nil end) -- hidden mid-drag, as for the slider
     thumb:SetScript("OnUpdate", function()
         local drag = thumb.drag
         if not drag then return end
