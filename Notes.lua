@@ -9,7 +9,7 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
-        version = "Unreleased",
+        version = "1.0.0",
         sections = {
             { "Blizzard's Cooldown Manager", {
                 "A new look: square icons with big, bold countdown numbers, and Tracked Bars in three designs (Glass, Split and Outline) and six colours. Any Tracked Bar can have a colour of its own. On by default, in /ccm > Look.",
@@ -33,6 +33,8 @@ ns.NOTES = {
                 "Trinkets, potions, your Hearthstone and ammo can go on a bar too. Search to add spells outside your spellbook by name or spell ID, or tick Show all ranks to use a lower rank.",
             } },
             { "Settings", {
+                "The first time you log in with the addon, its settings open with a quick tour of the basics: each step opens the right page and points at what it's about, and some let you try it. Skip it, or take it again any time from the General page or with /ccm tour.",
+                "A minimap button: click it for the settings, right-click for What's new, and drag it round the minimap. Turn it off on the General page.",
                 "Profiles: each character gets its own lists, and characters can share one, even across classes: each character only shows its own class's spells. Use on all characters puts one profile on every character. Switch, copy, rename or delete them from the Profile menu.",
                 "Your settings are also backed up in the game's own settings, so they come back if the game loses them, and you're told when that happens.",
                 "Pick the window's accent colour on the Look page, and find EraUI, my other addon, under More from Squirt on the General page.",
@@ -203,19 +205,22 @@ function ns.ShowNotes()
 end
 
 -- Once per version: a moment after the first login with it, and never in
--- combat. A first install only notes the version.
+-- combat. A first install has nothing new to show: the window opens instead,
+-- with the offer of a tour.
 function N:Start()
     local version = ns.Version()
     if ns.NotesSeen() == version then return end
     ns.SetNotesSeen(version)
-    if ns.firstInstall or #ns.NOTES == 0 then return end
+    local welcome = ns.firstInstall
+    if not welcome and #ns.NOTES == 0 then return end
     local events = CreateFrame("Frame")
     local due, waiting = false, false
     local function ShowWhenFree()
         if not due or InCombatLockdown() then return end
         due = false
         events:UnregisterAllEvents()
-        ns.ShowNotes()
+        if not welcome then return ns.ShowNotes() end
+        if ns.Tour then ns.Tour:Welcome() else ns.ShowWindow() end
     end
     events:RegisterEvent("PLAYER_ENTERING_WORLD")
     events:RegisterEvent("PLAYER_REGEN_ENABLED")

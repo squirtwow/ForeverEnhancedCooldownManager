@@ -97,6 +97,13 @@ function Proto:SetVertexColor(r, g, b) S[self].tint = { r, g, b } end
 function Proto:SetDesaturated(v) S[self].desaturated = v end
 function Proto:SetAlphaFromBoolean(v) S[self].alphaFrom = v end
 function Proto:IsMouseOver() return S[self].mouseOver == true end
+-- Like the game: shown, and so is everything it sits in.
+function Proto:IsVisible()
+    local s = S[self]
+    if not s.shown then return false end
+    local parent = s.parent
+    return parent == nil or S[parent] == nil or parent:IsVisible()
+end
 
 local function Fire(event, ...)
     for _, f in ipairs(frames) do
@@ -307,13 +314,22 @@ local function Environment(keepCVars)
     _G.Settings = nil
     _G.ClearOverrideBindings = function(owner) assert(not lockdown, "binding change in combat"); bindings[owner] = nil end
     _G.SetOverrideBindingClick = function(owner, _, key, button) assert(not lockdown, "binding change in combat"); bindings[owner] = key .. ":" .. button end
+    -- The minimap: 140 across, its centre at 900, 700.
+    _G.Minimap = New("Frame")
+    S[Minimap].width, S[Minimap].height, S[Minimap].cx, S[Minimap].cy = 140, 140, 900, 700
+    -- The tooltip keeps its lines.
+    _G.GameTooltip = New("Frame")
+    S[GameTooltip].shown = false
+    rawset(GameTooltip, "SetOwner", function(self) S[self].lines = {} end)
+    rawset(GameTooltip, "AddLine", function(self, text) table.insert(S[self].lines, text) end)
 end
 
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua",
-        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Notes.lua" }) do
+        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
+        "MinimapButton.lua", "Notes.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -489,7 +505,7 @@ Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 
 -- Backup ------------------------------------------------------------------------------
 
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=0;listRanks=0;minimap=1;minimapAngle=225;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "on/off backup")
 Equal(cvars.FECMBackupBars0 .. " " .. #cvars.FECMBackupBars1, "2 900", "bars backed up in chunks of 900 characters")
 Environment(true)
 ns = Load(nil)
@@ -1012,7 +1028,7 @@ Equal(Row("Moonfire") ~= nil, true, "spells listed")
 page.showItems:Click()
 Equal(ns.Get("listItems"), true, "Show items remembered")
 Equal(Row("item:118") ~= nil, true, "items listed when asked")
-Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=1;listRanks=0;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "and backed up")
+Equal(cvars.FECMBackup, "accent=orange;barColour=orange;barStyle=glass;castBar=0;castColour=default;castHeight=18;castIcon=1;castName=1;castTime=1;iconBorder=off;iconShadow=off;listItems=1;listRanks=0;minimap=1;minimapAngle=225;prdCombo=0;prdComboColour=default;prdHealth=default;prdHideRepeat=1;prdMatch=1;prdPower=default;prdSkin=1;skin=1;useBars=1", "and backed up")
 
 -- Searching filters the list and finds spells outside your spellbook.
 Equal(#S[page.list].points, 2, "the list is pinned by two corners, so the game can place it")
@@ -1501,13 +1517,7 @@ Equal(S[w].shown, false, "Escape closes it")
 Equal(bindings[FECMEscButton], nil, "and releases the key")
 
 SlashCmdList.FECM("check")
-Equal(S[w].shown, true, "without the development check, /ccm check just toggles")
-local probed
-ns.Probe = function(msg) probed = msg end
-SlashCmdList.FECM(" check Moonfire")
-Equal(probed, " check Moonfire", "/ccm check reaches the development check")
-Equal(S[w].shown, true, "and leaves the window alone")
-ns.Probe = nil
+Equal(S[w].shown, true, "anything after /ccm but new just opens the window")
 cvarOn = false
 w:Select("look")
 Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
@@ -1756,7 +1766,7 @@ Fire("PLAYER_REGEN_ENABLED")
 local notes = FECMNotes
 Equal(notes ~= nil and S[notes].shown, true, "but once the fight is over")
 Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape is taken while it's open")
-Equal(S[notes.version].text, "Unreleased", "headed with the notes' version")
+Equal(S[notes.version].text, "Version 1.0.0", "headed with the notes' version")
 Equal(S[notes.close.label].text, "X", "under the window's title bar")
 -- Every heading and bullet, top to bottom, none overlapping.
 local texts, expected = {}, 0
@@ -2600,6 +2610,183 @@ Equal(tostring(S[lp.cancel].shown) .. " " .. tostring(S[lp.rows.debuff.target].s
 lp.rows.debuff.tiles[1]:Click()
 Equal(table.concat(ns.BarData("debuff").spells, ","), "Faerie Fire,Moonfire", "and nothing is added")
 Equal(lp.drawError, nil, "the Layout page drew without errors")
+
+-- A first install: the window and a welcome ------------------------------------------
+
+-- Nothing new to show: the window opens instead, a moment after login and
+-- never in combat, offering the tour.
+do
+    Environment()
+    _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
+    ns = Load(nil)
+    Equal(FECMFrame, nil, "a first install waits a moment to open the window")
+    lockdown = true
+    for _, timer in ipairs(timers) do timer() end
+    Equal(FECMFrame, nil, "not in combat")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    local tw, box = FECMFrame, FECMTour
+    Equal(tw ~= nil and S[tw].shown, true, "then the window opens")
+    Equal(S[box].shown and S[box.title].text, "WELCOME", "with a welcome")
+    Equal(S[box.next.label].text .. "|" .. S[box.skip.label].text .. "|" .. tostring(S[box.back].shown),
+        "Take the tour|Skip|false", "offering the tour, or Skip")
+    Equal(FECMNotes == nil or not S[FECMNotes].shown, true, "and no What's new")
+    box.skip:Click()
+    Equal(S[box].shown, false, "Skip closes the welcome")
+    Equal(S[tw].shown and S[tw.note].text, "Take the tour any time from the General page, or with /ccm tour.",
+        "leaving the window open, and saying where the tour is")
+    -- Once only.
+    local saved = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    _G.FECMFrame, _G.FECMTour = nil, nil
+    ns = Load(saved)
+    for _, timer in ipairs(timers) do timer() end
+    Equal(FECMFrame == nil and FECMTour == nil, true, "the welcome only comes once")
+end
+
+-- The tour --------------------------------------------------------------------------------
+
+do
+    Environment()
+    _G.FECMFrame, _G.FECMTour = nil, nil
+    ns = Load({ useBars = false })
+    SlashCmdList.FECM("tour")
+    local tw, box = FECMFrame, FECMTour
+    local function Outlined() return S[box.outline].points[1][2] end
+    local function Anchor() local p = S[box].points[1]; return p[1] .. " " .. p[3] end
+    Equal(S[tw].shown and S[box].shown, true, "/ccm tour opens the window with the tour")
+    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of 9 THE MENU", "nine steps, the menu first")
+    Equal(Outlined() == tw.navFrame and S[box.outline].shown, true, "outlining the menu")
+    Equal(Anchor(), "TOPLEFT TOPRIGHT", "its box beside it")
+    Equal(S[box.back].shown, false, "no Back on the first step")
+    box.next:Click()
+    Equal(tw.selected .. " " .. S[box.title].text, "general SWITCH YOUR BARS ON", "Next opens the General page")
+    Equal(Outlined(), tw.useBars, "outlining Use my bars")
+    Equal(S[box.text].text:find("Try it: tick it.", 1, true) ~= nil, true, "asking you to try it")
+    S[box].scripts.OnUpdate(box, .3)
+    Equal(S[box.title].text, "SWITCH YOUR BARS ON", "waiting until you do")
+    tw.useBars:Click()
+    S[box].scripts.OnUpdate(box, .1)
+    Equal(S[box.title].text, "SWITCH YOUR BARS ON", "looking a few times a second, not every frame")
+    S[box].scripts.OnUpdate(box, .2)
+    Equal(tw.selected .. " " .. S[box.title].text, "cd ADD SPELLS", "ticking it moves the tour on by itself")
+    Equal(Outlined() == tw.pages.bar.listPanel and Anchor() == "BOTTOMLEFT TOPLEFT", true, "the spell list, the box above it")
+    ns.Bars:Assign("Moonfire", "cd")
+    S[box].scripts.OnUpdate(box, .3)
+    Equal(S[box.title].text, "THIS BAR'S OPTIONS", "adding a spell moves it on")
+    Equal(Outlined(), tw.pages.bar.optionsArea, "outlining the bar's options")
+    box.back:Click()
+    Equal(S[box.title].text, "ADD SPELLS", "Back goes back a step")
+    S[box].scripts.OnUpdate(box, .3)
+    Equal(S[box.title].text, "ADD SPELLS", "a step done before doesn't skip itself")
+    box.next:Click()
+    tw:Select("look")
+    Equal(S[box].shown and not S[box.outline].shown, true, "on another page the outline hides, the box stays")
+    tw:Select("util")
+    Equal(S[box.outline].shown, true, "any bar's page counts as the bar page")
+    box.next:Click()
+    Equal(tw.selected .. " " .. S[box.title].text, "layout LAYOUTS", "Layouts next")
+    local cards = tw.pages.layout.cards
+    Equal(Outlined() == cards[1] and S[box.outline].points[2][2] == cards[#cards], true, "outlining every preset")
+    box.next:Click()
+    Equal(tw.selected .. " " .. S[box.title].text, "look THE LOOK", "then the Look page")
+    Equal(Outlined(), tw.lookOptions, "its choices")
+    box.next:Click()
+    Equal(tw.selected .. " " .. S[box.title].text, "cast CAST BAR", "the Cast bar page")
+    Equal(Outlined(), tw.pages.cast.shown, "its tick")
+    box.next:Click()
+    Equal(S[box.title].text .. " " .. Anchor(), "PROFILES TOPRIGHT BOTTOMRIGHT", "Profiles, the box lined up with its right end")
+    Equal(Outlined(), tw.profileButton, "outlining the profile menu")
+    box.next:Click()
+    Equal(S[box.count].text .. " " .. S[box.title].text, "9 of 9 THAT'S THE BASICS", "the last step")
+    Equal(Outlined(), FECMMinimapButton, "pointing at the minimap button")
+    Equal(S[box.text].text:find("with this button or /ccm", 1, true) ~= nil, true, "which opens these settings")
+    Equal(S[box.next.label].text, "Done", "Done instead of Next")
+    box.next:Click()
+    Equal(S[box].shown, false, "Done ends the tour")
+    Equal(S[tw].shown and S[tw.note].text, "That's the tour. Take the tour any time from the General page, or with /ccm tour.",
+        "leaving the window open")
+    Equal(ns.Get("useBars") and #ns.BarData("cd").spells, 1, "the tour only changed what you did yourself")
+
+    -- Escape ends the tour first, then closes the window.
+    tw:Select("general")
+    tw.tour:Click()
+    Equal(S[box].shown and S[box.title].text, "THE MENU", "Take the tour on the General page starts it again")
+    FECMEscButton:Click()
+    Equal(S[box].shown == false and S[tw].shown, true, "Escape ends the tour, the window stays")
+    FECMEscButton:Click()
+    Equal(S[tw].shown, false, "then Escape closes the window")
+    -- Closing the window ends it too.
+    SlashCmdList.FECM("tour")
+    tw.close:Click()
+    SlashCmdList.FECM("")
+    Equal(S[tw].shown and not S[box].shown, true, "closing the window ends the tour")
+
+    -- With your bars already on, that step says so and waits for Next.
+    SlashCmdList.FECM("tour")
+    box.next:Click()
+    Equal(S[box.text].text:find("They're already on.", 1, true) ~= nil, true, "a step already done says so")
+    S[box].scripts.OnUpdate(box, 1)
+    Equal(S[box.title].text, "SWITCH YOUR BARS ON", "and waits for Next")
+    box.skip:Click()
+    Equal(S[box].shown, false, "Skip tour ends it")
+
+    -- Without the minimap button, the last step points at /ccm in the footer.
+    tw:Select("general")
+    tw.minimap:Click()
+    Equal(ns.Get("minimap") == false and S[FECMMinimapButton].shown == false, true, "the General tick hides the minimap button")
+    SlashCmdList.FECM("tour")
+    for _ = 1, 8 do box.next:Click() end
+    Equal(Outlined() == tw.versionText and Anchor() == "BOTTOMLEFT TOPLEFT", true, "without it, the last step points at /ccm")
+    Equal(S[box.text].text:find("any time with /ccm.", 1, true) ~= nil, true, "and says so")
+    box.next:Click()
+    tw.minimap:Click()
+    Equal(S[FECMMinimapButton].shown, true, "ticking it brings the button back")
+end
+
+-- The minimap button --------------------------------------------------------------------
+
+do
+    Environment()
+    _G.FECMFrame = nil
+    ns = Load({ useBars = true })
+    local mm = FECMMinimapButton
+    local function At() local p = S[mm].points[1]; return string.format("%s %.1f %.1f", p[1], p[4], p[5]) end
+    Equal(S[mm].shown and S[mm].parent == Minimap, true, "a minimap button, on by default")
+    Equal(At(), "CENTER -52.3 -52.3", "at the minimap's bottom left, just outside its edge")
+    S[mm].scripts.OnEnter(mm)
+    Equal(S[GameTooltip].text .. "|" .. table.concat(S[GameTooltip].lines, "|"),
+        ns.TITLE .. "|Click: settings|Right-click: What's new|Drag: move it round the minimap", "its tooltip says what it does")
+    S[mm].scripts.OnClick(mm, "LeftButton")
+    Equal(FECMFrame ~= nil and S[FECMFrame].shown, true, "click: the settings")
+    S[mm].scripts.OnClick(mm, "LeftButton")
+    Equal(S[FECMFrame].shown, false, "and again to close them")
+    S[mm].scripts.OnClick(mm, "RightButton")
+    Equal(FECMNotes ~= nil and S[FECMNotes].shown, true, "right-click: What's new")
+    FECMNotes:Hide()
+    -- Dragging: it follows the cursor round the edge, saved where it's let go.
+    S[mm].scripts.OnDragStart(mm)
+    _G.GetCursorPosition = function() return 900, 800 end
+    S[mm].scripts.OnUpdate(mm, .01)
+    Equal(At() .. " " .. ns.Get("minimapAngle"), "CENTER 0.0 74.0 225", "following the cursor")
+    S[mm].scripts.OnDragStop(mm)
+    Equal(ns.Get("minimapAngle") .. " " .. At(), "90 CENTER 0.0 74.0", "saved where it's let go")
+    Equal(cvars.FECMBackup:find("minimapAngle=90", 1, true) ~= nil, true, "and backed up")
+    S[mm].scripts.OnClick(mm, "LeftButton")
+    Equal(S[FECMFrame].shown, false, "letting go isn't a click")
+    clock = clock + 1
+    S[mm].scripts.OnClick(mm, "LeftButton")
+    Equal(S[FECMFrame].shown, true, "a click after that is")
+    S[Minimap].width = 200
+    S[Minimap].scripts.OnSizeChanged(Minimap)
+    Equal(At(), "CENTER 0.0 104.0", "a bigger minimap: still on its edge")
+    Equal(ns.Valid("minimapAngle", 360), false, "angles stay within a turn")
+    local saved = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    ns = Load(saved)
+    local p = S[FECMMinimapButton].points[1]
+    Equal(string.format("%.1f %.1f", p[4], p[5]), "0.0 74.0", "where you left it after a reload")
+end
 
 print = _G.print
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

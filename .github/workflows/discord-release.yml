@@ -1,0 +1,36 @@
+name: Discord release announcement
+
+# Each version tag (1.0.0, 1.0.1, ...) posts its changelog to the Discord
+# announcements channel, once CurseForge has that version.
+on:
+  push:
+    tags:
+      - '[0-9]*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Announce a version that is already out, for example 1.0.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discord-release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Wait for CurseForge, then announce on Discord
+        run: node .github/scripts/discord-release.mjs
+        env:
+          DISCORD_RELEASE_WEBHOOK: ${{ secrets.DISCORD_RELEASE_WEBHOOK }}
+          RELEASE_VERSION: ${{ inputs.version || github.ref_name }}

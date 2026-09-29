@@ -60,7 +60,7 @@ function ns.BuildCastBarPage(window, page, width)
         check:HookScript("OnLeave", Unnote)
         return check
     end
-    local shown = Tick("Show my cast bar under the resource display (Needs testing)", "castBar", -4,
+    local shown = Tick("Show my cast bar under the resource display", "castBar", -4,
         "On, Blizzard's own cast bar is hidden. Off, your rows close up and another addon's cast bar works as before.")
 
     -- Its colour: click the chosen one again for Blizzard's gold.

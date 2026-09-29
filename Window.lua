@@ -153,6 +153,7 @@ local function BuildLook(window, page, width)
     local options = CreateFrame("Frame", nil, page)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
     options:SetSize(inner, 198)
+    window.lookOptions = options
     local function Label(text, y)
         local label = T:Text(options, "GameFontHighlight")
         label:SetPoint("TOPLEFT", 0, y)
@@ -228,7 +229,7 @@ local function BuildLook(window, page, width)
     local repeatMana = Choice("Extra mana bar: hide in caster form, half size in forms", "prdHideRepeat", -160,
         "The second mana bar some specs get, under your main bar.",
         function() if ns.Resource then ns.Resource:Apply() end end)
-    local combo = Choice("Combo points under your energy bar (Needs testing)", "prdCombo", -182,
+    local combo = Choice("Combo points under your energy bar", "prdCombo", -182,
         "Forever's display has none, so the addon draws them: five segments as wide as the display, for rogues and druids in cat form.",
         function() if ns.Resource then ns.Resource:Apply() end end)
     window.look, window.personal, window.repeatMana, window.combo = look, personal, repeatMana, combo
@@ -504,18 +505,37 @@ local function BuildGeneral(window, page)
     window.useBars = bars
     Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left. Move and arrange them on the Layout page.", 34, -56)
 
-    T:Heading(page, "Saved settings"):SetPoint("TOPLEFT", 16, -96)
+    T:Heading(page, "Minimap button"):SetPoint("TOPLEFT", 16, -96)
+    local minimap = T:Check(page, "Show the minimap button", function(self)
+        ns.Set("minimap", self:GetChecked())
+        if ns.MinimapButton then ns.MinimapButton:Apply() end
+    end)
+    minimap:SetPoint("TOPLEFT", 16, -116)
+    window.minimap = minimap
+    Detail(page, "Click it for these settings, right-click for What's new, and drag it round the minimap.", 34, -136)
+
+    -- The tour of the basics, as a first install offers it.
+    T:Heading(page, "Tour"):SetPoint("TOPLEFT", 16, -176)
+    local tour = T:Button(page, "Take the tour", 110, 22)
+    tour:SetPoint("TOPLEFT", 16, -194)
+    tour:SetScript("OnClick", function() if ns.Tour then ns.Tour:Start() end end)
+    window.tour = tour
+    local tourAbout = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    tourAbout:SetPoint("LEFT", tour, "RIGHT", 10, 0)
+    tourAbout:SetText("The basics, a page at a time. About a minute.")
+
+    T:Heading(page, "Saved settings"):SetPoint("TOPLEFT", 16, -236)
 
     -- More from Squirt: the author's other addons, and a way to open them.
-    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -182)
+    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -322)
     local more = CreateFrame("Frame", nil, page, "BackdropTemplate")
-    more:SetPoint("TOPLEFT", 16, -202)
+    more:SetPoint("TOPLEFT", 16, -342)
     more:SetSize(WIDTH - NAV - 34, 74)
     T:Flat(more, T.PANEL, T.BORDER)
     local moreIcon = more:CreateTexture(nil, "ARTWORK")
     moreIcon:SetSize(36, 36)
     moreIcon:SetPoint("TOPLEFT", 12, -12)
-    moreIcon:SetTexture("Interface\\AddOns\\EraUI\\Media\\EraUIIcon.tga")
+    moreIcon:SetTexture(ns.MEDIA .. "EraUIIcon.tga") -- its own copy, so it shows without EraUI too
     local moreName = T:Text(more, "GameFontHighlight")
     moreName:SetPoint("TOPLEFT", 60, -12)
     moreName:SetText("EraUI")
@@ -543,7 +563,7 @@ local function BuildGeneral(window, page)
     end
     window.moreOpen, window.moreState, window.moreLinks = moreOpen, moreState, moreLinks
     local kept = T:Text(page, "GameFontHighlightSmall", T.MUTED)
-    kept:SetPoint("TOPLEFT", 16, -116)
+    kept:SetPoint("TOPLEFT", 16, -256)
     kept:SetWidth(440)
     window.kept = kept
 
@@ -554,6 +574,10 @@ local function BuildGeneral(window, page)
         moreState:SetText(installed and "Installed. Type /era, or click Open."
             or "Get it on CurseForge or GitHub: click one for its link.")
         bars:SetChecked(B:Enabled())
+        minimap:SetChecked(ns.Get("minimap"))
+        -- New files only load after a full restart: until then, no tour.
+        tour:SetShown(ns.Tour ~= nil)
+        tourAbout:SetShown(ns.Tour ~= nil)
         if ns.restored then
             kept:SetText(ns.RESTORED_TEXT .. " This happens when the game closes without saving, for example after a crash.")
             kept:SetTextColor(T.WARN[1], T.WARN[2], T.WARN[3])
@@ -683,7 +707,7 @@ local function BuildWindow()
         if ns.Bars then ns.Bars:SetUnlocked(false) end
     end)
 
-    -- Header: the icon on an accent square, and "Enhanced" in the accent.
+    -- Header: the addon's icon, and "Enhanced" in the accent.
     local header = T:TitleBar(window, HEADER)
     -- The accent washes in from the right, over the title bar and the pages.
     window.fades = { header = header.fade, page = T:Fade(window, T.FADE.page) }
@@ -699,6 +723,7 @@ local function BuildWindow()
     nav:SetPoint("TOPLEFT", 1, -(HEADER + 1))
     nav:SetPoint("BOTTOMLEFT", 1, FOOTER)
     nav:SetWidth(NAV)
+    window.navFrame = nav
     T:Flat(nav, T.NAV, T.NAV)
     local edge = nav:CreateTexture(nil, "BORDER")
     edge:SetPoint("TOPRIGHT")
@@ -757,6 +782,7 @@ local function BuildWindow()
     local version = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     version:SetPoint("BOTTOMLEFT", 12, 9)
     version:SetText(Version() .. "   /ccm to open")
+    window.versionText = version
     local note = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     note:SetPoint("BOTTOMRIGHT", -12, 9)
     note:SetJustifyH("RIGHT")
@@ -771,6 +797,7 @@ local function BuildWindow()
         self.selected = key
         self.profilePanel:Hide()
         self:Refresh()
+        if ns.Tour then ns.Tour:Sync() end
     end
 
     function window:Refresh()

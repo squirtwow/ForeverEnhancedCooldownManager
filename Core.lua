@@ -38,12 +38,15 @@ ns.DEFAULTS = {
     castTime = true,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
+    minimap = true, -- the minimap button
+    minimapAngle = 225, -- where it sits round the minimap: degrees anticlockwise from the right
 }
 ns.DECOR_KEYS = { "off", "icon", "bar" }
 ns.DECOR_NAMES = { off = "Off", icon = "Each icon", bar = "Whole bar" }
 -- Number settings, each within its limits: min, max, default.
 ns.CAST_HEIGHT = { 10, 32, 18 }
-local NUMBERS = { castHeight = ns.CAST_HEIGHT }
+ns.MINIMAP_ANGLE = { 0, 359, 225 }
+local NUMBERS = { castHeight = ns.CAST_HEIGHT, minimapAngle = ns.MINIMAP_ANGLE }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
 ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
@@ -993,9 +996,16 @@ end
 
 local function BuildEscape()
     escButton = CreateFrame("Button", "FECMEscButton", UIParent)
-    -- What's new sits over the window, so it closes first.
+    -- What's new sits over the window, so it closes first; then the tour ends,
+    -- leaving the window open.
     escButton:SetScript("OnClick", function()
-        if Shown(ns.notes) then ns.notes:Hide() elseif ns.window then ns.window:Hide() end
+        if Shown(ns.notes) then
+            ns.notes:Hide()
+        elseif ns.Tour and ns.Tour:Active() then
+            ns.Tour:Stop()
+        elseif ns.window then
+            ns.window:Hide()
+        end
     end)
     escButton:RegisterEvent("PLAYER_REGEN_DISABLED")
     escButton:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -1020,7 +1030,7 @@ local function BuildOptionsEntry()
     about:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
     about:SetWidth(560)
     about:SetJustifyH("LEFT")
-    about:SetText("A charcoal look for Blizzard's Cooldown Manager, plus cooldown and buff bars of your own. Type /ccm, or click below, for the settings.")
+    about:SetText("A cleaner look for Blizzard's Cooldown Manager and Personal Resource Display, plus cooldown, buff and cast bars of your own. Type /ccm, click the minimap button, or click below, for the settings.")
     local open = CreateFrame("Button", nil, canvas, "UIPanelButtonTemplate")
     open:SetSize(160, 24)
     open:SetPoint("TOPLEFT", about, "BOTTOMLEFT", 0, -14)
@@ -1061,6 +1071,7 @@ local function Load()
         if backup[field] ~= nil and (ns.restored or db[field] == nil) then db[field] = backup[field] end
     end
     db.session = math.max(session or 0, backup.session or 0) + 1
+    db.probe = nil -- results of a development check the released addon doesn't have
     RepairProfiles()
     for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key) end
     ns.ResolveProfile()
@@ -1071,10 +1082,10 @@ local function Load()
     SLASH_FECM2 = "/fecm"
     SlashCmdList.FECM = function(msg)
         msg = type(msg) == "string" and msg or ""
-        if ns.Probe and msg:match("^%s*check") then
-            ns.Probe(msg)
-        elseif msg:match("^%s*new%s*$") and ns.ShowNotes then
+        if msg:match("^%s*new%s*$") and ns.ShowNotes then
             ns.ShowNotes()
+        elseif msg:match("^%s*tour%s*$") and ns.Tour then
+            ns.Tour:Start()
         elseif ns.Toggle then
             ns.Toggle()
         end
@@ -1087,6 +1098,7 @@ local function Load()
     if ns.CastBar then ns.CastBar:Start() end
     if ns.Bars then ns.Bars:Start() end
     if ns.Layout then ns.Layout:Start() end
+    if ns.MinimapButton then ns.MinimapButton:Start() end
     if ns.Notes then ns.Notes:Start() end
 end
 

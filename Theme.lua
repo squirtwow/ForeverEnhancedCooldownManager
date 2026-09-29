@@ -112,8 +112,8 @@ function T:Panel(parent)
     return panel
 end
 
--- A window's title bar: the addon's icon on an accent square, its name with
--- "Enhanced" in the accent, the accent washing in from the right, and an X.
+-- A window's title bar: the addon's icon, its name with "Enhanced" in the
+-- accent, the accent washing in from the right, and an X.
 function T:TitleBar(window, height)
     local header = CreateFrame("Frame", nil, window, "BackdropTemplate")
     header:SetPoint("TOPLEFT", 1, -1)
@@ -122,17 +122,16 @@ function T:TitleBar(window, height)
     self:Flat(header, T.HEADER, T.HEADER)
     header.fade = self:Fade(header, T.FADE.header)
     header.fade:SetAllPoints()
-    local logo = CreateFrame("Frame", nil, header, "BackdropTemplate")
-    logo:SetSize(24, 24)
+    local logo = CreateFrame("Frame", nil, header)
+    logo:SetSize(26, 26)
     logo:SetPoint("LEFT", 12, 0)
     local icon = logo:CreateTexture(nil, "ARTWORK")
-    icon:SetPoint("TOPLEFT", 2, -2)
-    icon:SetPoint("BOTTOMRIGHT", -2, 2)
-    icon:SetTexture("Interface\\Icons\\INV_Misc_PocketWatch_01")
+    icon:SetAllPoints()
+    icon:SetTexture(ns.MEDIA .. "FECMIcon.tga")
+    header.icon = icon
     local title = self:Text(header, "GameFontNormalLarge")
     title:SetPoint("LEFT", logo, "RIGHT", 8, 0)
     self:Paint(function(accent)
-        self:Flat(logo, { accent[1], accent[2], accent[3], 1 }, { accent[1], accent[2], accent[3], 1 })
         title:SetText("Forever |cff" .. self:Hex(accent) .. "Enhanced|r Cooldown Manager")
     end)
     local close = self:Square(header, "X")

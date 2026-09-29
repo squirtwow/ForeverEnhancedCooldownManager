@@ -190,6 +190,7 @@ function ns.BuildBarPage(window, page, width)
     local options = CreateFrame("Frame", nil, page)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
     options:SetSize(inner, 112)
+    page.optionsArea = options
     local size = T:Slider(options, "Icon size", ns.BAR_LIMITS.size, 2, 280, function(value)
         B:SetOption(state.bar, "size", value)
         window:Refresh()

@@ -1,10 +1,10 @@
 ## Interface: 16001
 ## Title: Forever Enhanced Cooldown Manager
-## Notes: Restyles Blizzard's Cooldown Manager and adds cooldown and buff bars of your own, for WoW Forever.
+## Notes: Restyles Blizzard's Cooldown Manager and Personal Resource Display, with cooldown, buff and cast bars of your own, for WoW Forever.
 ## Author: Squirt
 ## Version: @project-version@
 ## SavedVariables: ForeverEnhancedCooldownManagerDB
-## IconTexture: Interface\Icons\INV_Misc_PocketWatch_01
+## IconTexture: Interface\AddOns\ForeverEnhancedCooldownManager\Media\FECMIcon.tga
 ## Category: UI
 
 Core.lua
@@ -23,5 +23,6 @@ LayoutPage.lua
 CastBarPage.lua
 ProfileMenu.lua
 Window.lua
+Tour.lua
+MinimapButton.lua
 Notes.lua
-Probe.lua

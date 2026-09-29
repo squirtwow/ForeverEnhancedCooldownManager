@@ -3,4 +3,6 @@ package-as: ForeverEnhancedCooldownManager
 manual-changelog: CHANGELOG.txt
 
 ignore:
+  - .github
+  - Screenshots
   - Tools
