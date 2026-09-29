@@ -1086,6 +1086,8 @@ local function Load()
             ns.ShowNotes()
         elseif msg:match("^%s*tour%s*$") and ns.Tour then
             ns.Tour:Start()
+        elseif msg:match("^%s*discord%s*$") and ns.ShowDiscord then
+            ns.ShowDiscord()
         elseif ns.Toggle then
             ns.Toggle()
         end

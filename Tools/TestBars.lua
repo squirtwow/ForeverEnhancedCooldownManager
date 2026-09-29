@@ -2788,5 +2788,31 @@ do
     Equal(string.format("%.1f %.1f", p[4], p[5]), "0.0 74.0", "where you left it after a reload")
 end
 
+-- The Discord: found a bug or have an idea ---------------------------------------------
+
+do
+    Environment()
+    _G.FECMFrame, _G.FECMCopyLink = nil, nil
+    ns = Load({ useBars = true })
+    SlashCmdList.FECM("")
+    local tw = FECMFrame
+    tw:Select("general")
+    tw.discord:Click()
+    local box = FECMCopyLink
+    Equal(S[box].shown and S[box.title].text .. " " .. S[box.input].text, "JOIN THE DISCORD https://discord.gg/FVfcDWJncr",
+        "the General page gives the Discord invite, ready to copy")
+    Equal(S[box.note].text:find("Found a bug or have an idea?", 1, true) ~= nil, true, "saying what it is for")
+    box.close:Click()
+    SlashCmdList.FECM("discord")
+    Equal(S[box].shown, true, "/ccm discord does too")
+    box.close:Click()
+    SlashCmdList.FECM("new")
+    local notes = FECMNotes
+    Equal(S[notes.ask].text, "Found a bug or have an idea?", "What's new asks")
+    Equal(S[notes.discord].points[1][2], notes.done, "with a Discord button beside Got it")
+    notes.discord:Click()
+    Equal(S[box].shown, true, "which gives the invite")
+end
+
 print = _G.print
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

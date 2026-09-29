@@ -68,6 +68,8 @@ right at home next to EraUI.
   it round the minimap, or turn it off on the General page
 - `/ccm` opens the settings; they're also under Options > AddOns
 - `/ccm tour` takes the tour again, and `/ccm new` shows What's new again
+- Found a bug or have an idea? The Discord button on the General page and in
+  What's new gives you the invite, or type `/ccm discord`
 
 Blizzard's Cooldown Manager must be on for its new look: Options > Gameplay >
 Advanced Options > Enable Cooldown Manager, or the Turn on button in `/ccm`.

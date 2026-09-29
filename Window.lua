@@ -492,6 +492,13 @@ local ERAUI_LINKS = {
         note = COPY .. " On CurseForge, Install opens the CurseForge app." },
     { label = "GitHub", url = "https://github.com/squirtwow/EraUI" },
 }
+ns.DISCORD_URL = "https://discord.gg/FVfcDWJncr"
+
+-- The Discord invite, ready to copy: from the General page, What's new and
+-- /ccm discord.
+function ns.ShowDiscord()
+    CopyLink("Join the Discord", ns.DISCORD_URL, "Found a bug or have an idea? " .. COPY)
+end
 
 local function BuildGeneral(window, page)
     local B = ns.Bars
@@ -514,15 +521,20 @@ local function BuildGeneral(window, page)
     window.minimap = minimap
     Detail(page, "Click it for these settings, right-click for What's new, and drag it round the minimap.", 34, -136)
 
-    -- The tour of the basics, as a first install offers it.
-    T:Heading(page, "Tour"):SetPoint("TOPLEFT", 16, -176)
+    -- Help: the tour of the basics, as a first install offers it, and the
+    -- Discord for bugs and ideas.
+    T:Heading(page, "Help"):SetPoint("TOPLEFT", 16, -176)
     local tour = T:Button(page, "Take the tour", 110, 22)
     tour:SetPoint("TOPLEFT", 16, -194)
     tour:SetScript("OnClick", function() if ns.Tour then ns.Tour:Start() end end)
     window.tour = tour
-    local tourAbout = T:Text(page, "GameFontHighlightSmall", T.MUTED)
-    tourAbout:SetPoint("LEFT", tour, "RIGHT", 10, 0)
-    tourAbout:SetText("The basics, a page at a time. About a minute.")
+    local discord = T:Button(page, "Discord", 80, 22)
+    discord:SetPoint("TOPLEFT", 134, -194)
+    discord:SetScript("OnClick", ns.ShowDiscord)
+    window.discord = discord
+    local helpAbout = T:Text(page, "GameFontHighlightSmall", T.MUTED)
+    helpAbout:SetPoint("LEFT", discord, "RIGHT", 10, 0)
+    helpAbout:SetText("A tour of the basics, or the Discord for bugs and ideas.")
 
     T:Heading(page, "Saved settings"):SetPoint("TOPLEFT", 16, -236)
 
@@ -577,7 +589,6 @@ local function BuildGeneral(window, page)
         minimap:SetChecked(ns.Get("minimap"))
         -- New files only load after a full restart: until then, no tour.
         tour:SetShown(ns.Tour ~= nil)
-        tourAbout:SetShown(ns.Tour ~= nil)
         if ns.restored then
             kept:SetText(ns.RESTORED_TEXT .. " This happens when the game closes without saving, for example after a crash.")
             kept:SetTextColor(T.WARN[1], T.WARN[2], T.WARN[3])

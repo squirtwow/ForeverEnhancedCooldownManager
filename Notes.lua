@@ -35,6 +35,7 @@ ns.NOTES = {
             { "Settings", {
                 "The first time you log in with the addon, its settings open with a quick tour of the basics: each step opens the right page and points at what it's about, and some let you try it. Skip it, or take it again any time from the General page or with /ccm tour.",
                 "A minimap button: click it for the settings, right-click for What's new, and drag it round the minimap. Turn it off on the General page.",
+                "Found a bug or have an idea? The Discord button on the General page and in What's new gives you the invite, or type /ccm discord.",
                 "Profiles: each character gets its own lists, and characters can share one, even across classes: each character only shows its own class's spells. Use on all characters puts one profile on every character. Switch, copy, rename or delete them from the Profile menu.",
                 "Your settings are also backed up in the game's own settings, so they come back if the game loses them, and you're told when that happens.",
                 "Pick the window's accent colour on the Look page, and find EraUI, my other addon, under More from Squirt on the General page.",
@@ -185,14 +186,23 @@ local function Build()
     window:RegisterEvent("DISPLAY_SIZE_CHANGED")
     window:SetScript("OnEvent", function(self) if self:IsShown() then self:Layout() end end)
 
+    -- Two short lines on the left: where to take a bug or an idea, and how to
+    -- see this again. The Discord button sits beside Got it.
+    local ask = T:Text(window, "GameFontHighlightSmall")
+    ask:SetPoint("BOTTOMLEFT", 20, 27)
+    ask:SetText("Found a bug or have an idea?")
     local hint = T:Text(window, "GameFontHighlightSmall", T.MUTED)
-    hint:SetPoint("BOTTOMLEFT", 20, 21)
+    hint:SetPoint("BOTTOMLEFT", 20, 13)
     hint:SetText("/ccm new shows this again.")
     local done = T:Button(window, "Got it", 100, 24)
     done:SetPoint("BOTTOMRIGHT", -16, 14)
     T:Paint(function(accent) done:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
     done:SetScript("OnClick", function() window:Hide() end)
     window.done = done
+    local discord = T:Button(window, "Discord", 80, 24)
+    discord:SetPoint("RIGHT", done, "LEFT", -8, 0)
+    discord:SetScript("OnClick", function() if ns.ShowDiscord then ns.ShowDiscord() end end)
+    window.discord, window.ask = discord, ask
 end
 
 function ns.ShowNotes()
