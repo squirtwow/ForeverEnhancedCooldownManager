@@ -1,0 +1,66 @@
+name: CurseForge comment notifications
+
+# About every 30 minutes, new comments and replies on the CurseForge page go to
+# the private Discord channel #cooldown-curseforge.
+on:
+  schedule:
+    - cron: '23,53 * * * *'
+  workflow_dispatch:
+    inputs:
+      initialize_state:
+        description: 'First setup only: remember existing comments without reposting them'
+        type: boolean
+        default: false
+      test_notification:
+        description: 'Send a clearly labelled connection test to the private Discord feed'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: curseforge-comment-notifications
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Find the latest notification state
+        id: state
+        run: node .github/scripts/curseforge-comments.mjs find-state
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Restore notification state
+        if: steps.state.outputs.run_id != ''
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: curseforge-comment-state
+          path: ${{ runner.temp }}/fecm-cf-state
+          run-id: ${{ steps.state.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Forward new comments and replies
+        run: node .github/scripts/curseforge-comments.mjs check
+        env:
+          CURSEFORGE_DISCORD_WEBHOOK: ${{ secrets.CURSEFORGE_DISCORD_WEBHOOK }}
+          CF_STATE_FILE: ${{ runner.temp }}/fecm-cf-state/state.json
+          CF_INITIALIZE_STATE: ${{ inputs.initialize_state || false }}
+          CF_TEST_NOTIFICATION: ${{ inputs.test_notification || false }}
+
+      - name: Preserve acknowledged notifications, including after partial failure
+        if: always() && steps.state.outcome == 'success'
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: curseforge-comment-state
+          path: ${{ runner.temp }}/fecm-cf-state/state.json
+          if-no-files-found: ignore
+          retention-days: 90
