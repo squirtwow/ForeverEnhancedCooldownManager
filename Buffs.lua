@@ -170,7 +170,7 @@ end
 -- Places the holders for the bar's entries and works out each one's spell
 -- IDs; joined entries count as one, with every linked spell's IDs.
 function F:Layout(bar, data)
-    local size, spacing = data.size, data.spacing
+    local size, spacing = ns.IconSize(data), data.spacing
     local fixed = not self:Packed(data)
     local count = 0
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
@@ -250,7 +250,7 @@ function F:Apply(bar)
         end
     end
     -- Groups are made as they're first needed; the game keeps them after that.
-    local scale = packed and data.size / BASE or 1
+    local scale = packed and ns.IconSize(data) / BASE or 1
     local spacing = data.spacing / scale
     -- Growing left, the first entry sits at the right, as fixed spots do.
     local function Index(i)

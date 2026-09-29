@@ -403,6 +403,19 @@ function C:Swing(duration, kind)
     Wake()
 end
 
+-- Auto-attack or Auto Shot switched off (the target died, you stopped, or
+-- changed target): that swing isn't coming, so the bar stops where it is and
+-- fades instead of filling on. The other kind of swing carries on.
+function C:SwingStopped(ranged)
+    if not (row and swing) or swing.ranged ~= ranged then return end
+    swing = nil
+    if drawn == "swing" then
+        swingEnd = GetTime()
+        row.bar.time:SetText("")
+        Wake()
+    end
+end
+
 -- Its place ----------------------------------------------------------------------------
 
 -- How much room it takes under the display while the cast bar or the swing
@@ -464,9 +477,14 @@ function C:Start()
     -- Forever's own swing events; a client without them just has no swing timer.
     pcall(events.RegisterEvent, events, "PLAYER_SWING")
     pcall(events.RegisterEvent, events, "WEAPON_SLOT_CHANGED")
+    -- Auto-attack and Auto Shot switching off.
+    pcall(events.RegisterEvent, events, "PLAYER_LEAVE_COMBAT")
+    pcall(events.RegisterEvent, events, "STOP_AUTOREPEAT_SPELL")
     events:SetScript("OnEvent", function(_, event, ...)
         if event == "PLAYER_SWING" then
             C:Swing(...)
+        elseif event == "PLAYER_LEAVE_COMBAT" or event == "STOP_AUTOREPEAT_SPELL" then
+            C:SwingStopped(event == "STOP_AUTOREPEAT_SPELL")
         else
             local _, id, _, interruptedBy = ...
             C:Event(event, id, interruptedBy)

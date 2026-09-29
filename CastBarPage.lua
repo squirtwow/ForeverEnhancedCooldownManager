@@ -13,8 +13,6 @@ local DIM = .35 -- a preview bar whose tick is off
 function ns.BuildCastBarPage(window, page, width)
     local C = ns.CastBar
     local inner = width - 32
-    local function Note(text) window.note:SetText(text) end
-    local function Unnote() window.note:SetText(window.lastNote or "") end
     local function Changed()
         C:Apply()
         window:Refresh()
@@ -71,8 +69,7 @@ function ns.BuildCastBarPage(window, page, width)
             Changed()
         end)
         check:SetPoint("TOPLEFT", 0, y)
-        check:HookScript("OnEnter", function() Note(note) end)
-        check:HookScript("OnLeave", Unnote)
+        window:Hint(check, note)
         return check
     end
     local shown = Tick("Show my cast bar under the resource display", "castBar", -4,
@@ -101,8 +98,7 @@ function ns.BuildCastBarPage(window, page, width)
             swatch:SetPoint("TOPLEFT", 100 + (i - 1) * (SWATCH + SWATCH_GAP), y)
             swatch.key = colour
             if colour == "class" then ns.ClassIcon(swatch) end
-            swatch:SetScript("OnEnter", function() Note(note) end)
-            swatch:SetScript("OnLeave", Unnote)
+            window:Hint(swatch, note)
             swatches[i] = swatch
         end
         local chosen = T:Text(options, "GameFontHighlightSmall", T.MUTED)
@@ -121,6 +117,7 @@ function ns.BuildCastBarPage(window, page, width)
         Changed()
     end)
     height:SetPoint("TOPLEFT", 0, -114)
+    window:Hint(height, "How tall your cast bar and swing timer are.")
     page.height = height
 
     local icon = Tick("Icon", "castIcon", -146, "The spell's icon at the left end, or your weapon's for the swing timer.")

@@ -24,6 +24,7 @@ function ns.BuildProfileMenu(window, header, anchor)
     button:SetPoint("RIGHT", anchor, "LEFT", -8, 0)
     button.label:SetWidth(264)
     button.label:SetWordWrap(false)
+    window:Hint(button, "The profile this character uses: its spell lists. Click for every profile, to switch or make one.")
     window.profileButton = button
 
     local panel = CreateFrame("Frame", nil, window, "BackdropTemplate")
@@ -50,6 +51,7 @@ function ns.BuildProfileMenu(window, header, anchor)
     end
     Pin()
     panel:HookScript("OnShow", function() C_Timer.After(0, Pin) end)
+    window:Hint(list.thumb, ns.SCROLL_NOTE)
     window.profileList = list
 
     -- Deleting asks first, in the window's own dialog, saying what happens to
@@ -113,6 +115,10 @@ function ns.BuildProfileMenu(window, header, anchor)
             if ok then panel:Hide() end
             window:Refresh()
         end)
+        window:Hint(row, function()
+            return row.profile == ns.ProfileName() and "The profile you're on." or ("Switch to " .. row.profile .. ".")
+        end)
+        window:Hint(row.remove, function() return "Delete " .. row.profile .. ". It asks first." end)
         rows[i] = row
         return row
     end
@@ -121,6 +127,7 @@ function ns.BuildProfileMenu(window, header, anchor)
     -- nothing is ever laid out without a place.
     local input = T:Input(panel, "Profile name", WIDTH - 20)
     input:SetPoint("TOPLEFT", 10, -54)
+    window:Hint(input, "A name for New, Copy or Rename.")
     window.profileInput = input
     local hint = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
     hint:SetPoint("TOPLEFT", 10, -136)
@@ -147,10 +154,10 @@ function ns.BuildProfileMenu(window, header, anchor)
                 window:Refresh()
             end)
     end)
-    everyone:HookScript("OnEnter", function()
-        window.note:SetText("Loads the profile you're on for every character. Each one only shows its own class's spells and racials.")
+    window:Hint(everyone, function()
+        return ns.OnAll(ns.ProfileName()) and "All your characters use this profile, and new ones will too."
+            or "Loads the profile you're on for every character. Each one only shows its own class's spells and racials."
     end)
-    everyone:HookScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
     window.profileEveryone = everyone
 
     -- Each button acts on the typed name. Every one of them leaves you on a
@@ -170,11 +177,14 @@ function ns.BuildProfileMenu(window, header, anchor)
     end
     local buttons = {}
     local x = 10
-    for _, spec in ipairs({ { "New", ns.NewProfile }, { "Copy", ns.CopyProfile }, { "Rename", ns.RenameProfile } }) do
+    for _, spec in ipairs({ { "New", ns.NewProfile, "Make a new, empty profile with the name typed above, and switch to it." },
+        { "Copy", ns.CopyProfile, "Copy your lists into a new profile with the name typed above, and switch to it." },
+        { "Rename", ns.RenameProfile, "Give the profile you're on the name typed above, for every character using it." } }) do
         local action = T:Button(panel, spec[1], 90, 22)
         action:SetPoint("TOPLEFT", x, -80)
         action.x = x
         action:SetScript("OnClick", Act(spec[2]))
+        window:Hint(action, spec[3])
         buttons[spec[1]:lower()] = action
         x = x + 94
     end

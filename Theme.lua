@@ -210,7 +210,11 @@ function T:Button(parent, label, width, height)
     function button:SetLabel(text)
         self.label:SetText(text)
     end
-    button:SetScript("OnEnter", function(self) self:SetBackdropColor(T.HOVER[1], T.HOVER[2], T.HOVER[3], 1) end)
+    -- Greyed out (a square's SetUsable), it still says why on hover, unlit.
+    button:SetScript("OnEnter", function(self)
+        if self.usable == false then return end
+        self:SetBackdropColor(T.HOVER[1], T.HOVER[2], T.HOVER[3], 1)
+    end)
     button:SetScript("OnLeave", function(self) self:SetBackdropColor(T.CONTROL[1], T.CONTROL[2], T.CONTROL[3], 1) end)
     return button
 end
@@ -222,8 +226,11 @@ function T:Square(parent, label, accented)
     if accented then
         self:Paint(function(accent) button.label:SetTextColor(accent[1], accent[2], accent[3]) end)
     end
+    -- Greyed out and unclickable while it doesn't apply; still says why on hover.
     function button:SetUsable(usable)
+        self.usable = usable and true or false
         self:SetEnabled(usable)
+        if self.SetMotionScriptsWhileDisabled then self:SetMotionScriptsWhileDisabled(true) end
         self:SetAlpha(usable and 1 or .35)
     end
     return button
@@ -263,6 +270,14 @@ function T:Segmented(parent, items, width, onSelect)
             button.label:SetShadowColor(0, 0, 0, chosen and on[1] < .5 and 0 or 1)
         end
     end
+    -- Greyed out and unclickable while it doesn't apply; still says why on hover.
+    function bar:SetUsable(usable)
+        for _, button in ipairs(self.buttons) do
+            button:SetEnabled(usable)
+            if button.SetMotionScriptsWhileDisabled then button:SetMotionScriptsWhileDisabled(true) end
+        end
+        self:SetAlpha(usable and 1 or .35)
+    end
     self:Paint(function() if bar.selected then bar:SetSelected(bar.selected) end end)
     return bar
 end
@@ -287,7 +302,8 @@ end
 
 -- A flat slider: the label, a thin track filled with the accent up to a
 -- square thumb, and the value. Drag it, click the track, or use the wheel.
-function T:Slider(parent, label, limits, step, width, onChange)
+-- labelWidth: the room for the label before the track, 100 unless given.
+function T:Slider(parent, label, limits, step, width, onChange, labelWidth)
     local slider = CreateFrame("Frame", nil, parent)
     slider:SetSize(width, 20)
     slider.label = self:Text(slider, "GameFontHighlight")
@@ -298,7 +314,7 @@ function T:Slider(parent, label, limits, step, width, onChange)
     slider.value:SetWidth(28)
     slider.value:SetJustifyH("RIGHT")
     local track = CreateFrame("Frame", nil, slider)
-    track:SetPoint("LEFT", 100, 0)
+    track:SetPoint("LEFT", labelWidth or 100, 0)
     track:SetPoint("RIGHT", -40, 0)
     track:SetHeight(16)
     track:EnableMouse(true)
@@ -339,6 +355,7 @@ function T:Slider(parent, label, limits, step, width, onChange)
         slider:Choose(limits[1] + (x - (track:GetLeft() or 0)) / length * (limits[2] - limits[1]))
     end
     track:SetScript("OnMouseDown", function()
+        if slider.usable == false then return end
         FromCursor()
         track:SetScript("OnUpdate", FromCursor)
     end)
@@ -349,6 +366,14 @@ function T:Slider(parent, label, limits, step, width, onChange)
     track:SetScript("OnSizeChanged", function() if slider.current then slider:Set(slider.current) end end)
     slider:EnableMouseWheel(true)
     slider:SetScript("OnMouseWheel", function(self, delta) self:Choose((self.current or limits[1]) + delta * step) end)
+    -- Greyed out and left alone while it doesn't apply. The track still takes
+    -- the mouse but ignores clicks, so it can still say why on hover.
+    function slider:SetUsable(usable)
+        self.usable = usable
+        self:EnableMouseWheel(usable)
+        if not usable then track:SetScript("OnUpdate", nil) end
+        self:SetAlpha(usable and 1 or .35)
+    end
     return slider
 end
 

@@ -61,12 +61,14 @@ local function NewIcon(bar)
     -- Events arrive when a cooldown starts, not when it ends; this catches the
     -- end, so the icon ungreys (or hides when ready) on time.
     icon.cooldown:SetScript("OnCooldownDone", function() B:RefreshAll() end)
-    -- Item counts sit above the sweep.
+    -- Item counts and the keybind sit above the sweep.
     local top = CreateFrame("Frame", nil, icon)
     top:SetAllPoints()
     top:SetFrameLevel(icon.cooldown:GetFrameLevel() + 1)
+    icon.top = top
     icon.count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     icon.count:SetPoint("BOTTOMRIGHT", -1, 1)
+    icon.key = Style:KeyText(top)
     icon.label = icon:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     icon.label:SetPoint("TOP", icon, "BOTTOM", 0, -3)
     icon.label:SetWordWrap(false)
@@ -157,10 +159,10 @@ local NAMES = 14 -- room for spell names under a row of icons
 
 -- Rows of up to perRow icons (or aura spots). Each row lines up by the bar's
 -- grow choice: centred, from the right edge (growing left, first icon on the
--- right) or from the left edge; a new row goes below or above. Returns the
--- bar's size.
+-- right) or from the left edge; a new row goes below or above. Icons are at
+-- their size on screen (ns.IconSize). Returns the bar's size.
 function B:Arrange(bar, frames, count, data)
-    local size, spacing = data.size, data.spacing
+    local size, spacing = ns.IconSize(data), data.spacing
     -- An empty bar keeps room for three icons so it can still be dragged.
     if count < 1 then return 3 * size + 2 * spacing, size end
     local across = math.max(1, math.min(data.perRow, count))
@@ -223,9 +225,14 @@ local function Place(bar)
         end
         bar:SetPoint(point, UIParent, "CENTER", data.x, data.y)
     else
-        -- Just above the action bar, growing up from there.
-        local low = "BOTTOM" .. side
-        bar:SetPoint(low, UIParent, "BOTTOM", (Offset(low, width, height)), DEFAULT_Y[bar.key] or 160)
+        -- Just above the action bar, growing up from there. All bars spreads
+        -- the spots over Utility's (or closes them up) with the bars, so they
+        -- never overlap where they didn't at 100.
+        local low, y = "BOTTOM" .. side, DEFAULT_Y[bar.key]
+        if y then
+            y = math.floor(DEFAULT_Y.util + (y - DEFAULT_Y.util) * ns.Get("barScale") / 100 + .5)
+        end
+        bar:SetPoint(low, UIParent, "BOTTOM", (Offset(low, width, height)), y or 160)
     end
 end
 
@@ -260,17 +267,17 @@ end
 -- that stay put. Packed Buffs and Debuffs and a bar that hides when ready
 -- come and go (like Blizzard's Tracked Buffs), so they'd leave an empty box
 -- behind, as would the greyed Debuffs spots while there's no enemy.
+local function Steady(key, data)
+    if ns.AURA_BARS[key] then return not ns.BuffBar:Packed(data) end
+    return not HidesReady(data)
+end
+
 local function BarDecor(bar)
     -- A layout waiting for the fight to end still has the old shape: keep the
     -- box as it is until then.
     if bar.pendingLayout then return end
     local border, shadow = Style:DecorFor("bar")
-    local steady
-    if bar.kind == "aura" then
-        steady = not ns.BuffBar:Packed(bar.data) and bar.enemy ~= false
-    else
-        steady = not HidesReady(bar.data)
-    end
+    local steady = Steady(bar.key, bar.data) and bar.enemy ~= false
     border, shadow = border and steady, shadow and steady
     local state = (border and "b" or "") .. (shadow and "s" or "")
     if bar.decorState == state then return end
@@ -350,19 +357,50 @@ local function LayoutAuras(bar, data)
     -- Fixed spots go in rows like icons; packed buffs are laid out by the
     -- game in one row.
     if ns.BuffBar:Packed(data) then
-        local slots = bar.count > 0 and bar.count or 3
-        bar:SetSize(slots * data.size + (slots - 1) * data.spacing, data.size)
+        local slots, size = bar.count > 0 and bar.count or 3, ns.IconSize(data)
+        bar:SetSize(slots * size + (slots - 1) * data.spacing, size)
     else
         bar:SetSize(B:Arrange(bar, bar.holders, bar.count, data))
     end
     Place(bar)
 end
 
+-- Keybinds: the key that casts each icon's spell (Keybinds.lua), placed and
+-- sized as chosen on the Look page, with the countdown moved clear, and the
+-- count too on an icon that shows a key.
+local function Numbers(cooldown)
+    local get = cooldown.GetCountdownFontString
+    return type(get) == "function" and get(cooldown) or nil
+end
+
+local function Room(icon)
+    Style:KeyRoom(icon.count, icon, 1, Numbers(icon.cooldown), icon.cooldown, icon.lift or 0, icon.keyed)
+end
+
+local function KeyLook(icon, size)
+    icon.lift = Style:KeyLook(icon.key, icon, size, Style:CountdownSize(size))
+    Room(icon)
+end
+
+-- The key that casts a bar entry, by name: your bars and the Layout page's
+-- drawing of them find it the same way.
+function B:KeyFor(name)
+    local keys = ns.Keybinds
+    return keys and name and keys:ForEntry(ns.Spells:Find(name)) or nil
+end
+
+-- A key showing up or going moves the count with it: the addon's own
+-- frames only, so in combat too.
+local function ShowKey(icon)
+    icon.keyed = Style:SetKey(icon.key, B:KeyFor(icon.name))
+    Room(icon)
+end
+
 local function Layout(bar)
     local data = ns.BarData(bar.key)
     bar.data = data
     if bar.kind == "aura" then return LayoutAuras(bar, data) end
-    local size, spacing = data.size, data.spacing
+    local size, spacing = ns.IconSize(data), data.spacing
     local count = 0
     for _, name in ipairs(data.spells) do
         local entry = ns.Spells:Find(name)
@@ -376,6 +414,8 @@ local function Layout(bar)
             icon.count:SetFontObject(Style:Count(size))
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
             icon.kind, icon.itemID, icon.slot = entry.kind, entry.itemID, entry.slot
+            KeyLook(icon, size)
+            ShowKey(icon)
             icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
             icon.count:SetText("")
             icon.label:SetWidth(size + spacing)
@@ -399,6 +439,14 @@ function B:Enabled()
     return ns.Get("useBars") == true
 end
 
+-- The border and shadow round a whole bar as set up, for the Layout page's
+-- drawing: as chosen on the Look page, round a bar whose icons stay put.
+function B:BarDecorFor(key)
+    local border, shadow = Style:DecorFor("bar")
+    local steady = Steady(key, ns.BarData(key))
+    return border and steady, shadow and steady
+end
+
 -- Borders and shadows as chosen on the Look page, round every icon or bar.
 function B:ApplyDecor()
     local border, shadow = Style:DecorFor("icon")
@@ -408,6 +456,36 @@ function B:ApplyDecor()
         ns.BuffBar:HolderDecor(bar)
         GroupDecor(bar)
     end
+end
+
+-- Keybinds go on the Cooldowns and Utility icons only: the Buffs and Debuffs
+-- bars show auras, not casts. Each icon in use goes through fn; a failure is
+-- reported once, as for RefreshAll.
+local function EachKey(fn)
+    for _, bar in pairs(bars) do
+        if bar.kind == "cooldown" then
+            for i = 1, bar.count do
+                local ok, err = pcall(fn, bar.icons[i], bar)
+                if not ok and not B.lastError then
+                    B.lastError = tostring(err)
+                    print("|cffffd100" .. ns.TITLE .. ":|r a bar icon's keybind couldn't update. Please report this: " .. B.lastError)
+                end
+            end
+        end
+    end
+end
+
+-- Keybinds placed and sized as chosen on the Look page.
+function B:ApplyKeybinds()
+    EachKey(function(icon, bar)
+        KeyLook(icon, ns.IconSize(bar.data))
+        ShowKey(icon)
+    end)
+end
+
+-- The keys again after a binding or page change; text only, so in combat too.
+function B:ShowKeys()
+    EachKey(ShowKey)
 end
 
 function B:Get(key)
@@ -702,9 +780,14 @@ function B:AddAt(key, text, spot)
     return ok, message
 end
 
--- An item with a cooldown: an equipped trinket follows its slot.
+-- An item with a cooldown: an equipped trinket follows its slot. Ammunition
+-- of any kind is your ammo, which counts whatever ammo you have equipped.
 function B:AddItem(key, itemID)
     if ns.AURA_BARS[key] then return false, "Items can't go on the " .. ns.BAR_NAMES[key] .. " bar." end
+    if ns.Spells:IsAmmo(itemID) then
+        if not self:Assign("ammo", key) then return false, Full(key) end
+        return true, Added(key, "your ammo") .. " It counts whatever ammo you have equipped."
+    end
     local item = "item:" .. itemID
     for _, slot in ipairs({ 13, 14 }) do
         if GetInventoryItemID("player", slot) == itemID then item = "slot:" .. slot end
@@ -716,19 +799,21 @@ function B:AddItem(key, itemID)
 end
 
 -- What's on the cursor, dropped on a bar: a spell from any spellbook or an
--- action bar, or an item. Nil when the cursor holds nothing.
+-- action bar, or an item from your bags or character panel. Nil when the
+-- cursor holds nothing. Only what joins the bar is let go of; anything
+-- turned away stays on the cursor.
 function B:AddFromCursor(key)
     local kind, first, _, spellID = GetCursorInfo()
-    if not kind then return nil end
+    if Open(kind) and kind == nil then return nil end
     local ok, message
-    if kind == "spell" and type(spellID) == "number" then
+    if Open(kind) and kind == "spell" and Open(spellID) and type(spellID) == "number" then
         ok, message = self:Add(key, tostring(spellID))
-    elseif kind == "item" and type(first) == "number" then
+    elseif Open(kind) and kind == "item" and Open(first) and type(first) == "number" then
         ok, message = self:AddItem(key, first)
     else
         ok, message = false, "Only spells and items can go on a bar."
     end
-    ClearCursor()
+    if ok then ClearCursor() end
     return ok, message
 end
 
@@ -819,6 +904,20 @@ function B:SetOption(key, field, value)
     self:UpdateShown()
     self:RefreshAll()
     -- A bar in a layout may now be taller or shorter.
+    if ns.Layout then ns.Layout:Stack() end
+end
+
+-- The size for all your bars together (the Layout page's All bars), as a
+-- share of each bar's own: every bar is laid out again, as when one bar's
+-- size changes, and a layout stacked again. Sent for every step the slider
+-- is dragged. In a fight the Buffs and Debuffs bars catch up once it's over.
+function B:SetScale(percent)
+    local limits = ns.BAR_SCALE
+    ns.Set("barScale", math.max(limits[1], math.min(limits[2], math.floor(percent + .5))))
+    if not self.started then return end
+    for _, key in ipairs(ns.BAR_KEYS) do Layout(bars[key] or NewBar(key)) end
+    self:UpdateShown()
+    self:RefreshAll()
     if ns.Layout then ns.Layout:Stack() end
 end
 

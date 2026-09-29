@@ -22,7 +22,7 @@ local FORBIDDEN = {
     SetSwipeColor = true, SetDrawSwipe = true, IsShown = true, GetText = true,
     GetValue = true, GetCooldownTimes = true, GetSpellID = true, GetAuraData = true,
     GetAuraDataCached = true, RefreshLayout = true, RefreshData = true, Layout = true,
-    SetTexture = true,
+    SetTexture = true, SetFrameLevel = true,
 }
 
 local Proto = {}
@@ -135,6 +135,24 @@ local function Seal(obj)
     for _, c in ipairs(S[obj].children) do Seal(c) end
 end
 
+-- Keybinds: levels are read on Blizzard's frames and only set on the addon's
+-- own (SetFrameLevel is forbidden on Blizzard's).
+function Proto:GetFrameLevel() return S[self].level or 1 end
+function Proto:SetFrameLevel(level) S[self].level = level end
+function Proto:EnableMouse(v) S[self].mouse = v end
+function Proto:SetJustifyH(h) S[self].justify = h end
+-- The trinket slot Blizzard's settings give a cooldown icon.
+function Proto:GetEquipSlot() return S[self].equipSlot end
+-- A cooldown's countdown numbers, Blizzard's own when the cooldown is.
+function Proto:GetCountdownFontString()
+    local s = S[self]
+    if not s.numbers then
+        s.numbers = New("FontString", self, s.blizzard)
+        if s.sealed then Seal(s.numbers) end
+    end
+    return s.numbers
+end
+
 -- Blizzard's item templates -----------------------------------------------------------
 
 local function IconParts(frame)
@@ -239,6 +257,7 @@ local function Environment(keepCVars)
         rawset(t, key, function(...) original(...); hook(...) end)
     end
     _G.print = function(msg) table.insert(printed, msg) end
+    _G.wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
     _G.InCombatLockdown = function() return combat end
     _G.ReloadUI = function()
         assert(not combat, "blocked ReloadUI in combat")
@@ -292,6 +311,7 @@ local function Load(saved)
     assert(loadfile("Core.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("Style.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("Skin.lua"))("ForeverEnhancedCooldownManager", ns)
+    assert(loadfile("Keybinds.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("Resource.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("CastBar.lua"))("ForeverEnhancedCooldownManager", ns)
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -873,6 +893,157 @@ ns.Set("iconShadow", "off")
 ns.Skin:ApplyDecor()
 Equal(tostring(S[decor.border[1]].shown) .. " " .. tostring(S[decor.shadow[1][1]].shown), "false false", "and off again")
 Equal(#printed, 0, "no errors from borders and shadows")
+
+-- Keybinds on Blizzard's Essential and Utility icons: the addon's own text on
+-- its own frame, Blizzard's charge count and countdown only moved while a key
+-- needs them moved, and nothing written on Blizzard's frames.
+do
+    local slots, keyOf = {}, {}
+    -- The game as Keybinds.lua reads it: your action bars, bindings, spell
+    -- names and trinket.
+    local function Game()
+        _G.C_Timer = { After = function(_, fn) fn() end }
+        _G.GetActionInfo = function(slot) local a = slots[slot]; if a then return a[1], a[2], a[3] end end
+        _G.GetBindingKey = function(binding) return keyOf[binding] end
+        _G.C_Spell = { GetSpellName = function(id) return ({ [8921] = "Moonfire", [8924] = "Moonfire", [5176] = "Wrath" })[id] end }
+        _G.GetInventoryItemID = function(_, slot) if slot == 13 then return 5079 end end
+        _G.issecretvalue = function(value) return value == SECRET end
+    end
+    local function At(region, anchor)
+        local p = S[region].points[1]
+        return p[1] .. " " .. tostring(p[2] == anchor) .. " " .. p[3] .. " " .. p[4] .. " " .. p[5]
+    end
+
+    Environment()
+    local views = Viewers(1)
+    Game()
+    local essential, utility = First(views.essentialActive), First(views.utilityActive)
+    S[essential.Cooldown].level, S[essential.ChargeCount].level, S[essential].baseSpell = 3, 4, 8924
+    S[utility].equipSlot = 13
+    slots[1], keyOf.ACTIONBUTTON1 = { "spell", 8921 }, "SHIFT-1"
+    slots[2], keyOf.ACTIONBUTTON2 = { "item", 5079 }, "2"
+    local kns = Load({ keybinds = true })
+    kns.Keybinds:Update()
+    local parts, small = kns.Skin.keys[essential], kns.Skin.keys[utility]
+    local text, frame = parts.text, parts.frame
+    Equal(S[text].text .. " " .. tostring(S[text].shown), "S1 true", "Blizzard's icon shows the key that casts its spell, whichever rank")
+    Equal(tostring(S[frame].parent == essential) .. " " .. tostring(S[frame].sealed) .. " " .. S[frame].level .. " " .. tostring(S[frame].mouse),
+        "true nil 6 false", "on the addon's own frame, above Blizzard's sweep and count, never taking the mouse")
+    Equal(S[text].parent == frame, true, "in the addon's own text")
+    Equal(At(text, frame) .. " " .. S[text].font .. " " .. S[text].width, "BOTTOM true BOTTOM 0 2 FECMFont14 42",
+        "along the bottom of the art, sized to the icon")
+    Equal(At(essential.ChargeCount.Current, essential.ChargeCount) .. " | " .. At(S[essential.Cooldown].numbers, essential.Cooldown),
+        "TOPRIGHT true TOPRIGHT -2 -2 | CENTER true CENTER 0 0", "the charge count goes top right; the countdown has room")
+    Equal(S[small.text].text .. " " .. S[small.text].font .. " " .. At(S[utility.Cooldown].numbers, utility.Cooldown),
+        "2 FECMFont8 CENTER true CENTER 0 2", "a trinket's key on a Utility icon, its countdown moved up clear of it")
+
+    local function Count(item) return At(item.ChargeCount.Current, item.ChargeCount) end
+
+    -- Pooled items change spell: the key follows, and the count with it.
+    S[essential].baseSpell = 5176
+    essential:OnCooldownIDSet()
+    Equal(tostring(S[text].shown) .. " " .. Count(essential), "false BOTTOMRIGHT true BOTTOMRIGHT -2 2",
+        "given a spell with no key: none, and its charge count back where Blizzard puts it")
+    S[essential].baseSpell = 8924
+    essential:OnCooldownIDSet()
+    Equal(S[text].text .. " " .. tostring(S[text].shown) .. " " .. Count(essential), "S1 true TOPRIGHT true TOPRIGHT -2 -2",
+        "given one with a key: shown at once, the count up clear of it")
+    -- Blizzard's pool takes it back and empties it without OnCooldownIDCleared
+    -- (ResetCooldownData), then hands it out again as an Edit Mode placeholder:
+    -- ClearCooldownID fires nothing on an item already empty.
+    S[essential].baseSpell = nil
+    views.essential:OnAcquireItemFrame(essential)
+    Equal(tostring(S[text].shown) .. " " .. #printed, "false 0", "handed out again as an empty placeholder: the old key goes")
+    S[essential].baseSpell = 8924
+    essential:OnCooldownIDSet()
+    Equal(S[text].text .. " " .. tostring(S[text].shown), "S1 true", "and comes back when Blizzard gives it a spell")
+    S[utility].equipSlot = nil
+    views.utility:OnAcquireItemFrame(utility)
+    Equal(tostring(S[small.text].shown) .. " " .. Count(utility), "false BOTTOMRIGHT true BOTTOMRIGHT -2 2",
+        "a trinket's Utility icon handed out again empty: no key either, its count at the bottom")
+    S[utility].equipSlot = 13
+    utility:OnCooldownIDSet()
+    Equal(S[small.text].text .. " " .. tostring(S[small.text].shown) .. " " .. Count(utility), "2 true TOPRIGHT true TOPRIGHT -2 -2",
+        "and back with its trinket, its count up")
+    S[essential].baseSpell = nil
+    essential:OnCooldownIDCleared()
+    Equal(tostring(S[text].shown), "false", "cleared, as for Edit Mode's placeholders: gone")
+
+    -- A spell kept secret in a fight: nothing until it's over.
+    combat = true
+    S[essential].baseSpell = SECRET
+    essential:OnCooldownIDSet()
+    Equal(tostring(S[text].shown) .. " " .. #printed .. " " .. Count(essential), "false 0 BOTTOMRIGHT true BOTTOMRIGHT -2 2",
+        "a secret spell in a fight: no key, no error, the count at the bottom")
+    combat = false
+    S[essential].baseSpell = 8924
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(S[text].text .. " " .. tostring(S[text].shown), "S1 true", "its key once the fight is over")
+
+    -- A key changed in a fight is read once it's over.
+    combat = true
+    keyOf.ACTIONBUTTON1 = "3"
+    Fire("UPDATE_BINDINGS")
+    Equal(S[text].text .. " " .. tostring(kns.Keybinds.pending), "S1 true", "a key changed in a fight waits")
+    combat = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(S[text].text, "3", "and shows once it's over")
+    -- Unbound and bound again: Blizzard's count follows the key at once.
+    keyOf.ACTIONBUTTON1 = nil
+    Fire("UPDATE_BINDINGS")
+    Equal(tostring(S[text].shown) .. " " .. Count(essential), "false BOTTOMRIGHT true BOTTOMRIGHT -2 2",
+        "a key unbound: Blizzard's count back down")
+    keyOf.ACTIONBUTTON1 = "3"
+    Fire("UPDATE_BINDINGS")
+    Equal(S[text].text .. " " .. Count(essential), "3 TOPRIGHT true TOPRIGHT -2 -2", "bound again: up")
+
+    -- Top right: Blizzard's count goes back where it puts it.
+    kns.Set("keybindPosition", "TOPRIGHT")
+    kns.Skin:ApplyKeybinds()
+    Equal(At(text, frame) .. " " .. S[text].justify, "TOPRIGHT true TOPRIGHT -2 -2 RIGHT", "top right")
+    Equal(At(essential.ChargeCount.Current, essential.ChargeCount) .. " | " .. At(S[utility.Cooldown].numbers, utility.Cooldown),
+        "BOTTOMRIGHT true BOTTOMRIGHT -2 2 | CENTER true CENTER 0 -2", "the count back where Blizzard puts it; a small icon's countdown moved down")
+
+    -- Off: no keys, and Blizzard's count and countdown back home.
+    kns.Set("keybinds", false)
+    kns.Keybinds:Update()
+    kns.Skin:ApplyKeybinds()
+    Equal(tostring(S[text].shown) .. " " .. tostring(S[small.text].shown), "false false", "off: no keys")
+    Equal(At(utility.ChargeCount.Current, utility.ChargeCount) .. " | " .. At(S[essential.Cooldown].numbers, essential.Cooldown)
+        .. " | " .. At(S[utility.Cooldown].numbers, utility.Cooldown),
+        "BOTTOMRIGHT true BOTTOMRIGHT -2 2 | CENTER true CENTER 0 0 | CENTER true CENTER 0 0", "and Blizzard's count and countdown back home")
+
+    -- Only cooldown icons get keys, and nothing is written on Blizzard's frames.
+    Equal(tostring(kns.Skin.keys[First(views.buffsActive)]) .. " " .. tostring(kns.Skin.keys[First(views.barsActive)]), "nil nil",
+        "Tracked Buffs and Tracked Bars get none")
+    local held = 0
+    for _ in pairs(essential) do held = held + 1 end
+    Equal(held, 7, "Blizzard's icon holds only its own parts and the two hooks")
+    for _, viewer in ipairs({ views.essential, views.utility, views.buffs, views.bars }) do
+        local count = 0
+        for name in pairs(viewer) do if name ~= "make" then count = count + 1 end end
+        Equal(count, 4, "each viewer still holds only its own four")
+    end
+    Equal(#printed, 0, "no errors from keybinds")
+
+    -- Off from login: Blizzard's count and countdown are never touched.
+    Environment()
+    views = Viewers(1)
+    Game()
+    kns = Load(nil)
+    essential = First(views.essentialActive)
+    Equal(#S[essential.ChargeCount.Current].points .. " " .. tostring(S[essential.Cooldown].numbers) .. " "
+        .. tostring(S[kns.Skin.keys[essential].text].shown), "0 nil false", "off from login: nothing moved, no key")
+
+    -- Without the look, Blizzard's icons get no keys, and nothing breaks.
+    Environment()
+    Viewers(1)
+    Game()
+    kns = Load({ skin = false, keybinds = true })
+    local ok = pcall(kns.Keybinds.Update, kns.Keybinds)
+    Equal(tostring(next(kns.Skin.keys)) .. " " .. tostring(ok) .. " " .. #printed, "nil true 0", "the look off: no keys on Blizzard's icons, no errors")
+    _G.issecretvalue = nil
+end
 
 print = _G.print
 io.write("Forever Enhanced Cooldown Manager checks passed: " .. checks .. " assertions.\n")

@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+- Keybinds on icons: the key that casts each spell or uses each item, from your action bars, on your Cooldowns and Utility bars and on Blizzard's Cooldown Manager icons. At the bottom, top left, top or top right, in the size you pick; the Look page's sample icons show it as you change it. Off by default, in /ccm > Look.
+- All bars: one slider on the Layout page sizes all your bars together, keeping their sizes next to each other. Each bar's Icon size still fine-tunes it.
+- Layout page: your icons show the border, shadow and keybinds from the Look page. Untick Live preview for plain icons.
+- Drag items onto your bars: ammo of any kind from your bags or character panel becomes one icon that follows whatever ammo you have equipped, with its count. Trinkets, potions and your Hearthstone can be dragged in too.
+- What's new: after an update, Show me what's new walks you through just the new features.
+- Made with love by Squirt in the /ccm footer, in your window accent colour.
+
+### Changed
+- Every button and setting in /ccm explains itself in the footer when you hover it.
+- Click a spell's name in a bar's list to tick it, like its tick box.
+- "Each spell shows once, at your highest rank" is now on the bar pages, by the spell list.
+
+### Fixed
+- Swing timer: when your auto-attack or Auto Shot stops (the target died, or you stopped), the bar stops and fades instead of filling on.
+- Layout page: a row's help stays up while you use its - + arrows and x, and the resource display's arrows can be reached by hovering.
+
 ## 1.0.0
 
 ### Blizzard's Cooldown Manager

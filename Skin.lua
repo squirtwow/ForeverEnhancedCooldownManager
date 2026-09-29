@@ -25,7 +25,9 @@ local skinned = setmetatable({}, { __mode = "k" })
 local bars = setmetatable({}, { __mode = "k" }) -- restyled bar items and the pieces added to them
 local decors = setmetatable({}, { __mode = "k" }) -- each icon's border and shadow
 local rows = {} -- each icon viewer's border and shadow, round the whole row
-M.decors, M.rows = decors, rows
+local keys = setmetatable({}, { __mode = "k" }) -- Essential/Utility item -> { frame, text, spec, lift, keyed }: the addon's own
+local room = setmetatable({}, { __mode = "k" }) -- item -> { top, lift } last applied to its count and countdown
+M.decors, M.rows, M.keys = decors, rows, keys
 local hooked = {}
 local SPLIT_BOX = 46 -- the Split design's time box
 
@@ -73,6 +75,108 @@ local function Font(region, name)
     if region and name then region:SetFontObject(name) end
 end
 
+-- A number from one of the item's own getters, such as the spell a bar or
+-- icon shows, from Blizzard's settings for it rather than from the aura,
+-- which can be secret in combat; nil if it can't be read.
+local function Read(item, method)
+    local get = item and item[method]
+    if type(get) ~= "function" then return nil end
+    local ok, value = pcall(get, item)
+    if not ok or (issecretvalue and issecretvalue(value)) or type(value) ~= "number" then return nil end
+    return value
+end
+
+local function SpellOf(item)
+    return Read(item, "GetBaseSpellID")
+end
+
+-- Keybinds ------------------------------------------------------------------------
+-- The key that casts each Essential and Utility icon's spell, from your action
+-- bars (Keybinds.lua), in the addon's own text on its own frame over the
+-- icon's art. Items are pooled and change spell, so the key follows each one;
+-- the hooks only read what was worked out outside combat.
+
+-- A level above the item's sweep and charge count; only levels are read.
+local function Above(item)
+    local level = item:GetFrameLevel()
+    if item.Cooldown then level = math.max(level, item.Cooldown:GetFrameLevel()) end
+    if item.ChargeCount then level = math.max(level, item.ChargeCount:GetFrameLevel()) end
+    return level + 2
+end
+
+local function KeyFor(item)
+    local binds = ns.Keybinds
+    return binds and (binds:ForSpell(SpellOf(item)) or binds:ForSlot(Read(item, "GetEquipSlot"))) or nil
+end
+
+-- Blizzard's charge count goes top-right while the icon's own key shows along
+-- the bottom, and the countdown moves clear of the key. Both are only touched
+-- when something must move, or be put back after: Blizzard's own anchors are
+-- the count at BOTTOMRIGHT -2,2 of ChargeCount and the countdown at the
+-- sweep's centre.
+local function Room(item)
+    local parts = keys[item]
+    local top, lift = Style:CountUp(parts.keyed), parts.lift or 0
+    local was = room[item]
+    if was then
+        if was.top == top and was.lift == lift then return end
+    elseif not top and lift == 0 then
+        return
+    end
+    room[item] = { top = top, lift = lift }
+    local cooldown, numbers = item.Cooldown, nil
+    local get = cooldown and cooldown.GetCountdownFontString
+    if type(get) == "function" then
+        local ok, found = pcall(get, cooldown)
+        if ok then numbers = found end
+    end
+    Style:KeyRoom(item.ChargeCount and item.ChargeCount.Current, item.ChargeCount, 2, numbers, cooldown, lift, parts.keyed)
+end
+
+-- A key showing up or going (a new spell, a binding changed) moves the count with it.
+local function ShowKey(item)
+    local parts = keys[item]
+    parts.keyed = Style:SetKey(parts.text, KeyFor(item))
+    Room(item)
+end
+
+-- A failure is reported once per session, never thrown into Blizzard's code.
+local function SafeShowKey(item)
+    local ok, err = pcall(ShowKey, item)
+    if not ok and not M.lastError then
+        M.lastError = tostring(err)
+        print("|cffffd100" .. ns.TITLE .. ":|r couldn't show a keybind on a cooldown icon. Please report this: " .. M.lastError)
+    end
+end
+
+-- Sized to the icon's own size in Blizzard's template, as the countdown is.
+local function KeyLook(item)
+    local parts = keys[item]
+    parts.frame:SetFrameLevel(Above(item))
+    parts.lift = Style:KeyLook(parts.text, parts.frame, parts.spec.size - 2 * INSET, Style:CountdownSize(parts.spec.size))
+    Room(item)
+end
+
+-- The key's own frame over the art, never taking the mouse. The acquire hook
+-- runs before Blizzard gives a pooled item its spell, so the key is shown as
+-- it gets one, and hidden as one is cleared (see Watch for pooled items
+-- handed out again).
+local function Keybind(item, spec)
+    local art = spec.size - 2 * INSET
+    local frame = CreateFrame("Frame", nil, item)
+    frame:SetSize(art, art)
+    frame:SetAllPoints(item.Icon)
+    frame:EnableMouse(false)
+    keys[item] = { frame = frame, text = Style:KeyText(frame), spec = spec }
+    KeyLook(item)
+    for _, method in ipairs({ "OnCooldownIDSet", "OnCooldownIDCleared" }) do
+        if type(item[method]) == "function" then
+            hooksecurefunc(item, method, function() SafeShowKey(item) end)
+        end
+    end
+    ShowKey(item)
+end
+
 -- Item frames -------------------------------------------------------------------
 
 -- Essential and Utility cooldowns, including trinkets and potions.
@@ -86,6 +190,7 @@ local function Cooldown(item, spec)
     -- end-of-cooldown sparkle stay hidden.
     if item.OutOfRange then item.OutOfRange:SetAlpha(0) end
     if item.CooldownFlash then item.CooldownFlash:SetAlpha(0) end
+    Keybind(item, spec)
 end
 
 -- Tracked buffs shown as icons.
@@ -100,16 +205,6 @@ end
 -- Tracked buffs shown as bars. Every piece any design uses is made once per
 -- bar; Look shows the ones the chosen design needs and colours them, at the
 -- start and whenever the choice changes.
-
--- The spell a bar shows, from Blizzard's settings for the bar rather than
--- from the aura, which can be secret in combat; nil if it can't be read.
-local function SpellOf(item)
-    local get = item and item.GetBaseSpellID
-    if type(get) ~= "function" then return nil end
-    local ok, id = pcall(get, item)
-    if not ok or (issecretvalue and issecretvalue(id)) or type(id) ~= "number" then return nil end
-    return id
-end
 
 -- A bar's own colour, when one is chosen for its spell, or the colour for all.
 local function BarColour(item)
@@ -334,6 +429,24 @@ function M:ApplyDecor()
     for name in pairs(rows) do ShowRow(name) end
 end
 
+-- Keybinds placed and sized as chosen on the Look page, on every Essential
+-- and Utility icon.
+function M:ApplyKeybinds()
+    for item in pairs(keys) do
+        local ok, err = pcall(KeyLook, item)
+        if not ok and not M.lastError then
+            M.lastError = tostring(err)
+            print("|cffffd100" .. ns.TITLE .. ":|r couldn't place a keybind on a cooldown icon. Please report this: " .. M.lastError)
+        end
+        SafeShowKey(item)
+    end
+end
+
+-- The keys again after a binding or page change; text only, so in combat too.
+function M:ShowKeys()
+    for item in pairs(keys) do SafeShowKey(item) end
+end
+
 -- Setup -------------------------------------------------------------------------
 
 -- Frames are pooled and reused, so each is styled once. A failure is reported
@@ -353,7 +466,14 @@ local function Watch(spec)
     local viewer = _G[spec.name]
     if not viewer or type(viewer.OnAcquireItemFrame) ~= "function" then return false end
     hooked[spec.name] = true
-    hooksecurefunc(viewer, "OnAcquireItemFrame", function(_, item) Skin(item, spec) end)
+    hooksecurefunc(viewer, "OnAcquireItemFrame", function(_, item)
+        Skin(item, spec)
+        -- Blizzard's pool empties an item it takes back without clearing its
+        -- cooldown the usual way, so nothing else would hide the old key when
+        -- the item comes back as one of Edit Mode's empty placeholders. Its
+        -- key is read again here (none, until Blizzard gives it a spell).
+        if keys[item] then SafeShowKey(item) end
+    end)
     -- The row's icons sit INSET inside its edge, like each icon in its item.
     -- Checked whenever Blizzard lays the row out or refreshes its cooldowns:
     -- going between none, one and two cooldowns in Cooldown Settings keeps

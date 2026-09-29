@@ -7,8 +7,8 @@ local T = ns.Theme
 local ICON, GAP = 32, 12 -- icons in the tray; the gap fits the join button
 local ROW, HEADER_ROW = 22, 20 -- spell list rows
 local EMPTY = {
-    cd = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook.",
-    util = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook.",
+    cd = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook or bags.",
+    util = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook or bags.",
     buff = "Nothing here yet. Tick spells that buff you, or your class procs, in the list below, or drag them here.",
     debuff = "Nothing here yet. Tick spells that put a debuff on your target in the list below, or drag them here.",
 }
@@ -40,6 +40,7 @@ function ns.BuildBarPage(window, page, width)
         B:Rebuild()
         window:Refresh()
     end)
+    window:Hint(turnOn, "Turn your bars on.")
     page.turnOn = turnOn
     -- A bar taken out of your layout says so, with a way to put it back.
     local out = T:Text(page, "GameFontHighlightSmall", T.WARN)
@@ -52,6 +53,7 @@ function ns.BuildBarPage(window, page, width)
         window:Say(message)
         window:Refresh()
     end)
+    window:Hint(putBack, function() return "Put " .. ns.BAR_NAMES[state.bar] .. " back in your layout." end)
     page.putBack = putBack
 
     -- Clearing asks for a second click within a few seconds.
@@ -74,6 +76,11 @@ function ns.BuildBarPage(window, page, width)
         end
         window:Refresh()
     end)
+    window:Hint(clear, function()
+        local name = ns.BAR_NAMES[state.bar]
+        return state.armed == state.bar and ("Click again to take every icon off " .. name .. ".")
+            or ("Take every icon off " .. name .. ". It asks for a second click.")
+    end)
     page.clear = clear
 
     -- The tray: the bar's icons, left to right --------------------------------------
@@ -86,6 +93,7 @@ function ns.BuildBarPage(window, page, width)
     tray:EnableMouse(true)
     tray:SetScript("OnReceiveDrag", function() B:Dropped(state.bar) end)
     tray:SetScript("OnMouseUp", function() B:Dropped(state.bar) end)
+    window:Hint(tray, "Drop a spell or item here from your spellbook, bags or action bars. Drag an icon to move it.")
     local empty = T:Text(tray, "GameFontHighlightSmall", T.MUTED)
     empty:SetPoint("LEFT", 12, 0)
     empty:SetWidth(inner - 24)
@@ -143,6 +151,7 @@ function ns.BuildBarPage(window, page, width)
             B:Remove(state.bar, icon.index)
             window:Refresh()
         end)
+        window:Hint(icon.remove, function() return "Take " .. (icon.name or "it") .. " off " .. ns.BAR_NAMES[state.bar] .. "." end)
         -- On the Buffs and Debuffs bars, the button in the gap before an icon
         -- joins it to the one before, or splits them again; a line under the
         -- pair shows they're joined.
@@ -156,11 +165,10 @@ function ns.BuildBarPage(window, page, width)
             if message then window:Say(message) end
             window:Refresh()
         end)
-        icon.link:SetScript("OnEnter", function()
-            window.note:SetText(B:Joined(state.bar, icon.index) and "Split this from the one before."
-                or "Join this to the one before: they'll show as one icon, lit by whichever is up.")
+        window:Hint(icon.link, function()
+            return B:Joined(state.bar, icon.index) and "Split this from the one before."
+                or "Join this to the one before: they'll show as one icon, lit by whichever is up."
         end)
-        icon.link:SetScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
         icon.bridge = tray:CreateTexture(nil, "ARTWORK")
         icon.bridge:SetHeight(3)
         icon.bridge:SetPoint("TOPLEFT", icon, "BOTTOMLEFT", -(ICON + GAP), -3)
@@ -190,9 +198,10 @@ function ns.BuildBarPage(window, page, width)
             end
         end)
         icon:SetScript("OnReceiveDrag", function() B:Dropped(state.bar) end)
-        -- The footer names the icon under the mouse.
-        icon:SetScript("OnEnter", function(self) window.note:SetText(self.name or "") end)
-        icon:SetScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
+        -- The footer names the icon under the mouse; its x says what it does.
+        window:Hint(icon, function(self)
+            return self.name and (self.name .. ". Drag it to move it, or off the bar to take it off.")
+        end)
         page.icons[i] = icon
         return icon
     end
@@ -207,32 +216,47 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end)
     size:SetPoint("TOPLEFT", 0, -2)
+    -- All bars (the Layout page) sizes every bar on top of this one: while it
+    -- isn't 100, the note says what size this bar's icons are on screen.
+    window:Hint(size, function()
+        local scale = ns.Get("barScale")
+        if scale == 100 then return "This bar's icon size. All bars on the Layout page sizes every bar together." end
+        local shown = ns.IconSize(ns.BarData(state.bar))
+        return "This bar's own size. All bars on the Layout page is at " .. scale .. ", so its icons show at "
+            .. shown .. (shown <= ns.BAR_LIMITS.size[1] and ", the smallest they go." or ".")
+    end)
     local spacing = T:Slider(options, "Spacing", ns.BAR_LIMITS.spacing, 1, 280, function(value)
         B:SetOption(state.bar, "spacing", value)
         window:Refresh()
     end)
     spacing:SetPoint("TOPLEFT", 0, -30)
+    window:Hint(spacing, "The room between this bar's icons.")
     -- More icons than fit across go on another row. (Not the tray's perRow.)
     local across = T:Slider(options, "Icons per row", ns.BAR_LIMITS.perRow, 1, 280, function(value)
         B:SetOption(state.bar, "perRow", value)
         window:Refresh()
     end)
     across:SetPoint("TOPLEFT", 0, -58)
+    window:Hint(across, "How many icons fit across before the next row starts.")
     page.size, page.spacing, page.across = size, spacing, across
 
-    local function Option(label, field, y)
+    local function Option(label, field, y, note)
         local check = T:Check(options, label, function(self)
             B:SetOption(state.bar, field, self:GetChecked())
             window:Refresh()
         end)
         check:SetPoint("TOPLEFT", 320, y)
+        window:Hint(check, note)
         return check
     end
-    local hideReady = Option("Hide when ready", "hideReady", 0)
+    local hideReady = Option("Hide when ready", "hideReady", 0, "Each icon hides while it's ready, so only the ones cooling down show.")
     -- Buffs only show while they're on you, so their bar offers this instead.
-    local showMissing = Option("Show missing buffs greyed", "showMissing", 0)
-    local showNames = Option("Show spell names", "showNames", -22)
-    local showTimer = Option("Show countdown numbers", "showTimer", -44)
+    local showMissing = Option("Show missing buffs greyed", "showMissing", 0, function()
+        return (state.bar == "debuff" and "Debuffs missing from your target" or "Buffs missing from you")
+            .. " show greyed in their spot, instead of hidden."
+    end)
+    local showNames = Option("Show spell names", "showNames", -22, "Each spell's name under its icon.")
+    local showTimer = Option("Show countdown numbers", "showTimer", -44, "The numbers counting down on this bar's icons.")
 
     -- A label and joined buttons for a choice, with the footer explaining it.
     local function Pills(label, x, y, width, keys, names, field, note)
@@ -253,10 +277,7 @@ function ns.BuildBarPage(window, page, width)
         end)
         pills:SetPoint("TOPLEFT", x + 100, y)
         for _, button in ipairs(pills.buttons) do
-            button:SetScript("OnEnter", function()
-                window.note:SetText(pills.held and "Your layout sets this. Change it on the Layout page." or note)
-            end)
-            button:SetScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
+            window:Hint(button, function() return pills.held and "Your layout sets this. Change it on the Layout page." or note end)
         end
         pills.label = text
         return pills
@@ -282,6 +303,7 @@ function ns.BuildBarPage(window, page, width)
         state.search = (self:GetText() or ""):lower():match("^%s*(.-)%s*$")
         window:Refresh()
     end)
+    window:Hint(search, "Find a spell by name or ID. Three letters or more also finds spells outside your spellbook.")
     page.search = search
     -- Trinkets and bag items only join the list when asked.
     local showItems = T:Check(listPanel, "Show items", function(self)
@@ -289,13 +311,21 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end)
     showItems:SetPoint("LEFT", search, "RIGHT", 14, 0)
+    window:Hint(showItems, "Trinkets and bag items with a use, listed to put on the bar.")
     -- Every rank you know as its own row, for casting a lower rank on purpose.
     local showRanks = T:Check(listPanel, "Show all ranks", function(self)
         ns.Set("listRanks", self:GetChecked())
         window:Refresh()
     end)
     showRanks:SetPoint("LEFT", showItems, "RIGHT", 14, 0)
+    window:Hint(showRanks, "Every rank you know as its own row, for casting a lower rank on purpose.")
     page.showItems, page.showRanks = showItems, showRanks
+    -- How the list shows ranks, on a line of its own under the search: too
+    -- long to fit beside it with the two ticks.
+    local ranks = T:Text(listPanel, "GameFontHighlightSmall", T.MUTED)
+    ranks:SetPoint("TOPLEFT", 10, -34)
+    ranks:SetWidth(inner - 20)
+    page.ranks = ranks
 
     local listWidth = inner - 30
     -- On this client a scroll area pinned while the page is still hidden is
@@ -305,12 +335,13 @@ function ns.BuildBarPage(window, page, width)
     local scroll = T:Scroll(listPanel, listWidth)
     local function Pin()
         scroll:ClearAllPoints()
-        scroll:SetPoint("TOPLEFT", listPanel, "TOPLEFT", 8, -36)
+        scroll:SetPoint("TOPLEFT", listPanel, "TOPLEFT", 8, -50)
         scroll:SetPoint("BOTTOMRIGHT", listPanel, "BOTTOMRIGHT", -16, 6)
         scroll:ScrollTo(scroll:GetVerticalScroll() or 0)
     end
     Pin()
     page:HookScript("OnShow", function() C_Timer.After(0, Pin) end)
+    window:Hint(scroll.thumb, ns.SCROLL_NOTE)
     page.list, page.listPanel = scroll, listPanel
     local rows = {}
     page.rows = rows
@@ -344,6 +375,18 @@ function ns.BuildBarPage(window, page, width)
         row:SetSize(listWidth, ROW)
         row.check = T:Check(row, nil, function(self) Ticked(row, self:GetChecked()) end)
         row.check:SetPoint("LEFT", 4, 0)
+        -- The whole row is the tick's, as a tick's label is elsewhere: its
+        -- spell's icon, name and rank click it too, and say what it does.
+        row.check:SetHitRectInsets(-4, -(listWidth - 20), -(ROW - 16) / 2, -(ROW - 16) / 2)
+        -- What ticking or unticking this row does, for the spell it holds now.
+        window:Hint(row.check, function()
+            local bar, name = ns.BAR_NAMES[state.bar], row.label or ""
+            if row.other then return "Add " .. name .. " to " .. bar .. ", by name: it isn't in your spellbook." end
+            if row.check:GetChecked() then return "Take " .. name .. " off " .. bar .. "." end
+            local on = not ns.AURA_BARS[state.bar] and row.spell and B:Find(row.spell)
+            if on and on ~= state.bar then return "Move " .. name .. " here from " .. ns.BAR_NAMES[on] .. "." end
+            return "Put " .. name .. " on " .. bar .. "."
+        end)
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(16, 16)
         ns.Style:Zoom(row.icon)
@@ -400,7 +443,7 @@ function ns.BuildBarPage(window, page, width)
 
     local function Spell(entry, indent, rankText)
         local row = Entry(entry.icon, indent and entry.rankText or entry.name, rankText, indent)
-        row.spell, row.other = entry.key, nil
+        row.spell, row.other, row.label = entry.key, nil, entry.name
         if ns.AURA_BARS[state.bar] then
             row.check:SetChecked(B:HasAura(state.bar, entry.key))
         else
@@ -464,7 +507,7 @@ function ns.BuildBarPage(window, page, width)
                 Header("Other spells")
                 for _, other in ipairs(others) do
                     local row = Entry(other.icon, other.label, "")
-                    row.spell, row.other = nil, other.lookup
+                    row.spell, row.other, row.label = nil, other.lookup, other.name
                     row.check:SetChecked(false)
                 end
             end
@@ -565,6 +608,10 @@ function ns.BuildBarPage(window, page, width)
         showRanks:SetShown(not aura)
         showItems:SetChecked(ns.Get("listItems"))
         showRanks:SetChecked(ns.Get("listRanks"))
+        -- An aura bar already counts every rank; Show all ranks lists the lower ones.
+        ranks:SetText(aura and "Each spell shows once, and counts every rank."
+            or ns.Get("listRanks") and "Each spell at your highest rank, with the lower ranks you know under it."
+            or "Each spell shows once, at your highest rank.")
         RefreshList()
     end
 

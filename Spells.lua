@@ -283,6 +283,16 @@ function S:IsItem(entry)
     return entry.kind == "item" or entry.kind == "slot" or entry.kind == "ammo"
 end
 
+-- Arrows or shot of any kind or level, equipped or not: what goes in the ammo
+-- slot, by where it's worn or its item class. Anything unreadable isn't ammo.
+function S:IsAmmo(itemID)
+    if not (Open(itemID) and type(itemID) == "number" and C_Item and C_Item.GetItemInfoInstant) then return false end
+    local _, _, _, worn, _, classID = C_Item.GetItemInfoInstant(itemID)
+    if Open(worn) and worn == "INVTYPE_AMMO" then return true end
+    local projectile = Enum and Enum.ItemClass and Enum.ItemClass.Projectile or 6
+    return Open(classID) and classID == projectile or false
+end
+
 -- Names to offer while typing in the add box. Your own spells, procs and items
 -- come before other classes' spells from the game data; within each, names
 -- that start with the text, then a word that does, then (from three letters

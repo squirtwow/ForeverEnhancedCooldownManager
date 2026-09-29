@@ -48,8 +48,12 @@ function S:Font(size)
 end
 
 -- Countdown numbers about half the icon's height; stacks and counts smaller.
+function S:CountdownSize(iconSize)
+    return math.floor(math.max(11, iconSize * .5) + .5)
+end
+
 function S:Countdown(iconSize)
-    return self:Font(math.max(11, iconSize * .5))
+    return self:Font(self:CountdownSize(iconSize))
 end
 
 function S:Count(iconSize)
@@ -126,5 +130,108 @@ function S:ShowDecor(decor, border, shadow)
     for i, ring in ipairs(decor.shadow) do
         Place(ring, decor.region, start + (border and 1 or 0) + i - 1)
         Show(ring, shadow)
+    end
+end
+
+-- Keybinds -------------------------------------------------------------------------
+-- The key that casts an icon's spell, in one corner or along one edge of its
+-- art, sized with the icon. Your bars, Blizzard's icons and the Look page's
+-- preview all draw it here, so they always match.
+local KEY_SHARE = .3 -- automatic size: this share of the icon art's size (36 -> 11, below the count's 13)
+local KEY_MIN = 8 -- smallest readable text; also S:Font's floor
+local KEY_GLYPH = .75 -- how tall numbers and capitals draw, as a share of the font size
+local KEY_EDGE = 2 -- from the icon art's edge
+local KEY_GAP = 1 -- between the key and the countdown's numbers
+S.KEY_COLOUR = { .9, .9, .9 } -- near white, just under the countdown's pure white
+local KEY_POINTS = { -- point on the art, x/y offset direction (times KEY_EDGE), justification
+    BOTTOM = { "BOTTOM", 0, 1, "CENTER" }, TOP = { "TOP", 0, -1, "CENTER" },
+    TOPLEFT = { "TOPLEFT", 1, -1, "LEFT" }, TOPRIGHT = { "TOPRIGHT", -1, -1, "RIGHT" },
+}
+
+-- The key's automatic size on an icon: a share of its art, times the size chosen.
+local function Wanted(art, scale)
+    return math.floor(art * KEY_SHARE * scale / 100 + .5)
+end
+
+-- Size for an icon's key, and how far its countdown moves to stay clear (+ up for a
+-- bottom key, - down for a top one). art: the icon art's size; countdown: its font size.
+function S:KeyFit(art, countdown, position, scale)
+    local half = KEY_GLYPH * countdown / 2
+    local room = art / 2 - half -- edge to the countdown's numbers
+    local most = math.floor((art - 2 * half - KEY_EDGE - KEY_GAP - 1) / KEY_GLYPH) -- countdown moved as far as it may go
+    local size = Wanted(art, scale)
+    size = math.max(KEY_MIN, math.min(size, most))
+    local need = KEY_EDGE + KEY_GLYPH * size + KEY_GAP - room
+    local lift = need > 0 and math.ceil(need) or 0
+    if position ~= "BOTTOM" then lift = -lift end
+    return size, lift
+end
+
+-- Whether a key reads on an icon this small, whatever size is chosen: the icon is
+-- at least as big as the smallest your bars can have, where KeyFit still fits it
+-- inside the art and clear of the countdown. The Layout page's small drawing of
+-- your bars leaves it off on smaller tiles, rather than draw a smudge; on the rest
+-- the size chosen only resizes it, as on your bars.
+function S:KeyReadable(art)
+    return art >= ns.BAR_LIMITS.size[1]
+end
+
+-- The addon's own text for a key, on parent (a frame above the icon's sweep), hidden until it has one.
+function S:KeyText(parent)
+    local text = parent:CreateFontString(nil, "OVERLAY")
+    text:SetFontObject(self:Font(KEY_MIN))
+    text:SetTextColor(S.KEY_COLOUR[1], S.KEY_COLOUR[2], S.KEY_COLOUR[3])
+    text:SetWordWrap(false)
+    text:SetJustifyH("CENTER")
+    text:SetWidth(20)
+    text:SetPoint("BOTTOM", parent, "BOTTOM", 0, KEY_EDGE)
+    text:Hide()
+    return text -- no height: a FontString shorter than its font draws nothing
+end
+
+-- Places and sizes it as chosen; returns the countdown's lift (0 with keybinds off).
+function S:KeyLook(text, region, art, countdown)
+    local position = ns.Get("keybindPosition")
+    local size, lift = self:KeyFit(art, countdown, position, ns.Get("keybindSize"))
+    local at = KEY_POINTS[position] or KEY_POINTS.BOTTOM
+    text:SetFontObject(self:Font(size))
+    text:SetTextColor(S.KEY_COLOUR[1], S.KEY_COLOUR[2], S.KEY_COLOUR[3])
+    -- One line as wide as the art: a long key is cut short, as Blizzard's own are.
+    text:SetWidth(math.max(1, art - 2 * KEY_EDGE))
+    text:SetJustifyH(at[4])
+    text:ClearAllPoints()
+    text:SetPoint(at[1], region, at[1], at[2] * KEY_EDGE, at[3] * KEY_EDGE)
+    return ns.Get("keybinds") and lift or 0
+end
+
+-- The key, or nothing (no key, or keybinds off). Text only: safe in combat.
+-- Returns whether it shows, for where the icon's count goes.
+function S:SetKey(text, key)
+    local shown = ns.Get("keybinds") and key ~= nil or false
+    text:SetText(key or "")
+    text:SetShown(shown)
+    return shown
+end
+
+-- Whether an icon's count goes top-right: only while its own key shows along the bottom.
+function S:CountUp(keyed)
+    return keyed == true and ns.Get("keybinds") == true and ns.Get("keybindPosition") == "BOTTOM"
+end
+
+-- Room for the key: the count goes top-right while the icon's key shows along the bottom (keyed),
+-- bottom-right otherwise, as on an icon with no key; the countdown's numbers move by lift.
+-- box/inset: where the count sits; around: what the numbers centre on.
+function S:KeyRoom(count, box, inset, numbers, around, lift, keyed)
+    if count and box then
+        count:ClearAllPoints()
+        if self:CountUp(keyed) then
+            count:SetPoint("TOPRIGHT", box, "TOPRIGHT", -inset, -inset)
+        else
+            count:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -inset, inset)
+        end
+    end
+    if numbers and around then
+        numbers:ClearAllPoints()
+        numbers:SetPoint("CENTER", around, "CENTER", 0, lift)
     end
 end

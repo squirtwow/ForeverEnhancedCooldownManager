@@ -96,6 +96,8 @@ function Proto:SetTexture(t) S[self].texture = t end
 function Proto:SetVertexColor(r, g, b) S[self].tint = { r, g, b } end
 function Proto:SetDesaturated(v) S[self].desaturated = v end
 function Proto:SetAlphaFromBoolean(v) S[self].alphaFrom = v end
+-- A cooldown's countdown numbers, made the first time they're asked for.
+function Proto:GetCountdownFontString() local s = S[self]; s.numbers = s.numbers or New("FontString", self); return s.numbers end
 function Proto:IsMouseOver() return S[self].mouseOver == true end
 -- Like the game: shown, and so is everything it sits in.
 function Proto:IsVisible()
@@ -120,6 +122,9 @@ local cooldownCalls, lockdown, containers, containerCallsInCombat
 local trinket, trinketCooldown, bagItems, itemCooldown, itemCount
 local ammo, ammoCount -- the equipped ammunition and how many you carry
 local bindings, cvarOn, reloads, timers
+-- Your action bars: what each slot holds, the key on each binding, macros,
+-- how many slots have been read, and the main bar's page and bonus bar.
+local actionSlots, keyOf, macroSpells, macroItems, actionReads, actionPage, bonusIndex
 local prdOn = true -- Blizzard's Personal Resource Display switched on
 local clock = 100 -- the game's time in seconds, for the cast bar
 -- Who is logged in: a GUID tells characters apart, even with the same name.
@@ -151,6 +156,18 @@ local function Environment(keepCVars)
     lockdown, containers, containerCallsInCombat = false, {}, 0
     bindings, cvarOn, reloads, timers = {}, true, 0, {}
     _G.C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
+    actionSlots, keyOf, macroSpells, macroItems, actionReads, actionPage, bonusIndex = {}, {}, {}, {}, 0, 1, nil
+    _G.GetActionInfo = function(slot)
+        actionReads = actionReads + 1
+        local a = actionSlots[slot]
+        if a then return a[1], a[2], a[3] end
+    end
+    _G.GetBindingKey = function(binding) return keyOf[binding] end
+    _G.GetMacroSpell = function(i) return macroSpells[i] end
+    _G.GetMacroItem = function(i) local id = macroItems[i]; if id then return "Item", "|Hitem:" .. id .. "::|h[Item]|h" end end
+    _G.C_ActionBar = { GetActionBarPage = function() return actionPage end, HasBonusActionBar = function() return bonusIndex ~= nil end,
+        GetBonusBarIndex = function() return bonusIndex end, HasVehicleActionBar = function() return false end,
+        HasOverrideActionBar = function() return false end, HasTempShapeshiftActionBar = function() return false end }
     _G.GetCursorPosition = function() return 0, 0 end
     _G.GetCursorInfo = function() end -- nothing picked up
     _G.ClearCursor = function() end
@@ -182,9 +199,11 @@ local function Environment(keepCVars)
     }
     _G.C_Item = {
         GetItemSpell = function(id) return ({ [118] = "Healing Potion", [117] = "Food", [2698] = "Learning" })[id] end,
+        -- Rough Arrow and Light Shot: projectiles (6), worn in the ammo slot.
         GetItemInfoInstant = function(id)
-            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 } })[id] or { 15, 0 }
-            return id, nil, nil, nil, nil, class[1], class[2]
+            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 } })[id]
+                or { 15, 0 }
+            return id, nil, nil, class[1] == 6 and "INVTYPE_AMMO" or "", nil, class[1], class[2]
         end,
         GetItemCooldown = function() return itemCooldown[1], itemCooldown[2], itemCooldown[3] end,
         GetItemCount = function(id) return itemCount[id] or 0 end,
@@ -327,7 +346,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Buffs.lua", "Bars.lua",
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -1299,7 +1318,8 @@ Equal(S[w.yourBars].text, "YOUR BARS", "the bars headed as your own, apart from 
 Equal(S[w.nav.cd.fill].shown and not S[w.nav.util.fill].shown, true, "the chosen one highlighted")
 Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape closes the window")
 Equal(S[w.close.label].text, "X", "a plain X")
-Equal(S[w.note].text, "Each spell shows once, at your highest rank.", "footer tip")
+Equal(S[w.note].text, "Made with |TInterface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Heart.tga:0:0:0:0:32:32:0:32:0:32:224:120:41|t"
+    .. " by |cffe07829Squirt|r", "the footer's credit: the heart and Squirt in the accent")
 Equal(S[w.versionText].text, "dev   /ccm to open", "the footer shows the version")
 w:Refresh()
 Equal(S[w.versionText].text, "dev   /ccm to open", "and keeps it")
@@ -1463,6 +1483,12 @@ local rows = w.eachRows
 Equal(S[rows[1].name].text .. "," .. S[rows[2].name].text, "Clearcasting,Power Word: Fortitude", "your Tracked Bars, in Blizzard's order")
 Equal(Last(rows[1].swatches[6].icon, "SetAtlas", 1), "classicon-druid", "each bar's Class swatch shows the icon too")
 Equal(S[rows[1].chosen].text, "Default", "each uses the colour for all at first")
+-- Round its swatches, a row says what it's for.
+local function Hover(region, script) if S[region].scripts[script] then S[region].scripts[script](region) end end
+Hover(rows[1], "OnEnter")
+Equal(S[w.note].text .. " | " .. tostring(Last(rows[1], "EnableMouse")), "Clearcasting: click a colour on the right for this bar alone. | true",
+    "hovering a bar's row, its note")
+Hover(rows[1], "OnLeave")
 Equal(S[w.eachEmpty].shown, false, "no note while there are bars")
 rows[1].swatches[4]:Click()
 Equal(ns.BarColours()[16870], "green", "a colour picked for one bar")
@@ -1985,16 +2011,20 @@ Fire("PLAYER_REGEN_ENABLED")
 local notes = FECMNotes
 Equal(notes ~= nil and S[notes].shown, true, "but once the fight is over")
 Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape is taken while it's open")
-Equal(S[notes.version].text, "Version 1.0.0", "headed with the notes' version")
+Equal(S[notes.version].text, "Version " .. ns.NOTES[1].version, "headed with the newest notes' version")
 Equal(S[notes.close.label].text, "X", "under the window's title bar")
 -- Every heading and bullet, top to bottom, none overlapping.
 local texts, expected = {}, 0
 for _, row in ipairs(notes.flow) do
     if row.text then texts[#texts + 1] = row end
 end
-for _, section in ipairs(ns.NOTES[1].sections) do expected = expected + 1 + #section[2] end
+-- A copy from the source shows every release's notes, newest first.
+for index, entry in ipairs(ns.NOTES) do
+    if index > 1 then expected = expected + 1 end -- an older release's version line
+    for _, section in ipairs(entry.sections) do expected = expected + 1 + #section[2] end
+end
 Equal(#texts, expected, "every heading and bullet listed")
-Equal(S[texts[1].text].text, "BLIZZARD'S COOLDOWN MANAGER", "headings in capitals")
+Equal(S[texts[1].text].text, ns.NOTES[1].sections[1][1]:upper(), "headings in capitals")
 local above
 for _, row in ipairs(texts) do
     local y = -S[row.text].points[1][3]
@@ -2523,7 +2553,7 @@ SlashCmdList.FECM("")
 w = FECMFrame
 w:Select("layout")
 lp = w.pages.layout
-Equal(S[lp.dragHint].text, "Drag spells from your spellbook onto a row. Hover a row to change it.",
+Equal(S[lp.dragHint].text, "Drag spells or items onto a row. Hover a row to change it.",
     "the Layout page says spells can be dragged in")
 cursor = { "spell", 12, "spell", 5176 }
 S[lp.rows.util].scripts.OnReceiveDrag(lp.rows.util)
@@ -2543,12 +2573,71 @@ Equal(ns.BarData("cd").spells[1], "item:118", "an item with a cooldown, from you
 cursor = { "item", 11111 }
 S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
 Equal(ns.BarData("cd").spells[2], "slot:13", "an equipped trinket follows its slot")
+do
+    -- Ammunition of any kind, equipped or not, is your ammo: the one entry that
+    -- counts whatever ammo you have equipped.
+    cursor = { "item", 2516, "|Hitem:2516|h[Light Shot]|h" }
+    S[lp.rows.util].scripts.OnReceiveDrag(lp.rows.util)
+    Equal(table.concat(ns.BarData("util").spells, ",") .. " " .. tostring(cursor) .. " " .. S[w.note].text,
+        "Wrath,ammo nil Added your ammo to Utility. It counts whatever ammo you have equipped.",
+        "ammo from your bags with none equipped: your ammo joins the bar, and is let go of")
+    local shot = B:Get("util").icons[2]
+    Equal(shot.kind .. " " .. shot.slot .. " " .. tostring(S[shot].shown) .. " " .. S[shot.count].text, "ammo 0 true 0",
+        "drawn as your ammo, showing none equipped")
+    ammo, ammoCount = 2512, 200
+    cursor = { "item", 2516 }
+    S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
+    local arrows = B:Get("cd").icons[3]
+    Equal(table.concat(ns.BarData("cd").spells, ",") .. " | " .. table.concat(ns.BarData("util").spells, ",") .. " | "
+        .. arrows.kind .. " " .. S[arrows.count].text, "item:118,slot:13,ammo | Wrath | ammo 200",
+        "another kind than the Rough Arrows equipped: still your ammo, moved to Cooldowns, counting the arrows")
+    cursor = { "item", 2512 }
+    S[lp.rows.cd.tiles[1]].scripts.OnReceiveDrag(lp.rows.cd.tiles[1])
+    Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. tostring(cursor), "item:118,slot:13,ammo nil",
+        "the equipped arrows, from your character panel onto an icon: already there, never twice")
+    cursor = { "item", 2512 }
+    S[lp.rows.buff].scripts.OnReceiveDrag(lp.rows.buff)
+    Equal(S[w.note].text .. " " .. tostring(cursor and cursor[2]) .. " " .. #ns.BarData("buff").spells,
+        "Items can't go on the Buffs bar. 2512 2", "ammo on the Buffs bar: turned away, and still on the cursor")
+    cursor = { "item", 117 }
+    S[lp.rows.util].scripts.OnReceiveDrag(lp.rows.util)
+    Equal(S[w.note].text .. " " .. tostring(cursor and cursor[2]) .. " " .. table.concat(ns.BarData("util").spells, ","),
+        "That item has no cooldown to show. 117 Wrath", "food: turned away, still on the cursor, the bar as it was")
+    -- Anything the game won't say is turned away, never guessed at.
+    local instant = _G.C_Item.GetItemInfoInstant
+    _G.C_Item.GetItemInfoInstant = function(id)
+        if id == 3030 then return id, nil, nil, SECRET, nil, 6, 2 end -- Razor Arrow, where it's worn kept secret
+        if id == 3033 then return id, nil, nil, "INVTYPE_AMMO", nil, SECRET, SECRET end -- Solid Shot, its class secret
+        if id == 3034 then return id, nil, nil, SECRET, nil, SECRET, SECRET end
+        return instant(id)
+    end
+    local Spells = ns.Spells
+    Equal(table.concat({ tostring(Spells:IsAmmo(3030)), tostring(Spells:IsAmmo(3033)), tostring(Spells:IsAmmo(3034)),
+        tostring(Spells:IsAmmo(SECRET)), tostring(Spells:IsAmmo(118)), tostring(Spells:IsAmmo(nil)) }, " "),
+        "true true false false false false", "ammo by its class or where it's worn; nothing secret or unknown counts")
+    _G.C_Item.GetItemInfoInstant = instant
+    for _, held in ipairs({ { "item", SECRET }, { SECRET, 118 }, { "spell", 1, "spell", SECRET } }) do
+        cursor = held
+        S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
+        Equal(S[w.note].text .. " " .. tostring(cursor == held) .. " " .. #ns.BarData("cd").spells,
+            "Only spells and items can go on a bar. true 3", "a secret on the cursor: turned away and left there")
+    end
+    Equal(#printed, 0, "no errors from secrets on the cursor")
+end
+cursor = nil
+B:TakeOff("cd", "ammo")
+ammo, ammoCount = nil, 0
 cursor = { "item", 118 }
 S[lp.rows.buff].scripts.OnReceiveDrag(lp.rows.buff)
-Equal(S[w.note].text .. " " .. tostring(cursor), "Items can't go on the Buffs bar. nil", "no items on the Buffs bar")
+Equal(S[w.note].text .. " " .. tostring(cursor and cursor[2]), "Items can't go on the Buffs bar. 118",
+    "no items on the Buffs bar: it stays on the cursor")
+lp.rows.buff:Click()
+Equal(tostring(cursor and cursor[2]) .. " " .. #ns.BarData("buff").spells, "118 2", "a click tries it again, with the same answer")
 cursor = { "macro", 4 }
 S[lp.rows.util].scripts.OnReceiveDrag(lp.rows.util)
-Equal(S[w.note].text, "Only spells and items can go on a bar.", "anything else is turned away")
+Equal(S[w.note].text .. " " .. tostring(cursor and cursor[1]), "Only spells and items can go on a bar. macro",
+    "anything else is turned away, left on the cursor")
+cursor = nil -- put away
 lp.rows.util:Click()
 Equal(S[lp.rows.util.buttons].shown, true, "with nothing held, a click just keeps the row's buttons up")
 -- A bar's icons, and the bars on screen while unlocked, take drops too.
@@ -2925,6 +3014,48 @@ Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
     clock = 220.8
     S[sw].scripts.OnUpdate(sw, .8)
     Equal(S[sw.bar.name].text .. " " .. S[sw].alpha, "Main hand 1", "and the swing timer comes back after")
+    -- Auto-attack switched off (the target died): the swing stops where it is
+    -- and fades instead of filling on. Auto Shot stopping leaves a melee swing
+    -- alone, and the other way round.
+    clock = 225
+    Fire("PLAYER_SWING", 3, 0)
+    clock = 226
+    S[sw].scripts.OnUpdate(sw, 1)
+    Fire("STOP_AUTOREPEAT_SPELL")
+    clock = 226.5
+    S[sw].scripts.OnUpdate(sw, .5)
+    Equal(string.format("%s %g %g", S[sw.bar.name].text, Last(sw.bar, "SetValue", 1), S[sw].alpha), "Main hand 1.5 1",
+        "Auto Shot stopping leaves a melee swing filling")
+    Fire("PLAYER_LEAVE_COMBAT")
+    clock = 227
+    S[sw].scripts.OnUpdate(sw, .5)
+    Equal(string.format("%g [%s] %.2f", Last(sw.bar, "SetValue", 1), S[sw.bar.time].text, S[sw].alpha), "1.5 [] 0.67",
+        "the mob died: it stops where it was, its time cleared, and fades")
+    clock = 227.3
+    S[sw].scripts.OnUpdate(sw, .3)
+    Equal(Gone(), "0 nil", "then it's gone, not filling on")
+    clock = 230
+    Fire("PLAYER_SWING", 2.5, 2)
+    Fire("PLAYER_LEAVE_COMBAT")
+    clock = 230.2
+    S[sw].scripts.OnUpdate(sw, .2)
+    Equal(string.format("%s %.1f %g", S[sw.bar.name].text, Last(sw.bar, "SetValue", 1), S[sw].alpha), "Auto Shot 0.2 1",
+        "melee stopping leaves Auto Shot filling")
+    Fire("STOP_AUTOREPEAT_SPELL")
+    clock = 231
+    S[sw].scripts.OnUpdate(sw, .8)
+    Equal(Gone(), "0 nil", "Auto Shot switched off: that swing stops and goes too")
+    -- Stopped during a cast: it doesn't come back after the cast.
+    clock = 232
+    Fire("PLAYER_SWING", 3, 0)
+    casting = { "Wrath", "Wrath", 136006, 232000, 233000, false, "cast-5" }
+    Fire("UNIT_SPELLCAST_START", "player", "cast-5", 5176)
+    Fire("PLAYER_LEAVE_COMBAT")
+    clock = 233
+    Fire("UNIT_SPELLCAST_STOP", "player", "cast-5", 5176)
+    clock = 233.8
+    S[sw].scripts.OnUpdate(sw, .8)
+    Equal(Gone(), "0 nil", "a swing stopped during a cast stays gone after it")
     -- The Layout page draws the spot while either is on.
     SlashCmdList.FECM("")
     local w = FECMFrame
@@ -2967,10 +3098,13 @@ Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
     note = S[w.note].text
     Equal(note:find("Main hand, Auto Shot or Ranged for the swing timer", 1, true) ~= nil, true, "the Name tick's note lists Ranged too")
     S[cp.name].scripts.OnLeave(cp.name)
-    -- What's new says what it does: the main hand for everyone, hunters too,
-    -- and ranged swings, called Auto Shot for hunters.
-    local bullet
-    for _, section in ipairs(ns.NOTES[1].sections) do
+    -- What's new for 1.0.0 says what it does: the main hand for everyone, hunters
+    -- too, and ranged swings, called Auto Shot for hunters.
+    local bullet, first
+    for _, entry in ipairs(ns.NOTES) do
+        if entry.version == "1.0.0" then first = entry end
+    end
+    for _, section in ipairs(first.sections) do
         for _, item in ipairs(section[2]) do
             if item:find("^Swing timer") then bullet = item end
         end
@@ -3345,7 +3479,7 @@ Equal(S[w.note].text .. " " .. #ns.BarData("debuff").spells, "Debuffs go in the 
 lp.rows.debuff.tiles[1]:Click()
 Equal(table.concat(ns.BarData("debuff").spells, ",") .. " " .. S[w.note].text, "Faerie Fire,Moonfire Added Faerie Fire to Debuffs.",
     "put in the spot you picked")
-Equal(S[lp.dragHint].text .. " " .. tostring(S[lp.cancel].shown), "Drag spells from your spellbook onto a row. Hover a row to change it. false",
+Equal(S[lp.dragHint].text .. " " .. tostring(S[lp.cancel].shown), "Drag spells or items onto a row. Hover a row to change it. false",
     "and back to normal")
 -- Changed your mind: Cancel.
 search:SetText("demoral")
@@ -3550,6 +3684,262 @@ end
     Equal(S[FECMMinimapButton].shown, true, "ticking it brings the button back")
 end)()
 
+-- What's new's tour: the steps an update added ------------------------------------------
+
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+;(function()
+    -- No resource display here: each load would hook its bars' colours again,
+    -- on top of every earlier load's, slowing every section after this one.
+    -- Put back at the end.
+    local display = _G.PersonalResourceDisplayFrame
+    _G.PersonalResourceDisplayFrame = nil
+    -- The version running: a release's from the TOC, or nil for a copy
+    -- straight from the source ("dev").
+    local function Running(version)
+        _G.C_AddOns = version and { GetAddOnMetadata = function() return version end } or nil
+    end
+    local function Fresh(saved)
+        Environment()
+        _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
+        ns = Load(saved)
+        for _, timer in ipairs(timers) do timer() end
+    end
+    local function Titles(list)
+        local titles = {}
+        for _, step in ipairs(list) do titles[#titles + 1] = step.title end
+        return table.concat(titles, ", ")
+    end
+    local BASICS = "The menu, Switch your bars on, Add spells, This bar's options, Layouts, The look, Cast bar, Profiles, That's the basics"
+    local NEW = "Keybinds on icons, Live preview, All bars"
+
+    -- Versions, compared part by part as numbers.
+    Running(nil)
+    Fresh({ useBars = true, notesSeen = "dev" })
+    local U = ns.UNRELEASED
+    local function C(a, b) return tostring(ns.CompareVersions(a, b)) end
+    Equal(table.concat({ C("1.0.0", "1.0.0"), C("1.1", "1.1.0"), C("1.10.0", "1.9.0"), C("1.0.1", "1.0.0"), C("1.9.9", "2.0"),
+        C("v1.2.0", "1.2"), C("1.1.0-beta", "1.1.0"), C("2", "10") }, " "), "0 0 1 1 -1 0 0 -1",
+        "versions compare part by part as numbers: 1.10 after 1.9, and a missing part is 0")
+    Equal(U .. " " .. C(U, "1.0.0") .. " " .. C(U, "999.99.99") .. " " .. C("2.0.0", U) .. " " .. C(U, U), "Unreleased 1 1 -1 0",
+        "the next update's placeholder comes after any release")
+    Equal(C("dev", U) .. " " .. C("dev", "999.0") .. " " .. C("dev", "dev") .. " " .. C("1.0.0", "dev"), "1 1 0 -1",
+        "and a copy straight from the source after that")
+    Equal(table.concat({ C(nil, "1.0.0"), C("1.0.0", nil), C("", "1.0.0"), C("x", "1.0.0"), C(5, "1.0.0"), C({}, "dev"),
+        C("Dev", "1.0.0") }, " "), "nil nil nil nil nil nil nil", "anything else isn't a version")
+
+    -- Which steps: newer than the version seen, up to the one running.
+    local Tour = ns.Tour
+    Equal(Titles(Tour:News("1.0.0")), NEW, "from 1.0.0 to this copy: the three new steps, in order")
+    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")), NEW .. "|" .. NEW,
+        "no version seen, or one that isn't: the latest update's, the newest steps there are")
+    Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW, "versions skipped come together: the basics from 1.0.0, then the new ones")
+    Equal(Titles(Tour:News("dev")) .. "|" .. Titles(Tour:News(U)), "|", "nothing when nothing is newer than what was seen")
+    -- Short and plain: no em dashes, and the new steps no longer than the basics'.
+    local plain, basics, longest = true, 0, 0
+    for _, step in ipairs(Tour:News("0.9.0")) do
+        local text = type(step.text) == "function" and step.text() or step.text
+        local all = text .. " " .. step.title .. " " .. (step.try or "") .. " " .. (step.alreadyText or "")
+        if all:find("\226\128\148", 1, true) then plain = false end
+        if step.version ~= "1.0.0" then longest = math.max(longest, #text) else basics = math.max(basics, #text) end
+    end
+    Equal(tostring(plain) .. " " .. tostring(longest > 0 and longest <= basics), "true true", "the steps are plain, the new ones short")
+    local keybinds = ns.Keybinds
+    ns.Keybinds = nil
+    Equal(Titles(Tour:News("1.0.0")), "Live preview, All bars", "the keybinds step waits for its file (a full restart after updating)")
+    ns.Keybinds = keybinds
+    Running("1.0.0")
+    Equal(Titles(Tour:News("0.9.0")) .. "|" .. Titles(Tour:News(nil)), BASICS .. "|" .. BASICS,
+        "a release takes in steps up to itself; by hand, its own (so all nine are 1.0.0's)")
+    Running("1.1.0")
+    Equal(Titles(Tour:News("1.0.0")) .. "|" .. Titles(Tour:News(nil)), NEW .. "|" .. NEW,
+        "1.1.0 numbered its steps: from 1.0.0 they show, and by hand too")
+    -- Once a release gives the new steps its number, an update after it that
+    -- adds none still offers them by hand, as the tour's Done and Skip say.
+    Running(nil)
+    local added = Tour:News("1.0.0")
+    for _, step in ipairs(added) do step.version = "1.1.0" end
+    Running("1.1.1")
+    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("1.0.0")) .. "|" .. Titles(Tour:News("1.1.0")), NEW .. "|" .. NEW .. "|",
+        "1.1.1 with steps from 1.1.0: by hand those, from 1.0.0 those, from 1.1.0 nothing new")
+    Running("1.1.0")
+    local own = Titles(Tour:News(nil))
+    Running("1.0.9")
+    Equal(own .. "|" .. Titles(Tour:News(nil)), NEW .. "|" .. BASICS, "1.1.0 by hand its own; a release before it never a later one's")
+    for _, step in ipairs(added) do step.version = U end
+    Running(nil)
+
+    -- After an update: What's new offers the tour beside Got it.
+    Fresh({ useBars = true, notesSeen = "1.0.0" })
+    local notes = FECMNotes
+    Equal(ns.NotesSeen() .. " " .. tostring(S[notes].shown) .. " " .. tostring(notes.seen), "dev true 1.0.0",
+        "What's new after an update, knowing the version seen before it")
+    Equal(tostring(S[notes.tour].shown) .. " " .. S[notes.tour.label].text, "true Show me what's new", "offering Show me what's new")
+    Equal(S[notes.tour].points[1][1] .. " " .. S[notes.tour].points[1][3] .. " " .. S[notes.tour].points[1][4] .. " | "
+        .. S[notes.discord].points[1][1] .. " " .. tostring(S[notes.discord].points[1][2] == notes.tour) .. " "
+        .. S[notes.discord].points[1][4], "RIGHT LEFT -8 | RIGHT true -8", "beside Got it, the Discord button moving along for it")
+    Equal(16 + S[notes.done].width + 8 + S[notes.tour].width + 8 + S[notes.discord].width, 332,
+        "the three buttons leave the left 188 of the 520 for the two lines there")
+    S[notes.tour].scripts.OnEnter(notes.tour)
+    Equal(S[GameTooltip].text .. "|" .. table.concat(S[GameTooltip].lines, "|") .. "|" .. tostring(S[GameTooltip].shown),
+        "Show me what's new|A quick tour of what's new, a page at a time. (Needs testing)|true",
+        "its tooltip says what it does, and that it needs testing")
+    S[notes.tour].scripts.OnLeave(notes.tour)
+    Equal(S[GameTooltip].shown, false, "gone as the mouse leaves")
+
+    -- The tour: What's new closes, and the window opens on the first step.
+    notes.tour:Click()
+    local tw, box = FECMFrame, FECMTour
+    Equal(tostring(S[notes].shown) .. " " .. tostring(S[tw].shown) .. " " .. tostring(S[box].shown), "false true true",
+        "it closes What's new and opens the settings with the tour")
+    Equal(S[box.count].text .. " " .. tw.selected .. " " .. S[box.title].text, "1 of 3 look KEYBINDS ON ICONS",
+        "three steps, the Look page's keybinds first")
+    local outline = S[box.outline].points
+    Equal(tostring(outline[1][2] == tw.keybinds) .. " " .. tostring(outline[2][2] == tw.keySize), "true true",
+        "outlining from the Keybinds on icons tick down to the Size slider")
+    -- The position pills sit inside that, and the box under it at its right end.
+    local function Rect(frame)
+        local p = S[frame].points[1]
+        return p[2], p[3], p[2] + S[frame].width, p[3] - S[frame].height
+    end
+    local left, top = Rect(tw.keybinds)
+    local _, _, right, bottom = Rect(tw.keySize)
+    local l, t, r, b = Rect(tw.keyPlace)
+    Equal(l >= left and t <= top and r <= right and b >= bottom and S[tw.keyPlace].parent == S[tw.keySize].parent, true,
+        "the position pills inside it")
+    local p = S[box].points[1]
+    Equal(p[1] .. " " .. tostring(p[2] == tw.keySize) .. " " .. p[3] .. " " .. S[box.arrow].points[1][3], "TOPRIGHT true BOTTOMRIGHT TOPRIGHT",
+        "the box under the Size slider at its right end, its arrow at that end")
+    Equal(S[box.text].text:find("Try it: tick it.", 1, true) ~= nil and not S[box.back].shown, true,
+        "asking you to tick it, with no Back on the first step")
+    Equal(tostring(tw.keySize.usable) .. " " .. S[tw.keyPlace].alpha, "false 0.35", "the position and size greyed until it's ticked")
+    tw.keybinds:Click()
+    S[box].scripts.OnUpdate(box, 1)
+    Equal(tostring(ns.Get("keybinds")) .. " " .. tw.selected .. " " .. S[box.title].text, "true look KEYBINDS ON ICONS",
+        "ticked, the step stays for the position and size it asks you to pick")
+    tw.keySize:Choose(120)
+    S[box].scripts.OnUpdate(box, 1)
+    Equal(tostring(tw.keySize.usable) .. " " .. S[tw.keyPlace].alpha .. " " .. ns.Get("keybindSize") .. " " .. S[box.title].text,
+        "true 1 120 KEYBINDS ON ICONS", "which now work, and can be picked while it shows")
+    tw.keySize:Choose(100)
+    box.next:Click()
+    local lp = tw.pages.layout
+    Equal(tw.selected .. " " .. S[box.count].text .. " " .. S[box.title].text, "layout 2 of 3 LIVE PREVIEW",
+        "Next moves on, to the Layout page's Live preview")
+    p = S[box].points[1]
+    local arrow = S[box.arrow].points[1]
+    Equal(tostring(S[box.outline].points[1][2] == lp.live) .. " " .. p[1] .. " " .. tostring(p[2] == lp.live) .. " " .. p[3] .. " "
+        .. p[4] .. " " .. p[5] .. " | " .. arrow[1] .. " " .. arrow[3] .. " " .. arrow[4],
+        "true BOTTOMRIGHT true TOPLEFT 20 14 | TOP BOTTOMRIGHT -14",
+        "outlining its tick, the box above it ending 20 past its start, the arrow down at the tick's box")
+    -- In the game the display's tick is about 230 across (its label measured
+    -- at about 212), so Live preview starts near 266 on the 638 page. The box
+    -- (290 across) must end before All bars, which starts at 312 at the same
+    -- height, so it never covers it; its arrow sits over the tick's box.
+    local liveLeft = 16 + 230 + S[lp.live].points[1][4]
+    local anchorX = (p[3]:find("RIGHT") and liveLeft + S[lp.live].width or liveLeft) + p[4]
+    local boxRight = p[1]:find("RIGHT") and anchorX or anchorX + S[box].width
+    local allLeft = 638 - 16 - S[lp.allBars].width
+    Equal(tostring(boxRight <= allLeft - 8) .. " " .. (boxRight + arrow[4] - liveLeft) .. " " .. S[lp.allBars].points[1][3],
+        "true 6 56", "the box clear of All bars (it ends by 304), the arrow 6 into the tick")
+    box.back:Click()
+    Equal(tw.selected .. " " .. S[box.title].text, "look KEYBINDS ON ICONS", "Back goes back to the Look page")
+    Equal(S[box.text].text:find("They're already on.", 1, true) ~= nil, true, "which now says they're on")
+    S[box].scripts.OnUpdate(box, 1)
+    Equal(S[box.title].text, "KEYBINDS ON ICONS", "and waits for Next")
+    box.next:Click()
+    box.next:Click()
+    p = S[box].points[1]
+    Equal(tw.selected .. " " .. S[box.count].text .. " " .. S[box.title].text .. " " .. S[box.next.label].text, "layout 3 of 3 ALL BARS Done",
+        "then All bars, the last step")
+    Equal(tostring(S[box.outline].points[1][2] == lp.allBars) .. " " .. p[1] .. " " .. tostring(p[2] == lp.allBars) .. " " .. p[3],
+        "true BOTTOMLEFT true TOPLEFT", "outlining the slider, the box above it")
+    tw:Select("look")
+    Equal(S[box].shown and not S[box.outline].shown, true, "on another page the outline hides, the box stays")
+    box.next:Click()
+    Equal(tostring(S[box].shown) .. " " .. tostring(S[tw].shown) .. " " .. S[tw.note].text,
+        "false true That's what's new. See it again any time from What's new, or with /ccm new.",
+        "Done ends it, leaving the window open and saying where it is")
+    Equal(ns.Get("barScale") .. " " .. tostring(ns.Get("layoutPreview")) .. " " .. tostring(ns.Get("keybinds")), "100 true true",
+        "the tour only changed what you did yourself")
+
+    -- Opened by hand: the latest update's steps. Escape closes What's new,
+    -- then ends the tour, then closes the window.
+    SlashCmdList.FECM("new")
+    Equal(tostring(S[notes].shown) .. " " .. tostring(notes.seen) .. " " .. tostring(S[notes.tour].shown), "true nil true",
+        "/ccm new offers it too")
+    notes.tour:Click()
+    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of 3 KEYBINDS ON ICONS", "the same three")
+    tw.news:Click()
+    Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown), "true true", "What's new opened over the tour")
+    FECMEscButton:Click()
+    Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown) .. " " .. tostring(S[tw].shown), "false true true",
+        "Escape closes What's new first")
+    FECMEscButton:Click()
+    Equal(tostring(S[box].shown) .. " " .. tostring(S[tw].shown) .. " " .. tostring(bindings[FECMEscButton]), "false true ESCAPE:FECMEscButton",
+        "then ends the tour, the window staying")
+    FECMEscButton:Click()
+    Equal(tostring(S[tw].shown) .. " " .. tostring(bindings[FECMEscButton]), "false nil", "then closes the window")
+    -- Skip tour ends it too, and says where it is.
+    tw.news:Click()
+    notes.tour:Click()
+    box.next:Click()
+    box.skip:Click()
+    Equal(tostring(S[box].shown) .. " " .. S[tw.note].text, "false See it again any time from What's new, or with /ccm new.",
+        "Skip tour ends it, saying where to see it again")
+    -- The full tour is still the basics, and says its own.
+    SlashCmdList.FECM("tour")
+    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of 9 THE MENU", "the full tour is still the nine basics")
+    box.skip:Click()
+    Equal(S[tw.note].text, "Take the tour any time from the General page, or with /ccm tour.", "and Skip tour says where it is")
+    SlashCmdList.FECM("tour")
+    for _ = 1, 9 do box.next:Click() end
+    Equal(S[tw.note].text, "That's the tour. Take the tour any time from the General page, or with /ccm tour.", "as Done does")
+
+    -- Versions skipped: every newer step in one tour.
+    Fresh({ useBars = true, notesSeen = "0.9.0" })
+    FECMNotes.tour:Click()
+    box = FECMTour
+    local titles = { S[box.title].text }
+    for _ = 2, 12 do
+        FECMTour.next:Click()
+        titles[#titles + 1] = S[box.title].text
+    end
+    Equal(S[box.count].text .. " " .. table.concat(titles, ", "), "12 of 12 " .. BASICS:upper() .. ", " .. NEW:upper(),
+        "from 0.9.0: the basics, then what's new since, in one tour")
+
+    -- An update with no new steps: no button, Discord back beside Got it,
+    -- and nothing to start. Opened by hand, it still offers the last ones.
+    Running("1.1.1")
+    Fresh({ useBars = true, notesSeen = "1.1.0" })
+    notes = FECMNotes
+    Equal(tostring(S[notes].shown) .. " " .. tostring(S[notes.tour].shown) .. " " .. tostring(S[notes.discord].points[1][2] == notes.done),
+        "true false true", "an update with no new steps: What's new without the button, Discord beside Got it")
+    notes:Hide()
+    ns.Tour:StartNews("1.1.0")
+    Equal(FECMFrame == nil and FECMTour == nil, true, "and no tour starts: the settings don't even open")
+    SlashCmdList.FECM("new")
+    Equal(tostring(S[notes.tour].shown) .. " " .. tostring(S[notes.discord].points[1][2] == notes.tour), "true true",
+        "opened by hand, the last update's steps are still offered, as the tour's Done and Skip say")
+    notes.tour:Click()
+    Equal(S[FECMTour.count].text .. " " .. S[FECMTour.title].text, "1 of 3 KEYBINDS ON ICONS", "here 1.1.0's, the three new ones")
+    FECMTour.skip:Click()
+    Running(nil)
+
+    -- A first install still has the welcome and the full tour, and no What's new.
+    Fresh(nil)
+    box = FECMTour
+    Equal(S[box.title].text .. " " .. tostring(FECMNotes == nil), "WELCOME true", "a first install: the welcome, no What's new")
+    box.next:Click()
+    titles = { S[box.title].text }
+    while S[box.next.label].text ~= "Done" and #titles < 20 do
+        box.next:Click()
+        titles[#titles + 1] = S[box.title].text
+    end
+    Equal(S[box.count].text .. " " .. table.concat(titles, ", "), "9 of 9 " .. BASICS:upper(), "Take the tour: the nine basics, unchanged")
+    Equal(#printed, 0, "no errors")
+    _G.PersonalResourceDisplayFrame = display
+end)()
+
 -- The minimap button --------------------------------------------------------------------
 
 do
@@ -3628,10 +4018,1391 @@ do
     SlashCmdList.FECM("new")
     local notes = FECMNotes
     Equal(S[notes.ask].text, "Found a bug or have an idea?", "What's new asks")
-    Equal(S[notes.discord].points[1][2], notes.done, "with a Discord button beside Got it")
+    Equal(tostring(S[notes.discord].points[1][2] == notes.tour) .. " " .. tostring(S[notes.tour].points[1][2] == notes.done),
+        "true true", "with a Discord button by Got it, past Show me what's new")
     notes.discord:Click()
     Equal(S[box].shown, true, "which gives the invite")
 end
+
+-- Keybinds on your icons ------------------------------------------------------------------
+
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+(function()
+    -- The spells and items the action bars below hold.
+    local function Names()
+        local spellName, itemSpell = C_Spell.GetSpellName, C_Item.GetItemSpell
+        local extra = { [8921] = "Moonfire", [8924] = "Moonfire", [5176] = "Wrath", [7384] = "Overpower" }
+        C_Spell.GetSpellName = function(id) return extra[id] or spellName(id) end
+        C_Item.GetItemSpell = function(id)
+            if id == 118 then return "Healing Potion", 441 end
+            return itemSpell(id)
+        end
+    end
+    -- Runs every timer queued so far, and any they queue.
+    local function Flush()
+        for _ = 1, 5 do
+            local list = timers
+            timers = {}
+            for _, timer in ipairs(list) do timer() end
+            if #timers == 0 then return end
+        end
+    end
+    local function At(region)
+        local p = S[region].points[1]
+        return p[1] .. " " .. p[3] .. " " .. p[4] .. " " .. p[5]
+    end
+
+    Environment()
+    local K = ns.Keybinds
+    -- The keys as action bars show them, from the raw key.
+    local shown = {}
+    for _, raw in ipairs({ "1", "SHIFT-2", "CTRL-3", "ALT-4", "BUTTON4", "SHIFT-BUTTON5", "ALT-CTRL-SHIFT-Q",
+        "CTRL-MOUSEWHEELDOWN", "NUMPAD5", "NUMPADPLUS", "SPACE", "SHIFT--" }) do
+        shown[#shown + 1] = K:Format(raw)
+    end
+    Equal(table.concat(shown, " "), "1 S2 C3 A4 M4 SM5 ACSQ CWD N5 N+ Sp S-", "keys shortened as action bars show them")
+    Equal(tostring(K:Format(nil)) .. " " .. tostring(K:Format("PADLTRIGGER")) .. " " .. tostring(K:Format(SECRET)), "nil nil nil",
+        "nothing for no key, a gamepad button or a secret")
+
+    -- Off by default: nothing is read and no timer is queued.
+    Names()
+    actionSlots[1], keyOf.ACTIONBUTTON1 = { "spell", 8924 }, "1"
+    ns = Load({ useBars = true, notesSeen = "dev" })
+    B, K = ns.Bars, ns.Keybinds
+    B:Assign("Moonfire", "cd")
+    Flush()
+    Fire("ACTIONBAR_SLOT_CHANGED", 1)
+    Fire("UPDATE_BINDINGS")
+    local queued = #timers
+    Flush()
+    Equal(actionReads .. " " .. queued, "0 0", "off by default: no action bar read, no timer queued")
+    Equal(S[B:Get("cd").icons[1].key].shown, false, "and no key on the icon")
+
+    -- On: read once the action bars settle after login.
+    Environment()
+    Names()
+    actionSlots[1], keyOf.ACTIONBUTTON1 = { "spell", 8924 }, "1"
+    ns = Load({ useBars = true, keybinds = true, notesSeen = "dev" })
+    B, K = ns.Bars, ns.Keybinds
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "cd")
+    B:Assign("Overpower", "cd")
+    local moon, wrath, over = B:Get("cd").icons[1], B:Get("cd").icons[2], B:Get("cd").icons[3]
+    local key = moon.key
+    Equal(tostring(S[key].shown) .. " " .. actionReads, "false 0", "on: nothing read until the action bars settle")
+    Flush()
+    Equal(actionReads, K.SLOTS, "then every slot read once")
+    Equal(S[key].text .. " " .. tostring(S[key].shown), "1 true", "Moonfire shows the key that casts it")
+    Equal(At(key) .. " " .. tostring(S[key].points[1][2] == moon), "BOTTOM BOTTOM 0 2 true", "along the bottom of the icon")
+    Equal(Last(key, "SetFontObject") .. " " .. S[key].width .. " " .. Last(key, "SetJustifyH") .. " " .. S[key].colour[1],
+        "FECMFont11 32 CENTER 0.9", "sized to the icon, one line across its art, near white")
+    Equal(S[key].parent == moon.top, true, "above the sweep, with the count")
+
+    -- Ranks: any rank in the slot counts for the spell; a fixed rank only its own.
+    actionSlots[1] = { "spell", 8921 }
+    K:Update()
+    Equal(S[key].text, "1", "rank 1 in the slot still counts for Moonfire")
+    ns.Set("listRanks", true)
+    B:Assign("Moonfire@1", "util")
+    local fixed = B:Get("util").icons[1]
+    Equal(S[fixed.key].text .. " " .. tostring(S[fixed.key].shown), "1 true", "a fixed rank shows the key for that rank")
+    actionSlots[1] = { "spell", 8924 }
+    K:Update()
+    Equal(tostring(S[fixed.key].shown) .. " " .. S[key].text, "false 1", "but not the key for another rank")
+
+    -- A spell in several slots: the main bar first, a macro last.
+    actionSlots[61], keyOf.MULTIACTIONBAR1BUTTON1 = { "spell", 8924 }, "SHIFT-1"
+    K:Update()
+    Equal(S[key].text, "1", "in two slots: the main bar's key")
+    actionSlots[1] = nil
+    K:Update()
+    Equal(S[key].text, "S1", "and the side bar's once it's gone from there")
+    actionSlots[62], keyOf.MULTIACTIONBAR1BUTTON2 = { "macro", 5176, "spell" }, "SHIFT-2"
+    K:Update()
+    Equal(S[wrath.key].text, "S2", "a macro showing a spell gives it its key")
+    actionSlots[50], keyOf.MULTIACTIONBAR2BUTTON2 = { "spell", 5176 }, "CTRL-2"
+    K:Update()
+    Equal(S[wrath.key].text, "C2", "but the spell placed directly wins, even on a later bar")
+
+    -- A form change in a fight: the main bar's keys press its form page at once.
+    actionSlots[1], actionSlots[61], actionSlots[85] = { "spell", 8924 }, nil, { "spell", 5176 }
+    K:Update()
+    Equal(S[key].text .. " " .. S[wrath.key].text, "1 C2", "the main bar's first page to start with")
+    local reads = actionReads
+    lockdown = true
+    bonusIndex = 8
+    Fire("UPDATE_BONUS_ACTIONBAR")
+    Equal(S[wrath.key].text .. " " .. tostring(S[key].shown), "1 false", "in a fight, a form's page: its keys at once")
+    Equal(actionReads, reads, "from what was read before the fight")
+    bonusIndex = nil
+    Fire("UPDATE_BONUS_ACTIONBAR")
+    Equal(S[key].text .. " " .. S[wrath.key].text, "1 C2", "and back")
+
+    -- A slot changed in a fight is read once it's over.
+    actionSlots[2], keyOf.ACTIONBUTTON2 = { "spell", 7384 }, "2"
+    Fire("ACTIONBAR_SLOT_CHANGED", 2)
+    Equal(tostring(K.pending) .. " " .. tostring(S[over.key].shown) .. " " .. actionReads, "true false " .. reads,
+        "a slot changed in a fight waits")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(S[over.key].text .. " " .. tostring(S[over.key].shown) .. " " .. tostring(K.pending), "2 true nil", "and shows once it's over")
+
+    -- A burst of changes is read once.
+    queued, reads = #timers, actionReads
+    for _ = 1, 5 do Fire("ACTIONBAR_SLOT_CHANGED", 3) end
+    Equal(#timers - queued, 1, "five slot changes queue one read")
+    Flush()
+    Equal(actionReads - reads, K.SLOTS, "which reads every slot once")
+
+    -- Unbound: no key.
+    keyOf.ACTIONBUTTON2 = nil
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    Equal(tostring(S[over.key].shown) .. " [" .. S[over.key].text .. "]", "false []", "a key unbound: none shown")
+
+    -- Items: a potion, by itself or in a macro; a trinket by what's equipped.
+    local function Icon(name)
+        for _, icon in ipairs(B:Get("cd").icons) do
+            if icon.name == name and S[icon].shown then return icon end
+        end
+    end
+    bagItems = { { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 } }
+    trinket, ammo, ammoCount = 5079, 2512, 200
+    B:Rebuild()
+    B:AddItem("cd", 118)
+    B:AddItem("cd", 5079)
+    B:Assign("ammo", "cd")
+    actionSlots[3], keyOf.ACTIONBUTTON3 = { "item", 118 }, "3"
+    actionSlots[5], keyOf.ACTIONBUTTON5 = { "item", 5079 }, "5"
+    actionSlots[6], keyOf.ACTIONBUTTON6 = { "spell", 16870 }, "6"
+    actionSlots[7], keyOf.ACTIONBUTTON7 = { "item", 2512 }, "7"
+    K:Update()
+    Equal(S[Icon("item:118").key].text, "3", "a bag item shows its slot's key")
+    Equal(K:ForSpell(441), "3", "and Blizzard's icon for it finds it by its use spell")
+    actionSlots[3], macroItems[7] = { "macro", 7, "" }, 118
+    K:Update()
+    Equal(S[Icon("item:118").key].text .. " " .. tostring(S[Icon("item:118").key].shown), "3 true", "as does a macro that uses it")
+    Equal(S[Icon("slot:13").key].text, "5", "a trinket shows the key for what's equipped")
+    Equal(tostring(K:ForEntry(ns.Spells:Find("ammo"))) .. " " .. tostring(K:ForEntry(ns.Spells:Find("Clearcasting")))
+        .. " " .. tostring(S[Icon("ammo").key].shown), "nil nil false", "ammunition and procs have nothing to press")
+    -- A key along the bottom only moves the count up on an icon that shows one.
+    local potion, quiver = Icon("item:118"), Icon("ammo")
+    Equal(At(potion.count) .. " | " .. At(quiver.count), "TOPRIGHT TOPRIGHT -1 -1 | BOTTOMRIGHT BOTTOMRIGHT -1 1",
+        "the potion's count moves up clear of its key; the ammo's, with no key, stays at the bottom")
+    keyOf.ACTIONBUTTON3 = nil
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    Equal(tostring(S[potion.key].shown) .. " " .. At(potion.count), "false BOTTOMRIGHT BOTTOMRIGHT -1 1",
+        "its key unbound: the potion's count comes back down at once")
+    keyOf.ACTIONBUTTON3 = "3"
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    Equal(S[potion.key].text .. " " .. At(potion.count) .. " | " .. At(quiver.count),
+        "3 TOPRIGHT TOPRIGHT -1 -1 | BOTTOMRIGHT BOTTOMRIGHT -1 1", "bound again: up again, and the ammo's stays put")
+    -- The main bar paged in a fight: text and the addon's own anchors only.
+    lockdown = true
+    bonusIndex = 8
+    Fire("UPDATE_BONUS_ACTIONBAR")
+    Equal(tostring(S[potion.key].shown) .. " " .. At(potion.count), "false BOTTOMRIGHT BOTTOMRIGHT -1 1",
+        "a form's page in a fight takes the potion's key away: its count follows at once")
+    bonusIndex = nil
+    Fire("UPDATE_BONUS_ACTIONBAR")
+    lockdown = false
+    Equal(At(potion.count), "TOPRIGHT TOPRIGHT -1 -1", "and back")
+    B:SetAura("buff", "Thorns", true)
+    Equal(B:Get("buff").holders[1].key, nil, "the Buffs bar's icons show auras, so get no key")
+
+    -- Room for the key on your icon at 36: the count and countdown move clear.
+    B:Clear("cd")
+    B:Assign("Moonfire", "cd")
+    moon = B:Get("cd").icons[1]
+    key = moon.key
+    local numbers = S[moon.cooldown].numbers
+    Equal(At(moon.count) .. " | " .. At(numbers), "TOPRIGHT TOPRIGHT -1 -1 | CENTER CENTER 0 0",
+        "a key along the bottom: the count goes top right, the countdown stays")
+    Equal(S[moon.count].points[1][2] == moon and S[numbers].points[1][2] == moon.cooldown, true, "on the icon and its sweep")
+    ns.Set("keybindPosition", "TOPRIGHT")
+    ns.Set("keybindSize", 150)
+    B:ApplyKeybinds()
+    Equal(Last(key, "SetFontObject") .. " " .. At(key) .. " " .. Last(key, "SetJustifyH"), "FECMFont16 TOPRIGHT TOPRIGHT -2 -2 RIGHT",
+        "top right, half as big again")
+    Equal(At(moon.count) .. " | " .. At(numbers), "BOTTOMRIGHT BOTTOMRIGHT -1 1 | CENTER CENTER 0 -4",
+        "the count back home, the countdown moved down clear of the key")
+    ns.Set("keybindPosition", "BOTTOM")
+    ns.Set("keybindSize", 100)
+    B:SetOption("cd", "size", 20)
+    Equal(At(numbers), "CENTER CENTER 0 4", "a small icon: the countdown moves up clear of a key along the bottom")
+    ns.Set("keybinds", false)
+    B:ApplyKeybinds()
+    Equal(At(moon.count) .. " | " .. At(numbers) .. " " .. tostring(S[key].shown), "BOTTOMRIGHT BOTTOMRIGHT -1 1 | CENTER CENTER 0 0 false",
+        "off: no key, and the count and countdown back home")
+    Equal(#printed, 0, "no errors from keybinds")
+
+    -- Every icon size, position and key size: the key fits the icon and clears
+    -- the countdown, which stays inside it.
+    local Style, bad, cases = ns.Style, {}, { { 46, 25 }, { 26, 15 }, { 26, 13 } }
+    for size = 20, 64 do cases[#cases + 1] = { size, Style:CountdownSize(size) } end
+    for _, case in ipairs(cases) do
+        local art, c = case[1], case[2]
+        for _, position in ipairs(ns.KEYBIND_POSITIONS) do
+            for scale = 50, 150, 10 do
+                local size, lift = Style:KeyFit(art, c, position, scale)
+                local up = math.abs(lift)
+                local fits = size >= 8 and 2 + .75 * size <= art and 2 + .75 * size + 1 <= art / 2 - .75 * c / 2 + up
+                    and art / 2 + .75 * c / 2 + up <= art and (lift == 0 or (position == "BOTTOM") == (lift > 0))
+                if not fits then bad[#bad + 1] = art .. "/" .. c .. "/" .. position .. "/" .. scale .. " " end
+            end
+        end
+    end
+    for art = 36, 64 do
+        local _, lift = Style:KeyFit(art, Style:CountdownSize(art), "BOTTOM", 100)
+        if lift ~= 0 then bad[#bad + 1] = "moved at " .. art .. " " end
+    end
+    Equal(table.concat(bad), "", "every key fits its icon, clear of the countdown; from 36 up nothing moves")
+    local function Fit(...)
+        local size, lift = Style:KeyFit(...)
+        return size .. "," .. lift
+    end
+    Equal(table.concat({ Fit(36, 18, "BOTTOM", 100), Fit(36, 18, "TOPRIGHT", 150), Fit(20, 11, "BOTTOM", 100),
+        Fit(64, 32, "BOTTOM", 150), Fit(46, 25, "BOTTOM", 100), Fit(26, 15, "BOTTOM", 100) }, " "),
+        "11,0 16,-4 8,4 29,5 14,0 8,2", "your icons and Blizzard's Essential and Utility rows")
+    Equal((Style:KeyFit(26, 13, "TOP", 100)) .. " " .. (Style:KeyFit(26, 13, "TOPLEFT", 150)), "8 12", "and the Look page's preview")
+
+    -- The Look page: a tick, where on the icon and how big, shown live.
+    Environment()
+    Names()
+    actionSlots[1], keyOf.ACTIONBUTTON1 = { "spell", 8924 }, "1"
+    _G.FECMFrame = nil
+    ns = Load({ useBars = true, notesSeen = "dev" })
+    B, K = ns.Bars, ns.Keybinds
+    B:Assign("Moonfire", "cd")
+    local icon = B:Get("cd").icons[1]
+    SlashCmdList.FECM("")
+    local lw = FECMFrame
+    lw:Select("look")
+    local samples = lw.sampleIcons.icons
+    local function Keys()
+        local list = {}
+        for i, sample in ipairs(samples) do list[i] = S[sample.key].shown and S[sample.key].text or "-" end
+        return table.concat(list, " ")
+    end
+    Equal(S[lw.keybinds.text].text .. " " .. tostring(lw.keybinds:GetChecked()), "Keybinds on icons (Needs testing) false",
+        "a tick on the Look page, off to start with")
+    Equal(S[lw.keyPlace].alpha .. " " .. S[lw.keySize].alpha .. " " .. Keys(), "0.35 0.35 - - - -", "its choices greyed, and no keys on the preview")
+    -- Greyed, both still say why on hover, and the slider ignores clicks.
+    local keyTrack, pill = lw.keySize.track, lw.keyPlace.buttons[1]
+    S[pill].scripts.OnEnter(pill)
+    local pillNote = S[lw.note].text
+    S[keyTrack].scripts.OnEnter(keyTrack)
+    Equal(pillNote .. " | " .. S[lw.note].text .. " | " .. tostring(Last(keyTrack, "EnableMouse")),
+        "Tick Keybinds on icons first. | Tick Keybinds on icons first. | true", "the greyed pills and slider both say why on hover")
+    S[keyTrack].scripts.OnMouseDown(keyTrack)
+    Equal(ns.Get("keybindSize") .. " " .. tostring(S[keyTrack].scripts.OnUpdate) .. " " .. tostring(Last(lw.keySize, "EnableMouseWheel")),
+        "100 nil false", "a click on the greyed slider changes nothing, nor does the wheel")
+    local rebuilds, rebuild = 0, B.Rebuild
+    B.Rebuild = function(...)
+        rebuilds = rebuilds + 1
+        return rebuild(...)
+    end
+    lw.keybinds:Click()
+    Equal(tostring(ns.Get("keybinds")) .. " " .. S[lw.keyPlace].alpha .. " " .. S[lw.keySize].alpha, "true 1 1", "ticked: on, and its choices usable")
+    S[pill].scripts.OnEnter(pill)
+    pillNote = S[lw.note].text
+    S[keyTrack].scripts.OnEnter(keyTrack)
+    Equal(pillNote .. " | " .. S[lw.note].text:sub(1, 17) .. " | " .. tostring(Last(lw.keySize, "EnableMouseWheel")),
+        "Where the key sits on each icon. At the bottom, the count or charges on an icon with a key move to the top right. | The key's size: 1 | true",
+        "usable: each explains itself, counts and charges alike, and the wheel works")
+    Equal(Keys(), "1 S2 M4 C3", "the preview shows keys at once")
+    local first = samples[1].key
+    Equal(At(first) .. " " .. Last(first, "SetFontObject"), "BOTTOM BOTTOM 0 2 FECMFont8", "along the bottom, sized to the preview's icons")
+    Equal(S[icon.key].text .. " " .. tostring(S[icon.key].shown), "1 true", "and your bar shows its real key")
+    lw.keyPlace.buttons[4]:Click()
+    Equal(ns.Get("keybindPosition") .. " " .. At(first) .. " | " .. At(icon.key) .. " " .. rebuilds,
+        "TOPRIGHT TOPRIGHT TOPRIGHT -2 -2 | TOPRIGHT TOPRIGHT -2 -2 0", "Top right: the preview and your bars move there, with no rebuild")
+    lw.keySize:Choose(150)
+    Equal(ns.Get("keybindSize") .. " " .. Last(first, "SetFontObject") .. " " .. Last(icon.key, "SetFontObject"), "150 FECMFont12 FECMFont16",
+        "bigger keys, each sized to its own icon")
+    lw.keybinds:Click()
+    local anyShown = S[icon.key].shown
+    for _, sample in ipairs(samples) do anyShown = anyShown or S[sample.key].shown end
+    Equal(tostring(ns.Get("keybinds")) .. " " .. tostring(anyShown), "false false", "unticked: every key hidden")
+    -- The same path as the preview: a bar icon its size draws the key the same way.
+    lw.keybinds:Click()
+    B:SetOption("cd", "size", 26)
+    Equal(Last(icon.key, "SetFontObject") .. " " .. At(icon.key) .. " " .. S[icon.key].width .. " " .. Last(icon.key, "SetJustifyH"),
+        Last(first, "SetFontObject") .. " " .. At(first) .. " " .. S[first].width .. " " .. Last(first, "SetJustifyH"),
+        "a bar icon as big as the preview's draws its key exactly the same way")
+    B.Rebuild = rebuild
+    Equal(#printed, 0, "no errors from the Look page's keybinds")
+
+    -- Kept over a reload; anything else reads as the defaults.
+    local saved = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    ns = Load(saved)
+    Equal(tostring(ns.Get("keybinds")) .. " " .. ns.Get("keybindPosition") .. " " .. ns.Get("keybindSize"), "true TOPRIGHT 150", "kept over a reload")
+    saved.keybinds, saved.keybindPosition, saved.keybindSize = "yes", "MIDDLE", 400
+    Equal(tostring(ns.Get("keybinds")) .. " " .. ns.Get("keybindPosition") .. " " .. ns.Get("keybindSize"), "false BOTTOM 100",
+        "anything else reads as off, at the bottom, at 100")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The Layout page's drawing: your look and keys ----------------------------------------------
+
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+;(function()
+    local function Flush()
+        for _ = 1, 5 do
+            local list = timers
+            timers = {}
+            for _, timer in ipairs(list) do timer() end
+            if #timers == 0 then return end
+        end
+    end
+    local function At(region)
+        local p = S[region].points[1]
+        return p[1] .. " " .. p[3] .. " " .. p[4] .. " " .. p[5]
+    end
+    local function On(ring) return S[ring[1]].shown == true end
+
+    Environment()
+    Display()
+    local spellName = C_Spell.GetSpellName
+    local extra = { [8921] = "Moonfire", [8924] = "Moonfire", [5176] = "Wrath", [7384] = "Overpower", [782] = "Thorns" }
+    C_Spell.GetSpellName = function(id) return extra[id] or spellName(id) end
+    actionSlots[1], keyOf.ACTIONBUTTON1 = { "spell", 8924 }, "1"
+    actionSlots[2], keyOf.ACTIONBUTTON2 = { "spell", 5176 }, "SHIFT-2"
+    actionSlots[3], keyOf.ACTIONBUTTON3 = { "spell", 782 }, "3"
+    _G.FECMFrame = nil
+    ns = Load({ useBars = true, prdSkin = false, keybinds = true, notesSeen = "dev" })
+    local Bars, Layout = ns.Bars, ns.Layout
+    for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do Bars:Assign(name, "cd") end
+    Bars:Assign("Thorns", "util")
+    Bars:SetAura("buff", "Thorns", true)
+    Layout:Apply("pyramid")
+    Flush()
+    -- Ticks as wide as their labels while the window is made, to check the new
+    -- one's room.
+    local fixedWidth = Proto.GetStringWidth
+    Proto.GetStringWidth = function(self) return #(S[self].text or "") * 6 end
+    SlashCmdList.FECM("")
+    Proto.GetStringWidth = fixedWidth
+    local lw = FECMFrame
+    lw:Select("layout")
+    local page = lw.pages.layout
+    -- What each tile in a row shows: its key or -, then b and s for its own
+    -- border and shadow.
+    local function Look(tile)
+        return (S[tile.key].shown and S[tile.key].text or "-") .. (On(tile.decor.border) and "b" or "")
+            .. (On(tile.decor.shadow[1]) and "s" or "")
+    end
+    local function Row(key)
+        local list = {}
+        for _, tile in ipairs(page.rows[key].tiles) do
+            if S[tile].shown then list[#list + 1] = Look(tile) end
+        end
+        return table.concat(list, " ")
+    end
+    local function Boxed(key)
+        local decor = page.rows[key].decor
+        return (On(decor.border) and "b" or "") .. (On(decor.shadow[1]) and "s" or "")
+    end
+
+    -- The tick: on to start with, beside the display's, clear of the sliders.
+    Equal(S[page.live.text].text .. " " .. tostring(page.live:GetChecked()) .. " " .. tostring(ns.Get("layoutPreview")),
+        "Live preview true true", "a Live preview tick on the Layout page, on to start with")
+    local p = S[page.live].points[1]
+    Equal(p[1] .. " " .. tostring(p[2] == page.shown) .. " " .. p[3] .. " " .. p[4] .. " " .. p[5], "LEFT true RIGHT 20 0",
+        "beside Show the Personal Resource Display")
+    local function Point(region)
+        local q = S[region].points[1]
+        return table.concat({ table.unpack(q, 1, q.n) }, " ")
+    end
+    Equal(Point(page.shown) .. " | " .. Point(page.match) .. " | " .. Point(page.spacing) .. " | " .. Point(page.iconSpacing),
+        "BOTTOMLEFT 16 36 | BOTTOMLEFT 16 14 | BOTTOMRIGHT -16 34 | BOTTOMRIGHT -16 12",
+        "the page's other controls where they were")
+    -- The page is 638 across: Row spacing starts 16 + 250 in from its right.
+    local liveRight = 16 + S[page.shown].width + 20 + S[page.live].width
+    Equal(tostring(liveRight <= 638 - 16 - S[page.spacing].width - 20), "true", "at least 20 clear of Row spacing")
+
+    -- Keys on your Cooldowns and Utility icons, as on your bars; none on an
+    -- unbound spell, an empty spot or the Buffs row.
+    Equal(Row("cd") .. " | " .. Row("util") .. " | " .. Row("buff"), "1 S2 - - - - | 3 - - - - | - - - -",
+        "each icon's real key, nothing on an unbound spell, an empty spot or Buffs")
+    local moon = page.rows.cd.tiles[1]
+    Equal(At(moon.key) .. " " .. tostring(S[moon.key].points[1][2] == moon) .. " " .. Last(moon.key, "SetFontObject") .. " "
+        .. S[moon.key].width .. " " .. Last(moon.key, "SetJustifyH") .. " " .. S[moon.key].colour[1],
+        "BOTTOM BOTTOM 0 2 true FECMFont8 21 CENTER 0.9", "placed and sized as on an icon the tile's size (25)")
+    Equal(S[moon.key].parent == moon and S[moon.decor.border[1]].parent == moon, true, "the tile's own text and rings")
+
+    -- The border and shadow from the Look page, live.
+    ns.Set("iconBorder", "icon")
+    Equal(Row("cd") .. " | " .. Row("buff") .. " | " .. Boxed("cd"), "1b S2b -b - - - | -b - - - | ",
+        "a border round each icon, the Buffs row's too; empty spots stay plain")
+    ns.Set("iconShadow", "icon")
+    Equal(Row("cd"), "1bs S2bs -bs - - -", "and a shadow")
+    ns.Set("iconBorder", "bar")
+    ns.Set("iconShadow", "bar")
+    local cdRow = page.rows.cd
+    Equal(Row("cd") .. " | " .. Boxed("cd") .. " " .. Boxed("util") .. " [" .. Boxed("buff") .. "] [" .. Boxed("debuff") .. "]",
+        "1 S2 - - - - | bs bs [] []", "round whole bars: not packed Buffs, nor an empty row")
+    local span = S[cdRow.span]
+    Equal(tostring(span.points[1][2] == cdRow.tiles[1]) .. " " .. span.points[1][1] .. " " .. tostring(span.points[2][2] == cdRow.tiles[3])
+        .. " " .. span.points[2][1] .. " " .. tostring(S[cdRow.decor.border[1]].points[1][2] == cdRow.span),
+        "true TOPLEFT true BOTTOMRIGHT true", "round your three icons, not the empty spots")
+    Bars:SetOption("buff", "showMissing", true)
+    Bars:SetOption("cd", "hideReady", true)
+    lw:Refresh()
+    Equal(Boxed("buff") .. " [" .. Boxed("cd") .. "]", "bs []", "as on your bars: fixed Buffs spots get it, a bar hiding ready icons doesn't")
+    Bars:SetOption("cd", "hideReady", false)
+    Layout:SetAcross("cd", 2)
+    lw:Refresh()
+    Equal(Row("cd") .. " " .. tostring(S[cdRow.span].points[2][2] == cdRow.tiles[2]) .. " " .. S[cdRow.more].text, "1 S2 true +1",
+        "fewer across: round the icons that fit")
+    Layout:SetAcross("cd", 6)
+    -- A row beside the display fills from the display outwards.
+    Layout:Apply("sides")
+    Bars:SetAura("buff", "Clearcasting", true)
+    lw:Refresh()
+    local buffRow = page.rows.buff
+    Equal(buffRow.place .. " " .. tostring(S[buffRow.span].points[1][2] == buffRow.tiles[2]) .. " "
+        .. tostring(S[buffRow.span].points[2][2] == buffRow.tiles[1]) .. " " .. Boxed("buff"), "left true true bs",
+        "beside the display on the left, round both its icons")
+    Layout:Apply("pyramid")
+    ns.Set("iconBorder", "icon")
+    ns.Set("iconShadow", "off")
+
+    -- Keybind settings, live.
+    ns.Set("keybindPosition", "TOPRIGHT")
+    Equal(At(moon.key) .. " " .. Last(moon.key, "SetJustifyH"), "TOPRIGHT TOPRIGHT -2 -2 RIGHT", "Top right")
+    ns.Set("keybindSize", 150)
+    Equal(Last(moon.key, "SetFontObject"), "FECMFont11", "half as big again, on the tile")
+    ns.Set("keybindPosition", "BOTTOM")
+    -- The size chosen only resizes the keys: smaller ones stay at the smallest
+    -- readable text, as on your bars, and never drop off the drawing.
+    local barKey = Bars:Get("cd").icons[1].key
+    local sizes = {}
+    for _, scale in ipairs({ 50, 90, 100 }) do
+        ns.Set("keybindSize", scale)
+        sizes[#sizes + 1] = scale .. ":" .. Row("cd") .. ":" .. Last(moon.key, "SetFontObject")
+    end
+    Equal(table.concat(sizes, " ") .. " | " .. tostring(S[barKey].shown),
+        "50:1b S2b -b - - -:FECMFont8 90:1b S2b -b - - -:FECMFont8 100:1b S2b -b - - -:FECMFont8 | true",
+        "smaller keys on the default tiles (25): still shown, at the smallest readable size")
+    ns.Set("keybindSize", 100)
+    -- Only the tile decides: a key on every tile at least as big as the
+    -- smallest icon your bars can have (20), at any size chosen; none below.
+    local wrongTiles = {}
+    for bar = 20, 40 do
+        Bars:SetOption("cd", "size", bar)
+        for scale = 50, 150, 10 do
+            ns.Set("keybindSize", scale)
+            local tile = S[moon].width
+            if S[moon.key].shown ~= (tile >= ns.BAR_LIMITS.size[1]) then
+                wrongTiles[#wrongTiles + 1] = bar .. "@" .. scale .. "=" .. tile .. " "
+            end
+        end
+    end
+    ns.Set("keybindSize", 100)
+    Equal(table.concat(wrongTiles), "", "a key on each tile from 20 up, whatever size is chosen")
+    Bars:SetOption("cd", "size", 20)
+    lw:Refresh()
+    Equal(Row("cd") .. " | " .. Row("util") .. " | " .. S[moon].width, "-b -b -b - - - | 3b - - - - | 14",
+        "a small bar's tiles too small for a key; a bigger one's keep theirs")
+    Bars:SetOption("cd", "size", 36)
+    lw:Refresh()
+    ns.Set("keybinds", false)
+    Equal(Row("cd") .. " | " .. Row("util"), "-b -b -b - - - | -b - - - -", "keybinds unticked: none")
+    ns.Set("keybinds", true)
+    Equal(Row("cd"), "1b S2b -b - - -", "and back")
+
+    -- Your bindings and action bars, live, with nothing redrawn: in a fight too.
+    local draws, refresh = 0, page.Refresh
+    page.Refresh = function(...)
+        draws = draws + 1
+        return refresh(...)
+    end
+    keyOf.ACTIONBUTTON1 = "CTRL-1"
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    actionSlots[4], keyOf.ACTIONBUTTON4 = { "spell", 7384 }, "4"
+    Fire("ACTIONBAR_SLOT_CHANGED", 4)
+    Flush()
+    Equal(Row("cd") .. " " .. draws, "C1b S2b 4b - - - 0", "a key rebound and a spell placed: shown at once, nothing redrawn")
+    actionSlots[85] = { "spell", 7384 }
+    ns.Keybinds:Update()
+    lockdown = true
+    bonusIndex = 8
+    Fire("UPDATE_BONUS_ACTIONBAR")
+    Equal(Row("cd") .. " " .. draws, "-b -b C1b - - - 0", "a form's page in a fight: its keys at once")
+    bonusIndex = nil
+    Fire("UPDATE_BONUS_ACTIONBAR")
+    lockdown = false
+    Equal(Row("cd"), "C1b S2b 4b - - -", "and back")
+    page.Refresh = refresh
+
+    -- Dragged to another row or off: the look and key go with the spell.
+    S[moon].scripts.OnDragStart(moon)
+    Equal(Look(moon), "-", "picked up, its spot is plain")
+    keyOf.ACTIONBUTTON2 = "SHIFT-3"
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    Equal(Look(moon) .. " " .. Look(cdRow.tiles[2]), "- S3b", "a key change meanwhile leaves it plain")
+    S[page.rows.util].mouseOver = true
+    S[moon].scripts.OnDragStop(moon)
+    S[page.rows.util].mouseOver = nil
+    Equal(Row("cd") .. " | " .. Row("util"), "S3b 4b - - - - | 3b C1b - - -", "moved to Utility: its key and border there, the tiles behind it following")
+    local off = page.rows.util.tiles[2]
+    S[off].scripts.OnDragStart(off)
+    S[off].scripts.OnDragStop(off)
+    Equal(tostring(off.name) .. " " .. Row("util"), "nil 3b - - - -", "dragged off: its spot plain again")
+
+    -- Nothing takes the mouse: only textures and text on the tiles and rows.
+    local wrong, strips, tiles = {}, {}, {}
+    for _, row in pairs(page.rows) do
+        strips[row.strip] = true
+        local parts = { { row.span, "Texture", row.strip } }
+        for _, ring in ipairs({ row.decor.border, table.unpack(row.decor.shadow) }) do
+            for _, strip in ipairs(ring) do parts[#parts + 1] = { strip, "Texture", row.strip } end
+        end
+        for _, tile in ipairs(row.tiles) do
+            tiles[tile] = true
+            parts[#parts + 1] = { tile.key, "FontString", tile }
+            for _, ring in ipairs({ tile.decor.border, table.unpack(tile.decor.shadow) }) do
+                for _, strip in ipairs(ring) do parts[#parts + 1] = { strip, "Texture", tile } end
+            end
+        end
+        for _, part in ipairs(parts) do
+            if S[part[1]].kind ~= part[2] or S[part[1]].parent ~= part[3] then wrong[#wrong + 1] = row.key end
+        end
+    end
+    -- And nothing else sits on a row's strip (its tiles aside) or on a tile.
+    for _, obj in ipairs(objects) do
+        local s = S[obj]
+        if s and strips[s.parent] and s.kind ~= "Texture" and s.kind ~= "Button" then wrong[#wrong + 1] = s.kind end
+        if s and tiles[s.parent] and s.kind ~= "Texture" and s.kind ~= "FontString" then wrong[#wrong + 1] = s.kind end
+    end
+    Equal(table.concat(wrong, " "), "", "the border, shadow and key are textures and text on the tile or row, which take no mouse")
+
+    -- Off: drawn as before, plain icons and grey spots.
+    ns.Set("iconShadow", "bar")
+    page.live:Click()
+    local empty = cdRow.tiles[3]
+    Equal(tostring(ns.Get("layoutPreview")) .. " " .. Row("cd") .. " | " .. Row("util") .. " [" .. Boxed("cd") .. "]",
+        "false - - - - - - | - - - - - []", "unticked: no border, shadow or keys")
+    Equal(tostring(S[cdRow.tiles[1].texture].texture ~= nil) .. " " .. Last(empty.texture, "SetColorTexture"), "true " .. ns.Theme.CONTROL_BORDER[1],
+        "your icons, then grey spots, as before")
+    -- The Look page's preview keeps its own.
+    lw:Select("look")
+    local samples = lw.sampleIcons.icons
+    Equal(tostring(S[samples[1].key].shown) .. " " .. S[samples[1].key].text .. " " .. tostring(On(samples[1].decor.border)), "true 1 true",
+        "the Look page's preview isn't affected")
+    lw:Select("layout")
+    page.live:Click()
+    Equal(tostring(ns.Get("layoutPreview")) .. " " .. Row("cd") .. " [" .. Boxed("cd") .. "]", "true S3b 4b - - - - [s]", "ticked again: back at once")
+
+    -- Kept over a reload; anything else reads as on.
+    ns.Set("layoutPreview", false)
+    Equal(#printed .. " " .. tostring(page.drawError), "0 nil", "no errors from the Layout page's drawing")
+    local saved = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    ns = Load(saved)
+    Equal(ns.Get("layoutPreview"), false, "kept over a reload")
+    saved.layoutPreview = "yes"
+    Equal(ns.Get("layoutPreview"), true, "anything else reads as on")
+end)()
+
+-- All bars: every bar's size together -------------------------------------------------------
+
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+;(function()
+    local function Spot(frame)
+        local p = S[frame].points[1]
+        return string.format("%s %g %g", p[1], p[4], p[5])
+    end
+    local function Point(region, i)
+        local q = S[region].points[i or 1]
+        return table.concat({ table.unpack(q, 1, q.n) }, " ")
+    end
+    local function Width(frame) return string.format("%g", S[frame].width) end
+
+    Environment()
+    Display()
+    _G.FECMFrame = nil
+    ns = Load({ useBars = true, prdSkin = false, keybinds = true, notesSeen = "dev" })
+    local Bars, Layout = ns.Bars, ns.Layout
+    for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do Bars:Assign(name, "cd") end
+    Bars:Assign("Attack", "util")
+    Bars:SetAura("buff", "Thorns", true)
+    Layout:Apply("pyramid")
+    Bars:SetOption("cd", "size", 48) -- Cooldowns bigger than the rest
+    local cd, util, buff = Bars:Get("cd"), Bars:Get("util"), Bars:Get("buff")
+    local buffBox = buff.container
+    -- The bars as drawn: Cooldowns' and Utility's icons, the packed Buffs
+    -- row's scale, each bar's width (and Cooldowns' height), where the three
+    -- bars are, and how wide the display is.
+    local function Shape()
+        return table.concat({ Width(cd.icons[1]), Width(util.icons[1]), string.format("%g", S[buffBox].scale), Width(cd),
+            string.format("%g", S[cd].height), Width(buff), Spot(cd), Spot(util), Spot(buff), Width(prd) }, " ")
+    end
+
+    -- 100 to start with: every bar exactly its own size.
+    Equal(ns.Get("barScale"), 100, "All bars starts at 100")
+    local own = {}
+    for size = ns.BAR_LIMITS.size[1], ns.BAR_LIMITS.size[2] do
+        if ns.IconSize({ size = size }) ~= size then own[#own + 1] = size end
+    end
+    Equal(table.concat(own, " "), "", "at 100 every bar is its own size")
+    local before = Shape()
+    Equal(before, "48 36 1 144 48 36 BOTTOM 0 -80 TOP 0 -100 TOP 0 -136 288",
+        "Cooldowns at 48, the rest at 36, stacked round the display as wide as the widest row")
+
+    -- Bigger together: each keeps its size next to the others.
+    Bars:SetScale(150)
+    Equal(Shape(), "72 54 1.5 216 72 54 BOTTOM 0 -80 TOP 0 -100 TOP 0 -154 432",
+        "at 150 every bar is half as big again, the rows below move down and the display widens")
+    Equal(S[cd.icons[1]].width * 36 == S[util.icons[1]].width * 48, true, "Cooldowns still bigger than Utility, by as much")
+    Equal(Last(cd.icons[1].cooldown, "SetCountdownFont") .. " " .. Last(util.icons[1].cooldown, "SetCountdownFont"),
+        "FECMFont36 FECMFont27", "the numbers grow with the icons")
+    Equal(ns.BarData("cd").size .. " " .. ns.BarData("util").size, "48 36", "each bar's own size stays as you set it")
+    Bars:SetScale(100)
+    Equal(Shape(), before, "back at 100, exactly as before")
+
+    -- Fixed Buffs spots follow it too.
+    Bars:SetScale(125)
+    Bars:SetOption("buff", "showMissing", true)
+    Equal(Width(buff.holders[1]) .. " " .. Width(buff) .. " " .. S[S[buffBox].slots.b1.supplied.SetDurationCooldown].last.SetCountdownFont[1],
+        "45 45 FECMFont23", "fixed Buffs spots at 125: 45, their numbers to match")
+    Bars:SetOption("buff", "showMissing", false)
+
+    -- Each bar's own Icon size still fine-tunes it.
+    Bars:SetScale(150)
+    SlashCmdList.FECM("")
+    local lw = FECMFrame
+    lw:Select("cd")
+    local bp = lw.pages.bar
+    Equal(bp.size.current, 48, "a bar's own Icon size slider shows its own size")
+    -- Its note says the size on screen, while All bars isn't 100.
+    local function SizeNote()
+        S[bp.size.track].scripts.OnEnter(bp.size.track)
+        local text = S[lw.note].text
+        S[bp.size.track].scripts.OnLeave(bp.size.track)
+        return text
+    end
+    Equal(SizeNote(), "This bar's own size. All bars on the Layout page is at 150, so its icons show at 72.",
+        "hovering Icon size says All bars makes Cooldowns' 48 show at 72")
+    Equal(S[lw.note].text, lw.lastNote, "the note going back after")
+    bp.size:Choose(40)
+    Equal(ns.BarData("cd").size .. " " .. Width(cd.icons[1]) .. " " .. Width(util.icons[1]), "40 60 54",
+        "and still fine-tunes that bar: 40 at 150 is 60, the others untouched")
+    bp.size:Choose(48)
+
+    -- Keybinds sized to the icon on screen, when the Look page changes them too.
+    ns.Set("keybindPosition", "TOP")
+    Bars:ApplyKeybinds()
+    Equal(Last(cd.icons[1].key, "SetFontObject") .. " " .. Width(cd.icons[1].key), "FECMFont22 68",
+        "keybinds follow the icon on screen (72), not the bar's own 48")
+    ns.Set("keybindPosition", "BOTTOM")
+    -- Icons can be up to 96 now: a key still fits, clear of the countdown.
+    local Style, bad = ns.Style, {}
+    for art = ns.BAR_LIMITS.size[2] + 1, ns.BAR_LIMITS.size[2] * ns.BAR_SCALE[2] / 100 do
+        local c = Style:CountdownSize(art)
+        for _, position in ipairs(ns.KEYBIND_POSITIONS) do
+            for scale = 50, 150, 10 do
+                local size, lift = Style:KeyFit(art, c, position, scale)
+                local up = math.abs(lift)
+                local fits = size >= 8 and 2 + .75 * size <= art and 2 + .75 * size + 1 <= art / 2 - .75 * c / 2 + up
+                    and art / 2 + .75 * c / 2 + up <= art
+                if not fits then bad[#bad + 1] = art .. "/" .. position .. "/" .. scale .. " " end
+            end
+        end
+    end
+    Equal(table.concat(bad), "", "a key fits every icon up to 96, clear of the countdown")
+
+    -- Kept within 50 to 150, and an icon never under 20.
+    Bars:SetScale(400)
+    local high = ns.Get("barScale")
+    Bars:SetScale(10)
+    Equal(high .. " " .. ns.Get("barScale"), "150 50", "All bars goes from 50 to 150")
+    Equal(Width(cd.icons[1]) .. " " .. Width(util.icons[1]), "24 20", "at 50: 48 is 24, and 36 stops at 20, the smallest a bar can have")
+    lw:Select("util")
+    local small = SizeNote()
+    lw:Select("cd")
+    Equal(small .. "|" .. SizeNote(), "This bar's own size. All bars on the Layout page is at 50, so its icons show at 20, the smallest they go."
+        .. "|This bar's own size. All bars on the Layout page is at 50, so its icons show at 24.", "the note says when a bar stops at 20")
+    local wrong = {}
+    for percent = ns.BAR_SCALE[1], ns.BAR_SCALE[2], 5 do
+        ns.Set("barScale", percent)
+        local last = 0
+        for size = ns.BAR_LIMITS.size[1], ns.BAR_LIMITS.size[2] do
+            local got, exact = ns.IconSize({ size = size }), size * percent / 100
+            -- Never under 20 or over 96; a bigger bar never smaller; to the
+            -- nearest whole size unless that's under 20.
+            if got < 20 or got > 96 or got < last or (exact >= 20 and math.abs(got - exact) > .5) then
+                wrong[#wrong + 1] = size .. "@" .. percent .. "=" .. got .. " "
+            end
+            last = got
+        end
+    end
+    Equal(table.concat(wrong), "", "every size at every step: from 20 to 96, in order, rounded")
+    ns.Set("barScale", 999)
+    local odd = ns.Get("barScale")
+    ns.Set("barScale", "big")
+    Equal(odd .. " " .. ns.Get("barScale"), "100 100", "a saved value out of range, or not a number, reads as 100")
+    Bars:SetScale(100)
+    Equal(SizeNote(), "This bar's icon size. All bars on the Layout page sizes every bar together.", "at 100 it just says what it is")
+
+    -- Beside the display, a bar sits level with its middle at its size on screen.
+    Layout:Apply("sides")
+    Bars:SetScale(150)
+    Equal(Spot(buff) .. " " .. Spot(Bars:Get("debuff")), "TOPRIGHT -100 -63 TOPLEFT 100 -63",
+        "Buffs and Debuffs beside the display, level with its middle at 54")
+    Bars:SetScale(100)
+    Layout:Apply("pyramid")
+
+    -- The Layout page: the slider, above the spacing sliders.
+    Bars:SetScale(150)
+    lw:Select("layout")
+    local page = lw.pages.layout
+    local all = page.allBars
+    Equal(S[all.label].text .. " " .. all.current, "All bars (Needs testing) 150", "an All bars slider on the Layout page, showing where it is")
+    Equal(Point(all) .. " " .. Width(all) .. " | " .. Point(all.track) .. " | " .. Point(page.spacing.track),
+        "BOTTOMRIGHT -16 56 310 | LEFT 160 0 | LEFT 100 0", "above Row spacing, with room for its longer label")
+    -- The page is 638 across.
+    Equal(638 - 16 - S[all].width + S[all.track].points[1][2], 638 - 16 - S[page.spacing].width + S[page.spacing.track].points[1][2],
+        "its track lined up with the spacing sliders'")
+    Equal(tostring(#S[all.label].text * 6 <= S[all.track].points[1][2] - 8), "true", "its label clear of its track (six units a letter)")
+    Equal(Point(page.box, 2) .. " | " .. (86 - 56 - S[all].height) .. " " .. (56 - 34 - S[page.spacing].height) .. " "
+        .. (34 - 12 - S[page.iconSpacing].height), "BOTTOMRIGHT -16 86 | 10 2 2",
+        "the box ends 22 higher for it: 10 under the box, 2 over Row spacing, as between the others")
+    Equal(Point(page.shown) .. " " .. tostring(56 > S[page.shown].points[1][3] + S[page.shown].height), "BOTTOMLEFT 16 36 true",
+        "above the ticks on the left, clear of them")
+    -- Its note, on hover.
+    S[all.track].scripts.OnEnter(all.track)
+    local note = S[lw.note].text
+    S[all.track].scripts.OnLeave(all.track)
+    Equal(note, "Sizes all your bars together, keeping each one's size next to the others. 100 is each bar's own Icon size,"
+        .. " which still fine-tunes it. Icons never go under 20.", "hovering it explains it in the note line")
+    Equal(S[lw.note].text, lw.lastNote, "and the note goes back after")
+    -- Dragged: the bars and the drawing change at once.
+    Equal(Width(page.rows.cd.tiles[1]), "50", "the drawing at 150: Cooldowns' 72 at .7")
+    all:Choose(125)
+    Equal(ns.Get("barScale") .. " " .. Width(cd.icons[1]) .. " " .. Width(page.rows.cd.tiles[1]), "125 60 42",
+        "dragged to 125: your bars at once, and the drawing with them")
+    S[all].scripts.OnMouseWheel(all, 1)
+    Equal(ns.Get("barScale") .. " " .. all.current, "130 130", "the wheel steps by 5")
+    Bars:SetScale(100)
+    Equal(all.current, 100, "and it shows a change made anywhere else")
+
+    -- Big icons: the drawing fits down the box as well as across, clear of
+    -- its hint and buttons.
+    for _, key in ipairs(ns.BAR_KEYS) do
+        Bars:SetOption(key, "size", 64)
+        Layout:SetAcross(key, 2)
+    end
+    Bars:SetScale(150)
+    lw:Refresh()
+    local lowest, highest = 0, math.huge
+    for _, row in pairs(page.rows) do
+        if S[row].shown then
+            lowest = math.max(lowest, -S[row].points[1][5] + S[row].height)
+            highest = math.min(highest, -S[row].points[1][5])
+        end
+    end
+    -- The box is 287 tall: the page's 489 less 116 above it and 86 under it.
+    Equal(tostring(highest >= 28) .. " " .. tostring(lowest <= 287 - 28) .. " " .. Width(page.rows.cd.tiles[1]), "true true 54",
+        "every row of 96 inside the box, drawn at 54")
+    for _, key in ipairs(ns.BAR_KEYS) do Bars:SetOption(key, "size", 36) end
+    Bars:SetOption("cd", "size", 48)
+    Layout:Apply("pyramid")
+    Bars:SetScale(100)
+    Equal(Shape(), before, "back as it was")
+
+    -- In a fight: your Cooldowns and Utility bars at once, the rest after.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local calls = containerCallsInCombat
+    all:Choose(125)
+    Equal(Width(cd.icons[1]) .. " " .. Width(util.icons[1]), "60 45", "in a fight, your Cooldowns and Utility bars resize at once")
+    Equal(tostring(buff.pendingLayout) .. string.format(" %g ", S[buffBox].scale) .. Width(buff) .. " " .. (containerCallsInCombat - calls),
+        "true 1 36 0", "the Buffs bar waits, its secure icons untouched")
+    Equal(tostring(Layout.pending) .. " " .. tostring(ns.Resource.pendingMatch) .. " " .. Width(prd), "true true 288",
+        "and the stack and the display's width wait too")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(string.format("%g ", S[buffBox].scale) .. Width(buff) .. " " .. Spot(buff) .. " " .. Width(prd) .. " " .. tostring(Layout.pending),
+        "1.25 45 TOP 0 -145 360 nil", "once it's over the Buffs bar catches up under Utility, and the display widens")
+
+    -- Shared by every profile, like the bars' own sizes; Reset keeps it too.
+    local mine = ns.ProfileName()
+    ns.NewProfile("Raid")
+    local there = ns.Get("barScale")
+    ns.UseProfile(mine)
+    Equal(there .. " " .. ns.Get("barScale"), "125 125", "the same in every profile")
+    Layout:Reset()
+    Equal(ns.Get("barScale") .. " " .. Width(cd.icons[1]), "125 60", "Reset keeps it, as it keeps your icon sizes")
+    Equal(#printed .. " " .. tostring(page.drawError) .. " " .. tostring(bp.listError), "0 nil nil", "no errors")
+
+    -- Kept over a reload, the bars drawn at it from the start.
+    local saved = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    Display()
+    ns = Load(saved)
+    Equal(ns.Get("barScale") .. " " .. Width(ns.Bars:Get("cd").icons[1]), "125 60", "kept over a reload")
+
+    -- Bars in no layout and never moved sit in their own spots above the
+    -- action bar, each growing up from there: All bars spreads the spots out
+    -- with the bars (or closes them up), so they never overlap.
+    Bars = ns.Bars
+    Bars:SetOption("cd", "size", 36)
+    Bars:ResetPositions()
+    local order = { "util", "cd", "buff", "debuff" }
+    local function Spots()
+        local spots = {}
+        for _, key in ipairs(order) do
+            local p = S[Bars:Get(key)].points[1]
+            spots[#spots + 1] = p[1] .. " " .. p[5] .. "-" .. (p[5] + S[Bars:Get(key)].height)
+        end
+        return table.concat(spots, " ")
+    end
+    Bars:SetScale(100)
+    Equal(Spots(), "BOTTOM 146-182 BOTTOM 190-226 BOTTOM 234-270 BOTTOM 278-314", "at 100 where they always were")
+    Bars:SetScale(150)
+    Equal(Spots(), "BOTTOM 146-200 BOTTOM 212-266 BOTTOM 278-332 BOTTOM 344-398", "at 150 spread out with the bars, the same 8 apart at 100 now 12")
+    local overlaps = {}
+    for percent = ns.BAR_SCALE[1], ns.BAR_SCALE[2], 5 do
+        Bars:SetScale(percent)
+        local below
+        for _, key in ipairs(order) do
+            local bottom = S[Bars:Get(key)].points[1][5]
+            if below and bottom < below then overlaps[#overlaps + 1] = key .. "@" .. percent .. " " end
+            below = bottom + S[Bars:Get(key)].height
+        end
+    end
+    Equal(table.concat(overlaps), "", "at every step each bar clears the one under it")
+    Bars:SetScale(100)
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The footer: who made the addon, and every control's note -------------------------------
+
+;(function()
+    Environment()
+    Display()
+    local ns = Load({ useBars = true, prdSkin = false })
+    local B, L, T = ns.Bars, ns.Layout, ns.Theme
+    for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+    L:Apply("pyramid")
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    local note = w.note
+    local function Text() return S[note].text end
+    local CREDIT = "Made with |TInterface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Heart.tga:0:0:0:0:32:32:0:32:0:32:%d:%d:%d|t"
+        .. " by |cff%sSquirt|r"
+    local ORANGE = CREDIT:format(224, 120, 41, "e07829")
+    local function Enter(control) S[control].scripts.OnEnter(control) end
+    local function Leave(control) S[control].scripts.OnLeave(control) end
+    -- The mouse over these, or (nil) off them.
+    local function Over(on, ...)
+        for _, region in ipairs({ ... }) do S[region].mouseOver = on end
+    end
+    -- A control's note as the mouse passes over it; areas are what it sits
+    -- in, which the mouse is over too.
+    local function NoteOf(control, ...)
+        Over(true, control, ...)
+        Enter(control)
+        local text = Text()
+        Over(nil, control, ...)
+        Leave(control)
+        return text
+    end
+    -- Every text the footer shows from here on, in order.
+    local shown = {}
+    rawset(note, "SetText", function(self, text)
+        shown[#shown + 1] = text
+        S[self].text = text
+    end)
+    local function Seen()
+        local list = shown
+        shown = {}
+        return list
+    end
+    local function Rested(list)
+        for _, text in ipairs(list) do
+            if type(text) == "string" and text:find("^Made with") then return true end
+        end
+        return false
+    end
+    local function Point(region, i)
+        local p = S[region].points[i or 1]
+        return p[1] .. " " .. p[p.n - 1] .. " " .. p[p.n]
+    end
+    -- Whether a region sits somewhere inside root.
+    local function Under(region, root)
+        local parent = S[region] and S[region].parent
+        while parent do
+            if parent == root then return true end
+            parent = S[parent] and S[parent].parent
+        end
+        return false
+    end
+
+    -- Made with a heart by Squirt, the heart and name in the accent.
+    Equal(Text(), ORANGE, "at rest the footer says who made the addon, the heart and Squirt in orange")
+    Equal(table.concat(S[note].colour, " "), table.concat(T.MUTED, " "), "the rest of the line in the footer's muted grey")
+    Equal(Text():find("highest rank", 1, true), nil, "the rank line is no longer the footer's")
+    w:Select("look")
+    w.swatches[3]:Click()
+    Equal(Text(), CREDIT:format(43, 179, 163, "2bb3a3"), "a new accent: the heart and name in teal at once")
+    -- The repaint alone does it: the setting changed without a refresh.
+    ForeverEnhancedCooldownManagerDB.accent = "purple"
+    T:Repaint()
+    Equal(Text(), CREDIT:format(176, 125, 240, "b07df0"), "repainted with the window, before any refresh: purple")
+    Over(true, w.swatches[2])
+    Enter(w.swatches[2])
+    T:Repaint()
+    Equal(Text(), "Blue for this window's headings, ticks, sliders and highlights.", "a repaint leaves a hovered control's note up")
+    Over(nil, w.swatches[2])
+    Leave(w.swatches[2])
+    Equal(Text(), CREDIT:format(176, 125, 240, "b07df0"), "and the credit comes back in the accent")
+    w.swatches[1]:Click()
+    Equal(Text(), ORANGE, "back to orange")
+
+    -- A note takes the credit's place while the mouse is over its control.
+    Equal(NoteOf(w.news), "What changed in this version. /ccm new shows it too.", "hovering What's new, its note")
+    Equal(Text(), ORANGE, "and the credit back as the mouse leaves")
+    w:Say("Done that.")
+    w:Refresh()
+    local over = NoteOf(w.news)
+    Equal(over .. " | " .. Text() .. " | " .. w.lastNote, "What changed in this version. /ccm new shows it too. | Done that. | Done that.",
+        "over a message, a note, then the message back")
+    w:Refresh()
+    Equal(Text(), ORANGE, "the next refresh rests on the credit again")
+    -- Straight from one control to the next, whichever the game tells first,
+    -- the next one's note: only the control whose note is up can take it down.
+    local look, layout = w.nav.look, w.nav.layout
+    Over(true, look)
+    Enter(look)
+    Over(nil, look)
+    Over(true, layout)
+    Enter(layout)
+    Leave(look)
+    local next = Text()
+    Over(nil, layout)
+    Over(true, look)
+    Enter(look)
+    Leave(layout)
+    Equal(next .. " | " .. Text(), "One-click layouts that stack your bars around your Personal Resource Display. | "
+        .. "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds and the accent.",
+        "entered before the last one is left, each keeps its note")
+    Over(nil, look)
+    Leave(look)
+    Equal(Text(), ORANGE, "and off both, the credit")
+
+    -- Clicking a control keeps its note up, as it now reads; a message from
+    -- the click takes the footer instead, and stays as the mouse leaves.
+    w:Select("cd")
+    local bp = w.pages.bar
+    Over(true, bp.clear)
+    Enter(bp.clear)
+    Equal(Text(), "Take every icon off Cooldowns. It asks for a second click.", "Clear says what it does")
+    bp.clear:Click()
+    Equal(Text(), "Click again to take every icon off Cooldowns.", "clicked once, its note stays up and says what the next click does")
+    bp.clear:Click()
+    Equal(Text(), "Cooldowns cleared.", "the message takes the footer from the control clicked")
+    Over(nil, bp.clear)
+    Leave(bp.clear)
+    Equal(Text(), "Cooldowns cleared.", "and stays as the mouse leaves")
+    for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+    w:Refresh()
+    -- Dragged, a slider's note stays up, not the credit, with each step.
+    Over(true, bp.size.track)
+    Enter(bp.size.track)
+    bp.size:Choose(40)
+    Equal(Text(), "This bar's icon size. All bars on the Layout page sizes every bar together.", "a slider's note stays up as it's dragged")
+    Over(nil, bp.size.track)
+    Leave(bp.size.track)
+    bp.size:Choose(36)
+    -- A button its own click hides leaves the credit behind, not its note.
+    ns.Set("useBars", false)
+    B:Rebuild()
+    w:Refresh()
+    Over(true, bp.turnOn)
+    Enter(bp.turnOn)
+    Equal(Text(), "Turn your bars on.", "Turn on says what it does")
+    bp.turnOn:Click()
+    Equal(tostring(S[bp.turnOn].shown) .. " " .. Text(), "false " .. ORANGE, "clicked, it goes, and so does its note")
+    Over(nil, bp.turnOn)
+    Leave(bp.turnOn)
+    -- Closed from a control (its X, or Escape), opened again: the credit.
+    Enter(w.close)
+    w.close:Click()
+    ns.ShowWindow()
+    Equal(Text(), ORANGE, "the window opened again rests on the credit, not the X's note")
+
+    -- The rank line: on the bar pages, under the search, clear of the list.
+    local ranks = bp.ranks
+    Equal(S[ranks].text .. " | " .. tostring(S[ranks].shown) .. " | " .. table.concat(S[ranks].colour, " "),
+        "Each spell shows once, at your highest rank. | true | " .. table.concat(T.MUTED, " "), "the rank line on the bar page, muted")
+    Equal(Point(ranks) .. " | " .. Point(bp.search) .. " " .. S[bp.search].height .. " | " .. Point(bp.list),
+        "TOPLEFT 10 -34 | TOPLEFT 8 -8 20 | TOPLEFT 8 -50", "under the search box, and the list under it")
+    Equal(tostring(#S[ranks].text * 6 <= S[ranks].width) .. " " .. tostring(-34 - ranks:GetStringHeight() >= -50), "true true",
+        "on one line (six units a letter), clear of the list")
+    bp.showRanks:Click()
+    Equal(S[ranks].text, "Each spell at your highest rank, with the lower ranks you know under it.", "Show all ranks: the line says so")
+    bp.showRanks:Click()
+    w:Select("buff")
+    Equal(S[ranks].text, "Each spell shows once, and counts every rank.", "an aura bar counts every rank")
+    w:Select("cd")
+
+    -- The Layout page: each of a row's buttons says what it does.
+    w:Select("layout")
+    local lp = w.pages.layout
+    local rows, display = lp.rows, lp.display
+    local cd, util = rows.cd, rows.util
+    local function RowNote(row, button) return NoteOf(button, row, row.buttons) end
+    Equal(RowNote(cd, cd.fewer) .. " | " .. RowNote(cd, cd.wider), "One fewer icon across (6 now). | One more icon across (6 now).",
+        "- and +, and how many across now")
+    Equal(RowNote(cd, cd.up), "Cooldowns is already at the top.", "greyed, the top row's up arrow says why")
+    Equal(tostring(cd.up.usable) .. " " .. tostring(Last(cd.up, "SetMotionScriptsWhileDisabled")), "false true",
+        "greyed buttons still hear the mouse")
+    Equal(RowNote(cd, cd.down), "Move Cooldowns down the stack, past the display, swapping places with Utility.", "down, past the display")
+    Equal(RowNote(util, util.up), "Move Utility up the stack, past the display, swapping places with Cooldowns.", "up, past the display")
+    Equal(RowNote(util, util.down), "Move Utility down the stack, swapping places with Buffs.", "down, the same side")
+    Equal(RowNote(rows.debuff, rows.debuff.down), "Debuffs is already at the bottom.", "the bottom row's down arrow says why")
+    Equal(RowNote(util, util.out), "Take Utility out of your layout. It asks first, and its spells stay.", "x")
+    Equal(NoteOf(display.up, display.buttons) .. " | " .. NoteOf(display.down, display.buttons),
+        "Move your resource display up the stack, past Cooldowns. | Move your resource display down the stack, past Utility.",
+        "the display's arrows name the row they move it past")
+    -- Greyed, lit on hover no more; usable, lit.
+    local lit = Last(cd.up, "SetBackdropColor")
+    Enter(cd.up)
+    Equal(Last(cd.up, "SetBackdropColor") == lit, true, "a greyed button isn't lit on hover")
+    Leave(cd.up)
+    Over(true, cd, cd.buttons, cd.wider)
+    Enter(cd.wider)
+    Equal(Last(cd.wider, "SetBackdropColor"), T.HOVER[1], "a usable one is")
+    cd.wider:Click()
+    Equal(Text(), "One more icon across (7 now).", "clicked, + still says what it does, now at 7")
+    -- A click's message takes the footer for that click only: the next
+    -- click, the mouse still on +, has its note back.
+    lockdown = true
+    cd.wider:Click()
+    local said = Text()
+    lockdown = false
+    cd.wider:Click()
+    Equal(said .. " | " .. Text(), "Finish combat first. | One more icon across (8 now).",
+        "in combat the message, then after it the next click without moving: + says what it does again")
+    Over(nil, cd, cd.buttons, cd.wider)
+    Leave(cd.wider)
+    Equal(tostring(S[cd.buttons].shown) .. " " .. Text(), "true " .. ORANGE,
+        "off the row the credit comes back (clicked, its buttons stay up)")
+    L:SetAcross("cd", 1)
+    lp:Refresh()
+    Equal(RowNote(cd, cd.fewer) .. " " .. tostring(cd.fewer.usable), "Cooldowns is down to 1 across, the fewest. false", "at 1, - says so")
+    L:SetAcross("cd", 20)
+    lp:Refresh()
+    Equal(RowNote(cd, cd.wider), "Cooldowns is at the most across, 20.", "at 20, + says so")
+    -- Beside the display.
+    L:Apply("sides")
+    lp:Refresh()
+    Equal(RowNote(cd, cd.down), "Move Cooldowns down, to the left of the display, swapping places with Buffs.", "down beside the display")
+    Equal(RowNote(rows.buff, rows.buff.up), "Move Buffs up, above the display, swapping places with Cooldowns.", "up above it")
+    Equal(RowNote(rows.buff, rows.buff.down), "Move Buffs down, to the right of the display, swapping places with Debuffs.", "across it")
+    Equal(RowNote(rows.debuff, rows.debuff.down), "Move Debuffs down, below the display, swapping places with Utility.", "down below it")
+    -- The display skips rows taken out, and says when it can't move.
+    L:Apply("pyramid")
+    L:TakeOut("cd")
+    lp:Refresh()
+    Equal(NoteOf(display.up, display.buttons), "Your resource display is already at the top.", "nothing above it in the layout")
+    L:PutBack("cd")
+    L:Apply("funnel")
+    lp:Refresh()
+    Equal(NoteOf(display.down, display.buttons), "Your resource display is already at the bottom.", "nothing below it")
+    L:Apply("pyramid")
+    lp:Refresh()
+
+    -- The game moves the mouse off one control and onto the next in one
+    -- frame: it leaves the first and enters the next, in either order, and
+    -- only then draws. So what's seen is the footer after both; a resting
+    -- line set in between is never drawn. Entered first, it isn't even set.
+    local function Move(from, to, enterFirst)
+        Seen()
+        if enterFirst then Enter(to); Leave(from) else Leave(from); Enter(to) end
+        return Text(), Rested(Seen())
+    end
+    -- From a row onto each of its buttons and back, the footer never drops
+    -- to the credit: the row's note, the button's, the row's again.
+    local function Path(row, button, enterFirst)
+        Over(true, row)
+        Enter(row)
+        Over(true, row.buttons, button)
+        local on, restedOn = Move(row, button, enterFirst)
+        local buttons = S[row.buttons].shown
+        Over(nil, row.buttons, button)
+        local back, restedBack = Move(button, row, enterFirst)
+        Over(nil, row)
+        Leave(row)
+        return on, back, enterFirst and (restedOn or restedBack), buttons
+    end
+    local HINT = "- and + change how many fit across; the arrows swap rows. Drag an icon to another row, or off to remove it."
+    local flashes = {}
+    for _, key in ipairs({ "cd", "util" }) do
+        local row = rows[key]
+        for _, part in ipairs({ "fewer", "wider", "up", "down", "out" }) do
+            local button = row[part]
+            local want = type(button.hint) == "function" and button.hint(button) or button.hint
+            for _, enterFirst in ipairs({ false, true }) do
+                local on, back, rested, buttons = Path(row, button, enterFirst)
+                if rested or not buttons or back ~= HINT or on ~= want or not want:find("%a") then
+                    flashes[#flashes + 1] = key .. "." .. part .. (enterFirst and " (enter first)" or "") .. ": " .. tostring(on) .. " "
+                end
+            end
+        end
+    end
+    Equal(table.concat(flashes), "", "row to each button and back: the button's note, then the row's, and the credit never seen")
+    Equal(Text(), ORANGE, "off the row altogether, the credit")
+    -- A row's icons too.
+    local tile = cd.tiles[1]
+    Over(true, cd)
+    Enter(cd)
+    Over(true, tile)
+    local onTile = Move(cd, tile)
+    Over(nil, tile)
+    local tileBack = Move(tile, cd)
+    Equal(onTile .. " | " .. tileBack, "Moonfire. Drag it to another row, or off to remove it. | " .. HINT,
+        "row to an icon and back: the icon's note, then the row's")
+    Over(nil, cd)
+    Leave(cd)
+
+    -- Clicked, a row's x asks first, and the "Are you sure?" dialog's shade
+    -- takes the mouse: the game leaves the x, though it and its row are still
+    -- under the mouse, covered. The footer rests, not on the covered row's
+    -- note, and stays so after Cancel with the mouse on nothing with a note.
+    local confirm = w.confirm
+    Over(true, cd, cd.buttons, cd.out)
+    Enter(cd)
+    Move(cd, cd.out)
+    cd.out:Click()
+    Leave(cd.out)
+    local covered = Text()
+    confirm.no:Click()
+    Equal(tostring(S[confirm.shade].shown) .. " | " .. covered .. " | " .. Text(), "false | " .. ORANGE .. " | " .. ORANGE,
+        "the x's dialog up, then Cancel: the credit, never the covered row's note")
+    Over(nil, cd, cd.buttons, cd.out)
+    Leave(cd)
+    Equal(Text(), ORANGE, "and the row, left after, changes nothing")
+
+    -- While a found debuff waits for its spot, a row's and an icon's notes
+    -- say what a click does with it.
+    B:SetAura("debuff", "Moonfire", true)
+    S[lp.search].scripts.OnEditFocusGained(lp.search)
+    lp.search:SetText("fae")
+    S[lp.search].scripts.OnTextChanged(lp.search, true)
+    lp.found[1]:Click()
+    local debuffs = rows.debuff
+    Equal(table.concat({ NoteOf(debuffs.tiles[1], debuffs), NoteOf(debuffs.tiles[2], debuffs), NoteOf(debuffs) }, " | "),
+        "Click to put Faerie Fire here, before Moonfire. | Click to put Faerie Fire here. | "
+        .. "Click to put Faerie Fire at the end, or click an icon to put it in that spot.",
+        "placing: the Debuffs row's icons take its spot, anywhere else there the end")
+    Equal(NoteOf(cd.tiles[1], cd) .. " | " .. NoteOf(cd), "Debuffs go in the Debuffs row. | Debuffs go in the Debuffs row.",
+        "and another row's icons and the row itself say it can't go there")
+    lp.cancel:Click()
+    Equal(NoteOf(cd.tiles[1], cd) .. " | " .. NoteOf(cd), "Moonfire. Drag it to another row, or off to remove it. | " .. HINT,
+        "cancelled, their usual notes")
+    B:SetAura("debuff", "Moonfire", false)
+    lp:Refresh()
+    -- The display's arrows sit 8 to its right: the strip under them spans
+    -- the gap, so crossing it keeps them up and a note in the footer.
+    Equal(Point(display.buttons) .. " " .. S[display.buttons].width .. " | " .. Point(display.up) .. " | " .. Point(display.down),
+        "LEFT 0 0 48 | LEFT 8 0 | LEFT 30 0", "the arrows where they were, the strip reaching back to the display")
+    Equal(tostring(Last(display.buttons, "EnableMouse")) .. " " .. tostring(Last(cd.buttons, "EnableMouse")), "true nil",
+        "that strip takes the mouse; a row's, inside the row, doesn't need to")
+    local DISPLAY = "Your Personal Resource Display. The arrows move it up or down the stack; move it on screen in Edit Mode."
+    Over(true, display)
+    Enter(display)
+    Over(nil, display)
+    Over(true, display.buttons)
+    local gap = Move(display, display.buttons)
+    local kept = S[display.buttons].shown
+    Over(true, display.up)
+    local onArrow = Move(display.buttons, display.up)
+    Over(nil, display.up)
+    local gapBack = Move(display.up, display.buttons)
+    Over(nil, display.buttons)
+    Over(true, display)
+    local displayBack = Move(display.buttons, display)
+    Equal(table.concat({ gap, tostring(kept), onArrow, gapBack, displayBack }, " | "),
+        table.concat({ DISPLAY, "true", "Move your resource display up the stack, past Cooldowns.", DISPLAY, DISPLAY }, " | "),
+        "display to its arrow and back: its arrows stay up across the gap, and a note all the way")
+    Over(nil, display)
+    Leave(display)
+
+    -- A bar page's icons: the tray, an icon, its x, and back.
+    w:Select("cd")
+    local icon = bp.icons[1]
+    local TRAY = "Drop a spell or item here from your spellbook, bags or action bars. Drag an icon to move it."
+    Over(true, bp.tray)
+    Enter(bp.tray)
+    local onTray = Text()
+    Over(true, icon)
+    local onIcon = Move(bp.tray, icon)
+    Over(true, icon.remove)
+    local onRemove = Move(icon, icon.remove)
+    Over(nil, icon.remove)
+    local iconBack = Move(icon.remove, icon)
+    Over(nil, icon)
+    local trayBack = Move(icon, bp.tray)
+    Equal(table.concat({ onTray, onIcon, onRemove, iconBack, trayBack }, " | "), table.concat({ TRAY,
+        "Moonfire. Drag it to move it, or off the bar to take it off.", "Take Moonfire off Cooldowns.",
+        "Moonfire. Drag it to move it, or off the bar to take it off.", TRAY }, " | "),
+        "tray, icon, its x, the icon, the tray: each its own note")
+    -- Off the x past the icon's edge, straight onto the tray: the tray's note.
+    Over(true, icon, icon.remove)
+    Enter(icon.remove)
+    Over(nil, icon, icon.remove)
+    Equal(Move(icon.remove, bp.tray), TRAY, "off an icon's x onto the tray: the tray's note")
+    Over(nil, bp.tray)
+    Leave(bp.tray)
+    Equal(Text(), ORANGE, "off the tray, the credit")
+    -- The profile menu over the tray: off an icon or the tray onto the menu,
+    -- the game leaves them, though they're still under the mouse, covered.
+    -- The footer rests, not on the tray's note under the menu.
+    w.profileButton:Click()
+    Over(true, bp.tray, icon)
+    Enter(icon)
+    Leave(icon)
+    local offIcon = Text()
+    Over(nil, icon)
+    Enter(bp.tray)
+    Over(true, icon) -- an icon under the menu, where the mouse now is
+    Leave(bp.tray)
+    Equal(offIcon .. " | " .. Text(), ORANGE .. " | " .. ORANGE, "onto the profile menu off an icon, or off the tray over an icon: the credit")
+    Over(nil, bp.tray, icon)
+    w.profileButton:Click()
+
+    -- The spell list's ticks say what ticking does.
+    local function ListRow(name)
+        for _, f in ipairs(frames) do
+            if f.spell == name and S[f].shown then return f end
+        end
+    end
+    Equal(NoteOf(ListRow("Moonfire").check), "Take Moonfire off Cooldowns.", "a ticked spell: untick to take it off")
+    -- The tick's click area is its whole row: the spell's icon, name and
+    -- rank say what ticking does too, and click it.
+    local listRow = ListRow("Moonfire")
+    local check, inset = listRow.check, function(i) return Last(listRow.check, "SetHitRectInsets", i) or 0 end
+    local left = S[check].points[1][2]
+    Equal(left + inset(1) == 0 and left + S[check].width - inset(2) == S[listRow].width
+        and S[check].height - inset(3) - inset(4) == S[listRow].height and inset(3) == inset(4), true,
+        "a spell's tick reaches across its whole row, and all the way down")
+    -- A slider's note is on all of it, its label and value too.
+    Equal(NoteOf(bp.spacing) .. " | " .. tostring(Last(bp.spacing, "EnableMouse")), "The room between this bar's icons. | true",
+        "hovering a slider's label or value, its note")
+    Equal(NoteOf(ListRow("Thorns").check), "Put Thorns on Cooldowns.", "an unticked one: tick to put it on")
+    B:Assign("Thorns", "util")
+    w:Refresh()
+    Equal(NoteOf(ListRow("Thorns").check), "Move Thorns here from Utility.", "one on the other bar: ticking moves it")
+    B:Assign("Thorns", nil)
+
+    -- The profile menu: a row, its x, and back.
+    w.profileButton:Click()
+    local profileRow
+    for _, f in ipairs(objects) do
+        if rawget(f, "profile") and rawget(f, "remove") and Under(f, w) and f:IsVisible() then profileRow = f end
+    end
+    Over(true, profileRow)
+    Enter(profileRow)
+    local onRow = Text()
+    Over(true, profileRow.remove)
+    local onX = Move(profileRow, profileRow.remove)
+    Over(nil, profileRow.remove)
+    local rowBack = Move(profileRow.remove, profileRow)
+    Equal(onRow .. " | " .. onX .. " | " .. rowBack, "The profile you're on. | Delete " .. profileRow.profile .. ". It asks first. | The profile you're on.",
+        "a profile, its x, and back")
+    -- Its x asks first: under the dialog's shade the footer rests, not on
+    -- the covered profile's note, and stays so after Cancel.
+    Over(true, profileRow.remove)
+    Move(profileRow, profileRow.remove)
+    profileRow.remove:Click()
+    Leave(profileRow.remove)
+    local asked = Text()
+    w.confirm.no:Click()
+    Equal(asked .. " | " .. Text(), ORANGE .. " | " .. ORANGE, "a profile's x, then Cancel: the credit, never the covered profile's note")
+    Over(nil, profileRow, profileRow.remove)
+    Leave(profileRow)
+
+    -- The Look page's Turn on under an empty list says what it does too.
+    w:Select("look")
+    ns.loaded.skin = false
+    w:Refresh()
+    Equal(NoteOf(w.eachFix), "Reload your interface so the look takes effect.", "the list's Reload says what it does")
+    ns.Set("skin", false)
+    w:Refresh()
+    Equal(NoteOf(w.eachFix), "Tick Apply this look to the Cooldown Manager above, then reload.", "and its Turn on")
+    ns.Set("skin", true)
+    ns.loaded.skin = true
+    w:Refresh()
+
+    -- Every button, text box, slider and anything else that takes the mouse
+    -- in the window has a note (the "Are you sure?" dialog and the tour's box
+    -- say everything themselves; the window, the profile menu and the
+    -- dialog's shade are only the ground under the rest), and on every page
+    -- each one showing shows its note on hover and gives the footer back after.
+    S[lp.search].scripts.OnEditFocusGained(lp.search) -- its results, made as they show
+    S[lp.search].scripts.OnEditFocusLost(lp.search)
+    local ground = { [w.profilePanel] = true, [w.confirm.shade] = true }
+    if _G.FECMTour then ground[FECMTour] = true end
+    local function Control(region)
+        local s = S[region]
+        if not s or ground[region] then return false end
+        return s.kind == "Button" or s.kind == "EditBox" or rawget(region, "track") ~= nil
+            or (s.parent and rawget(s.parent, "track") == region) or Last(region, "EnableMouse") == true
+    end
+    local controls, missing = {}, {}
+    for _, region in ipairs(objects) do
+        if Under(region, w) and Control(region) and not Under(region, w.confirm.shade)
+            and not (_G.FECMTour and Under(region, FECMTour)) then
+            controls[#controls + 1] = region
+            if rawget(region, "hint") == nil then
+                missing[#missing + 1] = S[region].kind .. ":" .. tostring(S[region].text or (region.label and S[region.label].text)) .. " "
+            end
+        end
+    end
+    Equal(table.concat(missing), "", "every button, text box, slider, list thumb and anything else taking the mouse in the window has a note")
+    Equal(#controls > 150, true, "all of them checked (" .. #controls .. ")")
+    local quiet, tried = {}, {}
+    for _, key in ipairs({ "cd", "util", "buff", "debuff", "look", "layout", "cast", "general" }) do
+        w:Select(key)
+        w.profileButton:Click() -- the profile menu over each page, as it can be
+        for _, control in ipairs(controls) do
+            local areas, parent = {}, S[control].parent
+            while parent and parent ~= w do
+                areas[#areas + 1] = parent
+                parent = S[parent].parent
+            end
+            Over(true, table.unpack(areas))
+            Over(true, control)
+            Enter(control)
+            if control:IsVisible() then
+                tried[control] = true
+                local text = Text()
+                if type(text) ~= "string" or text == "" or text:find("^Made with") then
+                    quiet[#quiet + 1] = key .. ":" .. S[control].kind .. ":" .. tostring(text) .. " "
+                end
+            end
+            Over(nil, control)
+            Over(nil, table.unpack(areas))
+            Leave(control)
+            if Text() ~= ORANGE then quiet[#quiet + 1] = key .. " left on: " .. tostring(Text()) .. " " end
+        end
+        w.profileButton:Click()
+    end
+    local count = 0
+    for _ in pairs(tried) do count = count + 1 end
+    Equal(table.concat(quiet), "", "on every page, each control showing has its note on hover and gives the footer back")
+    Equal(count > 120, true, "most of them showing on one page or another (" .. count .. ")")
+    Equal(#printed, 0, "no errors")
+end)()
 
 print = _G.print
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

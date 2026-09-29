@@ -8,7 +8,9 @@ local T = ns.Theme
 local WIDTH, HEIGHT = 820, 560
 local HEADER, FOOTER, NAV = 42, 28, 180
 local PREVIEW = 9 -- icons previewed under each bar's name
-local HINT = "Each spell shows once, at your highest rank."
+local HEART = "Heart.tga" -- white on clear, tinted to the accent in the footer's credit
+-- A list's scroll thumb, wherever there's one: the bar pages, Look and the profiles.
+ns.SCROLL_NOTE = "Drag to scroll the list, or turn the mouse wheel over it."
 
 local function Version()
     local version = ns.Version()
@@ -32,6 +34,8 @@ local SWATCH, SWATCH_GAP = 20, 6 -- colour swatches
 local ROW, ROW_SWATCH = 24, 16 -- the list of Tracked Bars
 -- The preview's icons, for the border and shadow.
 local SAMPLE_ICONS = { "Spell_Nature_Lightning", "Ability_Rogue_Sprint", "Spell_Holy_FlashHeal", "Spell_Fire_Fireball" }
+-- And keys on them, for the keybinds: made up, so the preview isn't tied to your own.
+local SAMPLE_KEYS = { "1", "S2", "M4", "C3" }
 local ICON, ICON_GAP = 26, 4
 
 local function Swatch(parent, size, onClick)
@@ -84,8 +88,6 @@ local function BuildLook(window, page, width)
         if ns.CastBar then ns.CastBar:Apply() end
         window:Refresh()
     end
-    local function Note(text) window.note:SetText(text) end
-    local function Unnote() window.note:SetText(window.lastNote or "") end
 
     -- Title row; a reload is offered at the right once one is needed.
     local title = T:Heading(page, "Look")
@@ -106,6 +108,7 @@ local function BuildLook(window, page, width)
     local managerOn = T:Button(page, "Turn on", 70, 18)
     managerOn:SetPoint("LEFT", off, "RIGHT", 8, 0)
     managerOn:SetScript("OnClick", TurnOnManager)
+    window:Hint(managerOn, "Switch Blizzard's Cooldown Manager on (Options > Gameplay > Advanced Options).")
     window.turnOnManager = managerOn
     -- Straight from the click, while the window is still shown.
     local function Reload()
@@ -119,6 +122,7 @@ local function BuildLook(window, page, width)
     local reload = T:Button(page, "Reload to apply", 120, 20)
     reload:SetPoint("TOPRIGHT", -16, -12)
     reload:SetScript("OnClick", Reload)
+    window:Hint(reload, "Reload your interface so the changes here take effect.")
     window.reload = reload
 
     -- The preview: a bar like Blizzard's, in the design and colour chosen.
@@ -145,6 +149,7 @@ local function BuildLook(window, page, width)
         texture:SetTexture("Interface\\Icons\\" .. art)
         ns.Style:Zoom(texture)
         icon.decor = ns.Style:Decor(icon, icon)
+        icon.key = ns.Style:KeyText(icon)
         sample.icons[i] = icon
     end
     window.sampleIcons = sample
@@ -167,6 +172,9 @@ local function BuildLook(window, page, width)
         Redraw()
     end)
     design:SetPoint("TOPLEFT", 100, 0)
+    for _, button in ipairs(design.buttons) do
+        window:Hint(button, "The design for Blizzard's Tracked Bars, your cast bar and, with its look on, your resource display.")
+    end
     window.barDesign = design
     Label("Colour", -32)
     local barSwatches = {}
@@ -177,11 +185,9 @@ local function BuildLook(window, page, width)
         end)
         swatch:SetPoint("TOPLEFT", 100 + (i - 1) * (SWATCH + SWATCH_GAP), -28)
         swatch.key = key
-        if key == "class" then
-            ClassIcon(swatch)
-            swatch:SetScript("OnEnter", function() Note("Your class colour.") end)
-            swatch:SetScript("OnLeave", Unnote)
-        end
+        if key == "class" then ClassIcon(swatch) end
+        window:Hint(swatch, (key == "class" and "Your class colour" or ns.BAR_COLOUR_NAMES[key])
+            .. " for all your Tracked Bars. Each bar can have its own below.")
         barSwatches[i] = swatch
     end
     window.barSwatches = barSwatches
@@ -198,10 +204,7 @@ local function BuildLook(window, page, width)
             Redecorate()
         end)
         pills:SetPoint("TOPLEFT", 100, y)
-        for _, button in ipairs(pills.buttons) do
-            button:HookScript("OnEnter", function() Note(note) end)
-            button:HookScript("OnLeave", Unnote)
-        end
+        for _, button in ipairs(pills.buttons) do window:Hint(button, note) end
         return pills
     end
     local border = Decor("Border", "iconBorder", -60,
@@ -211,15 +214,14 @@ local function BuildLook(window, page, width)
     window.iconBorder, window.iconShadow = border, shadow
 
     -- What the look applies to; the footer explains each.
-    local function Choice(label, key, y, note, after)
+    local function Choice(label, key, y, note, after, x)
         local check = T:Check(options, label, function(self)
             ns.Set(key, self:GetChecked())
             if after then after() end
             window:Refresh()
         end)
-        check:SetPoint("TOPLEFT", 0, y)
-        check:HookScript("OnEnter", function() Note(note) end)
-        check:HookScript("OnLeave", Unnote)
+        check:SetPoint("TOPLEFT", x or 0, y)
+        window:Hint(check, note)
         return check
     end
     local look = Choice("Apply this look to the Cooldown Manager", "skin", -116,
@@ -233,6 +235,52 @@ local function BuildLook(window, page, width)
         "Forever's display has none, so the addon draws them: five segments as wide as the display, for rogues and druids in cat form.",
         function() if ns.Resource then ns.Resource:Apply() end end)
     window.look, window.personal, window.repeatMana, window.combo = look, personal, repeatMana, combo
+
+    -- Keybinds on the icons, in the right-hand column clear of the rows on
+    -- the left: the tick, then where on each icon (level with Colour) and how
+    -- big (level with Border). Changes show at once on the preview, your
+    -- bars and Blizzard's icons.
+    local KEYS_X = 330
+    local function KeyLook()
+        if ns.Bars then ns.Bars:ApplyKeybinds() end
+        if ns.Skin then ns.Skin:ApplyKeybinds() end
+    end
+    local function Rekey()
+        if ns.Keybinds then ns.Keybinds:Update() end
+        KeyLook()
+    end
+    local keybinds = Choice("Keybinds on icons (Needs testing)", "keybinds", -2,
+        "The key that casts each spell or uses each item, from your action bars, on your Cooldowns and Utility bars. Blizzard's icons get them while Apply this look to the Cooldown Manager is on.",
+        Rekey, KEYS_X)
+    local placeItems = {}
+    for _, key in ipairs(ns.KEYBIND_POSITIONS) do
+        placeItems[#placeItems + 1] = { key = key, label = ns.KEYBIND_POSITION_NAMES[key] }
+    end
+    local keyPlace = T:Segmented(options, placeItems, 258, function(key)
+        ns.Set("keybindPosition", key)
+        KeyLook()
+        window:Refresh()
+    end)
+    keyPlace:SetPoint("TOPLEFT", KEYS_X + 18, -28)
+    -- Greyed out while the tick is off, and each says why on hover.
+    local KEYS_OFF = "Tick Keybinds on icons first."
+    for _, button in ipairs(keyPlace.buttons) do
+        window:Hint(button, function()
+            return ns.Get("keybinds") and "Where the key sits on each icon. At the bottom, the count or charges on an icon with a key move to the top right."
+                or KEYS_OFF
+        end)
+    end
+    local keySize = T:Slider(options, "Size", ns.KEYBIND_SIZE, 10, 258, function(value)
+        ns.Set("keybindSize", value)
+        KeyLook()
+        window:Refresh()
+    end)
+    keySize:SetPoint("TOPLEFT", KEYS_X + 18, -60)
+    window:Hint(keySize, function()
+        return ns.Get("keybinds") and "The key's size: 100 follows each icon's size. It stays clear of the countdown, which moves over a little on small icons."
+            or KEYS_OFF
+    end)
+    window.keybinds, window.keyPlace, window.keySize = keybinds, keyPlace, keySize
 
     -- Each Tracked Bar in a colour of its own.
     local eachTitle = T:Heading(page, "Each bar")
@@ -248,6 +296,7 @@ local function BuildLook(window, page, width)
             or "It couldn't be switched on here: Options > Combat > Personal Resource Display.")
         window:Refresh()
     end)
+    window:Hint(personalOn, "Switch your Personal Resource Display on (Options > Combat).")
     local personalOff = T:Text(page, "GameFontHighlightSmall", T.WARN)
     personalOff:SetPoint("RIGHT", personalOn, "LEFT", -8, 0)
     personalOff:SetJustifyH("RIGHT")
@@ -266,6 +315,7 @@ local function BuildLook(window, page, width)
     local fix = T:Button(listPanel, "Turn on", 90, 20)
     fix:SetPoint("TOPLEFT", empty, "BOTTOMLEFT", 0, -8)
     fix:SetScript("OnClick", function(self) if self.action then self.action() end end)
+    window:Hint(fix, function() return fix.about end)
     window.eachFix = fix
     local listWidth = inner - 30
     -- Pinned by two corners, again once the page shows (see the bar page).
@@ -278,6 +328,7 @@ local function BuildLook(window, page, width)
     end
     Pin()
     page:HookScript("OnShow", function() C_Timer.After(0, Pin) end)
+    window:Hint(scroll.thumb, ns.SCROLL_NOTE)
     local rows = {}
     window.eachRows = rows
     local SWATCHES_AT = 260
@@ -286,6 +337,11 @@ local function BuildLook(window, page, width)
         local row = CreateFrame("Frame", nil, scroll.content)
         row:SetSize(listWidth, ROW)
         row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW)
+        -- The row says what it's for round its swatches, which say their own.
+        row:EnableMouse(true)
+        window:Hint(row, function()
+            return (row.name:GetText() or "This bar") .. ": click a colour on the right for this bar alone."
+        end)
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(18, 18)
         row.icon:SetPoint("LEFT", 4, 0)
@@ -309,12 +365,11 @@ local function BuildLook(window, page, width)
             swatch:SetPoint("LEFT", SWATCHES_AT + (s - 1) * (ROW_SWATCH + 6), 0)
             swatch.key = key
             if key == "class" then ClassIcon(swatch) end
-            swatch:SetScript("OnEnter", function()
+            window:Hint(swatch, function()
                 local entry = row.entry
-                Note(entry and entry.back and ("A colour for this bar. Click it again for " .. entry.back .. ".")
-                    or "A colour for this bar. Click it again to use the colour for all bars.")
+                return entry and entry.back and ("A colour for this bar. Click it again for " .. entry.back .. ".")
+                    or "A colour for this bar. Click it again to use the colour for all bars."
             end)
-            swatch:SetScript("OnLeave", Unnote)
             row.swatches[s] = swatch
         end
         row.chosen = T:Text(row, "GameFontHighlightSmall", T.MUTED)
@@ -336,14 +391,15 @@ local function BuildLook(window, page, width)
         end)
         swatch:SetPoint("BOTTOMLEFT", 126 + (i - 1) * (SWATCH + SWATCH_GAP), 14)
         swatch.key = key
+        window:Hint(swatch, T.ACCENTS[key].name .. " for this window's headings, ticks, sliders and highlights.")
         swatches[i] = swatch
     end
     window.swatches = swatches
     local chosen = T:Text(page, "GameFontHighlightSmall", T.MUTED)
     chosen:SetPoint("BOTTOMLEFT", 126 + #ns.ACCENT_KEYS * (SWATCH + SWATCH_GAP) + 2, 18)
 
-    -- Why the list is empty, if it is, and a button's label and action to
-    -- fix it where the addon can.
+    -- Why the list is empty, if it is, and a button's label, action and note
+    -- to fix it where the addon can.
     local function ApplyLook()
         ns.Set("skin", true)
         window:Say("Reload to apply the look, then colour your bars here.")
@@ -351,10 +407,16 @@ local function BuildLook(window, page, width)
     end
     local function EmptyText(spells)
         if not ns.loaded.skin then
-            if ns.Get("skin") then return "Reload first, then colour your bars one by one here.", "Reload", Reload end
-            return "Apply this look to the Cooldown Manager and reload to colour your bars one by one.", "Turn on", ApplyLook
+            if ns.Get("skin") then
+                return "Reload first, then colour your bars one by one here.", "Reload", Reload,
+                    "Reload your interface so the look takes effect."
+            end
+            return "Apply this look to the Cooldown Manager and reload to colour your bars one by one.", "Turn on", ApplyLook,
+                "Tick Apply this look to the Cooldown Manager above, then reload."
         end
-        if not ns.CooldownManagerOn() then return "Blizzard's Cooldown Manager is off.", "Turn on", TurnOnManager end
+        if not ns.CooldownManagerOn() then
+            return "Blizzard's Cooldown Manager is off.", "Turn on", TurnOnManager, "Switch Blizzard's Cooldown Manager on."
+        end
         if #spells == 0 then
             return "Blizzard's Tracked Bars (buffs shown as timer bars) will be listed here to colour once you set some up in Blizzard's Cooldown Settings. Not using them? Nothing to do here."
         end
@@ -379,6 +441,21 @@ local function BuildLook(window, page, width)
         ns.Style:ShowDecor(sample.decor, ns.Style:DecorFor("bar"))
         local iconBorder, iconShadow = ns.Style:DecorFor("icon")
         for _, icon in ipairs(sample.icons) do ns.Style:ShowDecor(icon.decor, iconBorder, iconShadow) end
+        -- Keybinds: a new file, so only after a full restart.
+        local here, keysOn = ns.Keybinds ~= nil, ns.Get("keybinds")
+        keybinds:SetShown(here)
+        keyPlace:SetShown(here)
+        keySize:SetShown(here)
+        keybinds:SetChecked(keysOn)
+        keyPlace:SetSelected(ns.Get("keybindPosition"))
+        keyPlace:SetUsable(keysOn)
+        keySize:Set(ns.Get("keybindSize"))
+        keySize:SetUsable(keysOn)
+        -- The same calls as the bars, so the preview can't drift from them.
+        for i, icon in ipairs(sample.icons) do
+            ns.Style:KeyLook(icon.key, icon, ICON, ns.Style:CountdownSize(ICON))
+            ns.Style:SetKey(icon.key, SAMPLE_KEYS[i])
+        end
         local barColour = ns.Get("barColour")
         for _, swatch in ipairs(barSwatches) do
             PaintSwatch(swatch, ns.Style:BarColour(swatch.key), swatch.key == barColour)
@@ -404,7 +481,7 @@ local function BuildLook(window, page, width)
         end
         local personalRows = #entries
         local spells = ns.loaded.skin and on and ns.Skin and ns.Skin:TrackedBars() or {}
-        local why, fixLabel, fixAction = EmptyText(spells)
+        local why, fixLabel, fixAction, fixNote = EmptyText(spells)
         if not why then
             for _, id in ipairs(spells) do entries[#entries + 1] = { spell = id } end
         end
@@ -413,7 +490,7 @@ local function BuildLook(window, page, width)
         empty:SetText(why or "")
         empty:SetShown(why ~= nil)
         fix:SetLabel(fixLabel or "")
-        fix.action = fixAction
+        fix.action, fix.about = fixAction, fixNote
         fix:SetShown(fixAction ~= nil)
         local own = ns.BarColours()
         for i, entry in ipairs(entries) do
@@ -509,6 +586,7 @@ local function BuildGeneral(window, page)
         window:Refresh()
     end)
     bars:SetPoint("TOPLEFT", 16, -36)
+    window:Hint(bars, "Your own Cooldowns, Utility, Buffs and Debuffs bars. Off, none of them show.")
     window.useBars = bars
     Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left. Move and arrange them on the Layout page.", 34, -56)
 
@@ -518,6 +596,7 @@ local function BuildGeneral(window, page)
         if ns.MinimapButton then ns.MinimapButton:Apply() end
     end)
     minimap:SetPoint("TOPLEFT", 16, -116)
+    window:Hint(minimap, "A button on the minimap for these settings. Off, /ccm still opens them.")
     window.minimap = minimap
     Detail(page, "Click it for these settings, right-click for What's new, and drag it round the minimap.", 34, -136)
 
@@ -527,10 +606,12 @@ local function BuildGeneral(window, page)
     local tour = T:Button(page, "Take the tour", 110, 22)
     tour:SetPoint("TOPLEFT", 16, -194)
     tour:SetScript("OnClick", function() if ns.Tour then ns.Tour:Start() end end)
+    window:Hint(tour, "A short tour of this window, a page at a time. /ccm tour starts it too.")
     window.tour = tour
     local discord = T:Button(page, "Discord", 80, 22)
     discord:SetPoint("TOPLEFT", 134, -194)
     discord:SetScript("OnClick", ns.ShowDiscord)
+    window:Hint(discord, "The Discord invite, ready to copy: bugs, ideas and help.")
     window.discord = discord
     local helpAbout = T:Text(page, "GameFontHighlightSmall", T.MUTED)
     helpAbout:SetPoint("LEFT", discord, "RIGHT", 10, 0)
@@ -564,11 +645,13 @@ local function BuildGeneral(window, page)
             run("")
         end
     end)
+    window:Hint(moreOpen, "Open EraUI's settings, as /era does.")
     local moreLinks = {}
     for i, link in ipairs(ERAUI_LINKS) do
         local button = T:Button(more, link.label, 90, 22)
         button:SetPoint("RIGHT", -12 - (#ERAUI_LINKS - i) * 98, 0)
         button:SetScript("OnClick", function() CopyLink("EraUI on " .. link.label, link.url, link.note) end)
+        window:Hint(button, "EraUI on " .. link.label .. ", as a link to copy.")
         moreLinks[i] = button
     end
     window.moreOpen, window.moreState, window.moreLinks = moreOpen, moreState, moreLinks
@@ -587,6 +670,14 @@ local function BuildGeneral(window, page)
 end
 
 -- The bar list ---------------------------------------------------------------------
+
+-- What each page is for, in the footer on hover.
+local NAV_NOTES = {
+    look = "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds and the accent.",
+    layout = "One-click layouts that stack your bars around your Personal Resource Display.",
+    cast = "Your own cast bar and a swing timer, under your Personal Resource Display.",
+    general = "Your bars on or off, the minimap button, the tour, the Discord and EraUI.",
+}
 
 local function NavItem(window, nav, key, label, y, previews)
     local item = CreateFrame("Button", nil, nav)
@@ -624,6 +715,7 @@ local function NavItem(window, nav, key, label, y, previews)
     end
     item.key = key
     item:SetScript("OnClick", function() window:Select(key) end)
+    window:Hint(item, NAV_NOTES[key] or ("Your " .. label .. " bar: its icons, how it shows, and your spells to tick onto it."))
     return item
 end
 
@@ -680,6 +772,83 @@ local function BuildConfirm(window)
     end
 end
 
+-- The footer: the version on the left; on the right a note for the control
+-- under the mouse, or else the last message, or else who made the addon.
+-- Built before the pages, which give their controls notes as they're made.
+
+-- "Made with <heart> by Squirt", the heart and name in the accent. The font
+-- has no heart, so it's a small white texture inline in the text, tinted by
+-- the escape's own colour: the text lays it out, so it sits right however
+-- the line is justified, and it repaints with the line.
+local function Credit()
+    local accent = T:Accent()
+    local function Byte(v) return math.floor(math.max(0, math.min(1, v)) * 255 + .5) end
+    return ("Made with |T%s:0:0:0:0:32:32:0:32:0:32:%d:%d:%d|t by |cff%sSquirt|r"):format(ns.MEDIA .. HEART,
+        Byte(accent[1]), Byte(accent[2]), Byte(accent[3]), T:Hex(accent))
+end
+
+local function BuildFooter(window)
+    local version = T:Text(window, "GameFontHighlightSmall", T.MUTED)
+    version:SetPoint("BOTTOMLEFT", 12, 9)
+    version:SetText(Version() .. "   /ccm to open")
+    window.versionText = version
+    local note = T:Text(window, "GameFontHighlightSmall", T.MUTED)
+    note:SetPoint("BOTTOMRIGHT", -12, 9)
+    note:SetJustifyH("RIGHT")
+    note:SetWidth(560)
+    window.note = note
+    -- Shown at the next refresh, and until the one after.
+    function window:Say(text)
+        self.message = text
+    end
+
+    -- The hovered control's note, worked out afresh (some change as you
+    -- click), or what the footer rests on: the last message, or the credit.
+    -- A message just said goes in front of the hovered control's note until
+    -- the mouse moves onto a control, or the next refresh.
+    function window:ShowNote()
+        local hovered = self.hovered
+        if hovered and not hovered:IsVisible() then hovered, self.hovered = nil, nil end
+        local text = hovered and not self.saying and hovered.hint
+        if type(text) == "function" then text = text(hovered) end
+        self.lastNote = self.said or Credit()
+        note:SetText(text or self.lastNote)
+    end
+    function window:Note(control)
+        self.hovered, self.saying = control, nil
+        self:ShowNote()
+    end
+    -- Off a control, the footer rests. Notes follow the game's own enter and
+    -- leave, which know what's on top (the "Are you sure?" dialog, the
+    -- profile menu, the tour's box), not where the mouse is: from a control
+    -- onto the next, a row onto its buttons or back, the game sends both in
+    -- the same frame, so the resting line in between is never drawn. Only
+    -- the control whose note is up can take it down, whichever order the
+    -- game sends them.
+    function window:Unnote(control)
+        if self.hovered ~= control then return end
+        self.hovered = nil
+        self:ShowNote()
+    end
+    -- Every control's note, set up the same way. text: its note, or a
+    -- function for one that changes. Hooked, so each keeps its own hover
+    -- look. A slider has it all over, its label and value too, and on its
+    -- track, which takes the mouse over the rest.
+    function window:Hint(control, text)
+        if control.track then
+            control:EnableMouse(true)
+            self:Hint(control.track, text)
+        end
+        control.hint = text
+        control:HookScript("OnEnter", function() window:Note(control) end)
+        control:HookScript("OnLeave", function() window:Unnote(control) end)
+    end
+    -- Closed, nothing is under the mouse any more: open, the footer rests.
+    window:HookScript("OnHide", function() window.hovered = nil end)
+    -- A new accent recolours the heart and name at once.
+    T:Paint(function() window:ShowNote() end)
+end
+
 local function BuildWindow()
     local window = CreateFrame("Frame", "FECMFrame", UIParent, "BackdropTemplate")
     window:SetSize(WIDTH, HEIGHT)
@@ -715,6 +884,8 @@ local function BuildWindow()
     window.fades.page:SetPoint("BOTTOMRIGHT", -1, FOOTER)
     window.close = header.close
     window.header = header
+    BuildFooter(window)
+    window:Hint(header.close, "Close the window. Escape closes it too, and /ccm opens it again.")
     BuildConfirm(window)
     ns.BuildProfileMenu(window, header, header.close)
 
@@ -758,6 +929,7 @@ local function BuildWindow()
     local news = T:Button(nav, "What's new", NAV - 24, 22)
     news:SetPoint("BOTTOMLEFT", 12, 12)
     news:SetScript("OnClick", function() if ns.ShowNotes then ns.ShowNotes() end end)
+    window:Hint(news, "What changed in this version. /ccm new shows it too.")
     window.news = news
 
     -- Pages fill the rest.
@@ -777,20 +949,6 @@ local function BuildWindow()
     end
     BuildGeneral(window, window.pages.general)
     ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)
-
-    -- Footer: the version, and messages from the window (or a tip).
-    local version = T:Text(window, "GameFontHighlightSmall", T.MUTED)
-    version:SetPoint("BOTTOMLEFT", 12, 9)
-    version:SetText(Version() .. "   /ccm to open")
-    window.versionText = version
-    local note = T:Text(window, "GameFontHighlightSmall", T.MUTED)
-    note:SetPoint("BOTTOMRIGHT", -12, 9)
-    note:SetJustifyH("RIGHT")
-    note:SetWidth(560)
-    window.note = note
-    function window:Say(text)
-        self.message = text
-    end
 
     window.selected = "cd"
     function window:Select(key)
@@ -827,9 +985,12 @@ local function BuildWindow()
             page:SetShown(key == (barPage and "bar" or selected))
         end
         if barPage then self.pages.bar:Refresh(selected) else self.pages[selected]:Refresh() end
-        self.lastNote = self.message or HINT
-        self.note:SetText(self.lastNote)
-        self.message = nil
+        -- A message takes the footer, even from the control just clicked,
+        -- for now: the next refresh without one, or the mouse onto another
+        -- control, brings a hovered control's note back, updated.
+        self.said, self.message = self.message, nil
+        self.saying = self.said ~= nil
+        self:ShowNote()
     end
 
     ns.window = window

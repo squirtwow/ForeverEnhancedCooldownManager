@@ -1,10 +1,12 @@
 -- The tour: the basics a step at a time, like the game's own tips for new
 -- characters. Each step opens the page it's about, outlines the part it
 -- means in the accent, and explains it in a box beside it with Back, Next and
--- Skip tour. A Try it step moves on by itself once you've done what it asks.
--- The tour only opens pages and points: it never changes a setting, and the
--- outline takes no clicks. A first install opens the window with a welcome
--- that offers it; after that it's on the General page and /ccm tour.
+-- Skip tour. A Try it step can move on by itself once you've done what it
+-- asks. The tour only opens pages and points: it never changes a setting,
+-- and the outline takes no clicks. A first install opens the window with a
+-- welcome that offers it; after that it's on the General page and /ccm tour.
+-- Each step has the version it arrived in, and What's new offers a shorter
+-- tour of just the steps an update added (Show me what's new).
 local _, ns = ...
 local T = ns.Theme
 
@@ -17,9 +19,11 @@ local GAP = 14 -- between the part outlined and the box
 local OUTLINE = 4 -- how far outside that part the outline sits
 local CHECK_EVERY = .25 -- how often a Try it step looks to see if it's done
 local TOUR_NOTE = "Take the tour any time from the General page, or with /ccm tour."
+local NEWS_NOTE = "See it again any time from What's new, or with /ccm new."
 
 local window, box, outline
 local steps, index, started, welcome
+local news -- the tour showing is What's new's
 local since = 0
 
 local function Value(value, ...)
@@ -48,20 +52,26 @@ end
 -- The end of the Look step, once the look is on or waiting for a reload.
 local PICK = " Pick its design, colour, border and shadow here. Your own bars use them too."
 
--- The steps. page: the page it opens (none keeps the one showing). target:
--- the part it outlines, or the first and last of a row of them. side: where
--- the box goes, "right", "left", "below" or "above"; align "end" lines the
--- box up with the far end, where the side has one. A Try it step has watch,
--- a count that goes up once it's done, unless already says it was done
--- before the step began.
+-- The steps of the full tour, the basics. version: the version the step
+-- arrived in. page: the page it opens (none keeps the one showing). when:
+-- whether it can show here, if it can't always. target: the part it
+-- outlines, or the first and last of a row of them. side: where the box
+-- goes, "right", "left", "below" or "above"; align "end" lines the box up
+-- with the far end, where the side has one, and "before" (above only) ends it
+-- just past the start, reaching back over what's before it. A Try it step
+-- moves on by itself when it has watch, a count that goes up once it's done,
+-- unless already says it was done before the step began; without watch it
+-- waits for Next, for a step with more to do after it.
 local STEPS = {
     {
+        version = "1.0.0",
         title = "The menu",
         text = "Everything is in this list: your four bars at the top, then Look, Layout, Cast bar and General.",
         target = function(w) return w.navFrame end,
         side = "right",
     },
     {
+        version = "1.0.0",
         page = "general",
         title = "Switch your bars on",
         text = "Your own bars start off. Tick Use my bars to switch them on.",
@@ -73,6 +83,7 @@ local STEPS = {
         side = "below",
     },
     {
+        version = "1.0.0",
         page = "cd",
         title = "Add spells",
         text = "Tick spells in this list, or drag them in from your spellbook. Utility, Buffs and Debuffs work the same way.",
@@ -82,6 +93,7 @@ local STEPS = {
         side = "above",
     },
     {
+        version = "1.0.0",
         page = "cd",
         title = "This bar's options",
         text = "Icon size, spacing, icons per row, and whether the bar shows out of combat. Each bar has its own.",
@@ -89,6 +101,7 @@ local STEPS = {
         side = "below",
     },
     {
+        version = "1.0.0",
         page = "layout",
         title = "Layouts",
         text = "One click stacks your bars round your Personal Resource Display. Then change any row, or drag icons between rows.",
@@ -99,6 +112,7 @@ local STEPS = {
         side = "below",
     },
     {
+        version = "1.0.0",
         page = "look",
         title = "The look",
         text = function()
@@ -125,8 +139,11 @@ local STEPS = {
         side = "below",
     },
     {
+        version = "1.0.0",
         page = "cast",
-        when = function(w) return w.pages.cast ~= nil end,
+        -- The page's file only loads after a full restart. Asked before the
+        -- window is made, for What's new's button.
+        when = function() return ns.BuildCastBarPage ~= nil end,
         title = "Cast bar",
         text = "Tick the first for your own cast bar under your resource display, or leave it off if you use a cast bar addon."
             .. " The second adds a swing timer in the same spot.",
@@ -135,6 +152,7 @@ local STEPS = {
         side = "below",
     },
     {
+        version = "1.0.0",
         title = "Profiles",
         text = "Each character has its own spell lists. Share one between characters, even across classes, or use one on all of them.",
         -- Once the menu is open the box moves beside it, so it never covers it.
@@ -143,6 +161,7 @@ local STEPS = {
         align = "end",
     },
     {
+        version = "1.0.0",
         title = "That's the basics",
         text = function()
             return (MinimapButton() and "Open these settings any time with this button or /ccm."
@@ -152,6 +171,49 @@ local STEPS = {
         target = function(w) return MinimapButton() or w.versionText end,
         side = function() return MinimapButton() and "below" or "above" end,
         align = function() return MinimapButton() and "end" or nil end,
+    },
+}
+
+-- Steps only What's new tours, for what an update added after the basics.
+-- The same fields as above. Steps waiting for the next update's number are
+-- ns.UNRELEASED; the release gives them that number.
+local NEWS = {
+    {
+        version = "1.1.0",
+        page = "look",
+        when = function() return ns.Keybinds ~= nil end, -- a new file: only after a full restart
+        title = "Keybinds on icons",
+        text = "Your action bar keys on your Cooldowns and Utility icons, and on Blizzard's while Apply this look is ticked."
+            .. " Pick where the key sits and how big it is.",
+        -- No watch: the position and size only work once it's ticked, so the
+        -- step stays for them until Next.
+        try = "Try it: tick it.",
+        already = function() return ns.Get("keybinds") end,
+        alreadyText = "They're already on.",
+        -- The tick, the position and the size; the box under the size, at its
+        -- right, clear of all three.
+        target = function(w) return w.keybinds, w.keySize end,
+        side = "below",
+        align = "end",
+    },
+    {
+        version = "1.1.0",
+        page = "layout",
+        title = "Live preview",
+        text = "Your icons here now have the border, shadow and keybinds from the Look page, as on your bars. Untick Live preview for plain icons.",
+        target = function(w) return w.pages.layout.live end,
+        -- Above it, reaching back over the display's tick: All bars is to its
+        -- right.
+        side = "above",
+        align = "before",
+    },
+    {
+        version = "1.1.0",
+        page = "layout",
+        title = "All bars",
+        text = "Makes all your bars bigger or smaller together, each keeping its size next to the others. A bar's own Icon size still fine-tunes it.",
+        target = function(w) return w.pages.layout.allBars end,
+        side = "above",
     },
 }
 
@@ -165,7 +227,10 @@ local PLACES = {
     above = { "BOTTOMLEFT", "TOPLEFT", 0, GAP, "TOP", "BOTTOMLEFT", 24, 0, "down" },
     belowEnd = { "TOPRIGHT", "BOTTOMRIGHT", 0, -GAP, "BOTTOM", "TOPRIGHT", -24, 0, "up" },
     aboveEnd = { "BOTTOMRIGHT", "TOPRIGHT", 0, GAP, "TOP", "BOTTOMRIGHT", -24, 0, "down" },
+    -- Ends 20 past the part's start, its arrow over a tick's box (6 in).
+    aboveBefore = { "BOTTOMRIGHT", "TOPLEFT", 20, GAP, "TOP", "BOTTOMRIGHT", -14, 0, "down" },
 }
+local ALIGNS = { ["end"] = "End", before = "Before" }
 
 local function Strip(frame, layer)
     local strip = frame:CreateTexture(nil, layer)
@@ -244,8 +309,9 @@ local function Build()
     end)
     back:SetScript("OnClick", function() Tour:Back() end)
     skip:SetScript("OnClick", function()
+        local note = news and NEWS_NOTE or TOUR_NOTE
         Tour:Stop()
-        window:Say(TOUR_NOTE)
+        window:Say(note)
         window:Refresh()
     end)
     box.next, box.back, box.skip = nextButton, back, skip
@@ -300,7 +366,8 @@ local function Point(step)
     outline:SetPoint("BOTTOMRIGHT", last, "BOTTOMRIGHT", OUTLINE, -OUTLINE)
     outline:Show()
     local side = Value(step.side, window) or "below"
-    local place = (Value(step.align, window) == "end" and PLACES[side .. "End"]) or PLACES[side] or PLACES.below
+    local align = ALIGNS[Value(step.align, window)]
+    local place = (align and PLACES[side .. align]) or PLACES[side] or PLACES.below
     local anchor = place[2]:find("RIGHT") and last or first
     box:ClearAllPoints()
     box:SetPoint(place[1], anchor, place[2], place[3], place[4])
@@ -348,17 +415,65 @@ end
 -- The tour from the start, over the window.
 function Tour:Start()
     if not Ready() then return end
-    steps = {}
+    steps, news = {}, nil
     for _, step in ipairs(STEPS) do
         if not step.when or step.when(window) then steps[#steps + 1] = step end
     end
     Show(1)
 end
 
+-- The newest version a step arrived in, no newer than the one running (for a
+-- copy straight from the source, the newest there is).
+local function Latest(now)
+    local compare, latest = ns.CompareVersions, nil
+    for _, list in ipairs({ STEPS, NEWS }) do
+        for _, step in ipairs(list) do
+            if (compare(step.version, now) or 1) < 1 and (not latest or compare(step.version, latest) == 1) then
+                latest = step.version
+            end
+        end
+    end
+    return latest
+end
+
+-- The steps an update added, the full tour's then What's new's: newer than
+-- the version seen before it and no newer than the one running, so versions
+-- skipped come together. With no version seen (What's new opened by hand, or
+-- none noted), the latest update's: the steps of the newest version that
+-- added any, so an update that adds none still offers the last ones. Only
+-- steps that can show.
+function Tour:News(seen)
+    local now, compare = ns.Version(), ns.CompareVersions
+    local byHand = not compare(seen, now)
+    local latest = byHand and Latest(now)
+    local list = {}
+    if byHand and not latest then return list end
+    for _, group in ipairs({ STEPS, NEWS }) do
+        for _, step in ipairs(group) do
+            local new
+            if latest then
+                new = compare(step.version, latest) == 0
+            else
+                new = compare(step.version, seen) == 1 and (compare(step.version, now) or 1) < 1
+            end
+            if new and (not step.when or step.when(window)) then list[#list + 1] = step end
+        end
+    end
+    return list
+end
+
+-- What's new's tour: just those steps, over the window.
+function Tour:StartNews(seen)
+    local list = self:News(seen)
+    if #list == 0 or not Ready() then return end
+    steps, news = list, true
+    Show(1)
+end
+
 -- A first install: the window, and an offer of the tour.
 function Tour:Welcome()
     if not Ready() then return end
-    steps, index, started, welcome = nil, nil, nil, true
+    steps, index, started, welcome, news = nil, nil, nil, true, nil
     box.title:SetText("WELCOME")
     box.count:Hide()
     box.text:SetText("New to " .. ns.TITLE .. "? A quick tour shows you the basics, a page at a time. It takes about a minute.")
@@ -375,8 +490,9 @@ end
 function Tour:Next()
     if not (steps and index) then return end
     if index < #steps then return Show(index + 1) end
+    local done = news and "That's what's new. " .. NEWS_NOTE or "That's the tour. " .. TOUR_NOTE
     self:Stop()
-    window:Say("That's the tour. " .. TOUR_NOTE)
+    window:Say(done)
     window:Refresh()
 end
 
@@ -385,7 +501,7 @@ function Tour:Back()
 end
 
 function Tour:Stop()
-    steps, index, started, welcome = nil, nil, nil, nil
+    steps, index, started, welcome, news = nil, nil, nil, nil, nil
     if box then
         box:Hide()
         outline:Hide()

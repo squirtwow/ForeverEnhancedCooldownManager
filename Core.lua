@@ -15,6 +15,36 @@ function ns.Version()
     return version
 end
 
+-- The version of whatever waits for the next update's number: its notes
+-- (Notes.lua) and the tour steps it adds (Tour.lua). The release gives them
+-- that number in place of this.
+ns.UNRELEASED = "Unreleased"
+
+-- A version as numbers to compare part by part ("1.10.2" is 1, 10, 2), or nil
+-- if it isn't one. What's unreleased comes after every release, and a copy
+-- straight from the source ("dev") after that.
+local function VersionParts(version)
+    if version == ns.UNRELEASED then return { math.huge } end
+    if version == "dev" then return { math.huge, math.huge } end
+    local digits = type(version) == "string" and version:match("^v?(%d+[%d%.]*)")
+    if not digits then return nil end
+    local parts = {}
+    for part in digits:gmatch("%d+") do parts[#parts + 1] = tonumber(part) end
+    return parts
+end
+
+-- -1, 0 or 1 as version a is older than, the same as or newer than b ("1.1"
+-- is "1.1.0"); nil if either isn't a version.
+function ns.CompareVersions(a, b)
+    a, b = VersionParts(a), VersionParts(b)
+    if not (a and b) then return nil end
+    for i = 1, math.max(#a, #b) do
+        local x, y = a[i] or 0, b[i] or 0
+        if x ~= y then return x < y and -1 or 1 end
+    end
+    return 0
+end
+
 ns.DEFAULTS = {
     skin = true,
     useBars = false, -- the addon's own bars
@@ -40,15 +70,25 @@ ns.DEFAULTS = {
     swingColour = "default", -- its colour: silver, or a bar colour
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
+    keybinds = false, -- each Cooldowns/Utility icon's key, from your action bars (Look page)
+    keybindPosition = "BOTTOM", -- where on the icon: BOTTOM, TOPLEFT, TOP or TOPRIGHT
+    keybindSize = 100, -- its size, as a share of the automatic size that follows the icon
+    layoutPreview = true, -- the Layout page draws your icons with the Look page's border, shadow and keybinds
+    barScale = 100, -- every bar's icons together, as a share of each bar's own size (the Layout page's All bars)
     minimap = true, -- the minimap button
     minimapAngle = 225, -- where it sits round the minimap: degrees anticlockwise from the right
 }
 ns.DECOR_KEYS = { "off", "icon", "bar" }
 ns.DECOR_NAMES = { off = "Off", icon = "Each icon", bar = "Whole bar" }
+ns.KEYBIND_POSITIONS = { "BOTTOM", "TOPLEFT", "TOP", "TOPRIGHT" }
+ns.KEYBIND_POSITION_NAMES = { BOTTOM = "Bottom", TOPLEFT = "Top left", TOP = "Top", TOPRIGHT = "Top right" }
 -- Number settings, each within its limits: min, max, default.
 ns.CAST_HEIGHT = { 10, 32, 18 }
 ns.MINIMAP_ANGLE = { 0, 359, 225 }
-local NUMBERS = { castHeight = ns.CAST_HEIGHT, minimapAngle = ns.MINIMAP_ANGLE }
+ns.KEYBIND_SIZE = { 50, 150, 100 } -- min, max, default (percent)
+ns.BAR_SCALE = { 50, 150, 100 } -- min, max, default (percent)
+local NUMBERS = { castHeight = ns.CAST_HEIGHT, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
+    barScale = ns.BAR_SCALE }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
 ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
@@ -57,8 +97,10 @@ ns.BAR_COLOUR_KEYS = { "orange", "charcoal", "blue", "green", "purple", "class" 
 ns.BAR_COLOUR_NAMES = { orange = "Orange", class = "Class", charcoal = "Charcoal", blue = "Blue", green = "Green", purple = "Purple" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
-    iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true } }
+    iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
+    keybindPosition = {} }
 for _, key in ipairs(ns.ACCENT_KEYS) do CHOICES.accent[key] = true end
+for _, key in ipairs(ns.KEYBIND_POSITIONS) do CHOICES.keybindPosition[key] = true end
 for _, key in ipairs(ns.BAR_STYLE_KEYS) do CHOICES.barStyle[key] = true end
 for _, key in ipairs(ns.BAR_COLOUR_KEYS) do
     CHOICES.barColour[key], CHOICES.prdHealth[key], CHOICES.prdPower[key] = true, true, true
@@ -534,6 +576,15 @@ function ns.BarData(key)
     return bar
 end
 
+-- A bar's icon size on screen: its own size (data, from ns.BarData) times the
+-- size for all bars, so a bigger bar stays bigger. Never under the smallest
+-- size a bar can have, where the countdown and keybind still fit; at most 96
+-- (a 64 bar at 150). At 100 it's the bar's own size.
+function ns.IconSize(data)
+    local size = math.floor(data.size * ns.Get("barScale") / 100 + .5)
+    return math.max(ns.BAR_LIMITS.size[1], size)
+end
+
 -- Layouts: your bars stacked around Blizzard's Personal Resource Display.
 -- Which bars sit above it and below it (each top to bottom) and beside it,
 -- each bar once, and whether the layout holds them now. Repaired in place.
@@ -798,6 +849,7 @@ local function Load()
     BuildOptionsEntry()
 
     if ns.loaded.skin and ns.Skin then ns.Skin:Start() end
+    if ns.Keybinds then ns.Keybinds:Start() end
     if ns.Resource then ns.Resource:Start() end
     if ns.CastBar then ns.CastBar:Start() end
     if ns.Bars then ns.Bars:Start() end

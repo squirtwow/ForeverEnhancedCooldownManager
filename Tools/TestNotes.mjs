@@ -1,5 +1,6 @@
 // What's new in the game (Notes.lua) must say what CHANGELOG.txt says, version
-// by version, and nothing unused ships in Media/. Run with: node --test Tools/TestNotes.mjs
+// by version, nothing unused ships in Media/, and the footer's heart is drawn
+// right. Run with: node --test Tools/TestNotes.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
@@ -53,6 +54,65 @@ test('only the newest notes can wait for their version number', async () => {
   });
 });
 
+// Tour.lua's steps, the full tour's then What's new's: each one's title and
+// the version lines on it ([line, number, placeholder] for each).
+async function tourSteps() {
+  const lua = (await read('Tour.lua')).replace(/\r\n/g, '\n');
+  const steps = [];
+  for (const list of ['STEPS', 'NEWS']) {
+    const start = lua.indexOf(`\nlocal ${list} = {\n`);
+    assert.ok(start >= 0, `${list} found in Tour.lua`);
+    const block = lua.slice(start, lua.indexOf('\n}\n', start));
+    for (const step of block.split(/\n    \{\n/).slice(1)) {
+      const title = step.match(/^        title = "([^"]+)",$/m);
+      steps.push({
+        title: title ? title[1] : step.trim().split('\n')[1],
+        versions: [...step.matchAll(/^        version = (?:"([^"]+)"|(ns\.UNRELEASED)),$/gm)],
+      });
+    }
+  }
+  return steps;
+}
+
+// -1, 0 or 1 as version a is older than, the same as or newer than b, part by
+// part as numbers ("1.10" after "1.9", "1.1" is "1.1.0").
+function compareVersions(a, b) {
+  const x = a.split('.').map(Number), y = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const difference = (x[i] ?? 0) - (y[i] ?? 0);
+    if (difference) return Math.sign(difference);
+  }
+  return 0;
+}
+
+// Tour.lua: each step says the version it arrived in, so What's new can tour
+// just an update's steps. A numbered one must be a version with notes; the
+// next update's wait as ns.UNRELEASED until the release gives them its number.
+test('every tour step has the version it arrived in', async () => {
+  const released = new Set(gameNotes(await read('Notes.lua')).map(entry => entry.version));
+  const steps = await tourSteps();
+  for (const step of steps) {
+    assert.equal(step.versions.length, 1, `one version on: ${step.title}`);
+    const [, number, placeholder] = step.versions[0];
+    if (!placeholder) assert.ok(released.has(number), `"${number}" has notes in Notes.lua`);
+  }
+  assert.ok(steps.length >= 12, 'every step checked');
+});
+
+// A release never shows steps still waiting for their number, so it gives
+// them its number when its notes get it. Once the newest notes are a release
+// newer than every numbered step, a step still waiting was left behind.
+test('tour steps waiting for their number get it with the notes', async () => {
+  const newest = gameNotes(await read('Notes.lua'))[0].version;
+  const steps = await tourSteps();
+  const waiting = steps.filter(step => step.versions[0]?.[2]).map(step => step.title);
+  const numbered = steps.map(step => step.versions[0]?.[1]).filter(Boolean);
+  if (!/^\d+(\.\d+)*$/.test(newest) || waiting.length === 0) return;
+  assert.ok(numbered.some(number => compareVersions(number, newest) >= 0),
+    `${waiting.join(', ')} still wait as ns.UNRELEASED, but the newest notes are ${newest}, newer than every numbered step:`
+    + ` give them ${newest} if they shipped in it, or add the next update's notes as Unreleased first`);
+});
+
 test('every section has bullets, and none use em dashes', async () => {
   for (const entry of gameNotes(await read('Notes.lua'))) {
     for (const section of entry.sections) {
@@ -70,6 +130,34 @@ test('the swing timer is described as it works wherever players read about it', 
     assert.match(text, /main hand and ranged swings \(Auto Shot for hunters\)/, name);
     assert.doesNotMatch(text, /main hand for everyone else/, name);
   }
+});
+
+// The footer's credit draws its heart from Media: a 32x32 uncompressed 32-bit
+// TGA like the addon's other textures, white so the accent can tint it, the
+// right way up (TGA rows start at the bottom unless the header says not).
+test('the footer heart is a white 32x32 TGA, point down', async () => {
+  const name = (await read('Window.lua')).match(/local HEART = "([^"]+)"/)?.[1];
+  assert.equal(name, 'Heart.tga', 'Window.lua names the heart');
+  const tga = await readFile(new URL(`../Media/${name}`, import.meta.url));
+  const size = 32;
+  assert.deepEqual([tga[2], tga.readUInt16LE(12), tga.readUInt16LE(14), tga[16], tga[17]], [2, size, size, 32, 8],
+    'uncompressed true colour, 32x32, 32 bits a pixel, 8 of them alpha, bottom row first');
+  assert.equal(tga.length, 18 + size * size * 4, 'nothing after the pixels');
+  const widths = [];
+  let white = true;
+  for (let row = 0; row < size; row++) {
+    let solid = 0;
+    for (let col = 0; col < size; col++) {
+      const at = 18 + (row * size + col) * 4;
+      if (tga[at] !== 255 || tga[at + 1] !== 255 || tga[at + 2] !== 255) white = false;
+      if (tga[at + 3] > 127) solid++;
+    }
+    widths.push(solid);
+  }
+  assert.ok(white, 'white everywhere, so the tint is the accent');
+  const widest = widths.indexOf(Math.max(...widths));
+  assert.ok(widest > size / 2 && widths[1] < widths[widest] / 4, 'the lobes at the top, the point at the bottom');
+  assert.ok(widths[0] === 0 && widths[size - 1] === 0, 'clear of the top and bottom edges');
 });
 
 test('every file in Media is used by the addon, so none ship unused', async () => {

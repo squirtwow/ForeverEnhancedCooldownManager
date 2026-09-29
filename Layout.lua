@@ -166,7 +166,7 @@ function L:WidestRow()
     for _, place in ipairs({ "above", "below" }) do
         for _, key in ipairs(Placed(layout, place)) do
             local data = ns.BarData(key)
-            widest = math.max(widest, data.perRow * data.size + (data.perRow - 1) * data.spacing)
+            widest = math.max(widest, data.perRow * ns.IconSize(data) + (data.perRow - 1) * data.spacing)
         end
     end
     return widest > 0 and widest or nil
@@ -234,7 +234,7 @@ function L:Stack()
         if key and not layout.hidden[key] then
             local data = Grow(key, side, "down")
             local x = side == "left" and display.x - display.width / 2 - gap or display.x + display.width / 2 + gap
-            B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + data.size / 2)
+            B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + ns.IconSize(data) / 2)
         end
     end
     return true

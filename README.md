@@ -24,6 +24,7 @@ right at home next to EraUI.
 - Tracked Bars in three designs (Glass, Split and Outline) and six colours, or a
   colour of their own for any bar
 - Optional borders and soft shadows, round each icon or round whole rows
+- Keybinds on the icons, from your action bars (off by default)
 - Visual only: Blizzard still decides what shows and when, and Edit Mode keeps
   positions and sizes
 
@@ -51,7 +52,11 @@ right at home next to EraUI.
   other players count at any rank
 - Debuffs bar: your own debuffs on your target, with a search that lists your
   class's debuffs
-- Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID
+- Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag
+  items in from your bags, and any ammo becomes one icon for whatever you have
+  equipped
+- Keybinds on the icons: the key that casts each spell, at the bottom or a top
+  corner, in the size you pick (off by default)
 - Per bar: icon size, spacing, icons per row, which way it grows, hide when
   ready, spell names, countdown numbers, and show, fade or hide out of combat
 
@@ -63,12 +68,16 @@ right at home next to EraUI.
 - Change it row by row: how many icons fit across, which bar goes in which row
   and where the display sits; drag icons between rows or off to remove them;
   take a whole bar out; Reset or Undo
+- All bars: one slider sizes every bar together; Live preview shows your look
+  and keybinds on the icons
 
 ## Profiles and settings
 - Spell lists live in profiles. Characters can share one, even across classes:
   each only shows its own class's spells and racials. Use on all characters puts one profile
   on every character
-- An accent colour for the window, and What's new after each update
+- An accent colour for the window, and What's new after each update, with a
+  short tour of just the new features
+- Hover anything in /ccm and the footer tells you what it does
 
 ## Getting around
 - The first time you log in, the settings open with a quick tour of the basics.

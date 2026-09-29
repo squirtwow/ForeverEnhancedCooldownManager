@@ -1,13 +1,36 @@
 -- What's new: this version's notes, shown once after the addon updates (a
 -- first install has nothing new to show), then any time from What's new in
 -- /ccm or /ccm new. The releases before it follow underneath. Drawn in the
--- window's flat style.
+-- window's flat style. Show me what's new beside Got it tours the steps the
+-- update added (Tour.lua), when it added any.
 local _, ns = ...
 local T = ns.Theme
 
 -- Newest first, word for word as in CHANGELOG.txt (Tools/TestNotes.mjs checks).
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
+    {
+        version = "1.1.0",
+        sections = {
+            { "Added", {
+                "Keybinds on icons: the key that casts each spell or uses each item, from your action bars, on your Cooldowns and Utility bars and on Blizzard's Cooldown Manager icons. At the bottom, top left, top or top right, in the size you pick; the Look page's sample icons show it as you change it. Off by default, in /ccm > Look.",
+                "All bars: one slider on the Layout page sizes all your bars together, keeping their sizes next to each other. Each bar's Icon size still fine-tunes it.",
+                "Layout page: your icons show the border, shadow and keybinds from the Look page. Untick Live preview for plain icons.",
+                "Drag items onto your bars: ammo of any kind from your bags or character panel becomes one icon that follows whatever ammo you have equipped, with its count. Trinkets, potions and your Hearthstone can be dragged in too.",
+                "What's new: after an update, Show me what's new walks you through just the new features.",
+                "Made with love by Squirt in the /ccm footer, in your window accent colour.",
+            } },
+            { "Changed", {
+                "Every button and setting in /ccm explains itself in the footer when you hover it.",
+                "Click a spell's name in a bar's list to tick it, like its tick box.",
+                "\"Each spell shows once, at your highest rank\" is now on the bar pages, by the spell list.",
+            } },
+            { "Fixed", {
+                "Swing timer: when your auto-attack or Auto Shot stops (the target died, or you stopped), the bar stops and fades instead of filling on.",
+                "Layout page: a row's help stays up while you use its - + arrows and x, and the resource display's arrows can be reached by hovering.",
+            } },
+        },
+    },
     {
         version = "1.0.0",
         sections = {
@@ -190,7 +213,8 @@ local function Build()
     window:SetScript("OnEvent", function(self) if self:IsShown() then self:Layout() end end)
 
     -- Two short lines on the left: where to take a bug or an idea, and how to
-    -- see this again. The Discord button sits beside Got it.
+    -- see this again. On the right Got it, then Show me what's new while
+    -- there's a tour of it, then the Discord button.
     local ask = T:Text(window, "GameFontHighlightSmall")
     ask:SetPoint("BOTTOMLEFT", 20, 27)
     ask:SetText("Found a bug or have an idea?")
@@ -202,15 +226,39 @@ local function Build()
     T:Paint(function(accent) done:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
     done:SetScript("OnClick", function() window:Hide() end)
     window.done = done
+    -- Closes this for the tour, which opens the settings. Not tested in the
+    -- game yet, and the label has no room to say so: its tooltip does.
+    local tour = T:Button(window, "Show me what's new", 120, 24)
+    tour:SetPoint("RIGHT", done, "LEFT", -8, 0)
+    tour:SetScript("OnClick", function()
+        window:Hide()
+        if ns.Tour then ns.Tour:StartNews(window.seen) end
+    end)
+    tour:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Show me what's new")
+        GameTooltip:AddLine("A quick tour of what's new, a page at a time. (Needs testing)", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    tour:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    window.tour = tour
     local discord = T:Button(window, "Discord", 80, 24)
     discord:SetPoint("RIGHT", done, "LEFT", -8, 0)
     discord:SetScript("OnClick", function() if ns.ShowDiscord then ns.ShowDiscord() end end)
     window.discord, window.ask = discord, ask
 end
 
-function ns.ShowNotes()
+-- seen: after an update, the version whose notes were seen before it, so
+-- the tour takes in every step since. Opened by hand, the tour offered is
+-- the latest update's.
+function ns.ShowNotes(seen)
     if #ns.NOTES == 0 then return end
     if not window then Build() end
+    window.seen = type(seen) == "string" and seen or nil
+    local tour = ns.Tour ~= nil and #ns.Tour:News(window.seen) > 0
+    window.tour:SetShown(tour)
+    window.discord:ClearAllPoints()
+    window.discord:SetPoint("RIGHT", tour and window.tour or window.done, "LEFT", -8, 0)
     window:Show()
     window:Raise()
     window:Layout()
@@ -221,8 +269,8 @@ end
 -- combat. A first install has nothing new to show: the window opens instead,
 -- with the offer of a tour.
 function N:Start()
-    local version = ns.Version()
-    if ns.NotesSeen() == version then return end
+    local version, seen = ns.Version(), ns.NotesSeen()
+    if seen == version then return end
     ns.SetNotesSeen(version)
     local welcome = ns.firstInstall
     if not welcome and #ns.NOTES == 0 then return end
@@ -232,7 +280,7 @@ function N:Start()
         if not due or InCombatLockdown() then return end
         due = false
         events:UnregisterAllEvents()
-        if not welcome then return ns.ShowNotes() end
+        if not welcome then return ns.ShowNotes(seen) end
         if ns.Tour then ns.Tour:Welcome() else ns.ShowWindow() end
     end
     events:RegisterEvent("PLAYER_ENTERING_WORLD")
