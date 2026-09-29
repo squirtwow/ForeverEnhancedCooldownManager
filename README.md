@@ -5,11 +5,19 @@ Display** on **World of Warcraft: Forever**, plus cooldown, buff and cast bars
 of your own that stack around your resource display. Works on its own, and sits
 right at home next to EraUI.
 
+![Your bars, resource display and swing timer in game](Screenshots/in-game-auto-shot.png)
+![Blizzard's Tracked Bars in the new look](Screenshots/tracked-bars.png)
+
 ![The Layout page](Screenshots/layout-page.png)
 
-![Your bars in game](Screenshots/in-game.png)
+![The Look page](Screenshots/look-page.png)
 
-![The cast bar and combo points](Screenshots/cast-bar-and-combo-points.png)
+![The Cast bar page](Screenshots/cast-bar-page.png)
+
+![The quick tour](Screenshots/tour.png)
+
+![Combo points under the energy bar](Screenshots/combo-points.png)
+![A whole-bar shadow round the stack](Screenshots/whole-bar-shadow.png)
 
 ## Blizzard's Cooldown Manager
 - Square icons with big, bold countdown numbers
