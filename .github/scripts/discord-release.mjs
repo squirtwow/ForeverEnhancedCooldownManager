@@ -6,10 +6,10 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// The CurseForge project, filled in once it exists.
-export const PROJECT_ID = null;
+// The CurseForge project.
+export const PROJECT_ID = 1717227;
 export const LINKS = {
-  curseforge: null,
+  curseforge: 'https://www.curseforge.com/wow/addons/forever-enhanced-cooldown-manager',
   github: 'https://github.com/squirtwow/ForeverEnhancedCooldownManager',
 };
 const NAME = 'Forever Enhanced Cooldown Manager';
