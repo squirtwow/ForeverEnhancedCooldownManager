@@ -139,7 +139,7 @@ function ns.BuildProfileMenu(window, header, anchor)
             return window:Refresh()
         end
         window:Ask(('Use "%s" on all characters?'):format(name),
-            "Every character, and any you make later, loads it. Each only shows its own class's spells. Their own profiles stay in this list.",
+            "Every character, and any you make later, loads it. Each only shows its own class's spells and racials. Their own profiles stay in this list.",
             "Use on all", function()
                 local _, message = ns.UseOnAll()
                 window:Say(message)
@@ -148,7 +148,7 @@ function ns.BuildProfileMenu(window, header, anchor)
             end)
     end)
     everyone:HookScript("OnEnter", function()
-        window.note:SetText("Loads the profile you're on for every character. Each one only shows its own class's spells.")
+        window.note:SetText("Loads the profile you're on for every character. Each one only shows its own class's spells and racials.")
     end)
     everyone:HookScript("OnLeave", function() window.note:SetText(window.lastNote or "") end)
     window.profileEveryone = everyone

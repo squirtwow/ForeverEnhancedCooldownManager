@@ -28,5 +28,5 @@
 - The first time you log in with the addon, its settings open with a quick tour of the basics: each step opens the right page and points at what it's about, and some let you try it. Skip it, or take it again any time from the General page or with /ccm tour.
 - A minimap button: click it for the settings, right-click for What's new, and drag it round the minimap. Turn it off on the General page.
 - Found a bug or have an idea? The Discord button on the General page and in What's new gives you the invite, or type /ccm discord.
-- Profiles: each character gets its own lists, and characters can share one, even across classes: each character only shows its own class's spells. Use on all characters puts one profile on every character. Switch, copy, rename or delete them from the Profile menu.
+- Profiles: each character gets its own lists, and characters can share one, even across classes: each character only shows its own class's spells and racials. Use on all characters puts one profile on every character. Switch, copy, rename or delete them from the Profile menu.
 - Pick the window's accent colour on the Look page, and find EraUI, my other addon, under More from Squirt on the General page.

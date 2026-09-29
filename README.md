@@ -58,7 +58,7 @@ right at home next to EraUI.
 
 ## Profiles and settings
 - Spell lists live in profiles. Characters can share one, even across classes:
-  each only shows its own class's spells. Use on all characters puts one profile
+  each only shows its own class's spells and racials. Use on all characters puts one profile
   on every character
 - An accent colour for the window, and What's new after each update
 

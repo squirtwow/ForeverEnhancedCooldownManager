@@ -251,8 +251,10 @@ end
 -- each character passes over the other classes' spells and procs, which stay
 -- in the profile for the characters that use them. Anything in your own
 -- spellbook, procs or bags is yours, and a buff added by name stays on the
--- Buffs bar whoever casts it (another class's buff can land on you). Racials
--- and anything unknown are everyone's.
+-- Buffs bar whoever casts it (another class's buff can land on you). Another
+-- race's racial isn't yours either: it's in the game data (ns.RANKS) with no
+-- class, and not in your spellbook. Anything else unknown (items, spells the
+-- data doesn't have) is everyone's.
 function S:ForMe(key, bar)
     if type(key) ~= "string" then return false end
     local entry = byKey[key]
@@ -260,7 +262,7 @@ function S:ForMe(key, bar)
     local name = key:gsub("@%d+$", "")
     local classes = ns.SPELL_CLASSES and ns.SPELL_CLASSES[name]
     local procs = ProcClasses()[name]
-    if not classes and not procs then return true end
+    if not classes and not procs then return not (ns.RANKS and ns.RANKS[name]) end
     local _, mine = UnitClass("player")
     if type(mine) ~= "string" then return true end
     return (" " .. (classes or "") .. " " .. (procs or "") .. " "):find(" " .. mine .. " ", 1, true) ~= nil

@@ -1954,6 +1954,14 @@ B:Add("debuff", "Garrote")
 Equal(#(B:Mine("util")) .. " " .. B:Get("util").count .. " | " .. tostring(ns.Spells:ForMe("Blessing of Might", "buff"))
     .. " " .. tostring(ns.Spells:ForMe("Garrote", "debuff")) .. " " .. B:Get("debuff").count, "0 0 | true false 0",
     "a rogue's spell or debuff added by name isn't yours; a paladin's buff is")
+-- Racials: yours from your spellbook; another race's (an orc's Blood Fury in a
+-- shared profile) stays off your bars; anything the data doesn't know stays.
+Equal(tostring(ns.Spells:ForMe("Walk on Air", "cd")) .. " " .. tostring(ns.Spells:ForMe("Blood Fury", "cd"))
+    .. " " .. tostring(ns.Spells:ForMe("Will of the Forsaken", "util")) .. " " .. tostring(ns.Spells:ForMe("Blood Fury", "buff"))
+    .. " " .. tostring(ns.Spells:ForMe("Major Healing Potion", "cd")), "true false false false true",
+    "your racial is yours, another race's isn't, on any bar; unknown names stay")
+B:Add("cd", "Blood Fury")
+Equal(table.concat(B:Mine("cd"), ","):find("Blood Fury", 1, true), nil, "an orc's racial in the profile doesn't show on your bar")
 
 -- What's new -------------------------------------------------------------------------------
 
