@@ -53,6 +53,8 @@ ns.DEFAULTS = {
     accent = "orange", -- the /ccm window's accent colour
     barStyle = "glass", -- Blizzard's Tracked Bars: glass, split or outline
     barColour = "orange", -- and their colour
+    barTexture = "flat", -- the fill of the addon's bars and the restyled ones: flat, or one of the game's (Look page)
+    font = "friz", -- the numbers and text on icons and bars: Friz Quadrata, or another of the game's fonts
     prdSkin = true, -- Blizzard's Personal Resource Display in the same design
     prdHideRepeat = true, -- its second mana bar hidden while the main one is mana
     prdHealth = "default", -- its bars' colours: Blizzard's, or a bar colour
@@ -75,6 +77,7 @@ ns.DEFAULTS = {
     keybindSize = 100, -- its size, as a share of the automatic size that follows the icon
     layoutPreview = true, -- the Layout page draws your icons with the Look page's border, shadow and keybinds
     barScale = 100, -- every bar's icons together, as a share of each bar's own size (the Layout page's All bars)
+    growArrows = false, -- while your bars are arranged (unlocked or in Edit Mode), an arrow on each for the way it grows
     minimap = true, -- the minimap button
     minimapAngle = 225, -- where it sits round the minimap: degrees anticlockwise from the right
 }
@@ -95,13 +98,21 @@ ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
 ns.BAR_STYLE_NAMES = { glass = "Glass", split = "Split", outline = "Outline" }
 ns.BAR_COLOUR_KEYS = { "orange", "charcoal", "blue", "green", "purple", "class" } -- your class colour last
 ns.BAR_COLOUR_NAMES = { orange = "Orange", class = "Class", charcoal = "Charcoal", blue = "Blue", green = "Green", purple = "Purple" }
+-- The game's own fonts and bar textures, so every player has them (their
+-- files are in Style.lua).
+ns.FONT_KEYS = { "friz", "arial", "morpheus", "skurri" }
+ns.FONT_NAMES = { friz = "Friz Quadrata", arial = "Arial Narrow", morpheus = "Morpheus", skurri = "Skurri" }
+ns.BAR_TEXTURE_KEYS = { "flat", "classic", "raid", "skills" }
+ns.BAR_TEXTURE_NAMES = { flat = "Flat", classic = "Classic", raid = "Raid", skills = "Skills" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
-    keybindPosition = {} }
+    keybindPosition = {}, font = {}, barTexture = {} }
 for _, key in ipairs(ns.ACCENT_KEYS) do CHOICES.accent[key] = true end
 for _, key in ipairs(ns.KEYBIND_POSITIONS) do CHOICES.keybindPosition[key] = true end
 for _, key in ipairs(ns.BAR_STYLE_KEYS) do CHOICES.barStyle[key] = true end
+for _, key in ipairs(ns.FONT_KEYS) do CHOICES.font[key] = true end
+for _, key in ipairs(ns.BAR_TEXTURE_KEYS) do CHOICES.barTexture[key] = true end
 for _, key in ipairs(ns.BAR_COLOUR_KEYS) do
     CHOICES.barColour[key], CHOICES.prdHealth[key], CHOICES.prdPower[key] = true, true, true
     CHOICES.prdComboColour[key], CHOICES.castColour[key], CHOICES.swingColour[key] = true, true, true
@@ -148,6 +159,10 @@ local POINTS = { CENTER = true, TOP = true, BOTTOM = true, TOPLEFT = true, TOPRI
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
 ns.OUT_OF_COMBAT_NAMES = { show = "Show", fade = "Fade", hide = "Hide" }
+-- While its spell is ready an icon shows in full, dims or hides, so the ones
+-- cooling down stand out.
+ns.WHEN_READY = { "show", "dim", "hide" }
+ns.WHEN_READY_NAMES = { show = "Show", dim = "Dim", hide = "Hide" }
 ns.BUFF_SLOTS = 16 -- the Buffs bar has one secure slot per buff
 
 local db
@@ -557,7 +572,11 @@ function ns.BarData(key)
     end
     bar.size = Limit(bar.size, ns.BAR_LIMITS.size)
     bar.spacing = Limit(bar.spacing, ns.BAR_LIMITS.spacing)
-    bar.hideReady = bar.hideReady == true
+    -- Bars set to hide when ready before Dim joined it still hide.
+    if not ns.WHEN_READY_NAMES[bar.whenReady] then
+        bar.whenReady = bar.hideReady == true and "hide" or "show"
+    end
+    bar.hideReady = nil
     -- Bars set to "only in combat" before this choice existed hide.
     if not ns.OUT_OF_COMBAT_NAMES[bar.outOfCombat] then
         bar.outOfCombat = bar.combatOnly == true and "hide" or "show"

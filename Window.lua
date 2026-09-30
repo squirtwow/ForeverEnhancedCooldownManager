@@ -37,6 +37,24 @@ local SAMPLE_ICONS = { "Spell_Nature_Lightning", "Ability_Rogue_Sprint", "Spell_
 -- And keys on them, for the keybinds: made up, so the preview isn't tied to your own.
 local SAMPLE_KEYS = { "1", "S2", "M4", "C3" }
 local ICON, ICON_GAP = 26, 4
+-- The font and bar texture choices: a short bar for each texture, and what
+-- each one says on hover, then what they're used for.
+local FILL_SWATCH = { 36, 20 }
+local FONT_NOTES = {
+    friz = "Friz Quadrata, the game's own font",
+    arial = "Arial Narrow, plain and narrow",
+    morpheus = "Morpheus, the game's storybook lettering",
+    skurri = "Skurri, heavy like the game's big numbers",
+}
+local FONT_USE = ", for countdowns, counts, keys and names on icons, and the text on your cast bar and Tracked Bars."
+local TEXTURE_NOTES = {
+    flat = "Flat colour",
+    classic = "The game's classic unit frame bar",
+    raid = "The game's raid frame bar",
+    skills = "The game's skill bar, from the character sheet",
+}
+local TEXTURE_USE = " on your cast bar, swing timer and combo points, and the restyled Tracked Bars and resource display."
+local UNTESTED = " (Needs testing)" -- on every choice but today's look
 
 local function Swatch(parent, size, onClick)
     local swatch = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -282,6 +300,64 @@ local function BuildLook(window, page, width)
     end)
     window.keybinds, window.keyPlace, window.keySize = keybinds, keyPlace, keySize
 
+    -- The font for the numbers and text, and the texture for the bars, under
+    -- the keybinds, level with Shadow and the first tick: each font's name in
+    -- its own face, each texture as a short bar in the colour for all bars.
+    -- The preview above shows both; everything changes at once.
+    local FACES_X = KEYS_X + 52 -- where the choices start, clear of their labels
+    local faces = CreateFrame("Frame", nil, options) -- both rows as one, for the tour to outline
+    faces:SetPoint("TOPLEFT", KEYS_X, -88)
+    faces:SetSize(inner - KEYS_X, 48)
+    window.faces = faces
+    local function Refont()
+        ns.Style:ApplyFont()
+        if ns.Bars then ns.Bars:ApplyFont() end
+        window:Refresh()
+    end
+    local function Retexture()
+        if ns.CastBar then ns.CastBar:Apply() end
+        Redraw()
+    end
+    local fontLabel = T:Text(options, "GameFontHighlight")
+    fontLabel:SetPoint("TOPLEFT", KEYS_X, -92)
+    fontLabel:SetText("Font")
+    local fontItems = {}
+    for _, key in ipairs(ns.FONT_KEYS) do
+        fontItems[#fontItems + 1] = { key = key, label = ns.FONT_NAMES[key]:match("^%S+") }
+    end
+    local font = T:Segmented(options, fontItems, inner - FACES_X, function(key)
+        ns.Set("font", key)
+        Refont()
+    end)
+    font:SetPoint("TOPLEFT", FACES_X, -88)
+    for _, button in ipairs(font.buttons) do
+        button.label:SetFontObject(ns.Style:SampleFont(button.key))
+        window:Hint(button, FONT_NOTES[button.key] .. FONT_USE .. (button.key ~= ns.DEFAULTS.font and UNTESTED or ""))
+    end
+    local textureLabel = T:Text(options, "GameFontHighlight")
+    textureLabel:SetPoint("TOPLEFT", KEYS_X, -120)
+    textureLabel:SetText("Texture")
+    local fills = {}
+    for i, key in ipairs(ns.BAR_TEXTURE_KEYS) do
+        local swatch = Swatch(options, SWATCH, function()
+            ns.Set("barTexture", key)
+            Retexture()
+        end)
+        swatch:SetSize(FILL_SWATCH[1], FILL_SWATCH[2])
+        swatch:SetPoint("TOPLEFT", FACES_X + (i - 1) * (FILL_SWATCH[1] + SWATCH_GAP), -116)
+        swatch.key = key
+        -- The texture itself, inside the swatch's 1px edge.
+        swatch.fill = swatch:CreateTexture(nil, "ARTWORK")
+        swatch.fill:SetPoint("TOPLEFT", 1, -1)
+        swatch.fill:SetPoint("BOTTOMRIGHT", -1, 1)
+        swatch.fill:SetTexture(ns.Style.BAR_TEXTURES[key])
+        window:Hint(swatch, TEXTURE_NOTES[key] .. TEXTURE_USE .. (key ~= ns.DEFAULTS.barTexture and UNTESTED or ""))
+        fills[i] = swatch
+    end
+    local fillChosen = T:Text(options, "GameFontHighlightSmall", T.MUTED)
+    fillChosen:SetPoint("TOPLEFT", FACES_X + #ns.BAR_TEXTURE_KEYS * (FILL_SWATCH[1] + SWATCH_GAP) + 2, -120)
+    window.fontChoice, window.fills, window.fillChosen = font, fills, fillChosen
+
     -- Each Tracked Bar in a colour of its own.
     local eachTitle = T:Heading(page, "Each bar")
     eachTitle:SetPoint("TOPLEFT", options, "BOTTOMLEFT", 0, -12)
@@ -461,6 +537,14 @@ local function BuildLook(window, page, width)
             PaintSwatch(swatch, ns.Style:BarColour(swatch.key), swatch.key == barColour)
         end
         barChosen:SetText(ns.BAR_COLOUR_NAMES[barColour])
+        -- The font, and each texture in the colour for all bars.
+        font:SetSelected(ns.Get("font"))
+        local texture, tint = ns.Get("barTexture"), ns.Style:BarColour(barColour)
+        for _, swatch in ipairs(fills) do
+            PaintSwatch(swatch, { 0, 0, 0 }, swatch.key == texture)
+            swatch.fill:SetVertexColor(tint[1], tint[2], tint[3])
+        end
+        fillChosen:SetText(ns.BAR_TEXTURE_NAMES[texture])
         local accent = ns.Get("accent")
         for _, swatch in ipairs(swatches) do
             PaintSwatch(swatch, T.ACCENTS[swatch.key].colour, swatch.key == accent)
@@ -673,7 +757,7 @@ end
 
 -- What each page is for, in the footer on hover.
 local NAV_NOTES = {
-    look = "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds and the accent.",
+    look = "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds, font, textures and the accent.",
     layout = "One-click layouts that stack your bars around your Personal Resource Display.",
     cast = "Your own cast bar and a swing timer, under your Personal Resource Display.",
     general = "Your bars on or off, the minimap button, the tour, the Discord and EraUI.",

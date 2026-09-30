@@ -1,6 +1,7 @@
 -- The look shared by Blizzard's restyled Cooldown Manager and the addon's own
 -- bars: square icon art zoomed past its built-in bevel with no frame around
--- it, big bold countdown numbers, and flat bars in a colour of your choice.
+-- it, big bold countdown numbers, and bars in a colour of your choice. The
+-- font and the bars' texture can be chosen too, on the Look page.
 local _, ns = ...
 
 local S = {}
@@ -28,9 +29,48 @@ end
 S.TRACK = { .08, .08, .09, .85 } -- behind a bar's fill
 S.ZOOM = { .08, .92, .08, .92 } -- trims the icon art's own bevelled edge
 
-local FONT = "Fonts\\FRIZQT__.TTF" -- the game's own font, as in the /ccm window
+-- The fills a bar can have, as chosen on the Look page: flat colour, or one
+-- of the game's own bar textures, each tinted in the bar's colour.
+S.BAR_TEXTURES = {
+    flat = S.FLAT,
+    classic = "Interface\\TargetingFrame\\UI-StatusBar", -- the unit frames' bars
+    raid = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill", -- the raid frames' health bars
+    skills = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar", -- the character sheet's skill bars
+}
+
+function S:BarTexture()
+    return S.BAR_TEXTURES[ns.Get("barTexture")] or S.FLAT
+end
+
+-- The fonts the numbers and text can be in: the game's own, so every player
+-- has them. Friz Quadrata is the /ccm window's too.
+S.FONTS = {
+    friz = "Fonts\\FRIZQT__.TTF",
+    arial = "Fonts\\ARIALN.TTF",
+    morpheus = "Fonts\\MORPHEUS.ttf",
+    skurri = "Fonts\\skurri.ttf",
+}
+local FONT = S.FONTS.friz
 local THICK = 16 -- from this size up, a heavier outline
 local made = {}
+
+function S:FontFile()
+    return S.FONTS[ns.Get("font")] or FONT
+end
+
+-- Puts a font in file at its size, or in Friz Quadrata should the game ever
+-- refuse file, so the text never goes blank.
+local function Face(font, file, size, flags)
+    if file ~= FONT then
+        local ok, done = pcall(font.SetFont, font, file, size, flags)
+        if ok and done ~= false then return end
+    end
+    font:SetFont(FONT, size, flags)
+end
+
+local function Outline(size)
+    return size >= THICK and "THICKOUTLINE" or "OUTLINE"
+end
 
 -- An outlined font of the given size, made once and shared. No drop shadow,
 -- so the numbers stay crisp over bright icon art.
@@ -39,10 +79,49 @@ function S:Font(size)
     local name = "FECMFont" .. size
     if not made[size] then
         local font = CreateFont(name)
-        font:SetFont(FONT, size, size >= THICK and "THICKOUTLINE" or "OUTLINE")
+        Face(font, self:FontFile(), size, Outline(size))
         font:SetShadowOffset(0, 0)
         font:SetTextColor(1, 1, 1)
         made[size] = font
+    end
+    return name
+end
+
+-- A new font chosen: every font made so far takes it, and the text drawn in
+-- them follows by itself: countdowns, counts and keys, your cast bar, and
+-- Blizzard's restyled icons and Tracked Bars, with nothing set on them again.
+function S:ApplyFont()
+    local file = self:FontFile()
+    for size, font in pairs(made) do Face(font, file, size, Outline(size)) end
+end
+
+-- Spell names under icons: the game's own small text, or a copy of it in the
+-- font chosen, the same size and shadow.
+local NAMES = "GameFontHighlightSmall"
+local names
+
+function S:NameFont()
+    local file, small = self:FontFile(), _G[NAMES]
+    if file == FONT or not (small and small.GetFont) then return NAMES end
+    if not names then
+        names = CreateFont("FECMNames")
+        names:CopyFontObject(small)
+    end
+    local _, size, flags = small:GetFont()
+    Face(names, file, size or 10, flags or "")
+    return "FECMNames"
+end
+
+-- Each font's name in its own face, for the Look page to pick from.
+local samples = {}
+
+function S:SampleFont(key)
+    local name = "FECMSample" .. key
+    if not samples[key] then
+        local font = CreateFont(name)
+        Face(font, S.FONTS[key] or FONT, 11, "")
+        font:SetShadowOffset(1, -1)
+        samples[key] = font
     end
     return name
 end

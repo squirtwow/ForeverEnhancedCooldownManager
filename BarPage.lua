@@ -249,8 +249,8 @@ function ns.BuildBarPage(window, page, width)
         window:Hint(check, note)
         return check
     end
-    local hideReady = Option("Hide when ready", "hideReady", 0, "Each icon hides while it's ready, so only the ones cooling down show.")
-    -- Buffs only show while they're on you, so their bar offers this instead.
+    -- Buffs only show while they're on you, so their bar offers this instead
+    -- of When ready (below), in the same spot.
     local showMissing = Option("Show missing buffs greyed", "showMissing", 0, function()
         return (state.bar == "debuff" and "Debuffs missing from your target" or "Buffs missing from you")
             .. " show greyed in their spot, instead of hidden."
@@ -258,7 +258,8 @@ function ns.BuildBarPage(window, page, width)
     local showNames = Option("Show spell names", "showNames", -22, "Each spell's name under its icon.")
     local showTimer = Option("Show countdown numbers", "showTimer", -44, "The numbers counting down on this bar's icons.")
 
-    -- A label and joined buttons for a choice, with the footer explaining it.
+    -- A label and joined buttons for a choice, with the footer explaining it:
+    -- note is the same for every button, or one for each choice by its key.
     local function Pills(label, x, y, width, keys, names, field, note)
         local text = T:Text(options, "GameFontHighlight")
         text:SetPoint("TOPLEFT", x, y - 4)
@@ -277,11 +278,25 @@ function ns.BuildBarPage(window, page, width)
         end)
         pills:SetPoint("TOPLEFT", x + 100, y)
         for _, button in ipairs(pills.buttons) do
-            window:Hint(button, function() return pills.held and "Your layout sets this. Change it on the Layout page." or note end)
+            local own = type(note) == "table" and note[button.key] or note
+            window:Hint(button, function() return pills.held and "Your layout sets this. Change it on the Layout page." or own end)
         end
         pills.label = text
         return pills
     end
+    -- When ready: each icon in full, dimmed or hidden while its spell is
+    -- ready. Dim is new, so its note says it needs testing.
+    local whenReady = Pills("When ready", 320, 0, 156, ns.WHEN_READY, ns.WHEN_READY_NAMES, "whenReady", {
+        show = "Every icon shows in full, ready or cooling down.",
+        dim = "Each icon dims while it's ready, so the ones cooling down stand out. (Needs testing)",
+        hide = "Each icon hides while it's ready, so only the ones cooling down show.",
+    })
+    -- The label and its choices as one part, for the tour to outline: the
+    -- label ends above the buttons, so a box hung from it sat too high.
+    local readyPart = CreateFrame("Frame", nil, options)
+    readyPart:SetPoint("TOPLEFT", 320, 0)
+    readyPart:SetSize(100 + 156, 20)
+    whenReady.part = readyPart
     -- Out of combat: show, fade or hide. The footer explains when bars come back.
     local outOfCombat = Pills("Out of combat", 0, -85, 156, ns.OUT_OF_COMBAT, ns.OUT_OF_COMBAT_NAMES, "outOfCombat",
         "Out of combat. Bars come back in full in combat, with an enemy targeted, while unlocked, and in Edit Mode.")
@@ -289,7 +304,7 @@ function ns.BuildBarPage(window, page, width)
         "Which way a row grows as icons come and go: from its centre, or from its right or left edge.")
     local wrap = Pills("New rows", 320, -85, 110, ns.WRAP, ns.WRAP_NAMES, "wrap",
         "Where the next row goes when there are more icons than fit across.")
-    page.options = { hideReady = hideReady, showMissing = showMissing, showNames = showNames,
+    page.options = { whenReady = whenReady, showMissing = showMissing, showNames = showNames,
         showTimer = showTimer, outOfCombat = outOfCombat, grow = grow, wrap = wrap }
 
     -- The spell list -------------------------------------------------------------------
@@ -311,7 +326,7 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end)
     showItems:SetPoint("LEFT", search, "RIGHT", 14, 0)
-    window:Hint(showItems, "Trinkets and bag items with a use, listed to put on the bar.")
+    window:Hint(showItems, "Trinkets and bag items with a use, listed to put on the bar. Healthstones and potions are one icon each, whatever rank you carry.")
     -- Every rank you know as its own row, for casting a lower rank on purpose.
     local showRanks = T:Check(listPanel, "Show all ranks", function(self)
         ns.Set("listRanks", self:GetChecked())
@@ -379,13 +394,17 @@ function ns.BuildBarPage(window, page, width)
         -- spell's icon, name and rank click it too, and say what it does.
         row.check:SetHitRectInsets(-4, -(listWidth - 20), -(ROW - 16) / 2, -(ROW - 16) / 2)
         -- What ticking or unticking this row does, for the spell it holds now.
+        -- A healthstone or potion family says how it works as it's put on.
         window:Hint(row.check, function()
             local bar, name = ns.BAR_NAMES[state.bar], row.label or ""
             if row.other then return "Add " .. name .. " to " .. bar .. ", by name: it isn't in your spellbook." end
             if row.check:GetChecked() then return "Take " .. name .. " off " .. bar .. "." end
+            local entry = row.spell and ns.Spells:Find(row.spell)
+            local family = entry and entry.kind == "family"
+                and " One icon for the best one you carry, switching as your bags change." or ""
             local on = not ns.AURA_BARS[state.bar] and row.spell and B:Find(row.spell)
-            if on and on ~= state.bar then return "Move " .. name .. " here from " .. ns.BAR_NAMES[on] .. "." end
-            return "Put " .. name .. " on " .. bar .. "."
+            if on and on ~= state.bar then return "Move " .. name .. " here from " .. ns.BAR_NAMES[on] .. "." .. family end
+            return "Put " .. name .. " on " .. bar .. "." .. family
         end)
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(16, 16)
@@ -594,12 +613,13 @@ function ns.BuildBarPage(window, page, width)
         end
         grow:SetSelected(data.grow)
         wrap:SetSelected(data.wrap)
-        hideReady:SetShown(not aura)
+        whenReady:SetShown(not aura)
+        whenReady.label:SetShown(not aura)
         showMissing:SetShown(aura ~= nil)
         showMissing.text:SetText("Show missing " .. word .. "s greyed")
         -- Packed buffs have no fixed spot to put a name under.
         showNames:SetShown(not aura or data.showMissing)
-        hideReady:SetChecked(data.hideReady)
+        whenReady:SetSelected(data.whenReady)
         showMissing:SetChecked(data.showMissing)
         showNames:SetChecked(data.showNames)
         outOfCombat:SetSelected(data.outOfCombat)

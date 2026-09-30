@@ -97,6 +97,8 @@ end
 function Proto:SetFontObject(o) S[self].font = o end
 function Proto:SetWordWrap(v) S[self].wordWrap = v end
 function Proto:SetCountdownFont(o) S[self].countdownFont = o end
+-- The addon's own fonts: the face each one is set in.
+function Proto:SetFont(file, size, flags) S[self].face = file .. " " .. size .. " " .. flags end
 function Proto:SetTexCoord(...)
     S[self].coords = table.concat({ ... }, ",")
     S[self].zooms = (S[self].zooms or 0) + 1
@@ -453,6 +455,39 @@ ns.Set("barColour", "orange")
 ns.Skin:ApplyBarLook()
 Equal(#printed, 0, "no errors while switching")
 
+-- The bar texture picked on the Look page, a cosmetic setter on Blizzard's
+-- bars, only set again when it changes; and the font picked, which the
+-- addon's own fonts take, so Blizzard's countdowns and bar text change with
+-- nothing set on Blizzard's frames again.
+local RAID, FLAT = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill", "Interface\\Buttons\\WHITE8X8"
+local textures = 0
+local SetTexture = Proto.SetStatusBarTexture
+function Proto:SetStatusBarTexture(t)
+    textures = textures + 1
+    SetTexture(self, t)
+end
+ns.Set("barTexture", "raid")
+ns.Skin:ApplyBarLook()
+Equal(S[bar.Bar].barTexture, RAID, "the texture picked, on Blizzard's Tracked Bars")
+local before = textures
+ns.Skin:ApplyBarLook()
+bar:OnCooldownIDSet()
+Equal(textures, before, "not set again while it stays the same, even as Blizzard gives the bar a new spell")
+ns.Set("barTexture", "flat")
+ns.Skin:ApplyBarLook()
+Equal(S[bar.Bar].barTexture, FLAT, "flat again")
+Proto.SetStatusBarTexture = SetTexture
+Equal(S[_G.FECMFont25].face .. " | " .. S[_G.FECMFont13].face, "Fonts\\FRIZQT__.TTF 25 THICKOUTLINE | Fonts\\FRIZQT__.TTF 13 OUTLINE",
+    "Friz Quadrata to start with")
+ns.Set("font", "skurri")
+ns.Style:ApplyFont()
+Equal(S[_G.FECMFont25].face .. " | " .. S[_G.FECMFont13].face .. " | " .. S[item.Cooldown].countdownFont .. " " .. S[bar.Bar.Name].font,
+    "Fonts\\skurri.ttf 25 THICKOUTLINE | Fonts\\skurri.ttf 13 OUTLINE | FECMFont25 FECMFont13",
+    "a new font: Blizzard's countdowns and bar text keep their fonts, which take it")
+ns.Set("font", "friz")
+ns.Style:ApplyFont()
+Equal(S[_G.FECMFont25].face, "Fonts\\FRIZQT__.TTF 25 THICKOUTLINE", "and back")
+
 -- Each bar can have a colour of its own, by the spell Blizzard gives it.
 S[bar].baseSpell = 467 -- Thorns
 local other = BarItem()
@@ -675,6 +710,26 @@ ns.Set("barStyle", "outline")
 ns.Resource:Apply()
 Equal(S[prd.PowerBar].barColour[4], .45, "Outline: a see-through fill")
 Equal(S[Piece(prd.PowerBar, "BACKGROUND", -8)].color[1], .6, "inside an edge in its colour")
+-- The bar texture picked on the Look page, and still only set when it changes
+-- as Blizzard recolours the bars.
+ns.Set("barTexture", "skills")
+ns.Resource:Apply()
+local SKILLS = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar"
+Equal(S[health].barTexture .. " " .. S[prd.PowerBar].barTexture .. " " .. S[prd.AlternatePowerBar].barTexture,
+    SKILLS .. " " .. SKILLS .. " " .. SKILLS, "the texture picked, on the display's bars")
+local fills = 0
+local SetFill = Proto.SetStatusBarTexture
+function Proto:SetStatusBarTexture(t)
+    fills = fills + 1
+    SetFill(self, t)
+end
+prd.PowerBar:SetStatusBarColor(0, 0, 1)
+ns.Resource:Apply()
+Equal(fills .. " " .. S[prd.PowerBar].barTexture, "0 " .. SKILLS, "not set again while it stays the same")
+Proto.SetStatusBarTexture = SetFill
+ns.Set("barTexture", "flat")
+ns.Resource:Apply()
+Equal(S[health].barTexture, "Interface\\Buttons\\WHITE8X8", "flat again")
 ns.Set("prdHideRepeat", false)
 ns.Resource:Apply()
 Equal(S[prd.AlternatePowerBar].alpha, 1, "the repeat bar can stay")
@@ -780,6 +835,12 @@ ns.Set("barStyle", "outline")
 ns.Resource:Apply()
 Equal(S[segments[1]].barColour[1] == ns.Style:BarColour("blue")[1] and S[segments[1]].barColour[4], .45,
     "your colour, in the design you picked")
+ns.Set("barTexture", "classic")
+ns.Resource:Apply()
+Equal(S[segments[1]].barTexture .. " " .. S[segments[5]].barTexture, "Interface\\TargetingFrame\\UI-StatusBar Interface\\TargetingFrame\\UI-StatusBar",
+    "and the texture you picked")
+ns.Set("barTexture", "flat")
+ns.Resource:Apply()
 -- Caster form: gone, and back in cat form.
 power = 0
 Fire("UPDATE_SHAPESHIFT_FORM")

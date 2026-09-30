@@ -22,7 +22,8 @@ local GOLD, GREEN, RED = { 1, .7, 0 }, { 0, .8, 0 }, { .85, .15, .1 } -- casting
 local SILVER = { .66, .68, .72 } -- the swing timer's own colour
 local HOLD, FADE = .4, .3 -- a finished or broken cast, or a swing run out, stays up this long, then fades
 local PAD = 4 -- under the display: the gap Blizzard leaves between its own bars
-local ALONE = { x = 0, y = -150, width = 200, height = 0 } -- with no display to go under
+local EDGE = 1 -- the bar's own edge, just outside it and its icon
+local ALONE = { x = 0, y = -150, width = 200, height = 0, edge = 0 } -- with no display to go under
 local MAIN_HAND, RANGED = 16, 18 -- equipment slots
 local SWORD, BOW = "Interface\\Icons\\INV_Sword_04", "Interface\\Icons\\INV_Weapon_Bow_05"
 local LONGEST = 60 -- seconds: a swing any longer isn't a real one
@@ -141,11 +142,12 @@ function C:Make(parent)
     frame.icon:SetPoint("TOPLEFT")
     Style:Zoom(frame.icon)
     frame.iconEdge = frame:CreateTexture(nil, "BACKGROUND")
-    frame.iconEdge:SetPoint("TOPLEFT", frame.icon, "TOPLEFT", -1, 1)
-    frame.iconEdge:SetPoint("BOTTOMRIGHT", frame.icon, "BOTTOMRIGHT", 1, -1)
+    frame.iconEdge:SetPoint("TOPLEFT", frame.icon, "TOPLEFT", -EDGE, EDGE)
+    frame.iconEdge:SetPoint("BOTTOMRIGHT", frame.icon, "BOTTOMRIGHT", EDGE, -EDGE)
     frame.iconEdge:SetColorTexture(0, 0, 0, 1)
     local bar = CreateFrame("StatusBar", nil, frame)
-    bar:SetStatusBarTexture(Style.FLAT)
+    bar.fill = Style:BarTexture()
+    bar:SetStatusBarTexture(bar.fill)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
     local track = bar:CreateTexture(nil, "BACKGROUND")
@@ -153,8 +155,8 @@ function C:Make(parent)
     track:SetColorTexture(Style.TRACK[1], Style.TRACK[2], Style.TRACK[3], Style.TRACK[4])
     -- A 1px edge round the bar, and Glass's shine over its top half.
     bar.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
-    bar.edge:SetPoint("TOPLEFT", -1, 1)
-    bar.edge:SetPoint("BOTTOMRIGHT", 1, -1)
+    bar.edge:SetPoint("TOPLEFT", -EDGE, EDGE)
+    bar.edge:SetPoint("BOTTOMRIGHT", EDGE, -EDGE)
     bar.sheen = bar:CreateTexture(nil, "OVERLAY", nil, -8)
     bar.sheen:SetPoint("TOPLEFT")
     bar.sheen:SetPoint("BOTTOMRIGHT", bar, "RIGHT")
@@ -168,14 +170,14 @@ function C:Make(parent)
     bar.time:SetJustifyH("RIGHT")
     bar.time:SetPoint("RIGHT", -4, 0)
     frame.bar = bar
-    -- A soft shadow round the whole cast bar while shadows are on, outside
-    -- its own 1px edges (so no extra border).
-    frame.decor = Style:Decor(frame, frame, -1)
+    -- A soft shadow round the whole cast bar while shadows are on, and no
+    -- extra border: its own 1px edges are one (Dress places the shadow).
+    frame.decor = Style:Decor(frame, frame, -EDGE)
     return frame
 end
 
 -- Sizes and colours a cast bar from your choices: its height, the design,
--- the colour and which parts show.
+-- the texture, the colour and which parts show.
 local function Dress(frame, colour)
     local height = ns.Get("castHeight")
     local design = ns.Get("barStyle")
@@ -189,6 +191,12 @@ local function Dress(frame, colour)
     bar:ClearAllPoints()
     bar:SetPoint("TOPLEFT", withIcon and height + 3 or 0, 0)
     bar:SetPoint("BOTTOMRIGHT")
+    -- Dressed for every cast: the texture is only set again when it changes.
+    local texture = Style:BarTexture()
+    if bar.fill ~= texture then
+        bar.fill = texture
+        bar:SetStatusBarTexture(texture)
+    end
     bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
     local edge = outline and colour or { 0, 0, 0 }
     bar.edge:SetColorTexture(edge[1], edge[2], edge[3], 1)
@@ -201,7 +209,12 @@ local function Dress(frame, colour)
     bar.name:SetPoint("RIGHT", withTime and -40 or -4, 0)
     bar.name:SetShown(ns.Get("castName"))
     bar.time:SetShown(withTime)
-    Style:ShowDecor(frame.decor, false, ns.Get("iconShadow") ~= "off")
+    -- The shadow reaches as far out as your rows' does: it starts on the
+    -- bar's edge, as theirs starts on their icons, or just past it while a
+    -- border sits under their shadow and pushes it out.
+    local shadow = ns.Get("iconShadow")
+    frame.decor.inset = ns.Get("iconBorder") == shadow and -EDGE or 0
+    Style:ShowDecor(frame.decor, false, shadow ~= "off")
 end
 
 -- A cast's colour: red once it's broken off.
@@ -433,9 +446,13 @@ function C:Under(display)
     local height = self:Room()
     if not height then return bottom end
     local pad = display.height > 0 and PAD or 0
-    -- The restyle's 1px edges stick out past the display and this bar alike.
-    local edge = display.height > 0 and ns.loaded.prdSkin and 1 or 0
-    local width = display.width - 2 * edge
+    -- The bar's own edges, round its icon too, go on the restyle's, so the
+    -- whole bar is exactly as wide as the display you see, at any Size and
+    -- while it's switched off (its width still takes them in). Without the
+    -- restyle they sit where its edges would, just outside the display's
+    -- bars, like the combo points'.
+    local width = display.width
+    if (display.edge or 0) > 0 then width = width - 2 * EDGE end
     if row then
         row:ClearAllPoints()
         row:SetPoint("TOP", UIParent, "CENTER", display.x, bottom - pad)

@@ -216,9 +216,19 @@ local function Solid(texture, colour, alpha)
     texture:SetColorTexture(colour[1], colour[2], colour[3], alpha or 1)
 end
 
+-- The bar's fill in the texture chosen on the Look page, set only when it
+-- changes: this runs whenever Blizzard gives a pooled bar a new spell.
+local function Fill(bar, parts)
+    local texture = Style:BarTexture()
+    if parts.texture == texture then return end
+    parts.texture = texture
+    bar:SetStatusBarTexture(texture)
+end
+
 local function Look(item, parts)
     local bar, design, colour = item.Bar, ns.Get("barStyle"), BarColour(item)
     local glass, split, outline = design == "glass", design == "split", design == "outline"
+    Fill(bar, parts)
     bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
     -- A 1px edge round the bar and the icon: black, or the colour for Outline.
     local edge = outline and colour or { 0, 0, 0 }
@@ -267,7 +277,7 @@ local function Bar(item, spec)
     local bar = item.Bar
     if not bar then return end
     bar:SetHeight(BAR_HEIGHT)
-    bar:SetStatusBarTexture(Style.FLAT)
+    Fill(bar, parts)
     if bar.BarBG then
         bar.BarBG:SetColorTexture(Style.TRACK[1], Style.TRACK[2], Style.TRACK[3], Style.TRACK[4])
         Inset(bar.BarBG, bar, 0)
@@ -316,7 +326,7 @@ local function TrackedBar(item, spec)
     end
 end
 
--- Redraws every restyled bar in the current design and colours.
+-- Redraws every restyled bar in the current design, colours and texture.
 function M:ApplyBarLook()
     for item, parts in pairs(bars) do Redraw(item, parts) end
 end

@@ -62,7 +62,12 @@ function Proto:RegisterUnitEvent(e) S[self].events[e] = true end
 function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:CreateTexture() return New("Texture", self) end
-function Proto:CreateFontString() return New("FontString", self) end
+-- The font it starts in, as the game does: the template's.
+function Proto:CreateFontString(_, _, template)
+    local text = New("FontString", self)
+    S[text].template = template
+    return text
+end
 function Proto:SetText(t) S[self].text = t end
 function Proto:GetText() return S[self].text end
 function Proto:SetChecked(v) S[self].checked = v and true or false end
@@ -95,7 +100,13 @@ function Proto:Click() S[self].scripts.OnClick(self) end
 function Proto:SetTexture(t) S[self].texture = t end
 function Proto:SetVertexColor(r, g, b) S[self].tint = { r, g, b } end
 function Proto:SetDesaturated(v) S[self].desaturated = v end
-function Proto:SetAlphaFromBoolean(v) S[self].alphaFrom = v end
+-- Like the game: the alpha for true, then for false (1 and 0 unless given).
+-- A secret answer is kept as it is; a plain one sets the alpha it picks.
+function Proto:SetAlphaFromBoolean(v, ifTrue, ifFalse)
+    local s = S[self]
+    s.alphaFrom, s.alphaIf = v, tostring(ifTrue) .. " " .. tostring(ifFalse)
+    if type(v) == "boolean" then s.alpha = v and (ifTrue or 1) or (ifFalse or 0) end
+end
 -- A cooldown's countdown numbers, made the first time they're asked for.
 function Proto:GetCountdownFontString() local s = S[self]; s.numbers = s.numbers or New("FontString", self); return s.numbers end
 function Proto:IsMouseOver() return S[self].mouseOver == true end
@@ -365,7 +376,8 @@ Environment()
 local ns = Load(nil)
 local B = ns.Bars
 local list = ns.Spells:List()
-Equal(#list, 8, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower and two druid procs; passive and future spells left out")
+Equal(#list, 11, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower, two druid procs, then the healthstone and"
+    .. " potion families; passive and future spells left out")
 local moonfire = ns.Spells:Find("Moonfire")
 Equal(moonfire.spellID, 8924, "Moonfire uses the highest rank")
 Equal(moonfire.rankText, "Rank 2", "shows that rank")
@@ -379,7 +391,7 @@ Equal(ns.Spells:Resolve("blood fury"), "Blood Fury", "any race's racial can be a
 local cc = ns.Spells:Find("Clearcasting")
 Equal(cc and cc.kind == "proc" and cc.line, "Procs", "class procs listed under Procs")
 Equal(cc.ids[1], 16870, "with their spell IDs")
-Equal(list[#list].name, "Nature's Grace", "procs come last")
+Equal(list[8].name .. " " .. list[9].line, "Nature's Grace Items", "procs come after your spells, before your items")
 
 -- Off by default ------------------------------------------------------------------------
 
@@ -439,10 +451,11 @@ active = SECRET
 B:RefreshAll()
 Equal(S[moon.texture].desaturated, SECRET, "the secret cooldown state goes straight to the game")
 Equal(Last(moon.cooldown, "SetCooldownFromDurationObject") ~= nil, true, "sweep fed from the duration object")
-Equal(S[moon].alpha, 1, "shown while not hiding ready icons")
-B:SetOption("cd", "hideReady", true)
+Equal(S[moon].alpha .. " " .. ns.BarData("cd").whenReady, "1 show", "shown in full while ready unless you choose otherwise")
+B:SetOption("cd", "whenReady", "hide")
 moon = cd.icons[2]
-Equal(S[moon].alphaFrom, SECRET, "hide when ready also uses the secret state as it is")
+Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf, "secret nil nil",
+    "hide when ready also uses the secret state as it is, with the game's own 0 while ready")
 -- While the bars are being arranged, every icon shows.
 S[moon].alpha, S[moon].alphaFrom = nil, nil
 B:SetUnlocked(true)
@@ -454,8 +467,30 @@ EditModeManagerFrame:Show()
 Equal(S[moon].alpha == 1 and S[moon].alphaFrom == nil, true, "in Edit Mode too")
 EditModeManagerFrame:Hide()
 Equal(S[moon].alphaFrom, SECRET, "and hidden when ready once Edit Mode closes")
-B:SetOption("cd", "hideReady", false)
+-- Dim when ready: the same secret state, never read here, so the game picks
+-- the alpha: in full while cooling down, 40% while ready.
+S[moon].alpha, S[moon].alphaFrom = nil, nil
+B:SetOption("cd", "whenReady", "dim")
+Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf .. " " .. tostring(S[moon].alpha), "secret 1 0.4 nil",
+    "dim when ready: the secret state goes to the game as it is, 1 while cooling down and 0.4 while ready")
+Equal(ns.BarData("util").whenReady, "show", "each bar has its own choice")
 active = false
+B:RefreshAll()
+Equal(S[moon].alpha, .4, "a ready spell dims")
+active = true
+B:RefreshAll()
+Equal(S[moon].alpha, 1, "and is in full while it cools down")
+active = false
+B:SetUnlocked(true)
+Equal(S[moon].alpha, 1, "unlocked: in full even when ready, to see while moving it")
+B:SetUnlocked(false)
+Equal(S[moon].alpha, .4, "locked again: dimmed when ready")
+EditModeManagerFrame:Show()
+Equal(S[moon].alpha, 1, "in Edit Mode too")
+EditModeManagerFrame:Hide()
+Equal(S[moon].alpha, .4, "and dimmed once Edit Mode closes")
+B:SetOption("cd", "whenReady", "show")
+Equal(S[moon].alpha, 1, "Show: in full again")
 
 usable[8924], noMana[8924] = false, true
 B:RefreshAll()
@@ -541,13 +576,21 @@ do
     -- Anything unexpected in the saved settings is put right at load.
     Environment()
     ns = Load({ useBars = true, bars = { cd = { size = 9999, spells = { "A", 7, "", "B" }, x = "nope", y = 3, hideReady = "maybe" },
-        evil = { size = 3 } } })
+        util = { whenReady = "fade" }, evil = { size = 3 } } })
     local data = ns.BarData("cd")
     Equal(data.size, 64, "bad sizes clamped")
     Equal(table.concat(data.spells, ","), "A,B", "only names kept in a list")
     Equal(data.x, nil, "bad positions dropped")
-    Equal(data.hideReady, false, "bad flags off")
+    Equal(data.whenReady .. " " .. ns.BarData("util").whenReady, "show show", "bad flags and choices off")
     Equal(ns.BarData("evil"), nil, "unknown bars ignored")
+
+    -- Hide when ready was a tick before Dim joined it: a bar that hid its
+    -- ready icons still does, and the old setting goes.
+    Environment()
+    ns = Load({ useBars = true, bars = { cd = { hideReady = true }, util = { hideReady = false }, buff = { whenReady = "dim", hideReady = true } } })
+    Equal(ns.BarData("cd").whenReady .. " " .. ns.BarData("util").whenReady .. " " .. ns.BarData("buff").whenReady, "hide show dim",
+        "hide when ready kept as Hide, off as Show, and a choice already made kept")
+    Equal(rawget(ns.BarData("cd"), "hideReady"), nil, "the old setting is gone")
 end
 
 -- Buffs bar -------------------------------------------------------------------------------
@@ -912,6 +955,165 @@ Equal(S[B:Get("util").icons[1].count].text, 0, "showing none")
 Equal(ns.Spells:IsItem(ns.Spells:Find("ammo")), true, "never offered for the Buffs or Debuffs bar")
 Equal(#printed, 0, "no errors")
 
+-- Healthstones and potions: one icon for whichever rank you carry ------------------------------
+
+;(function()
+    Environment()
+    -- The names of the ranks used here, and a picture for each.
+    local names = { [5512] = "Minor Healthstone", [9421] = "Major Healthstone", [19013] = "Major Healthstone",
+        [118] = "Minor Healing Potion", [1710] = "Greater Healing Potion", [13446] = "Major Healing Potion" }
+    _G.C_Item.GetItemNameByID = function(id) return names[id] end
+    _G.C_Item.GetItemIconByID = function(id) return 100000 + id end
+    -- Potions above your level can't be used; each cooldown asked for is noted.
+    local unusable, asked = {}, {}
+    _G.C_Item.IsUsableItem = function(id) return not unusable[id], false end
+    _G.C_Item.GetItemCooldown = function(id)
+        asked[#asked + 1] = id
+        return itemCooldown[1], itemCooldown[2], itemCooldown[3]
+    end
+    bagItems = { { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 } }
+    itemCount[5512], itemCount[9421] = 1, 1
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    local Spells = ns.Spells
+    local stones = Spells:Find("family:healthstone")
+    Equal(stones.name .. " | " .. stones.line .. " | " .. stones.rankText .. " | " .. tostring(Spells:IsItem(stones)),
+        "Healthstones | Items | Best you carry (Needs testing) | true", "Healthstones listed with your items, as one entry")
+    Equal(stones.itemID .. " " .. stones.current .. " " .. stones.icon, "9421 Major Healthstone 109421",
+        "showing the best one you carry: a Major over a Minor")
+    Equal(tostring(Spells:Find("family:healing") ~= nil) .. " " .. tostring(Spells:Find("family:mana") ~= nil) .. " "
+        .. Spells:Find("item:118").name, "true true Minor Healing Potion", "healing and mana potions too, and each potion still on its own")
+    -- Every rank in one family only; Improved Healthstone's and the conjured
+    -- potions in theirs, the Discolored ones left as single items.
+    local seen, twice = {}, 0
+    for _, family in ipairs(Spells.FAMILIES) do
+        for _, id in ipairs(family.items) do
+            if seen[id] then twice = twice + 1 end
+            seen[id] = true
+        end
+    end
+    Equal(twice .. " " .. Spells:Family(19013).key .. " " .. Spells:Family(268883).name .. " " .. Spells:Family(13444).name
+        .. " " .. tostring(Spells:Family(247240)) .. " " .. tostring(Spells:Family(SECRET)),
+        "0 family:healthstone Healing Potions Mana Potions nil nil", "each rank in one family, and nothing secret looked up")
+
+    -- On a bar: the one it shows, with its count and name.
+    B:Assign("family:healthstone", "cd")
+    B:SetOption("cd", "showNames", true)
+    local icon = B:Get("cd").icons[1]
+    Equal(icon.kind .. " " .. icon.itemID .. " " .. S[icon.texture].texture .. " " .. S[icon.count].text .. " " .. S[icon.label].text,
+        "family 9421 109421 1 Major Healthstone", "on a bar: the Major Healthstone's picture, count and name")
+    -- Used up: with the window shut only the bars refresh, and it moves on.
+    itemCount[9421] = 0
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(icon.itemID .. " " .. S[icon.texture].texture .. " " .. S[icon.count].text .. " " .. S[icon.label].text .. " "
+        .. tostring(S[icon.texture].desaturated), "5512 105512 1 Minor Healthstone false",
+        "used: the Minor one next, as soon as your bags change")
+    itemCooldown = { 100, 120, 1 }
+    asked = {}
+    B:RefreshAll()
+    Equal(asked[1] .. " " .. Last(icon.cooldown, "SetCooldown", 2) .. " " .. tostring(S[icon.texture].desaturated), "5512 120 true",
+        "its cooldown, for the one it shows, greyed")
+    itemCooldown = { 0, 0, 1 }
+    itemCount[5512] = 0
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(icon.itemID .. " " .. S[icon.count].text .. " " .. tostring(S[icon.texture].desaturated) .. " " .. S[icon.label].text,
+        "5512 0 true Healthstones", "none left: the last one greyed, showing none, named for them all")
+    itemCount[19013] = 1
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(icon.itemID .. " " .. S[icon.count].text .. " " .. S[icon.label].text, "19013 1 Major Healthstone",
+        "a new one made, with Improved Healthstone: shown at once")
+    itemCount[19013], itemCount[19012] = 0, 1
+    Fire("BAG_UPDATE_DELAYED")
+    local waiting = icon.itemID .. " " .. S[icon.label].text
+    names[19012] = "Major Healthstone"
+    B:RefreshAll()
+    Equal(waiting .. " | " .. S[icon.label].text, "19012 Healthstones | Major Healthstone",
+        "a name the game hasn't loaded yet: the family's until it has")
+    itemCount[19013], itemCount[19012] = 1, 0
+    B:RefreshAll()
+
+    -- The best you can use: a Major potion above your level waits.
+    unusable[13446] = true
+    itemCount[13446], itemCount[1710], itemCount[118] = 2, 3, 5
+    B:Assign("family:healing", "cd")
+    local potion = B:Get("cd").icons[2]
+    Equal(potion.itemID .. " " .. S[potion.count].text .. " " .. S[potion.label].text, "1710 3 Greater Healing Potion",
+        "the best potion you can use: Greater, while the Major is above your level")
+    unusable[1710], unusable[118] = true, true
+    B:RefreshAll()
+    Equal(potion.itemID, 13446, "none you can use: the best you carry")
+    unusable[13446], unusable[1710], unusable[118] = nil, nil, nil
+    B:RefreshAll()
+    Equal(potion.itemID .. " " .. S[potion.count].text, "13446 2", "the Major once you can use it")
+    -- Bags or use hidden in a fight: each stays as it is, with no errors.
+    local count, use = _G.C_Item.GetItemCount, _G.C_Item.IsUsableItem
+    _G.C_Item.GetItemCount = function() return SECRET end
+    unusable[13446] = true -- a change it can't see yet
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    Fire("BAG_UPDATE_DELAYED")
+    _G.C_Item.GetItemCount = count
+    _G.C_Item.IsUsableItem = function() return SECRET, SECRET end
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(potion.itemID .. " " .. icon.itemID .. " " .. S[potion.count].text .. " " .. #printed, "13446 19013 2 0",
+        "counts or use hidden in a fight: nothing moves, no errors")
+    _G.C_Item.IsUsableItem = use
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    B:RefreshAll()
+    Equal(potion.itemID, 1710, "and after it, the best you can use again")
+
+    -- Any rank dragged in adds its family, never on the Buffs or Debuffs bars.
+    B:TakeOff("cd", "family:healing")
+    local ok, message = B:AddItem("util", 858) -- a Lesser Healing Potion, none in your bags
+    Equal(tostring(ok) .. " " .. message .. " " .. table.concat(ns.BarData("util").spells, ","),
+        "true Added Healing Potions to Utility. It shows the best one you carry. family:healing", "any rank dragged in adds its family")
+    Equal(select(2, B:AddItem("buff", 5512)) .. " " .. select(2, B:Add("debuff", "Healthstones")) .. " " .. #ns.BarData("buff").spells
+        .. " " .. #ns.BarData("debuff").spells, "Items can't go on the Buffs bar. Items can't go on the Debuffs bar. 0 0",
+        "never on the Buffs or Debuffs bar, dragged or by name")
+    Equal(select(2, B:Transfer("util", "buff", "family:healing")), "Items can't go on the Buffs bar.", "nor moved there")
+    B:Assign("item:118", "util")
+    local single = B:Get("util").icons[2]
+    Equal(single.kind .. " " .. single.itemID .. " " .. S[single.count].text, "item 118 5", "a potion on its own still works beside it")
+
+    -- The list: with your items, where Show items puts them, saying how it
+    -- works as you go to tick one.
+    ns.Toggle()
+    local w = FECMFrame
+    local page = w.pages.bar
+    page.showItems:Click()
+    local row = ListRow("family:healing")
+    Equal(tostring(row ~= nil) .. " " .. S[row.name].text .. " | " .. S[row.rank].text .. " | " .. tostring(row.check:GetChecked()),
+        "true Healing Potions | Best you carry (Needs testing) | false", "listed as one row, labelled as needing testing")
+    S[row.check].scripts.OnEnter(row.check)
+    Equal(S[w.note].text, "Move Healing Potions here from Utility. One icon for the best one you carry, switching as your bags change.",
+        "its note says how it works")
+    S[row.check].scripts.OnLeave(row.check)
+    S[page.showItems].scripts.OnEnter(page.showItems)
+    Equal(S[w.note].text:find("Healthstones and potions are one icon each", 1, true) ~= nil, true, "as does Show items'")
+    S[page.showItems].scripts.OnLeave(page.showItems)
+    row.check:Click()
+    Equal(table.concat(ns.BarData("cd").spells, ",") .. " | " .. table.concat(ns.BarData("util").spells, ","),
+        "family:healthstone,family:healing | item:118", "ticking it moves it here from Utility")
+    w:Select("buff")
+    Equal(ListRow("family:healthstone") == nil and ListRow("family:healing") == nil, true, "never offered on the Buffs page")
+    w:Select("debuff")
+    Equal(ListRow("family:healthstone") == nil, true, "nor the Debuffs page")
+    ns.Toggle()
+
+    -- A class without mana isn't offered Mana Potions, unless they're on a
+    -- bar (a profile shared with one that has mana). Kept over a reload.
+    local kept = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    _G.UnitClass = function() return "Warrior", "WARRIOR" end
+    ns = Load(kept)
+    Equal(tostring(ns.Spells:Find("family:mana")) .. " " .. ns.BarData("cd").spells[1] .. " " .. ns.Spells:Find("family:healthstone").itemID,
+        "nil family:healthstone 19004", "no Mana Potions for a warrior; Healthstones kept on the bar, none carried")
+    ns.Bars:Assign("family:mana", "util")
+    Equal(ns.Spells:Find("family:mana") and ns.Spells:Find("family:mana").name, "Mana Potions", "but kept once on a bar")
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- Ticking spells onto bars from their pages ------------------------------------------------
 
 Environment()
@@ -1011,9 +1213,20 @@ trinketCooldown = { SECRET, SECRET, 1 }
 B:RefreshAll()
 Equal(S[charmIcon.texture].desaturated, false, "a hidden item cooldown leaves the icon as it was")
 trinketCooldown = { 0, 0, 1 }
-B:SetOption("cd", "hideReady", true)
+B:SetOption("cd", "whenReady", "hide")
 Equal(S[cdBar.icons[1]].alpha, 0, "ready trinket hidden when asked")
-B:SetOption("cd", "hideReady", false)
+B:SetOption("cd", "whenReady", "dim")
+Equal(S[cdBar.icons[1]].alpha, .4, "or dimmed")
+trinketCooldown = { 100, 120, 1 }
+B:RefreshAll()
+Equal(S[cdBar.icons[1]].alpha, 1, "in full while it cools down")
+trinketCooldown = { SECRET, SECRET, 1 }
+S[cdBar.icons[1]].alpha = nil
+B:RefreshAll()
+Equal(S[cdBar.icons[1]].alpha, nil, "a hidden item cooldown doesn't dim or undim it")
+trinketCooldown = { 0, 0, 1 }
+B:SetOption("cd", "whenReady", "show")
+Equal(S[cdBar.icons[1]].alpha, 1, "Show: in full")
 
 B:Assign("Moonfire", "util")
 local moonIcon = B:Get("util").icons[1]
@@ -1373,9 +1586,44 @@ Equal(ns.BarData("cd").spacing, 7, "spacing set")
 page.options.showTimer:Click()
 Equal(ns.BarData("cd").showTimer, false, "countdown numbers switched off for this bar")
 Equal(Last(B:Get("cd").icons[1].cooldown, "SetHideCountdownNumbers"), true, "and hidden on its icons")
-Equal(S[page.options.hideReady].shown and not S[page.options.showMissing].shown, true, "cooldown bars offer Hide when ready")
-w:Select("buff")
-Equal(S[page.options.showMissing].shown and not S[page.options.hideReady].shown, true, "the Buffs bar offers missing buffs greyed")
+do
+    local ready = page.options.whenReady
+    Equal(tostring(S[ready].shown and S[ready.label].shown and not S[page.options.showMissing].shown) .. " " .. S[ready.label].text
+        .. " " .. ready.selected, "true When ready show", "cooldown bars offer When ready, showing the bar's choice")
+    -- Show, Dim or Hide, one at a time, in the spot the Hide when ready tick had.
+    local labels = {}
+    for _, button in ipairs(ready.buttons) do labels[#labels + 1] = S[button.label].text end
+    local at = S[ready].points[1]
+    Equal(table.concat(labels, " ") .. " | " .. at[1] .. " " .. at[2] .. " " .. at[3], "Show Dim Hide | TOPLEFT 420 0",
+        "three choices, beside the options' first tick row")
+    -- The label and its choices as one part for the tour, from the label's
+    -- start to the buttons' end and level with the buttons, top and bottom
+    -- (the label alone ends above them).
+    local part, lt = S[ready.part], S[ready.label].points[1]
+    local pt = part.points[1]
+    Equal(pt[1] .. " " .. pt[2] .. " " .. pt[3] .. " " .. tostring(pt[2] == lt[2] and pt[2] + part.width == at[2] + S[ready].width
+        and pt[3] == at[3] and pt[3] - part.height == at[3] - S[ready].height and #part.points == 1),
+        "TOPLEFT 320 0 true", "one part round When ready and its choices, for the tour")
+    ready.buttons[2]:Click()
+    Equal(ns.BarData("cd").whenReady .. " " .. ready.selected .. " " .. S[B:Get("cd").icons[1]].alpha, "dim dim 0.4",
+        "clicking Dim sets it, shows it, and a ready icon on the bar dims")
+    ready.buttons[3]:Click()
+    Equal(ns.BarData("cd").whenReady .. " " .. ready.selected, "hide hide", "Hide instead: one choice at a time")
+    -- Each says what it does; Dim that it needs testing.
+    local notes = {}
+    for _, button in ipairs(ready.buttons) do
+        S[button].scripts.OnEnter(button)
+        notes[#notes + 1] = S[w.note].text
+        S[button].scripts.OnLeave(button)
+    end
+    Equal(table.concat(notes, " | "), "Every icon shows in full, ready or cooling down. | "
+        .. "Each icon dims while it's ready, so the ones cooling down stand out. (Needs testing) | "
+        .. "Each icon hides while it's ready, so only the ones cooling down show.", "each choice's note")
+    ready.buttons[1]:Click()
+    w:Select("buff")
+    Equal(S[page.options.showMissing].shown and not S[ready].shown and not S[ready.label].shown, true,
+        "the Buffs bar offers missing buffs greyed there instead")
+end
 Equal(page.options.showTimer:GetChecked(), true, "each bar keeps its own countdown choice")
 Equal(page.size.current, 36, "and its own size")
 
@@ -2569,7 +2817,9 @@ Equal(table.concat(ns.BarData("buff").spells, ",") .. " " .. tostring(ns.CustomS
     "Thorns,Power Word: Fortitude true", "a spell from outside your spellbook, like another class's buff")
 cursor = { "item", 118 }
 S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
-Equal(ns.BarData("cd").spells[1], "item:118", "an item with a cooldown, from your bags")
+Equal(ns.BarData("cd").spells[1] .. " " .. S[w.note].text,
+    "family:healing Added Healing Potions to Cooldowns. It shows the best one you carry.",
+    "a healing potion from your bags: one icon for whichever rank you carry")
 cursor = { "item", 11111 }
 S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
 Equal(ns.BarData("cd").spells[2], "slot:13", "an equipped trinket follows its slot")
@@ -2589,11 +2839,11 @@ do
     S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
     local arrows = B:Get("cd").icons[3]
     Equal(table.concat(ns.BarData("cd").spells, ",") .. " | " .. table.concat(ns.BarData("util").spells, ",") .. " | "
-        .. arrows.kind .. " " .. S[arrows.count].text, "item:118,slot:13,ammo | Wrath | ammo 200",
+        .. arrows.kind .. " " .. S[arrows.count].text, "family:healing,slot:13,ammo | Wrath | ammo 200",
         "another kind than the Rough Arrows equipped: still your ammo, moved to Cooldowns, counting the arrows")
     cursor = { "item", 2512 }
     S[lp.rows.cd.tiles[1]].scripts.OnReceiveDrag(lp.rows.cd.tiles[1])
-    Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. tostring(cursor), "item:118,slot:13,ammo nil",
+    Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. tostring(cursor), "family:healing,slot:13,ammo nil",
         "the equipped arrows, from your character panel onto an icon: already there, never twice")
     cursor = { "item", 2512 }
     S[lp.rows.buff].scripts.OnReceiveDrag(lp.rows.buff)
@@ -2657,6 +2907,165 @@ Equal(lp.drawError, nil, "the Layout page drew without errors")
 Equal(Last(FECMFont18, "SetFont", 1) .. " " .. Last(FECMFont18, "SetFont", 3) .. " " .. Last(FECMFont13, "SetFont", 3),
     "Fonts\\FRIZQT__.TTF THICKOUTLINE OUTLINE", "Friz Quadrata, thick outline from 16 up")
 Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
+
+-- Font and bar texture, picked on the Look page -------------------------------------------
+
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+;(function()
+    -- No resource display: its bars are TestSkin's, and each load would hook
+    -- them again. Put back at the end.
+    local display = _G.PersonalResourceDisplayFrame
+    _G.PersonalResourceDisplayFrame = nil
+    local FRIZ, ARIAL, SKURRI = "Fonts\\FRIZQT__.TTF", "Fonts\\ARIALN.TTF", "Fonts\\skurri.ttf"
+    local FLAT, CLASSIC = "Interface\\Buttons\\WHITE8X8", "Interface\\TargetingFrame\\UI-StatusBar"
+    local RAID = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill"
+    local function Fresh(saved)
+        Environment(saved ~= nil)
+        _G.GameFontHighlightSmall = New("Font") -- the game's small text: "font", 12, "" (Proto:GetFont)
+        _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
+        ns = Load(saved or { useBars = true, notesSeen = "dev" })
+        for _, timer in ipairs(timers) do timer() end
+    end
+    Fresh()
+    local B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local font, fills = w.fontChoice, w.fills
+    local cdBar, buffBar, castBar = B:Get("cd"), B:Get("buff"), ns.CastBar.row.bar
+
+    -- Four of the game's own fonts, each name in its own face; Friz Quadrata
+    -- and flat, as before, until you pick another.
+    local labels = {}
+    for i, button in ipairs(font.buttons) do labels[i] = S[button.label].text .. ":" .. Last(button.label, "SetFontObject") end
+    Equal(table.concat(labels, " "), "Friz:FECMSamplefriz Arial:FECMSamplearial Morpheus:FECMSamplemorpheus Skurri:FECMSampleskurri",
+        "four of the game's fonts, each name in its own face")
+    Equal(Last(FECMSamplearial, "SetFont", 1) .. " " .. Last(FECMSamplemorpheus, "SetFont", 1) .. " " .. Last(FECMSampleskurri, "SetFont", 1),
+        ARIAL .. " Fonts\\MORPHEUS.ttf " .. SKURRI, "from the game's own files")
+    Equal(font.selected .. " " .. ns.Get("font") .. " " .. Last(FECMFont18, "SetFont", 1) .. " " .. S[cdBar.icons[1].label].template .. " "
+        .. S[buffBar.holders[1].label].template, "friz friz " .. FRIZ .. " GameFontHighlightSmall GameFontHighlightSmall",
+        "Friz Quadrata by default, the names in the game's own small text as before")
+    local keys = {}
+    for i, swatch in ipairs(fills) do keys[i] = swatch.key .. ":" .. S[swatch.fill].texture end
+    Equal(table.concat(keys, " "), "flat:" .. FLAT .. " classic:" .. CLASSIC .. " raid:" .. RAID
+        .. " skills:Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar", "four of the game's bar textures, flat first")
+    Equal(S[w.fillChosen].text .. " " .. S[fills[1]].border[1] .. " " .. tostring(S[fills[2]].border[1] < 1), "Flat 1 true",
+        "Flat by default, its swatch outlined")
+    Equal(table.concat(S[fills[3].fill].tint, ","), "1,0.5,0.25", "each a short bar in the colour for all bars")
+    Equal(Last(w.preview.Bar, "SetStatusBarTexture") .. " " .. Last(castBar, "SetStatusBarTexture"), FLAT .. " " .. FLAT,
+        "the preview and your cast bar flat, as before")
+
+    -- In the right-hand column under the keybinds, level with Shadow and the
+    -- first tick, inside the Look page's choices.
+    local function Rect(region) -- left, top, right, bottom within the choices
+        local p = S[region].points[1]
+        return p[2], p[3], p[2] + S[region].width, p[3] - S[region].height
+    end
+    local fl, ft, fr, fb = Rect(font)
+    local tl, tt = Rect(fills[1])
+    local _, _, tr, tb = Rect(fills[#fills])
+    local _, _, _, sizeBottom = Rect(w.keySize)
+    local options = S[w.lookOptions]
+    Equal(table.concat({ fl, ft, fr, fb, tl, tt, tr, tb }, " "), "382 -88 606 -108 382 -116 544 -136", "the font's four choices, then the textures")
+    Equal(tostring(ft == S[w.iconShadow].points[1][3] and tt == S[w.look].points[1][3]) .. " "
+        .. tostring(ft < sizeBottom and fl > S[w.keybinds].points[1][2] and fr <= options.width and tb >= -options.height)
+        .. " " .. tostring(S[w.fillChosen].points[1][2] + 40 <= options.width),
+        "true true true", "level with Shadow and the first tick, under the keybinds' Size, inside the choices, the name clear of the edge")
+    local fp = S[w.faces].points[1]
+    Equal(tostring(fp[2] < fl and fp[3] == ft and fp[2] + S[w.faces].width == fr and fp[3] - S[w.faces].height == tb),
+        "true", "one part round both rows and their labels, for the tour")
+
+    -- Each says what it's for on hover; all but today's look need testing.
+    Hover(font.buttons[2], "OnEnter")
+    Equal(S[w.note].text, "Arial Narrow, plain and narrow, for countdowns, counts, keys and names on icons, and the text on your cast bar"
+        .. " and Tracked Bars. (Needs testing)", "each font says what it's for")
+    Hover(font.buttons[2], "OnLeave")
+    Hover(font.buttons[1], "OnEnter")
+    Equal(S[w.note].text:find("Friz Quadrata, the game's own font", 1, true) == 1 and S[w.note].text:find("Needs testing", 1, true), nil,
+        "Friz Quadrata, the look as it was, needs no testing")
+    Hover(font.buttons[1], "OnLeave")
+    Hover(fills[2], "OnEnter")
+    Equal(S[w.note].text, "The game's classic unit frame bar on your cast bar, swing timer and combo points, and the restyled Tracked Bars"
+        .. " and resource display. (Needs testing)", "each texture says where it goes")
+    Hover(fills[2], "OnLeave")
+
+    -- A font picked: every font made so far takes it at once, so the text in
+    -- them changes with no reload, and the names under icons follow.
+    font.buttons[2]:Click()
+    Equal(ns.Get("font") .. " " .. font.selected, "arial arial", "Arial Narrow picked")
+    Equal(Last(FECMFont18, "SetFont", 1) .. " " .. Last(FECMFont18, "SetFont", 3) .. " " .. Last(FECMFont13, "SetFont", 1) .. " "
+        .. Last(FECMFont13, "SetFont", 3), ARIAL .. " THICKOUTLINE " .. ARIAL .. " OUTLINE",
+        "every font made so far takes it at once, its outline as before")
+    Equal(Last(FECMFont15, "SetFont", 1) .. " " .. Last(FECMFont10, "SetFont", 1) .. " " .. Last(w.preview.Bar.Duration, "SetFontObject"),
+        ARIAL .. " " .. ARIAL .. " FECMFont15", "the preview's Tracked Bar and your cast bar too, keeping their fonts")
+    Equal(tostring(Last(cdBar.icons[1].label, "SetFontObject")) .. " " .. tostring(Last(buffBar.holders[1].label, "SetFontObject")),
+        "FECMNames FECMNames", "the names under icons, on every bar")
+    Equal(tostring(Last(FECMNames, "CopyFontObject") == GameFontHighlightSmall) .. " " .. Last(FECMNames, "SetFont", 1) .. " "
+        .. Last(FECMNames, "SetFont", 2), "true " .. ARIAL .. " 12", "a copy of the game's small text, in Arial Narrow at its size")
+    B:SetOption("cd", "size", 60)
+    Equal(Last(FECMFont30, "SetFont", 1) .. " " .. tostring(Last(cdBar.icons[1].label, "SetFontObject")), ARIAL .. " FECMNames",
+        "fonts made later, for a bigger icon, start in it, and the names keep it")
+    B:SetOption("cd", "size", 36)
+
+    -- A texture picked: the preview, your cast bar and its page's previews at once.
+    fills[2]:Click()
+    Equal(ns.Get("barTexture") .. " " .. S[w.fillChosen].text .. " " .. S[fills[2]].border[1] .. " " .. tostring(S[fills[1]].border[1] < 1),
+        "classic Classic 1 true", "Classic picked, its swatch outlined")
+    Equal(Last(w.preview.Bar, "SetStatusBarTexture") .. " " .. Last(castBar, "SetStatusBarTexture"), CLASSIC .. " " .. CLASSIC,
+        "the preview and your cast bar take it at once")
+    local set = 0
+    rawset(castBar, "SetStatusBarTexture", function(self, texture)
+        set = set + 1
+        S[self].last.SetStatusBarTexture = table.pack(texture)
+    end)
+    ns.CastBar:Apply()
+    ns.CastBar:Apply()
+    Equal(set, 0, "the cast bar, dressed for every cast, only sets it when it changes")
+    w:Select("cast")
+    local cp = w.pages.cast
+    Equal(Last(cp.sample.bar, "SetStatusBarTexture") .. " " .. Last(cp.swingSample.bar, "SetStatusBarTexture"), CLASSIC .. " " .. CLASSIC,
+        "and the Cast bar page's previews")
+    w:Select("look")
+    w.barSwatches[3]:Click()
+    Equal(S[fills[1].fill].tint[3], .88, "the textures follow the colour for all bars")
+    w.barSwatches[1]:Click()
+
+    -- Back to today's look: Friz Quadrata, the game's own small text for
+    -- names, and flat bars.
+    font.buttons[1]:Click()
+    fills[1]:Click()
+    Equal(Last(FECMFont18, "SetFont", 1) .. " " .. tostring(Last(cdBar.icons[1].label, "SetFontObject")) .. " "
+        .. Last(w.preview.Bar, "SetStatusBarTexture") .. " " .. Last(castBar, "SetStatusBarTexture") .. " " .. set,
+        FRIZ .. " GameFontHighlightSmall " .. FLAT .. " " .. FLAT .. " 1", "back as it was, in one click each")
+
+    -- A font the game won't take: Friz Quadrata stands in, and nothing breaks.
+    rawset(FECMFont18, "SetFont", function(self, file, size, flags)
+        if file ~= FRIZ then error("not a font the game has") end
+        S[self].last.SetFont = table.pack(file, size, flags)
+    end)
+    font.buttons[3]:Click()
+    Equal(Last(FECMFont18, "SetFont", 1) .. " " .. Last(FECMFont13, "SetFont", 1) .. " " .. #printed, FRIZ .. " Fonts\\MORPHEUS.ttf 0",
+        "a font the game refuses: Friz Quadrata instead, with no error")
+
+    -- Kept over a reload: the fonts and bars start in them. Anything else
+    -- saved is ignored.
+    font.buttons[4]:Click()
+    fills[3]:Click()
+    local saved = ForeverEnhancedCooldownManagerDB
+    Fresh(saved)
+    Equal(ns.Get("font") .. " " .. ns.Get("barTexture") .. " " .. Last(FECMFont18, "SetFont", 1) .. " "
+        .. Last(ns.CastBar.row.bar, "SetStatusBarTexture"), "skurri raid " .. SKURRI .. " " .. RAID,
+        "kept over a reload: the fonts made in Skurri and the bars in Raid from the start")
+    Equal(S[ns.Bars:Get("cd").icons[1].label].template .. " " .. S[ns.Bars:Get("buff").holders[1].label].template .. " "
+        .. Last(FECMNames, "SetFont", 1), "FECMNames FECMNames " .. SKURRI, "the names made in it too")
+    saved.font, saved.barTexture = "comic", 7
+    Fresh(saved)
+    Equal(ns.Get("font") .. " " .. ns.Get("barTexture") .. " " .. Last(FECMFont18, "SetFont", 1), "friz flat " .. FRIZ,
+        "anything else saved is ignored")
+    Equal(#printed, 0, "no errors from the font or texture")
+    _G.PersonalResourceDisplayFrame = display
+end)()
 
 -- Flush against the bars you can see ------------------------------------------------------
 
@@ -3170,6 +3579,148 @@ Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
     end
 end)()
 
+-- The cast bar exactly as wide as the display ------------------------------------------------------
+
+;(function()
+    -- How big one of a region's own units is on screen: its own size, or what it sits in.
+    local function Scale(region)
+        while region do
+            local own = rawget(region, "GetEffectiveScale")
+            if own then return own(region) end
+            region = S[region] and S[region].parent
+        end
+        return 1
+    end
+    -- Where a region's left and right edges end up across the screen, from its
+    -- anchors and width as the game lays them out; Blizzard's bars from their rects.
+    local function Across(region)
+        if region == UIParent then return S[UIParent].cx, S[UIParent].cx end
+        local s = S[region]
+        if s.rect and #s.points == 0 then
+            local scale = Scale(region)
+            return s.rect[1] * scale, (s.rect[1] + s.rect[3]) * scale
+        end
+        local left, right, middle
+        for _, p in ipairs(s.points) do
+            local point, relative, relativePoint, x = p[1], p[2], p[3], p[4]
+            if type(relative) ~= "table" then relative, relativePoint, x = s.parent, point, relative end
+            local l, r = Across(relative)
+            local at = relativePoint:find("LEFT") and l or relativePoint:find("RIGHT") and r or (l + r) / 2
+            at = at + (x or 0) * Scale(region)
+            if point:find("LEFT") then left = at elseif point:find("RIGHT") then right = at else middle = at end
+        end
+        local width = s.width * Scale(region)
+        if middle then left, right = middle - width / 2, middle + width / 2 end
+        return left or right - width, right or left + width
+    end
+    -- The whole cast bar you see: its edge, and its icon's while that shows.
+    local function Seen(cb)
+        local left, right = Across(cb.bar.edge)
+        if S[cb.iconEdge].shown then left = math.min(left, (Across(cb.iconEdge))) end
+        return string.format("%.2f %.2f", left, right)
+    end
+    -- The display you see: the restyle's edge round its power bar.
+    local function Restyled()
+        local edge
+        for _, obj in ipairs(objects) do
+            local p = S[obj].parent == prd.PowerBar and S[obj].kind == "Texture" and S[obj].points[1]
+            if p and p[1] == "TOPLEFT" and p[4] < 0 then edge = obj end
+        end
+        return edge and string.format("%.2f %.2f", Across(edge))
+    end
+
+    Environment()
+    Display()
+    prdOn = true
+    _G.PlayerCastingBarFrame = New("Frame")
+    ns = Load({ useBars = true, castBar = true, castIcon = true })
+    local B, L, C = ns.Bars, ns.Layout, ns.CastBar
+    local cb = C.row
+    B:Assign("Moonfire", "cd")
+    B:Assign("Attack", "util")
+    L:Apply("pyramid")
+    -- The display's bars run from 400 to 600; the restyle's 1px edge goes round them.
+    Equal(Restyled() .. string.format(" %g %g", L:Display().width, L:Display().edge), "399.00 601.00 202 1",
+        "the restyled display: its bars and 1px edges")
+    Equal(Seen(cb) .. " " .. string.format("%.2f %.2f", Across(cb.icon)), "399.00 601.00 400.00 418.00",
+        "the cast bar, icon to bar end, edge to edge with the display, the icon on its bars' line")
+    ns.Set("castIcon", false)
+    C:Apply()
+    Equal(Seen(cb) .. " " .. string.format("%.2f", (Across(cb.bar))), "399.00 601.00 400.00",
+        "no icon: the bar's own edge takes its place")
+    ns.Set("castIcon", true)
+    ns.Set("castBar", false)
+    ns.Set("swingTimer", true)
+    C:Apply()
+    Equal(Seen(cb) .. " " .. tostring(S[cb].shown), "399.00 601.00 true", "the swing timer in the same spot, just as wide")
+    -- Switched off, it sits where the display was, still no wider.
+    prdOn = false
+    L:Stack()
+    Equal(Seen(cb) .. " " .. At(cb), "399.00 601.00 TOP 0 -90", "with the display switched off, exactly where its edges were")
+    prdOn = true
+    L:Stack()
+    -- A display last seen before the edge was kept: the restyle's 1px.
+    local seen = ns.LayoutData().display
+    seen.edge = nil
+    _G.PersonalResourceDisplayFrame = nil
+    L:Stack()
+    Equal(Seen(cb) .. " " .. tostring(seen.edge), "399.00 601.00 1", "a display remembered from before still lines up")
+    _G.PersonalResourceDisplayFrame = prd
+    -- Edit Mode's Size makes the display and its 1px edges bigger or smaller;
+    -- the cast bar follows its edges exactly.
+    for _, size in ipairs({ 1.5, .7 }) do
+        for _, part in ipairs({ prd, prd.HealthBarsContainer, prd.PowerBar }) do
+            rawset(part, "GetEffectiveScale", function() return size end)
+        end
+        L:Stack()
+        Equal(Seen(cb), Restyled(), string.format("at %g%% Size, still edge to edge with the display", size * 100))
+    end
+    for _, part in ipairs({ prd, prd.HealthBarsContainer, prd.PowerBar }) do rawset(part, "GetEffectiveScale", nil) end
+    Equal(#printed, 0, "no errors lining it up")
+
+    -- Without the restyle: its icon and bar span the display's bars exactly,
+    -- its own edges just outside them, where the restyle's would be.
+    Environment()
+    Display()
+    _G.PlayerCastingBarFrame = New("Frame")
+    ns = Load({ useBars = true, prdSkin = false, castBar = true })
+    B, L, C = ns.Bars, ns.Layout, ns.CastBar
+    cb = C.row
+    B:Assign("Moonfire", "cd")
+    L:Apply("pyramid")
+    Equal(string.format("%.2f %.2f ", (Across(cb.icon)), select(2, Across(cb.bar))) .. Seen(cb), "400.00 600.00 399.00 601.00",
+        "without the restyle: icon and bar span the display's bars, its edges where the restyle's go")
+    prdOn = false
+    L:Stack()
+    Equal(Seen(cb), "399.00 601.00", "and the same with the display switched off")
+    prdOn = true
+
+    -- Its shadow reaches as far out as your rows' does, whatever borders go under theirs.
+    local function Reach(ring) return 1 - S[ring[3]].points[1][4] end -- past the edge it's round
+    local function Shown(ring) return tostring(S[ring[1]].shown) end
+    local cd = B:Get("cd")
+    local reaches = {}
+    for _, pair in ipairs({ { "off", "bar" }, { "bar", "bar" }, { "icon", "bar" }, { "off", "icon" }, { "icon", "icon" }, { "bar", "icon" } }) do
+        ns.Set("iconBorder", pair[1])
+        ns.Set("iconShadow", pair[2])
+        B:ApplyDecor()
+        C:Apply()
+        local rows = pair[2] == "bar" and cd.decor or cd.icons[1].decor
+        reaches[#reaches + 1] = pair[1] .. "/" .. pair[2] .. " " .. Reach(rows.shadow[4]) .. " " .. Reach(cb.decor.shadow[4])
+            .. " " .. Shown(cb.decor.shadow[4]) .. " " .. Shown(cb.decor.border)
+    end
+    Equal(table.concat(reaches, ", "), "off/bar 4 4 true false, bar/bar 5 5 true false, icon/bar 4 4 true false, "
+        .. "off/icon 4 4 true false, icon/icon 5 5 true false, bar/icon 4 4 true false",
+        "the cast bar's shadow fades out just where the rows' does, and it never gets a second border")
+    ns.Set("iconBorder", "off")
+    ns.Set("iconShadow", "bar")
+    C:Apply()
+    Equal(Reach(cb.decor.shadow[1]), 1, "with no border, its shadow's darkest ring sits under its own 1px edge, as a row's sits on its icons")
+    Equal(#printed, 0, "no errors from its shadow")
+    _G.PlayerCastingBarFrame = nil
+    Display()
+end)()
+
 -- Borders and shadows on your bars -------------------------------------------------------------
 
 Environment()
@@ -3217,13 +3768,15 @@ do
     Equal(Shown(cd.decor.border) .. " " .. Shown(cd.decor.shadow[1]), "true true", "a cooldown bar gets the whole-bar box")
     Equal(Shown(buff.decor.border) .. " " .. Shown(buff.decor.shadow[1]) .. " " .. Shown(debuff.decor.border), "false false false",
         "packed Buffs and Debuffs don't: their icons come and go")
-    B:SetOption("cd", "hideReady", true)
+    B:SetOption("cd", "whenReady", "hide")
     Equal(Shown(cd.decor.border), "false", "nor a bar that hides its ready icons")
     B:SetUnlocked(true)
     Equal(Shown(cd.decor.border), "true", "unless every icon shows, unlocked")
     B:SetUnlocked(false)
     Equal(Shown(cd.decor.border), "false", "locked again, it goes")
-    B:SetOption("cd", "hideReady", false)
+    B:SetOption("cd", "whenReady", "dim")
+    Equal(Shown(cd.decor.border) .. " " .. Shown(cd.decor.shadow[1]), "true true", "a bar that dims them keeps them in place, and its box")
+    B:SetOption("cd", "whenReady", "show")
     Equal(Shown(cd.decor.border), "true", "and it's back with Hide when ready off")
     B:SetOption("buff", "showMissing", true)
     Equal(Shown(buff.decor.border), "true", "fixed Buffs spots always show, so they get it")
@@ -3729,10 +4282,18 @@ end)()
 
     -- Which steps: newer than the version seen, up to the one running.
     local Tour = ns.Tour
-    Equal(Titles(Tour:News("1.0.0")), NEW, "from 1.0.0 to this copy: the three new steps, in order")
-    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")), NEW .. "|" .. NEW,
+    -- 1.2.0's steps: after 1.1.0's in a copy from the source.
+    local nextSteps = Tour:News("1.1.0")
+    local NEXT = Titles(nextSteps)
+    local TOTAL = 3 + #nextSteps -- from 1.0.0: 1.1.0's three, then the next update's
+    Equal(NEXT:find("Healthstones and potions", 1, true) ~= nil and NEXT:find("Dim when ready", 1, true) ~= nil
+        and nextSteps[1].version == "1.2.0", true,
+        "1.2.0's steps, Healthstones and potions and Dim when ready among them")
+    Equal(Titles(Tour:News("1.0.0")), NEW .. ", " .. NEXT, "from 1.0.0 to this copy: the three new steps, then the next update's")
+    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")), NEXT .. "|" .. NEXT,
         "no version seen, or one that isn't: the latest update's, the newest steps there are")
-    Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW, "versions skipped come together: the basics from 1.0.0, then the new ones")
+    Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW .. ", " .. NEXT,
+        "versions skipped come together: the basics from 1.0.0, then the new ones")
     Equal(Titles(Tour:News("dev")) .. "|" .. Titles(Tour:News(U)), "|", "nothing when nothing is newer than what was seen")
     -- Short and plain: no em dashes, and the new steps no longer than the basics'.
     local plain, basics, longest = true, 0, 0
@@ -3745,7 +4306,7 @@ end)()
     Equal(tostring(plain) .. " " .. tostring(longest > 0 and longest <= basics), "true true", "the steps are plain, the new ones short")
     local keybinds = ns.Keybinds
     ns.Keybinds = nil
-    Equal(Titles(Tour:News("1.0.0")), "Live preview, All bars", "the keybinds step waits for its file (a full restart after updating)")
+    Equal(Titles(Tour:News("1.0.0")), "Live preview, All bars, " .. NEXT, "the keybinds step waits for its file (a full restart after updating)")
     ns.Keybinds = keybinds
     Running("1.0.0")
     Equal(Titles(Tour:News("0.9.0")) .. "|" .. Titles(Tour:News(nil)), BASICS .. "|" .. BASICS,
@@ -3753,11 +4314,9 @@ end)()
     Running("1.1.0")
     Equal(Titles(Tour:News("1.0.0")) .. "|" .. Titles(Tour:News(nil)), NEW .. "|" .. NEW,
         "1.1.0 numbered its steps: from 1.0.0 they show, and by hand too")
-    -- Once a release gives the new steps its number, an update after it that
-    -- adds none still offers them by hand, as the tour's Done and Skip say.
-    Running(nil)
-    local added = Tour:News("1.0.0")
-    for _, step in ipairs(added) do step.version = "1.1.0" end
+    -- An update after a release that adds no steps still offers the
+    -- release's by hand, as the tour's Done and Skip say. The next update's,
+    -- still waiting for their number, are in no release.
     Running("1.1.1")
     Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("1.0.0")) .. "|" .. Titles(Tour:News("1.1.0")), NEW .. "|" .. NEW .. "|",
         "1.1.1 with steps from 1.1.0: by hand those, from 1.0.0 those, from 1.1.0 nothing new")
@@ -3765,7 +4324,6 @@ end)()
     local own = Titles(Tour:News(nil))
     Running("1.0.9")
     Equal(own .. "|" .. Titles(Tour:News(nil)), NEW .. "|" .. BASICS, "1.1.0 by hand its own; a release before it never a later one's")
-    for _, step in ipairs(added) do step.version = U end
     Running(nil)
 
     -- After an update: What's new offers the tour beside Got it.
@@ -3791,8 +4349,8 @@ end)()
     local tw, box = FECMFrame, FECMTour
     Equal(tostring(S[notes].shown) .. " " .. tostring(S[tw].shown) .. " " .. tostring(S[box].shown), "false true true",
         "it closes What's new and opens the settings with the tour")
-    Equal(S[box.count].text .. " " .. tw.selected .. " " .. S[box.title].text, "1 of 3 look KEYBINDS ON ICONS",
-        "three steps, the Look page's keybinds first")
+    Equal(S[box.count].text .. " " .. tw.selected .. " " .. S[box.title].text, "1 of " .. TOTAL .. " look KEYBINDS ON ICONS",
+        "1.1.0's three steps and the next update's, the Look page's keybinds first")
     local outline = S[box.outline].points
     Equal(tostring(outline[1][2] == tw.keybinds) .. " " .. tostring(outline[2][2] == tw.keySize), "true true",
         "outlining from the Keybinds on icons tick down to the Size slider")
@@ -3823,7 +4381,7 @@ end)()
     tw.keySize:Choose(100)
     box.next:Click()
     local lp = tw.pages.layout
-    Equal(tw.selected .. " " .. S[box.count].text .. " " .. S[box.title].text, "layout 2 of 3 LIVE PREVIEW",
+    Equal(tw.selected .. " " .. S[box.count].text .. " " .. S[box.title].text, "layout 2 of " .. TOTAL .. " LIVE PREVIEW",
         "Next moves on, to the Layout page's Live preview")
     p = S[box].points[1]
     local arrow = S[box.arrow].points[1]
@@ -3849,12 +4407,92 @@ end)()
     box.next:Click()
     box.next:Click()
     p = S[box].points[1]
-    Equal(tw.selected .. " " .. S[box.count].text .. " " .. S[box.title].text .. " " .. S[box.next.label].text, "layout 3 of 3 ALL BARS Done",
-        "then All bars, the last step")
+    Equal(tw.selected .. " " .. S[box.count].text .. " " .. S[box.title].text .. " " .. S[box.next.label].text,
+        "layout 3 of " .. TOTAL .. " ALL BARS Next", "then All bars, the last of 1.1.0's")
     Equal(tostring(S[box.outline].points[1][2] == lp.allBars) .. " " .. p[1] .. " " .. tostring(p[2] == lp.allBars) .. " " .. p[3],
         "true BOTTOMLEFT true TOPLEFT", "outlining the slider, the box above it")
     tw:Select("look")
     Equal(S[box].shown and not S[box.outline].shown, true, "on another page the outline hides, the box stays")
+    -- Then the next update's steps, to Done. Healthstones and potions: the
+    -- Cooldowns page's Show items tick, the box above it, clear of the list.
+    local ahead = {}
+    for _ = 4, TOTAL do
+        box.next:Click()
+        ahead[#ahead + 1] = S[box.title].text
+        if S[box.title].text == "HEALTHSTONES AND POTIONS" then
+            local bp = tw.pages.bar
+            p = S[box].points[1]
+            Equal(tw.selected .. " " .. tostring(S[box.outline].points[1][2] == bp.showItems) .. " " .. p[1] .. " "
+                .. tostring(p[2] == bp.showItems) .. " " .. p[3] .. " " .. tostring(S[box.text].text:find("Try it: tick Show items.", 1, true) ~= nil),
+                "cd true BOTTOMLEFT true TOPLEFT true", "Healthstones and potions: outlining Show items, the box above it, asking you to tick it")
+            bp.showItems:Click()
+            S[box].scripts.OnUpdate(box, 1)
+            Equal(tostring(ns.Get("listItems")) .. " " .. S[box.title].text .. " " .. tostring(Row("family:healthstone") ~= nil),
+                "true HEALTHSTONES AND POTIONS true", "ticked: Healthstones listed, the step staying so they can be seen")
+        end
+        -- Dim when ready: the Cooldowns page's When ready and its three
+        -- choices as one part, the box under the buttons (not the shorter
+        -- label), inside the page's right edge.
+        if S[box.title].text == "DIM WHEN READY" then
+            local ready = tw.pages.bar.options.whenReady
+            local o = S[box.outline].points
+            p = S[box].points[1]
+            Equal(tw.selected .. " " .. tostring(o[1][2] == ready.part and o[2][2] == ready.part) .. " " .. p[1] .. " "
+                .. tostring(p[2] == ready.part) .. " " .. p[3] .. " " .. tostring(S[box.text].text:find("Try it: pick Dim.", 1, true) ~= nil),
+                "cd true TOPLEFT true BOTTOMLEFT true", "Dim when ready: outlining When ready and its choices, the box under them, asking you to pick Dim")
+            -- The box hangs from the bottom the outline goes round, so its
+            -- arrow's tip stops under the outline, as on the other steps.
+            Equal(tostring(p[5] + S[box.arrow].height < o[2][5]) .. " " .. p[5] .. " " .. S[box.arrow].height .. " " .. o[2][5],
+                "true -14 9 -4", "its arrow stops just under the outline, clear of it and the buttons")
+            Equal(16 + S[ready.part].points[1][2] + S[box].width <= 638 - 8, true, "the box inside the page's right edge")
+            ready.buttons[2]:Click()
+            S[box].scripts.OnUpdate(box, 1)
+            Equal(ns.BarData("cd").whenReady .. " " .. S[box.title].text, "dim DIM WHEN READY", "picked: the step stays so the bar can be seen dimming")
+            ready.buttons[1]:Click()
+        end
+        -- Font and bar texture: both rows on the Look page as one part, the
+        -- box under them at their right end, inside the page and below the
+        -- preview at the top.
+        if S[box.title].text == "FONT AND BAR TEXTURE" then
+            local faces = tw.faces
+            local o = S[box.outline].points
+            p = S[box].points[1]
+            Equal(tw.selected .. " " .. tostring(o[1][2] == faces and o[2][2] == faces) .. " " .. p[1] .. " " .. tostring(p[2] == faces)
+                .. " " .. p[3] .. " " .. S[box.arrow].points[1][3] .. " "
+                .. tostring(S[box.text].text:find("Try it: pick a font or a texture.", 1, true) ~= nil),
+                "look true TOPRIGHT true BOTTOMRIGHT TOPRIGHT true",
+                "Font and bar texture: outlining both rows, the box under them at their right end, asking you to pick one")
+            local at = S[faces].points[1]
+            Equal(tostring(16 + at[2] + S[faces].width <= 638 - 16 and 16 + at[2] + S[faces].width - S[box].width >= 16), "true",
+                "the box inside the page, lined up with the Look page's right edge")
+            tw.fontChoice.buttons[4]:Click()
+            tw.fills[2]:Click()
+            S[box].scripts.OnUpdate(box, 1)
+            Equal(ns.Get("font") .. " " .. ns.Get("barTexture") .. " " .. S[box.title].text, "skurri classic FONT AND BAR TEXTURE",
+                "picked: the step stays so others can be tried")
+            tw.fontChoice.buttons[1]:Click()
+            tw.fills[1]:Click()
+        end
+        -- Grow arrows: the Layout page's tick, the box above it, clear of
+        -- Unlock bars, which it asks you to click next.
+        if S[box.title].text == "GROW ARROWS" then
+            local tick = lp.growArrows
+            p = S[box].points[1]
+            Equal(tw.selected .. " " .. tostring(S[box.outline].points[1][2] == tick) .. " " .. p[1] .. " " .. tostring(p[2] == tick)
+                .. " " .. p[3] .. " " .. tostring(S[box.text].text:find("Try it: tick it, then Unlock bars.", 1, true) ~= nil),
+                "layout true BOTTOMLEFT true TOPLEFT true", "Grow arrows: outlining its tick, the box above it, asking you to tick it and unlock")
+            local unlockLeft = 638 - 16 - 12 - S[lp.home].width - 6 - S[lp.unlock].width
+            Equal(S[tick].points[1][2] + S[box].width <= unlockLeft - 8, true, "the box clear of Unlock bars")
+            tick:Click()
+            lp.unlock:Click()
+            S[box].scripts.OnUpdate(box, 1)
+            Equal(tostring(ns.Get("growArrows")) .. " " .. tostring(ns.Bars:Get("cd").arrows:IsVisible()) .. " " .. S[box.title].text,
+                "true true GROW ARROWS", "ticked and unlocked: arrows on your bars, the step staying so they can be seen")
+            lp.unlock:Click()
+            tick:Click()
+        end
+    end
+    Equal(table.concat(ahead, ", ") .. " " .. S[box.next.label].text, NEXT:upper() .. " Done", "then the next update's steps, the last one Done")
     box.next:Click()
     Equal(tostring(S[box].shown) .. " " .. tostring(S[tw].shown) .. " " .. S[tw.note].text,
         "false true That's what's new. See it again any time from What's new, or with /ccm new.",
@@ -3868,7 +4506,8 @@ end)()
     Equal(tostring(S[notes].shown) .. " " .. tostring(notes.seen) .. " " .. tostring(S[notes.tour].shown), "true nil true",
         "/ccm new offers it too")
     notes.tour:Click()
-    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of 3 KEYBINDS ON ICONS", "the same three")
+    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of " .. #nextSteps .. " " .. nextSteps[1].title:upper(),
+        "the next update's steps, the newest there are")
     tw.news:Click()
     Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown), "true true", "What's new opened over the tour")
     FECMEscButton:Click()
@@ -3882,7 +4521,7 @@ end)()
     -- Skip tour ends it too, and says where it is.
     tw.news:Click()
     notes.tour:Click()
-    box.next:Click()
+    if #nextSteps > 1 then box.next:Click() end -- a step past the first, where there is one
     box.skip:Click()
     Equal(tostring(S[box].shown) .. " " .. S[tw.note].text, "false See it again any time from What's new, or with /ccm new.",
         "Skip tour ends it, saying where to see it again")
@@ -3900,11 +4539,12 @@ end)()
     FECMNotes.tour:Click()
     box = FECMTour
     local titles = { S[box.title].text }
-    for _ = 2, 12 do
+    for _ = 2, 9 + TOTAL do
         FECMTour.next:Click()
         titles[#titles + 1] = S[box.title].text
     end
-    Equal(S[box.count].text .. " " .. table.concat(titles, ", "), "12 of 12 " .. BASICS:upper() .. ", " .. NEW:upper(),
+    Equal(S[box.count].text .. " " .. table.concat(titles, ", "),
+        (9 + TOTAL) .. " of " .. (9 + TOTAL) .. " " .. BASICS:upper() .. ", " .. NEW:upper() .. ", " .. NEXT:upper(),
         "from 0.9.0: the basics, then what's new since, in one tour")
 
     -- An update with no new steps: no button, Discord back beside Got it,
@@ -4169,7 +4809,7 @@ end
     bagItems = { { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 } }
     trinket, ammo, ammoCount = 5079, 2512, 200
     B:Rebuild()
-    B:AddItem("cd", 118)
+    B:Assign("item:118", "cd") -- the potion on its own, ticked in the list
     B:AddItem("cd", 5079)
     B:Assign("ammo", "cd")
     actionSlots[3], keyOf.ACTIONBUTTON3 = { "item", 118 }, "3"
@@ -4199,6 +4839,24 @@ end
     Flush()
     Equal(S[potion.key].text .. " " .. At(potion.count) .. " | " .. At(quiver.count),
         "3 TOPRIGHT TOPRIGHT -1 -1 | BOTTOMRIGHT BOTTOMRIGHT -1 1", "bound again: up again, and the ammo's stays put")
+    -- A healthstone family: the key for the one it shows, else for any rank
+    -- on your bars, the best first; a new key as soon as it moves on.
+    actionSlots[8], keyOf.ACTIONBUTTON8 = { "item", 9421 }, "8"
+    actionSlots[10], keyOf.ACTIONBUTTON10 = { "item", 5511 }, "0"
+    K:Update()
+    B:Assign("family:healthstone", "cd")
+    local stone = Icon("family:healthstone")
+    Equal(stone.itemID .. " " .. S[stone.key].text .. " " .. tostring(S[stone.key].shown), "19004 8 true",
+        "none carried: the Major Healthstone's key, the best rank on your bars")
+    actionSlots[9], keyOf.ACTIONBUTTON9 = { "item", 5512 }, "9"
+    K:Update()
+    itemCount[5512] = 1
+    B:RefreshAll()
+    Equal(stone.itemID .. " " .. S[stone.key].text, "5512 9", "a Minor one made: its own key, as soon as the bars refresh")
+    itemCount[5512] = 0
+    B:TakeOff("cd", "family:healthstone")
+    actionSlots[8], actionSlots[9], actionSlots[10] = nil, nil, nil
+    K:Update()
     -- The main bar paged in a fight: text and the addon's own anchors only.
     lockdown = true
     bonusIndex = 8
@@ -4450,10 +5108,13 @@ end)()
         .. " " .. span.points[2][1] .. " " .. tostring(S[cdRow.decor.border[1]].points[1][2] == cdRow.span),
         "true TOPLEFT true BOTTOMRIGHT true", "round your three icons, not the empty spots")
     Bars:SetOption("buff", "showMissing", true)
-    Bars:SetOption("cd", "hideReady", true)
+    Bars:SetOption("cd", "whenReady", "hide")
     lw:Refresh()
     Equal(Boxed("buff") .. " [" .. Boxed("cd") .. "]", "bs []", "as on your bars: fixed Buffs spots get it, a bar hiding ready icons doesn't")
-    Bars:SetOption("cd", "hideReady", false)
+    Bars:SetOption("cd", "whenReady", "dim")
+    lw:Refresh()
+    Equal(Boxed("cd"), "bs", "one dimming them does")
+    Bars:SetOption("cd", "whenReady", "show")
     Layout:SetAcross("cd", 2)
     lw:Refresh()
     Equal(Row("cd") .. " " .. tostring(S[cdRow.span].points[2][2] == cdRow.tiles[2]) .. " " .. S[cdRow.more].text, "1 S2 true +1",
@@ -4883,6 +5544,154 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- Grow arrows while you arrange your bars -------------------------------------------------
+
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+;(function()
+    Environment()
+    local ns = Load({ useBars = true })
+    local B, L, T = ns.Bars, ns.Layout, ns.Theme
+    for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+    local cd, buff, debuff = B:Get("cd"), B:Get("buff"), B:Get("debuff")
+    local arrows = cd.arrows
+    -- Which way the art faces, from how it's turned.
+    local function Way(texture)
+        local c = S[texture].last.SetTexCoord
+        if c.n == 8 then return c[1] == 1 and c[2] == 0 and "left" or "right" end
+        return c[3] == 0 and "up" or "down"
+    end
+    -- The arrows that can be seen on a bar, each by the way it points (the
+    -- row's with the edge it sits on), or "none". Each black edge must go
+    -- with its arrow.
+    local function Seen(bar)
+        local a = bar.arrows
+        if not a:IsVisible() then return "none" end
+        local list = {}
+        for _, arrow in ipairs({ a.left, a.right, a.row }) do
+            if S[arrow].shown ~= S[arrow.edge].shown or Way(arrow) ~= Way(arrow.edge) then list[#list + 1] = "(edge?)" end
+            if S[arrow].shown then list[#list + 1] = Way(arrow) .. (arrow == a.row and ("@" .. S[arrow].points[1][1]) or "") end
+        end
+        return table.concat(list, " ")
+    end
+
+    -- Off to start with: unlocked, just the movers.
+    B:SetUnlocked(true)
+    Equal(tostring(ns.Get("growArrows")) .. " " .. tostring(S[cd.mover].shown) .. " " .. Seen(cd), "false true none",
+        "grow arrows start off: unlocked, a bar has its mover and no arrows")
+    -- Never in the way: on the bar, above its mover, taking no mouse.
+    Equal(tostring(Last(arrows, "EnableMouse")) .. " " .. tostring(S[arrows].parent == cd) .. " "
+        .. tostring(Last(arrows, "SetFrameLevel") > Last(cd.mover, "SetFrameLevel")), "false true true",
+        "the arrows never take the mouse, and sit on the bar above its mover")
+
+    -- Ticked: from the centre, out both ways, and new rows below.
+    ns.Set("growArrows", true)
+    B:ApplyArrows()
+    Equal(Seen(cd), "left right down@BOTTOM", "ticked: growing from the centre, an arrow out each side, and one down for new rows")
+    local function At(region)
+        local p = S[region].points[1]
+        return table.concat({ p[1], tostring(p[2] == cd), p[3], p[4], p[5], S[region].width .. "x" .. S[region].height }, " ")
+    end
+    Equal(At(arrows.left) .. " | " .. At(arrows.right) .. " | " .. At(arrows.row),
+        "LEFT true LEFT -3 0 7x12 | RIGHT true RIGHT 3 0 7x12 | BOTTOM true BOTTOM 0 -3 12x7",
+        "small, on the bar's edges, their tips just outside, inside the mover's margin")
+    local edge = arrows.left.edge
+    Equal(S[edge].width .. "x" .. S[edge].height .. " " .. table.concat(S[edge].tint, " ") .. " " .. tostring(S[edge].points[1][2] == arrows.left),
+        "9x14 0 0 0 true", "each over a black copy a little bigger, so it reads over any icon")
+    Equal(table.concat(S[arrows.left].tint, " ") .. " " .. S[arrows.left].texture,
+        table.concat(T:Accent(), " ") .. " " .. ns.MEDIA .. "TourArrow.tga", "the tour's arrow, in the accent")
+    ForeverEnhancedCooldownManagerDB.accent = "blue"
+    T:Repaint()
+    Equal(table.concat(S[arrows.row].tint, " "), table.concat(T.ACCENTS.blue.colour, " "), "a new accent repaints them")
+    ForeverEnhancedCooldownManagerDB.accent = "orange"
+    T:Repaint()
+
+    -- Growing from an edge: one arrow, away from it. New rows above: the
+    -- row's arrow up, at the top.
+    B:SetOption("cd", "grow", "left")
+    local left = Seen(cd)
+    B:SetOption("cd", "grow", "right")
+    local right = Seen(cd)
+    B:SetOption("cd", "wrap", "up")
+    Equal(left .. " | " .. right .. " | " .. Seen(cd) .. " " .. S[arrows.row].points[1][5],
+        "left down@BOTTOM | right down@BOTTOM | right up@TOP 3",
+        "growing left or right, the one arrow that way; new rows above, the row's arrow up at the top")
+    B:SetOption("cd", "grow", "centre")
+    B:SetOption("cd", "wrap", "down")
+
+    -- Only while the bars are being arranged.
+    B:SetUnlocked(false)
+    Equal(tostring(S[arrows].shown) .. " " .. Seen(cd), "false none", "locked: gone")
+    EditModeManagerFrame:Show()
+    Equal(Seen(cd) .. " " .. tostring(S[cd.mover].shown), "left right down@BOTTOM false", "in Edit Mode on your bars, with no mover")
+    EditModeManagerFrame:Hide()
+    Equal(Seen(cd), "none", "and gone once it closes")
+    B:SetUnlocked(true)
+    ns.Set("growArrows", false)
+    B:ApplyArrows()
+    Equal(Seen(cd), "none", "unticked while unlocked: gone at once")
+    ns.Set("growArrows", true)
+    B:ApplyArrows()
+
+    -- Packed Buffs and Debuffs are one row: only which way they grow. Fixed
+    -- spots go in rows like icons.
+    B:SetAura("buff", "Thorns", true)
+    Equal(Seen(buff) .. " | " .. Seen(debuff), "left right | left right", "packed Buffs, and an empty Debuffs shown while unlocked: no new rows")
+    B:SetOption("buff", "showMissing", true)
+    Equal(Seen(buff), "left right down@BOTTOM", "fixed spots: new rows too")
+    -- In a fight the Buffs bar keeps its shape, and its arrows, until it's over.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetOption("buff", "grow", "right")
+    local during = Seen(buff)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(during .. " | " .. Seen(buff), "left right down@BOTTOM | right down@BOTTOM",
+        "a fight holds the Buffs bar's arrows with its shape; they follow it after")
+    B:SetOption("buff", "showMissing", false)
+    B:SetOption("buff", "grow", "centre")
+
+    -- A layout sets which way its bars grow; the arrows follow.
+    L:Apply("sides")
+    Equal(Seen(cd) .. " | " .. Seen(buff) .. " | " .. Seen(debuff) .. " | " .. Seen(B:Get("util")),
+        "left right up@TOP | left | right | left right down@BOTTOM",
+        "Sides: Cooldowns above growing up, Buffs growing left, Debuffs right, Utility below growing down")
+    L:TurnOff()
+    B:SetUnlocked(false)
+
+    -- The Layout page's tick, level with All bars on its left.
+    ns.Set("growArrows", false)
+    B:ApplyArrows()
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("layout")
+    local lp = w.pages.layout
+    local tick = lp.growArrows
+    local p, all = S[tick].points[1], S[lp.allBars].points[1]
+    Equal(S[tick.text].text .. " " .. tostring(tick:GetChecked()) .. " " .. p[1] .. " " .. p[2] .. " " .. p[3],
+        "Show grow arrows (Needs testing) false BOTTOMLEFT 16 58", "a Show grow arrows tick on the Layout page, off, bottom left")
+    Equal(tostring(p[3] + S[tick].height / 2 == all[3] + S[lp.allBars].height / 2) .. " "
+        .. tostring(16 + 18 + #S[tick.text].text * 6 <= 638 - 16 - S[lp.allBars].width - 8) .. " "
+        .. tostring(p[3] + S[tick].height <= S[lp.box].points[2][3] - 8), "true true true",
+        "level with All bars and clear of it (six units a letter), under the drawing's box")
+    Equal(tick.hint, "While your bars are unlocked, or in Edit Mode, an arrow on each shows which way it grows as icons come and go,"
+        .. " and where a new row goes.", "its note says when they show and what they mean")
+    tick:Click()
+    lp.unlock:Click()
+    Equal(tostring(ns.Get("growArrows")) .. " " .. tostring(tick:GetChecked()) .. " " .. Seen(cd), "true true left right up@TOP",
+        "ticked and unlocked: the arrows on your bars")
+    w:Hide()
+    Equal(tostring(B:IsUnlocked()) .. " " .. Seen(cd), "false none", "closing the window locks the bars, and the arrows go")
+    Equal(#printed, 0, "no errors")
+
+    -- Kept over a reload; anything else reads as off.
+    local saved = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    ns = Load(saved)
+    Equal(ns.Get("growArrows"), true, "kept over a reload")
+    saved.growArrows = "yes"
+    Equal(ns.Get("growArrows"), false, "anything else reads as off")
+end)()
+
 -- The footer: who made the addon, and every control's note -------------------------------
 
 ;(function()
@@ -4992,7 +5801,7 @@ end)()
     Enter(look)
     Leave(layout)
     Equal(next .. " | " .. Text(), "One-click layouts that stack your bars around your Personal Resource Display. | "
-        .. "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds and the accent.",
+        .. "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds, font, textures and the accent.",
         "entered before the last one is left, each keeps its note")
     Over(nil, look)
     Leave(look)

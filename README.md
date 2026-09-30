@@ -55,10 +55,14 @@ right at home next to EraUI.
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag
   items in from your bags, and any ammo becomes one icon for whatever you have
   equipped
+- Healthstones, Healing Potions and Mana Potions: one icon each for the best
+  one you carry, switching as your bags change
 - Keybinds on the icons: the key that casts each spell, at the bottom or a top
   corner, in the size you pick (off by default)
-- Per bar: icon size, spacing, icons per row, which way it grows, hide when
-  ready, spell names, countdown numbers, and show, fade or hide out of combat
+- Per bar: icon size, spacing, icons per row, which way it grows, show, dim or
+  hide when ready, spell names, countdown numbers, and show, fade or hide out of
+  combat
+- Your choice of font and bar texture on the Look page
 
 ## Layouts
 - One click stacks your bars around your Personal Resource Display: Pyramid,
@@ -70,6 +74,7 @@ right at home next to EraUI.
   take a whole bar out; Reset or Undo
 - All bars: one slider sizes every bar together; Live preview shows your look
   and keybinds on the icons
+- Grow arrows show which way each bar grows while you move them
 
 ## Profiles and settings
 - Spell lists live in profiles. Characters can share one, even across classes:

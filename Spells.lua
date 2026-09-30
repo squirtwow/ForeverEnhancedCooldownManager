@@ -1,8 +1,10 @@
 -- Everything a bar can show, one entry each: your spells at their
 -- highest known rank, your class's talent procs, your trinkets and usable bag
--- items, and spells added by name or ID. Bars store each entry's key (a spell
--- name, "item:<id>" or "slot:<n>"), so training a new rank or swapping a
--- trinket moves every bar along without any change to the saved setup.
+-- items, healthstones and potions whatever their rank, and spells added by
+-- name or ID. Bars store each entry's key (a spell name, "item:<id>",
+-- "slot:<n>" or "family:<name>"), so training a new rank, swapping a trinket
+-- or carrying a better potion moves every bar along without any change to
+-- the saved setup.
 local _, ns = ...
 
 local S = {}
@@ -44,6 +46,50 @@ local GROUP = {
 }
 
 S.LINES = { procs = "Procs", items = "Items", added = "Added" }
+
+-- Healthstones and potions come in ranks, and you carry whichever you have:
+-- a family is one entry for every rank of one, showing the best you carry.
+-- Item IDs from the Forever client's own item tables (build 1.60.1.70009),
+-- weakest first by what each restores. A rank's twins sit beside it:
+-- Improved Healthstone's, the conjured Perishable potions (after the plain
+-- ones, so they show first: they don't last), and the battleground and other
+-- same-named ones. Discolored and Restored potions work differently, so
+-- they stay single items.
+local FAMILIES = {
+    { key = "family:healthstone", name = "Healthstones", items = {
+        19004, 5512, 19005, -- Minor
+        19006, 5511, 19007, -- Lesser
+        19008, 5509, 19009, -- Healthstone
+        19010, 5510, 19011, -- Greater
+        19012, 9421, 19013, -- Major
+    } },
+    { key = "family:healing", name = "Healing Potions", items = {
+        118, 268881, -- Minor
+        858, 268882, -- Lesser
+        929, 268883, -- Healing Potion
+        1710, 223914, -- Greater
+        3928, 18839, -- Superior, Combat Healing Potion
+        13446, 223913, -- Major
+    } },
+    { key = "family:mana", name = "Mana Potions", mana = true, items = {
+        2455, 3385, 3827, 6149, -- Minor, Lesser, Mana Potion, Greater
+        13443, 18841, -- Superior, Combat Mana Potion
+        13444, -- Major
+    } },
+}
+S.FAMILIES = FAMILIES
+-- Mana Potions are only offered to classes with mana (or kept on a bar).
+local NO_MANA = { WARRIOR = true, ROGUE = true }
+local FAMILY_NOTE = "Best you carry (Needs testing)"
+
+local familyOf, familyByKey = {}, {}
+for _, family in ipairs(FAMILIES) do
+    familyByKey[family.key] = family
+    for _, id in ipairs(family.items) do familyOf[id] = family end
+end
+-- The item each family showed last, kept over each scan: what it shows while
+-- the game hides your bags in a fight, or once you carry none.
+local shown = {}
 
 local list, byKey = {}, {}
 
@@ -150,6 +196,48 @@ local function AddItem(itemID, link, icon)
         itemID = itemID, icon = icon or (C_Item.GetItemIconByID and C_Item.GetItemIconByID(itemID)), rankText = "" })
 end
 
+-- Moves a family on to the item it should show now: the best one you carry
+-- and can use (a potion above your level can't be), else the best you carry,
+-- else the one it showed before. Anything the game hides keeps it as it is.
+-- Also notes the name of the one you carry, for its label (none when you're
+-- out, or until the game has the name). The bars call this as your bags
+-- change; true when anything changed.
+function S:Pick(entry)
+    local family = entry and entry.family
+    if not family then return false end
+    local best, carried
+    for i = #family.items, 1, -1 do
+        local id = family.items[i]
+        local count = C_Item.GetItemCount(id, false, true)
+        if not Open(count) then return false end
+        if type(count) == "number" and count > 0 then
+            local usable = C_Item.IsUsableItem(id)
+            if not Open(usable) then return false end
+            carried = carried or id
+            if usable then
+                best = id
+                break
+            end
+        end
+    end
+    local have = carried ~= nil
+    best = best or carried or entry.itemID
+    local current = have and C_Item.GetItemNameByID and Text(C_Item.GetItemNameByID(best)) or nil
+    if best == entry.itemID and have == entry.have and current == entry.current then return false end
+    shown[entry.key] = best
+    entry.itemID, entry.have, entry.current = best, have, current
+    entry.icon = C_Item.GetItemIconByID and C_Item.GetItemIconByID(best) or entry.icon
+    return true
+end
+
+local function AddFamily(family)
+    local itemID = shown[family.key] or family.items[1]
+    local entry = Add({ key = family.key, name = family.name, kind = "family", line = S.LINES.items, family = family,
+        itemID = itemID, icon = C_Item.GetItemIconByID and C_Item.GetItemIconByID(itemID), rankText = FAMILY_NOTE })
+    S:Pick(entry)
+    return entry
+end
+
 -- Food, drink and recipes can be used but never have a cooldown to show.
 local RECIPE, CONSUMABLE, FOOD_AND_DRINK = 9, 0, 5
 local function NoCooldown(itemID)
@@ -181,6 +269,11 @@ local function ScanItems()
     end
     local ammo = GetInventoryItemID("player", AMMO)
     if ammo then AddAmmo(ammo) end
+    -- Healthstones and potions, one entry each whatever rank you carry.
+    local _, class = UnitClass("player")
+    for _, family in ipairs(FAMILIES) do
+        if not (family.mana and NO_MANA[class]) then AddFamily(family) end
+    end
     if not (C_Container and C_Container.GetContainerNumSlots) then return end
     for bag = 0, BAGS do
         for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
@@ -194,7 +287,8 @@ local function ScanItems()
 end
 
 -- Anything on a bar that isn't in your spellbook or bags right now: spells
--- added by name or ID, and items you've run out of.
+-- added by name or ID, items you've run out of, and Mana Potions kept on a
+-- bar by a class without mana (a profile shared with one that has it).
 local function ScanSaved()
     local custom = ns.CustomSpells and ns.CustomSpells() or {}
     for _, key in ipairs(ns.BAR_KEYS) do
@@ -203,6 +297,8 @@ local function ScanSaved()
                 local itemID = tonumber(saved:match("^item:(%d+)$"))
                 if saved == "ammo" then
                     AddAmmo(nil) -- none equipped now: shown empty
+                elseif familyByKey[saved] then
+                    AddFamily(familyByKey[saved])
                 elseif itemID then
                     AddItem(itemID)
                 elseif custom[saved] then
@@ -278,9 +374,16 @@ function S:Icon(key)
     return icon or 134400
 end
 
--- Trinkets, bag items and ammunition: nothing that puts an aura on anyone.
+-- Trinkets, bag items, healthstones and potions, and ammunition: nothing
+-- that puts an aura on anyone.
 function S:IsItem(entry)
-    return entry.kind == "item" or entry.kind == "slot" or entry.kind == "ammo"
+    return entry.kind == "item" or entry.kind == "slot" or entry.kind == "ammo" or entry.kind == "family"
+end
+
+-- The healthstone or potion family an item is a rank of, if any: dragging
+-- any rank in adds the family. Its key and name.
+function S:Family(itemID)
+    return Open(itemID) and itemID ~= nil and familyOf[itemID] or nil
 end
 
 -- Arrows or shot of any kind or level, equipped or not: what goes in the ammo

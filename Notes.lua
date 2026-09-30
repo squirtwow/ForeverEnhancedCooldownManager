@@ -10,6 +10,20 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.2.0",
+        sections = {
+            { "Added", {
+                "Healthstones, Healing Potions and Mana Potions: one icon that shows the best one you carry and switches as your bags change. Tick it under Items, or drag any rank onto a bar.",
+                "When ready: Show, Dim or Hide, for each bar.",
+                "Font and bar texture choice on the Look page.",
+                "Show grow arrows on the Layout page: while your bars are unlocked or in Edit Mode, arrows show which way each bar grows.",
+            } },
+            { "Fixed", {
+                "Cast bar: its shadow no longer sticks out past the resource display and your rows, and it lines up with the display switched off or at other Edit Mode sizes.",
+            } },
+        },
+    },
+    {
         version = "1.1.0",
         sections = {
             { "Added", {

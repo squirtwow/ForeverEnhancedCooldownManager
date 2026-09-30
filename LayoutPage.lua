@@ -4,7 +4,8 @@
 -- keybinds the Look page gives them. Drag a spell from your spellbook onto a
 -- row to add it; hover a row for - and + (how many icons fit across) and the
 -- arrows (up or down the stack, past the display). All bars sizes every bar
--- together.
+-- together, and Show grow arrows marks which way each grows while you
+-- arrange them.
 local _, ns = ...
 local T = ns.Theme
 
@@ -919,6 +920,16 @@ function ns.BuildLayoutPage(window, page, width, height)
     window:Hint(allBars, "Sizes all your bars together, keeping each one's size next to the others. 100 is each bar's own Icon size,"
         .. " which still fine-tunes it. Icons never go under 20.")
     page.allBars = allBars
+    -- Arrows on your bars for the way each grows, while you arrange them:
+    -- level with All bars, on its left.
+    local growArrows = Tick("Show grow arrows (Needs testing)", 58,
+        "While your bars are unlocked, or in Edit Mode, an arrow on each shows which way it grows as icons come and go,"
+            .. " and where a new row goes.", function(self)
+            ns.Set("growArrows", self:GetChecked())
+            B:ApplyArrows()
+            window:Refresh()
+        end)
+    page.growArrows = growArrows
 
     local function Refresh()
         local layout, active, on = ns.LayoutData(), L:Active(), B:Enabled()
@@ -952,6 +963,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         match:SetChecked(ns.Get("prdMatch"))
         shown:SetChecked(ns.PersonalDisplayOn())
         live:SetChecked(ns.Get("layoutPreview"))
+        growArrows:SetChecked(ns.Get("growArrows"))
         spacing:Set(layout.gap)
         iconSpacing:Set(layout.spacing)
         allBars:Set(ns.Get("barScale"))

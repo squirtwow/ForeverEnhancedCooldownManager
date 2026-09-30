@@ -37,9 +37,19 @@ local function Colour(state)
     return state.blizzard
 end
 
+-- The bar's fill in the texture chosen on the Look page, set only when it
+-- changes: Look also runs each time Blizzard recolours the bar.
+local function Fill(bar, state)
+    local texture = Style:BarTexture()
+    if state.texture == texture then return end
+    state.texture = texture
+    bar:SetStatusBarTexture(texture)
+end
+
 local function Look(bar, state)
     local design, colour = ns.Get("barStyle"), Colour(state)
     local outline = design == "outline"
+    Fill(bar, state)
     state.sheen:SetShown(design == "glass")
     painting[bar] = true
     bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
@@ -51,7 +61,7 @@ end
 local function Restyle(bar, setting)
     if not bar or bars[bar] then return end
     local state = { setting = setting }
-    bar:SetStatusBarTexture(Style.FLAT)
+    Fill(bar, state)
     for _, region in ipairs({ bar:GetRegions() }) do
         if region:GetObjectType() == "Texture" and region:GetAtlas() == BG_ATLAS then
             Solid(region, Style.TRACK, Style.TRACK[4])
@@ -112,8 +122,9 @@ end
 -- Combo points ---------------------------------------------------------------------
 -- Blizzard left combo points out of Forever's display, so the addon draws its
 -- own under the display's lowest bar: five segments as wide as the display, in
--- the Tracked Bars design and a colour of your choice. Plain colour, so they
--- stay sharp at any size, and they stretch or shrink with the display.
+-- the Tracked Bars design and texture and a colour of your choice. Flat by
+-- default, so they stay sharp at any size, and they stretch or shrink with the
+-- display.
 -- Rogues, and druids in cat form. The count can be secret in combat, so each
 -- segment is a bar from i - 1 to i handed the count as it is: the game fills
 -- it, and the addon never reads the number.
@@ -133,9 +144,13 @@ end
 
 local function ComboLook()
     if not combo then return end
-    local design, colour = ns.Get("barStyle"), ComboColour()
+    local design, colour, texture = ns.Get("barStyle"), ComboColour(), Style:BarTexture()
     local outline = design == "outline"
+    -- The texture only when it changes, as for the display's own bars.
+    local retexture = combo.texture ~= texture
+    combo.texture = texture
     for _, bar in ipairs(combo.segments) do
+        if retexture then bar:SetStatusBarTexture(texture) end
         bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
         Solid(bar.edge, outline and colour or { 0, 0, 0 })
         bar.sheen:SetShown(design == "glass")
@@ -161,9 +176,10 @@ local function MakeCombo(frame)
     combo:SetSize(1, 1)
     combo:Hide()
     combo.segments = {}
+    combo.texture = Style:BarTexture()
     for i = 1, COMBO_MAX do
         local bar = CreateFrame("StatusBar", nil, combo)
-        bar:SetStatusBarTexture(Style.FLAT)
+        bar:SetStatusBarTexture(combo.texture)
         bar:SetMinMaxValues(i - 1, i)
         bar:SetValue(0)
         local track = bar:CreateTexture(nil, "BACKGROUND")

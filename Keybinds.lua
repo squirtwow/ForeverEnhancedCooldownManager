@@ -240,13 +240,20 @@ local function Lookup(map, id)
 end
 
 -- The key for one of your bar's entries (Spells.lua). A spell uses its
--- highest rank's key, or any rank's; a fixed rank only its own. Procs and
--- ammunition have nothing to press.
+-- highest rank's key, or any rank's; a fixed rank only its own. A
+-- healthstone or potion family uses the key for the one it shows, or for any
+-- rank, the best first. Procs and ammunition have nothing to press.
 function K:ForEntry(entry)
     if not entry then return nil end
     if entry.kind == "spell" then return Lookup(bySpell, entry.spellID) or Lookup(byName, entry.name) end
     if entry.kind == "rank" then return Lookup(bySpell, entry.spellID) end
     if entry.kind == "item" or entry.kind == "slot" then return Lookup(byItem, entry.itemID) end
+    if entry.kind == "family" then
+        local key = Lookup(byItem, entry.itemID)
+        local items = entry.family and entry.family.items or {}
+        for i = #items, 1, -1 do key = key or Lookup(byItem, items[i]) end
+        return key
+    end
     return nil
 end
 

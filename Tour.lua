@@ -215,6 +215,61 @@ local NEWS = {
         target = function(w) return w.pages.layout.allBars end,
         side = "above",
     },
+    {
+        version = "1.2.0",
+        page = "cd",
+        title = "Healthstones and potions",
+        text = "Healthstones, healing potions and mana potions: one icon each on a bar, for the best rank you carry."
+            .. " They're with your items, or drag one in.",
+        -- No watch: ticking it lists them, and the step stays so they can be seen.
+        try = "Try it: tick Show items.",
+        already = function() return ns.Get("listItems") end,
+        alreadyText = "Your items are already listed.",
+        target = function(w) return w.pages.bar.showItems end,
+        -- Above the tick, clear of the list it fills.
+        side = "above",
+    },
+    {
+        version = "1.2.0",
+        page = "cd",
+        title = "Dim when ready",
+        text = "Each bar's ready icons can now dim instead of hiding: the ones cooling down stand out, and every icon keeps its place.",
+        -- No watch: the step stays so the bar can be seen dimming.
+        try = "Try it: pick Dim.",
+        already = function() return ns.BarData("cd").whenReady == "dim" end,
+        alreadyText = "Cooldowns already dims its ready icons.",
+        -- The label and its three choices as one part, the box under them.
+        target = function(w) return w.pages.bar.options.whenReady.part end,
+        side = "below",
+    },
+    {
+        version = "1.2.0",
+        page = "look",
+        title = "Font and bar texture",
+        text = "Pick the font for the numbers, keys and names on your icons, and the texture for your bars."
+            .. " The preview at the top shows them.",
+        -- No watch: the step stays so a few can be tried.
+        try = "Try it: pick a font or a texture.",
+        -- Both rows, the box under them at their right end, so the preview
+        -- above stays in sight.
+        target = function(w) return w.faces end,
+        side = "below",
+        align = "end",
+    },
+    {
+        version = "1.2.0",
+        page = "layout",
+        title = "Grow arrows",
+        text = "While your bars are unlocked, or in Edit Mode, an arrow on each shows which way it grows, and where a new row goes.",
+        -- No watch: the arrows only show once the bars are unlocked, so the
+        -- step stays until Next.
+        try = "Try it: tick it, then Unlock bars.",
+        already = function() return ns.Get("growArrows") end,
+        alreadyText = "They're already on: Unlock bars to see them.",
+        target = function(w) return w.pages.layout.growArrows end,
+        -- Above it, clear of Unlock bars to the right.
+        side = "above",
+    },
 }
 
 -- Where the box goes against what it points at, and its arrow on the box's

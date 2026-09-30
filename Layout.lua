@@ -101,10 +101,10 @@ local function Bars(frame)
 end
 
 -- The display's middle and size, from the middle of the screen, in the bars'
--- own units, edges included, so rows sit flush against it. While the game
--- can't say (it's hidden until combat, say), where it was last seen. Switched
--- off, it takes no room, so the rows close up where it was. Nil when it's
--- never been there.
+-- own units, edges included, so rows sit flush against it; edge is how far
+-- the restyle's edges reach past its bars. While the game can't say (it's
+-- hidden until combat, say), where it was last seen. Switched off, it takes
+-- no room, so the rows close up where it was. Nil when it's never been there.
 function L:Display()
     local frame = _G.PersonalResourceDisplayFrame
     local layout = ns.LayoutData()
@@ -112,7 +112,7 @@ function L:Display()
     if frame then
         Watch(frame)
         local screen = UIParent:GetEffectiveScale()
-        local left, right, bottom, top
+        local left, right, bottom, top, edge
         for _, region in ipairs(Bars(frame)) do
             local shown = region and region.GetRect and region:IsShown()
             local ok, x, y, width, height
@@ -122,14 +122,16 @@ function L:Display()
                 x, y, width, height = x * scale, y * scale, width * scale, height * scale
                 left, right = math.min(left or x, x), math.max(right or x + width, x + width)
                 bottom, top = math.min(bottom or y, y), math.max(top or y + height, y + height)
+                -- The restyle draws a 1px edge round each bar, in the
+                -- display's own size (Edit Mode's Size), not the screen's.
+                if ns.loaded.prdSkin then edge = math.max(edge or 0, scale) end
             end
         end
         if left then
-            -- The restyle draws a 1px edge round each bar.
-            local edge = ns.loaded.prdSkin and 1 or 0
+            edge = edge or 0
             local cx, cy = UIParent:GetCenter()
             display = { x = (left + right) / 2 - cx, y = (bottom + top) / 2 - cy,
-                width = right - left + 2 * edge, height = top - bottom + 2 * edge }
+                width = right - left + 2 * edge, height = top - bottom + 2 * edge, edge = edge }
             if layout then layout.display = display end
         end
     end
@@ -137,9 +139,11 @@ function L:Display()
     if not display and type(seen) == "table" and type(seen.x) == "number" and type(seen.y) == "number"
         and type(seen.width) == "number" and type(seen.height) == "number" then
         display = seen
+        -- Seen before its edge was kept: measured with the restyle's 1px.
+        if type(display.edge) ~= "number" then display.edge = ns.loaded.prdSkin and 1 or 0 end
     end
     if display and not ns.PersonalDisplayOn() then
-        return { x = display.x, y = display.y, width = display.width, height = 0, off = true }
+        return { x = display.x, y = display.y, width = display.width, height = 0, edge = display.edge, off = true }
     end
     return display
 end
@@ -195,7 +199,7 @@ function L:Stack()
     if ns.Resource then ns.Resource:Match() end
     local display = self:Display()
     self.found = display ~= nil
-    display = display or { x = 0, y = FALLBACK_Y, width = self:MatchWidth() or 0, height = 0 }
+    display = display or { x = 0, y = FALLBACK_Y, width = self:MatchWidth() or 0, height = 0, edge = 0 }
     -- Each bar grows away from the display; laid out again if that changed.
     local function Grow(key, grow, wrap)
         local data = ns.BarData(key)

@@ -1,7 +1,8 @@
 -- The addon's own bars: rows of square frameless icons for the spells you
 -- pick. Cooldowns are secret in combat, so each icon hands the game's
--- duration object straight to its sweep, greying and hide-when-ready without
--- ever reading it; only the open "usable" and range checks are read here.
+-- duration object straight to its sweep, greying and dim or hide when ready
+-- without ever reading it; only the open "usable" and range checks are read
+-- here.
 -- The icons never take the mouse, so they can't get in the way in combat.
 local _, ns = ...
 
@@ -27,15 +28,23 @@ local REACTIVE = {
 local bars = {}
 local unlocked, inCombat, editMode = false, false, false
 local FADE = .3 -- a faded bar's opacity out of combat
+local DIM = .4 -- a ready icon's opacity on a bar that dims them
+local READY_ALPHA = { show = 1, dim = DIM, hide = 0 }
 
 local function Open(value)
     return not (issecretvalue and issecretvalue(value))
 end
 
--- Hide when ready waits while the bars are being arranged (unlocked, or in
--- Edit Mode), so every icon on them can be seen.
+-- How a ready icon shows: "show", "dim" or "hide". Dimming and hiding wait
+-- while the bars are being arranged (unlocked, or in Edit Mode), so every
+-- icon on them can be seen in full.
+local function WhenReady(data)
+    if unlocked or editMode then return "show" end
+    return data.whenReady
+end
+
 local function HidesReady(data)
-    return data.hideReady and not (unlocked or editMode)
+    return WhenReady(data) == "hide"
 end
 
 -- Icons ---------------------------------------------------------------------------
@@ -59,7 +68,7 @@ local function NewIcon(bar)
     icon.cooldown:SetDrawEdge(false)
     icon.cooldown:SetDrawBling(false)
     -- Events arrive when a cooldown starts, not when it ends; this catches the
-    -- end, so the icon ungreys (or hides when ready) on time.
+    -- end, so the icon ungreys (or dims or hides when ready) on time.
     icon.cooldown:SetScript("OnCooldownDone", function() B:RefreshAll() end)
     -- Item counts and the keybind sit above the sweep.
     local top = CreateFrame("Frame", nil, icon)
@@ -69,7 +78,7 @@ local function NewIcon(bar)
     icon.count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     icon.count:SetPoint("BOTTOMRIGHT", -1, 1)
     icon.key = Style:KeyText(top)
-    icon.label = icon:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    icon.label = icon:CreateFontString(nil, "OVERLAY", Style:NameFont())
     icon.label:SetPoint("TOP", icon, "BOTTOM", 0, -3)
     icon.label:SetWordWrap(false)
     icon.decor = Style:Decor(icon, icon)
@@ -77,9 +86,33 @@ local function NewIcon(bar)
     return icon
 end
 
+local ShowKey -- with the keybinds, below
+
+-- The name under an icon: a trinket or ammo by the item itself, and a
+-- healthstone or potion family by the one you carry (its own name when
+-- you're out).
+local function Label(entry)
+    return ((entry.current or entry.name):gsub("^Trinket %d: ", ""):gsub("^Ammo: ", ""))
+end
+
+-- A healthstone or potion family moves on to the best one you carry as your
+-- bags change, which only refreshes the bars: its picture, name and key
+-- follow it.
+local function Follow(icon)
+    local entry = ns.Spells:Find(icon.name)
+    if not entry then return end
+    ns.Spells:Pick(entry)
+    if icon.itemID == entry.itemID and icon.current == entry.current then return end
+    icon.itemID, icon.current = entry.itemID, entry.current
+    icon.texture:SetTexture(entry.icon)
+    icon.label:SetText(Label(entry))
+    ShowKey(icon)
+end
+
 -- Trinkets and bag items. Their cooldowns come back as plain numbers; if the
 -- game ever hides them in combat, the icon simply keeps its last state.
 local function RefreshItem(icon, data)
+    if icon.kind == "family" then Follow(icon) end
     local start, duration
     if icon.kind == "slot" then
         start, duration = GetInventoryItemCooldown("player", icon.slot)
@@ -90,10 +123,10 @@ local function RefreshItem(icon, data)
         local active = start > 0 and duration > 1.5
         if active then icon.cooldown:SetCooldown(start, duration) else icon.cooldown:Clear() end
         icon.texture:SetDesaturated(active)
-        icon:SetAlpha(HidesReady(data) and not active and 0 or 1)
+        icon:SetAlpha(active and 1 or READY_ALPHA[WhenReady(data)])
     end
     local count
-    if icon.kind == "item" then
+    if icon.kind == "item" or icon.kind == "family" then
         count = C_Item.GetItemCount(icon.itemID, false, true)
         if Open(count) and type(count) == "number" then
             icon.count:SetText(count)
@@ -126,7 +159,7 @@ end
 
 local function RefreshIcon(icon, data, hasTarget)
     if icon.kind == "ammo" then return RefreshAmmo(icon) end
-    if icon.kind == "item" or icon.kind == "slot" then return RefreshItem(icon, data) end
+    if icon.kind == "item" or icon.kind == "slot" or icon.kind == "family" then return RefreshItem(icon, data) end
     local id = icon.spellID
     local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(id, true)
     if duration then
@@ -134,7 +167,15 @@ local function RefreshIcon(icon, data, hasTarget)
         -- Secret in combat: passed to the game as it is, never tested here.
         local active = duration:IsActive()
         icon.texture:SetDesaturated(active)
-        if HidesReady(data) and icon.SetAlphaFromBoolean then icon:SetAlphaFromBoolean(active) else icon:SetAlpha(1) end
+        -- In full while it cools down; dimmed or hidden while it's ready.
+        local ready = WhenReady(data)
+        if ready == "show" or not icon.SetAlphaFromBoolean then
+            icon:SetAlpha(1)
+        elseif ready == "dim" then
+            icon:SetAlphaFromBoolean(active, 1, DIM)
+        else
+            icon:SetAlphaFromBoolean(active)
+        end
     else
         icon.cooldown:Clear()
         icon.texture:SetDesaturated(false)
@@ -266,7 +307,8 @@ end
 -- The border and shadow round a whole bar, when chosen, only go round icons
 -- that stay put. Packed Buffs and Debuffs and a bar that hides when ready
 -- come and go (like Blizzard's Tracked Buffs), so they'd leave an empty box
--- behind, as would the greyed Debuffs spots while there's no enemy.
+-- behind, as would the greyed Debuffs spots while there's no enemy. A bar
+-- that dims its ready icons keeps them in place, and its box.
 local function Steady(key, data)
     if ns.AURA_BARS[key] then return not ns.BuffBar:Packed(data) end
     return not HidesReady(data)
@@ -299,6 +341,99 @@ local function GroupDecor(bar)
     bar.pendingDecor = nil
     local border, shadow = Style:DecorFor("icon")
     for _, parts in ipairs(bar.groupParts) do Style:ShowDecor(parts.decor, border, shadow) end
+end
+
+-- Grow arrows -----------------------------------------------------------------------
+-- While you arrange your bars (unlocked, or in Edit Mode), small arrows in the
+-- accent on each bar show which way it grows as icons come and go: out both
+-- ways from its centre, or away from the edge it's held by, and the way a new
+-- row goes. Each sits on the bar's edge with its tip just outside, over the
+-- icons and the mover, and never takes the mouse. Off unless the Layout
+-- page's Show grow arrows is ticked.
+
+local ARROW = ns.MEDIA .. "TourArrow.tga" -- the tour's arrow: a triangle pointing up
+local ARROW_WIDE, ARROW_LONG = 12, 7 -- across its base, and from its base to its tip
+local ARROW_OUT = 3 -- how far its tip reaches past the bar's edge, inside the mover's
+
+-- The art turned to face a way.
+local function Turn(texture, way)
+    if way == "left" then
+        texture:SetTexCoord(1, 0, 0, 0, 1, 1, 0, 1)
+    elseif way == "right" then
+        texture:SetTexCoord(1, 1, 0, 1, 1, 0, 0, 0)
+    elseif way == "up" then
+        texture:SetTexCoord(0, 1, 0, 1)
+    else
+        texture:SetTexCoord(0, 1, 1, 0)
+    end
+end
+
+-- An arrow facing a way, with a dark edge so it reads over any icon: the
+-- same art in black, a little bigger, underneath it.
+local function NewArrow(arrows, way)
+    local across = way == "left" or way == "right"
+    local width, height = across and ARROW_LONG or ARROW_WIDE, across and ARROW_WIDE or ARROW_LONG
+    local edge = arrows:CreateTexture(nil, "ARTWORK", nil, 0)
+    edge:SetTexture(ARROW)
+    edge:SetSize(width + 2, height + 2)
+    edge:SetVertexColor(0, 0, 0, .8)
+    local arrow = arrows:CreateTexture(nil, "ARTWORK", nil, 1)
+    arrow:SetTexture(ARROW)
+    arrow:SetSize(width, height)
+    edge:SetPoint("CENTER", arrow, "CENTER")
+    Turn(arrow, way)
+    Turn(edge, way)
+    arrow.edge = edge
+    return arrow
+end
+
+local function ShowArrow(arrow, shown)
+    arrow:SetShown(shown)
+    arrow.edge:SetShown(shown)
+end
+
+-- A bar's arrows: one at each side edge, and one for new rows. They sit in a
+-- frame of their own, above the mover, so they show in Edit Mode too.
+local function NewArrows(bar)
+    local arrows = CreateFrame("Frame", nil, bar)
+    arrows:SetAllPoints()
+    arrows:SetFrameLevel(bar:GetFrameLevel() + 22)
+    arrows:EnableMouse(false)
+    arrows.left, arrows.right, arrows.row = NewArrow(arrows, "left"), NewArrow(arrows, "right"), NewArrow(arrows, "down")
+    arrows.left:SetPoint("LEFT", bar, "LEFT", -ARROW_OUT, 0)
+    arrows.right:SetPoint("RIGHT", bar, "RIGHT", ARROW_OUT, 0)
+    for _, arrow in ipairs({ arrows.left, arrows.right, arrows.row }) do ShowArrow(arrow, false) end -- until pointed (below)
+    ns.Theme:Paint(function(accent)
+        for _, arrow in ipairs({ arrows.left, arrows.right, arrows.row }) do
+            arrow:SetVertexColor(accent[1], accent[2], accent[3], 1)
+        end
+    end)
+    arrows:Hide()
+    return arrows
+end
+
+-- A bar's arrows shown while the bars are being arranged, if asked for, and
+-- pointed the way it grows now. A Buffs or Debuffs bar waiting for the fight
+-- to end still has its old shape, so its arrows wait with it. Packed buffs
+-- stay in one row: no new rows to point to.
+local function Arrows(bar)
+    local arrows = bar.arrows
+    arrows:SetShown((unlocked or editMode) and ns.Get("growArrows") and B:Enabled() or false)
+    if bar.pendingLayout then return end
+    local data = bar.data
+    local rows = not (bar.kind == "aura" and ns.BuffBar:Packed(data))
+    local up = data.wrap == "up"
+    local state = data.grow .. " " .. (rows and data.wrap or "none")
+    if arrows.state == state then return end
+    arrows.state = state
+    ShowArrow(arrows.left, data.grow ~= "right")
+    ShowArrow(arrows.right, data.grow ~= "left")
+    ShowArrow(arrows.row, rows)
+    Turn(arrows.row, up and "up" or "down")
+    Turn(arrows.row.edge, up and "up" or "down")
+    local point = up and "TOP" or "BOTTOM"
+    arrows.row:ClearAllPoints()
+    arrows.row:SetPoint(point, bar, point, 0, up and ARROW_OUT or -ARROW_OUT)
 end
 
 local function NewBar(key)
@@ -336,6 +471,7 @@ local function NewBar(key)
     mover:SetScript("OnMouseUp", function() B:Dropped(key) end)
     mover:Hide()
     bar.mover = mover
+    bar.arrows = NewArrows(bar)
     -- A border and shadow round the whole bar, when chosen.
     bar.decor = Style:Decor(bar, bar)
     BarDecor(bar)
@@ -363,6 +499,7 @@ local function LayoutAuras(bar, data)
         bar:SetSize(B:Arrange(bar, bar.holders, bar.count, data))
     end
     Place(bar)
+    Arrows(bar)
 end
 
 -- Keybinds: the key that casts each icon's spell (Keybinds.lua), placed and
@@ -391,7 +528,7 @@ end
 
 -- A key showing up or going moves the count with it: the addon's own
 -- frames only, so in combat too.
-local function ShowKey(icon)
+ShowKey = function(icon)
     icon.keyed = Style:SetKey(icon.key, B:KeyFor(icon.name))
     Room(icon)
 end
@@ -413,13 +550,13 @@ local function Layout(bar)
             icon.cooldown:SetHideCountdownNumbers(not data.showTimer)
             icon.count:SetFontObject(Style:Count(size))
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
-            icon.kind, icon.itemID, icon.slot = entry.kind, entry.itemID, entry.slot
+            icon.kind, icon.itemID, icon.slot, icon.current = entry.kind, entry.itemID, entry.slot, entry.current
             KeyLook(icon, size)
             ShowKey(icon)
             icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
             icon.count:SetText("")
             icon.label:SetWidth(size + spacing)
-            icon.label:SetText((entry.name:gsub("^Trinket %d: ", ""):gsub("^Ammo: ", "")))
+            icon.label:SetText(Label(entry))
             icon.label:SetShown(data.showNames)
             icon:Show()
         end
@@ -431,6 +568,7 @@ local function Layout(bar)
     bar.count = count
     bar:SetSize(B:Arrange(bar, bar.icons, count, data))
     Place(bar)
+    Arrows(bar)
 end
 
 -- Public ------------------------------------------------------------------------------
@@ -472,6 +610,16 @@ local function EachKey(fn)
                 end
             end
         end
+    end
+end
+
+-- The font chosen on the Look page, for the spell names under the icons
+-- (the numbers and keys follow their own fonts by themselves).
+function B:ApplyFont()
+    local font = Style:NameFont()
+    for _, bar in pairs(bars) do
+        for _, icon in ipairs(bar.icons or {}) do icon.label:SetFontObject(font) end
+        for _, holder in ipairs(bar.holders or {}) do holder.label:SetFontObject(font) end
     end
 end
 
@@ -531,9 +679,15 @@ function B:UpdateShown()
                 bar:SetAlpha(mode == "fade" and FADE or 1)
             end
             bar.mover:SetShown(on and unlocked)
+            Arrows(bar)
             BarDecor(bar)
         end
     end
+end
+
+-- The grow arrows switched on or off on the Layout page.
+function B:ApplyArrows()
+    for _, bar in pairs(bars) do Arrows(bar) end
 end
 
 function B:SetUnlocked(value)
@@ -781,12 +935,19 @@ function B:AddAt(key, text, spot)
 end
 
 -- An item with a cooldown: an equipped trinket follows its slot. Ammunition
--- of any kind is your ammo, which counts whatever ammo you have equipped.
+-- of any kind is your ammo, which counts whatever ammo you have equipped, and
+-- any rank of a healthstone or potion is its family, which shows the best
+-- one you carry.
 function B:AddItem(key, itemID)
     if ns.AURA_BARS[key] then return false, "Items can't go on the " .. ns.BAR_NAMES[key] .. " bar." end
     if ns.Spells:IsAmmo(itemID) then
         if not self:Assign("ammo", key) then return false, Full(key) end
         return true, Added(key, "your ammo") .. " It counts whatever ammo you have equipped."
+    end
+    local family = ns.Spells:Family(itemID)
+    if family then
+        if not self:Assign(family.key, key) then return false, Full(key) end
+        return true, Added(key, family.name) .. " It shows the best one you carry."
     end
     local item = "item:" .. itemID
     for _, slot in ipairs({ 13, 14 }) do
