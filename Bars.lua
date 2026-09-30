@@ -47,6 +47,40 @@ local function HidesReady(data)
     return WhenReady(data) == "hide"
 end
 
+-- Bag items, healthstones and potions you carry none of, by their key on the
+-- bar: left off your bars, which close up, so a profile shared with another
+-- character doesn't show that one's potions. Read outside a fight only, so
+-- icons never jump about in one (a potion used up then stays greyed at 0
+-- until it's over). They show while the bars are arranged, to be placed.
+local absent = {}
+
+local function Absent(name)
+    return absent[name] == true and not (unlocked or editMode)
+end
+
+-- Reads again which of the items on your cooldown bars you carry none of.
+-- Anything the game won't say keeps what was known. True when any changed.
+local function Recount()
+    if InCombatLockdown() then return false end
+    local now, changed = {}, false
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if not ns.AURA_BARS[key] then
+            for _, name in ipairs(ns.BarData(key).spells) do
+                local have = ns.Spells:Carries(ns.Spells:Find(name))
+                if have == nil then now[name] = absent[name] else now[name] = not have or nil end
+            end
+        end
+    end
+    for name in pairs(absent) do
+        if now[name] ~= absent[name] then changed = true end
+    end
+    for name in pairs(now) do
+        if now[name] ~= absent[name] then changed = true end
+    end
+    absent = now
+    return changed
+end
+
 -- Icons ---------------------------------------------------------------------------
 
 local function NewIcon(bar)
@@ -541,7 +575,7 @@ local function Layout(bar)
     local count = 0
     for _, name in ipairs(data.spells) do
         local entry = ns.Spells:Find(name)
-        if entry and ns.Spells:ForMe(name, bar.key) then
+        if entry and ns.Spells:ForMe(name, bar.key) and not Absent(name) then
             count = count + 1
             local icon = bar.icons[count] or NewIcon(bar)
             bar.icons[count] = icon
@@ -569,6 +603,15 @@ local function Layout(bar)
     bar:SetSize(B:Arrange(bar, bar.icons, count, data))
     Place(bar)
     Arrows(bar)
+end
+
+-- The Cooldowns and Utility bars laid out again, when the items left off
+-- them change: the addon's own frames only, so safe in a fight too.
+local function Relay()
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = bars[key]
+        if bar and bar.kind == "cooldown" then Layout(bar) end
+    end
 end
 
 -- Public ------------------------------------------------------------------------------
@@ -690,8 +733,24 @@ function B:ApplyArrows()
     for _, bar in pairs(bars) do Arrows(bar) end
 end
 
+-- Whether an entry is left off your bars because you carry none of it (it
+-- still shows on the window's drawings of them).
+function B:Absent(name)
+    return absent[name] == true
+end
+
+-- Said as an item or potion family goes on a bar while you carry none of it,
+-- so it isn't taken for broken: it's left off till you do. Nothing while the
+-- game won't say.
+function B:CarryNote(name)
+    return ns.Spells:Carries(ns.Spells:Find(name)) == false and " You carry none, so it shows once you do." or ""
+end
+
 function B:SetUnlocked(value)
+    local was = unlocked
     unlocked = value and self:Enabled() or false
+    -- Items you carry none of show while unlocked, so they can be placed.
+    if self.started and was ~= unlocked then Relay() end
     self:UpdateShown()
     self:RefreshAll()
     -- Unlocked, empty bars show too, so a layout makes room for them.
@@ -718,6 +777,7 @@ end
 function B:Rebuild()
     if not self.started then return end
     ns.Spells:Scan()
+    Recount()
     for _, key in ipairs(ns.BAR_KEYS) do Layout(bars[key] or NewBar(key)) end
     self:UpdateShown()
     self:RefreshAll()
@@ -922,7 +982,7 @@ function B:Add(key, text)
     if ns.AURA_BARS[key] then ok = self:SetAura(key, found, true) else ok = self:Assign(found, key) end
     ns.PruneCustom()
     if not ok then return false, Full(key) end
-    return true, Added(key, entry and entry.name or found), found
+    return true, Added(key, entry and entry.name or found) .. self:CarryNote(found), found
 end
 
 -- The same, at a place in the bar's list (where the entry clicked is): the
@@ -935,19 +995,20 @@ function B:AddAt(key, text, spot)
 end
 
 -- An item with a cooldown: an equipped trinket follows its slot. Ammunition
--- of any kind is your ammo, which counts whatever ammo you have equipped, and
--- any rank of a healthstone or potion is its family, which shows the best
--- one you carry.
+-- of any kind is your ammo, which counts whatever ammo you have equipped (a
+-- class that never uses ammo is told so), and any rank of a healthstone or
+-- potion is its family, which shows the best one you carry.
 function B:AddItem(key, itemID)
     if ns.AURA_BARS[key] then return false, "Items can't go on the " .. ns.BAR_NAMES[key] .. " bar." end
     if ns.Spells:IsAmmo(itemID) then
+        if not ns.Spells:UsesAmmo() then return false, "Your class doesn't use ammo." end
         if not self:Assign("ammo", key) then return false, Full(key) end
         return true, Added(key, "your ammo") .. " It counts whatever ammo you have equipped."
     end
     local family = ns.Spells:Family(itemID)
     if family then
         if not self:Assign(family.key, key) then return false, Full(key) end
-        return true, Added(key, family.name) .. " It shows the best one you carry."
+        return true, Added(key, family.name) .. " It shows the best one you carry." .. self:CarryNote(family.key)
     end
     local item = "item:" .. itemID
     for _, slot in ipairs({ 13, 14 }) do
@@ -956,7 +1017,7 @@ function B:AddItem(key, itemID)
     local entry = ns.Spells:Find(item)
     if not entry then return false, "That item has no cooldown to show." end
     if not self:Assign(item, key) then return false, ns.BAR_NAMES[key] .. " is full." end
-    return true, Added(key, entry.name)
+    return true, Added(key, entry.name) .. self:CarryNote(item)
 end
 
 -- What's on the cursor, dropped on a bar: a spell from any spellbook or an
@@ -1154,12 +1215,26 @@ function B:Start()
                 if bar and bar.pendingDecor then GroupDecor(bar) end
                 if bar then bar.pendingShown = nil end
             end
+            -- Items used up or picked up in the fight come off or go on now.
+            local recounted = Recount()
+            if recounted then Relay() end
             B:UpdateShown()
+            if recounted then
+                B:RefreshAll()
+                if ns.Layout then ns.Layout:Stack() end
+            end
         elseif event == "BAG_UPDATE_DELAYED" then
             -- Counts change often; the item list only matters while /ccm is open.
             if ns.window and ns.window:IsShown() then
                 B:Rebuild()
                 ns.window:Refresh()
+            elseif Recount() then
+                -- Out of an item, or carrying one again: the bars close up
+                -- or make room for it.
+                Relay()
+                B:UpdateShown()
+                B:RefreshAll()
+                if ns.Layout then ns.Layout:Stack() end
             else
                 B:RefreshAll()
             end
@@ -1186,10 +1261,19 @@ function B:Start()
     -- Bars come back in full while Edit Mode is open.
     local editor = EditModeManagerFrame
     if editor and editor.HookScript then
-        editor:HookScript("OnShow", function() editMode = true; B:UpdateShown(); B:RefreshAll() end)
+        editor:HookScript("OnShow", function()
+            editMode = true
+            -- Items you carry none of show, to be placed, and a layout makes room.
+            local any = next(absent) ~= nil
+            if any then Relay() end
+            B:UpdateShown()
+            B:RefreshAll()
+            if any and ns.Layout then ns.Layout:Stack() end
+        end)
         -- The resource display may have moved: a layout follows it.
         editor:HookScript("OnHide", function()
             editMode = false
+            if next(absent) then Relay() end
             B:UpdateShown()
             B:RefreshAll()
             if ns.Layout then ns.Layout:Stack() end

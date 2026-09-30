@@ -394,14 +394,16 @@ function ns.BuildBarPage(window, page, width)
         -- spell's icon, name and rank click it too, and say what it does.
         row.check:SetHitRectInsets(-4, -(listWidth - 20), -(ROW - 16) / 2, -(ROW - 16) / 2)
         -- What ticking or unticking this row does, for the spell it holds now.
-        -- A healthstone or potion family says how it works as it's put on.
+        -- A healthstone or potion family says how it works as it's put on,
+        -- and one you carry none of (an item too) that it shows once you do.
         window:Hint(row.check, function()
             local bar, name = ns.BAR_NAMES[state.bar], row.label or ""
             if row.other then return "Add " .. name .. " to " .. bar .. ", by name: it isn't in your spellbook." end
             if row.check:GetChecked() then return "Take " .. name .. " off " .. bar .. "." end
             local entry = row.spell and ns.Spells:Find(row.spell)
-            local family = entry and entry.kind == "family"
-                and " One icon for the best one you carry, switching as your bags change." or ""
+            local family = (entry and entry.kind == "family"
+                and " One icon for the best one you carry, switching as your bags change." or "")
+                .. (row.spell and B:CarryNote(row.spell) or "")
             local on = not ns.AURA_BARS[state.bar] and row.spell and B:Find(row.spell)
             if on and on ~= state.bar then return "Move " .. name .. " here from " .. ns.BAR_NAMES[on] .. "." .. family end
             return "Put " .. name .. " on " .. bar .. "." .. family

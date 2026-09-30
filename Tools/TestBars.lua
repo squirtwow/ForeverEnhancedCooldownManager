@@ -934,6 +934,7 @@ Equal(choice.selected, "show", "each bar has its own")
 
 Environment()
 ammo, ammoCount = 2512, 200
+_G.UnitClass = function() return "Hunter", "HUNTER" end
 ns = Load({ useBars = true })
 B = ns.Bars
 local arrows = ns.Spells:Find("ammo")
@@ -954,6 +955,44 @@ Equal(ns.Spells:Find("ammo") and ns.Spells:Find("ammo").name, "Ammo", "kept on t
 Equal(S[B:Get("util").icons[1].count].text, 0, "showing none")
 Equal(ns.Spells:IsItem(ns.Spells:Find("ammo")), true, "never offered for the Buffs or Debuffs bar")
 Equal(#printed, 0, "no errors")
+-- Only hunters, warriors and rogues use ammo. Any other class on a profile
+-- shared with a hunter passes over it, like another class's spell: not
+-- listed, off its bars and its drawings of them, kept in the profile.
+do
+    local uses = {}
+    for _, class in ipairs({ "HUNTER", "WARRIOR", "ROGUE", "WARLOCK", "MAGE", "PRIEST", "PALADIN", "SHAMAN", "DRUID" }) do
+        _G.UnitClass = function() return class, class end
+        uses[#uses + 1] = class .. "=" .. tostring(ns.Spells:UsesAmmo()) .. "," .. tostring(ns.Spells:ForMe("ammo", "util"))
+    end
+    _G.UnitClass = function() return SECRET, SECRET end
+    uses[#uses + 1] = "secret=" .. tostring(ns.Spells:ForMe("ammo", "util"))
+    Equal(table.concat(uses, " "), "HUNTER=true,true WARRIOR=true,true ROGUE=true,true WARLOCK=false,false MAGE=false,false"
+        .. " PRIEST=false,false PALADIN=false,false SHAMAN=false,false DRUID=false,false secret=true",
+        "ammo is for hunters, warriors and rogues; a class the game won't say keeps it")
+    -- A warlock with arrows in the ammo slot (and on the shared bar).
+    ammo, ammoCount = 2512, 0
+    _G.UnitClass = function() return "Warlock", "WARLOCK" end
+    B:Rebuild()
+    local util = B:Get("util")
+    Equal(tostring(ns.Spells:Find("ammo")) .. " " .. util.count .. " " .. tostring(S[util].shown) .. " " .. #(B:Mine("util")) .. " "
+        .. table.concat(ns.BarData("util").spells, ","), "nil 0 false 0 ammo",
+        "a warlock: ammo not listed, not on its bar or the window's drawing of it, still in the profile")
+    ns.Toggle()
+    FECMFrame:Select("util")
+    FECMFrame.pages.bar.showItems:Click()
+    Equal(tostring(ListRow("family:healing") ~= nil) .. " " .. tostring(ListRow("ammo") ~= nil) .. " " .. select(2, B:AddItem("util", 2512)),
+        "true false Your class doesn't use ammo.", "nor offered in its Items list, or taken when dragged in")
+    ns.Toggle()
+    ammo = nil
+    B:Rebuild()
+    Equal(tostring(ns.Spells:Find("ammo")) .. " " .. util.count, "nil 0", "nor shown empty with none equipped")
+    -- The hunter again: back, greyed at 0 while out.
+    _G.UnitClass = function() return "Hunter", "HUNTER" end
+    B:Rebuild()
+    Equal(util.count .. " " .. S[util.icons[1].count].text .. " " .. tostring(S[util.icons[1].texture].desaturated), "1 0 true",
+        "a hunter out of ammo: still on the bar, greyed at 0")
+    Equal(#printed, 0, "no errors")
+end
 
 -- Healthstones and potions: one icon for whichever rank you carry ------------------------------
 
@@ -1016,8 +1055,19 @@ Equal(#printed, 0, "no errors")
     itemCooldown = { 0, 0, 1 }
     itemCount[5512] = 0
     Fire("BAG_UPDATE_DELAYED")
-    Equal(icon.itemID .. " " .. S[icon.count].text .. " " .. tostring(S[icon.texture].desaturated) .. " " .. S[icon.label].text,
-        "5512 0 true Healthstones", "none left: the last one greyed, showing none, named for them all")
+    local stoneBar = B:Get("cd")
+    Equal(stoneBar.count .. " " .. tostring(S[icon].shown) .. " " .. tostring(S[stoneBar].shown) .. " " .. tostring(B:Absent("family:healthstone")),
+        "0 false false true", "none left: off the bar, which closes up (empty here, so hidden)")
+    Equal(table.concat(ns.BarData("cd").spells, ","), "family:healthstone", "still on the bar's list")
+    B:SetUnlocked(true)
+    Equal(stoneBar.count .. " " .. tostring(S[icon].shown) .. " " .. icon.itemID .. " " .. S[icon.count].text .. " "
+        .. tostring(S[icon.texture].desaturated) .. " " .. S[icon.label].text,
+        "1 true 5512 0 true Healthstones", "unlocked: back, the last one greyed at 0 and named for them all, to be placed")
+    EditModeManagerFrame:Show()
+    B:SetUnlocked(false)
+    Equal(stoneBar.count .. " " .. tostring(S[icon].shown), "1 true", "in Edit Mode too")
+    EditModeManagerFrame:Hide()
+    Equal(stoneBar.count .. " " .. tostring(S[icon].shown) .. " " .. tostring(S[stoneBar].shown), "0 false false", "and off again after")
     itemCount[19013] = 1
     Fire("BAG_UPDATE_DELAYED")
     Equal(icon.itemID .. " " .. S[icon.count].text .. " " .. S[icon.label].text, "19013 1 Major Healthstone",
@@ -2266,8 +2316,10 @@ local texts, expected = {}, 0
 for _, row in ipairs(notes.flow) do
     if row.text then texts[#texts + 1] = row end
 end
--- A copy from the source shows every release's notes, newest first.
+-- A copy from the source shows the newest release's notes and the two before
+-- it (Notes.lua HISTORY = 3), newest first.
 for index, entry in ipairs(ns.NOTES) do
+    if index > 3 then break end
     if index > 1 then expected = expected + 1 end -- an older release's version line
     for _, section in ipairs(entry.sections) do expected = expected + 1 + #section[2] end
 end
@@ -2781,12 +2833,187 @@ bp.options.showMissing:Click()
 Equal(S[bp.across].shown and S[bp.options.wrap].shown, true, "fixed spots can have rows")
 Equal(bp.listError, nil, "the bar page drew without errors")
 
+-- Items you carry none of: off your bars, which close up -----------------------------------
+
+;(function()
+    Environment()
+    Display()
+    local worn = {}
+    _G.C_Item.IsEquippedItem = function(id) return worn[id] == true end
+    -- A profile shared with a character who had potions: this one carries none.
+    ns = Load({ useBars = true, prdSkin = false })
+    B, L = ns.Bars, ns.Layout
+    for _, name in ipairs({ "Moonfire", "family:healing", "item:118", "Wrath" }) do B:Assign(name, "cd") end
+    B:Assign("family:mana", "util")
+    B:SetAura("buff", "Thorns", true)
+    local cdBar, utilBar = B:Get("cd"), B:Get("util")
+    local function Names(bar)
+        local out = {}
+        for i = 1, bar.count do out[i] = bar.icons[i].name end
+        return table.concat(out, ",")
+    end
+    local data = ns.BarData("cd")
+    Equal(Names(cdBar) .. " | " .. utilBar.count .. " " .. tostring(S[utilBar].shown), "Moonfire,Wrath | 0 false",
+        "potions you carry none of are left off: Cooldowns closes up, and Utility, with only Mana Potions, hides")
+    Equal(S[cdBar].width, 2 * ns.IconSize(data) + data.spacing, "two icons wide")
+    Equal(table.concat(data.spells, ",") .. " " .. B:Find("family:healing") .. " " .. B:Find("item:118"),
+        "Moonfire,family:healing,item:118,Wrath cd cd", "still on the bar, for the characters that carry them")
+    -- Stacked round the display: the empty Utility row takes no room, and the
+    -- display keeps the width of your widest row as set up.
+    L:Apply("pyramid")
+    Equal(At(B:Get("buff")) .. " " .. string.format("%g", S[prd].width), "TOP 0 -100 216",
+        "Buffs moves up under the display; its width, and the cast bar's, stay as set up")
+    -- The window still shows them, ticked, to be placed.
+    ns.Toggle()
+    local w = FECMFrame
+    w:Select("cd")
+    w.pages.bar.showItems:Click()
+    Equal(tostring(ListRow("family:healing").check:GetChecked()) .. " " .. tostring(ListRow("item:118").check:GetChecked()),
+        "true true", "ticked in the Items list")
+    -- Going to put on one you carry none of, the note says why it won't show yet.
+    local function Note(name)
+        local row = ListRow(name)
+        S[row.check].scripts.OnEnter(row.check)
+        local text = S[w.note].text
+        S[row.check].scripts.OnLeave(row.check)
+        return text
+    end
+    local NONE = " You carry none, so it shows once you do."
+    local STONES = "Put Healthstones on Cooldowns. One icon for the best one you carry, switching as your bags change."
+    Equal(Note("family:healthstone"), STONES .. NONE, "a family you carry none of: the tick's note says it shows once you carry one")
+    local open = _G.C_Item.GetItemCount
+    _G.C_Item.GetItemCount = function() return SECRET end
+    Equal(Note("family:healthstone") .. " " .. #printed, STONES .. " 0", "counts hidden: no guess, no errors")
+    _G.C_Item.GetItemCount = open
+    w:Select("util")
+    Equal(Note("family:healing") .. " | " .. Note("item:118"), "Move Healing Potions here from Cooldowns. One icon for the best one you carry,"
+        .. " switching as your bags change." .. NONE .. " | Move " .. ListRow("item:118").label .. " here from Cooldowns." .. NONE,
+        "and moving one, or an item, to another bar")
+    w:Select("cd")
+    -- Dragged in or added by name: told the same.
+    local _, dragged = B:AddItem("util", 5512)
+    B:TakeOff("util", "family:healthstone")
+    local _, typed = B:Add("util", "Healthstones")
+    B:TakeOff("util", "family:healthstone")
+    Equal(dragged .. " | " .. typed, "Added Healthstones to Utility. It shows the best one you carry." .. NONE
+        .. " | Added Healthstones to Utility." .. NONE, "dragged in or typed, while you carry none: told it shows once you carry one")
+    Equal(utilBar.count .. " " .. tostring(ns.BarData("util").spells[2]), "0 nil", "taken off again")
+    w:Select("layout")
+    local tiles = w.pages.layout.rows.cd.tiles
+    Equal(tiles[2].name .. " " .. tiles[3].name, "family:healing item:118", "drawn on the Layout page in their places")
+    ns.Toggle()
+    -- Unlocked or in Edit Mode, they show (greyed, none carried) to be placed.
+    B:SetUnlocked(true)
+    Equal(Names(cdBar) .. " " .. S[cdBar.icons[2].count].text .. " " .. tostring(S[cdBar.icons[2].texture].desaturated) .. " "
+        .. At(B:Get("buff")), "Moonfire,family:healing,item:118,Wrath 0 true TOP 0 -136",
+        "unlocked: back in place, greyed at 0, and the rows make room for them")
+    B:SetUnlocked(false)
+    Equal(Names(cdBar) .. " " .. At(B:Get("buff")), "Moonfire,Wrath TOP 0 -100", "locked: off again")
+    -- Edit Mode opened while locked: shown to be placed, and the rows make room.
+    EditModeManagerFrame:Show()
+    Equal(Names(cdBar) .. " " .. At(B:Get("buff")), "Moonfire,family:healing,item:118,Wrath TOP 0 -136",
+        "Edit Mode: back in place to be arranged, and the rows make room")
+    EditModeManagerFrame:Hide()
+    Equal(Names(cdBar) .. " " .. At(B:Get("buff")), "Moonfire,Wrath TOP 0 -100", "Edit Mode closed: off again")
+    -- Carrying one again: back as your bags change, in its place.
+    itemCount[118] = 2
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Names(cdBar), "Moonfire,family:healing,item:118,Wrath", "a potion in your bags: both back, in their places")
+    Equal(cdBar.icons[2].itemID .. " " .. S[cdBar.icons[2].count].text .. " " .. tostring(S[cdBar.icons[2].texture].desaturated),
+        "118 2 false", "the family on the one you carry, in colour, with its count")
+    -- A Mana Potion picked up: Utility comes back and the rows below make room.
+    local function Util()
+        return utilBar.count .. " " .. tostring(S[utilBar].shown) .. " " .. At(B:Get("buff"))
+    end
+    itemCount[2455] = 1
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Util(), "1 true TOP 0 -136", "a Mana Potion picked up: Utility back, and the rows make room for it")
+    -- Used up in a fight: Utility stays till it's over, then goes, and the rows close up.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    itemCount[2455] = 0
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Util(), "1 true TOP 0 -136", "used up in a fight: nothing moves")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Util(), "0 false TOP 0 -100", "after the fight: Utility goes, and the rows close up")
+    -- Picked up in a fight: on once it's over, with its count, and the rows make room.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    itemCount[2455] = 3
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Util(), "0 false TOP 0 -100", "picked up in a fight: waits for it to end")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Util() .. " " .. S[utilBar.icons[1].count].text .. " " .. tostring(S[utilBar.icons[1].texture].desaturated),
+        "1 true TOP 0 -136 3 false", "after the fight: on, in colour with its count, and the rows make room")
+    itemCount[2455] = 0
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Util(), "0 false TOP 0 -100", "used up out of a fight: off at once")
+    -- Counts hidden while you carry them: kept on, not taken off.
+    local open = _G.C_Item.GetItemCount
+    _G.C_Item.GetItemCount = function() return SECRET end
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Names(cdBar) .. " " .. #printed, "Moonfire,family:healing,item:118,Wrath 0", "hidden counts while carried: kept on")
+    _G.C_Item.GetItemCount = open
+    -- Used up in a fight: nothing jumps about; it stays, greyed at 0, until it's over.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    itemCount[118] = 0
+    Fire("BAG_UPDATE_DELAYED")
+    local potion = cdBar.icons[3]
+    Equal(Names(cdBar) .. " " .. S[potion.count].text .. " " .. tostring(S[potion.texture].desaturated),
+        "Moonfire,family:healing,item:118,Wrath 0 true", "used up in a fight: stays put, greyed at 0")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Names(cdBar), "Moonfire,Wrath", "off once the fight is over")
+    Equal(tostring(S[cdBar.icons[2].texture].desaturated), "false",
+        "Wrath, moved into the greyed potion's place, is drawn again, not left greyed")
+    -- Counts the game won't give keep what was known.
+    local count = _G.C_Item.GetItemCount
+    _G.C_Item.GetItemCount = function() return SECRET end
+    itemCount[118] = 1
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Names(cdBar) .. " " .. #printed, "Moonfire,Wrath 0", "hidden counts: kept as they were, no errors")
+    _G.C_Item.GetItemCount = count
+    itemCount[118] = 0
+    -- An item with a use that you wear still counts.
+    B:Assign("item:4000", "util")
+    Equal(Names(utilBar), "", "an item you carry none of and don't wear: off")
+    local _, moved = B:AddItem("cd", 4000)
+    B:AddItem("util", 4000)
+    Equal(moved .. " " .. B:Find("item:4000"), "Added " .. ns.Spells:Find("item:4000").name .. " to Cooldowns." .. NONE .. " util",
+        "dragged to another bar: told it shows once you carry one")
+    -- Whether it's worn, hidden by the game: kept off as it was, no errors.
+    local isWorn = _G.C_Item.IsEquippedItem
+    _G.C_Item.IsEquippedItem = function() return SECRET end
+    Fire("PLAYER_EQUIPMENT_CHANGED")
+    Equal(Names(utilBar) .. " " .. #printed, " 0", "whether it's worn hidden: kept off as it was, no errors")
+    _G.C_Item.IsEquippedItem = isWorn
+    worn[4000] = true
+    Fire("PLAYER_EQUIPMENT_CHANGED")
+    Equal(Names(utilBar), "item:4000", "an item you wear counts as carried")
+    -- Ammo on the shared bar: a class that never uses it (this druid, or a
+    -- warlock) doesn't show it; a hunter out of ammo sees it greyed at 0.
+    B:Assign("ammo", "util")
+    Equal(Names(utilBar) .. " " .. B:Find("ammo"), "item:4000 util", "ammo: off a druid's bar, kept in the profile")
+    _G.UnitClass = function() return "Hunter", "HUNTER" end
+    B:Rebuild()
+    Equal(Names(utilBar) .. " " .. S[utilBar.icons[2].count].text .. " " .. tostring(S[utilBar.icons[2].texture].desaturated),
+        "item:4000,ammo 0 true", "a hunter's: stays, greyed at 0, when out")
+    _G.UnitClass = function() return "Druid", "DRUID" end
+    -- Keys only go on the icons you see.
+    B:ShowKeys()
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- Dragging in from any spellbook, an action bar or your bags -------------------------------
 
 Environment()
 Display()
 trinket = 11111
 bagItems = { { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 } }
+itemCount[118] = 1 -- the potion in your bags, dragged out below
 local cursor
 _G.GetCursorInfo = function()
     if cursor then return cursor[1], cursor[2], cursor[3], cursor[4] end
@@ -2824,9 +3051,14 @@ cursor = { "item", 11111 }
 S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
 Equal(ns.BarData("cd").spells[2], "slot:13", "an equipped trinket follows its slot")
 do
-    -- Ammunition of any kind, equipped or not, is your ammo: the one entry that
-    -- counts whatever ammo you have equipped.
+    -- A class that never uses ammo (this druid) is told so, and keeps it on the cursor.
     cursor = { "item", 2516, "|Hitem:2516|h[Light Shot]|h" }
+    S[lp.rows.util].scripts.OnReceiveDrag(lp.rows.util)
+    Equal(table.concat(ns.BarData("util").spells, ",") .. " " .. tostring(cursor and cursor[2]) .. " " .. S[w.note].text,
+        "Wrath 2516 Your class doesn't use ammo.", "ammo dragged in by a class that never uses it: turned away, still on the cursor")
+    -- Ammunition of any kind, equipped or not, is a hunter's ammo: the one
+    -- entry that counts whatever ammo you have equipped.
+    _G.UnitClass = function() return "Hunter", "HUNTER" end
     S[lp.rows.util].scripts.OnReceiveDrag(lp.rows.util)
     Equal(table.concat(ns.BarData("util").spells, ",") .. " " .. tostring(cursor) .. " " .. S[w.note].text,
         "Wrath,ammo nil Added your ammo to Utility. It counts whatever ammo you have equipped.",
@@ -2873,6 +3105,7 @@ do
             "Only spells and items can go on a bar. true 3", "a secret on the cursor: turned away and left there")
     end
     Equal(#printed, 0, "no errors from secrets on the cursor")
+    _G.UnitClass = function() return "Druid", "DRUID" end
 end
 cursor = nil
 B:TakeOff("cd", "ammo")
@@ -4808,6 +5041,10 @@ end
     end
     bagItems = { { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 } }
     trinket, ammo, ammoCount = 5079, 2512, 200
+    itemCount[118] = 3
+    -- Ammo shows for a class that uses it; the druid's proc is kept to ask about.
+    local clearcasting = ns.Spells:Find("Clearcasting")
+    _G.UnitClass = function() return "Hunter", "HUNTER" end
     B:Rebuild()
     B:Assign("item:118", "cd") -- the potion on its own, ticked in the list
     B:AddItem("cd", 5079)
@@ -4823,8 +5060,9 @@ end
     K:Update()
     Equal(S[Icon("item:118").key].text .. " " .. tostring(S[Icon("item:118").key].shown), "3 true", "as does a macro that uses it")
     Equal(S[Icon("slot:13").key].text, "5", "a trinket shows the key for what's equipped")
-    Equal(tostring(K:ForEntry(ns.Spells:Find("ammo"))) .. " " .. tostring(K:ForEntry(ns.Spells:Find("Clearcasting")))
-        .. " " .. tostring(S[Icon("ammo").key].shown), "nil nil false", "ammunition and procs have nothing to press")
+    Equal(tostring(K:ForEntry(ns.Spells:Find("ammo"))) .. " " .. tostring(clearcasting and clearcasting.kind) .. " "
+        .. tostring(K:ForEntry(clearcasting)) .. " " .. tostring(S[Icon("ammo").key].shown), "nil proc nil false",
+        "ammunition and procs have nothing to press")
     -- A key along the bottom only moves the count up on an icon that shows one.
     local potion, quiver = Icon("item:118"), Icon("ammo")
     Equal(At(potion.count) .. " | " .. At(quiver.count), "TOPRIGHT TOPRIGHT -1 -1 | BOTTOMRIGHT BOTTOMRIGHT -1 1",
@@ -4839,21 +5077,23 @@ end
     Flush()
     Equal(S[potion.key].text .. " " .. At(potion.count) .. " | " .. At(quiver.count),
         "3 TOPRIGHT TOPRIGHT -1 -1 | BOTTOMRIGHT BOTTOMRIGHT -1 1", "bound again: up again, and the ammo's stays put")
+    _G.UnitClass = function() return "Druid", "DRUID" end
     -- A healthstone family: the key for the one it shows, else for any rank
     -- on your bars, the best first; a new key as soon as it moves on.
     actionSlots[8], keyOf.ACTIONBUTTON8 = { "item", 9421 }, "8"
     actionSlots[10], keyOf.ACTIONBUTTON10 = { "item", 5511 }, "0"
     K:Update()
+    itemCount[19004] = 1
     B:Assign("family:healthstone", "cd")
     local stone = Icon("family:healthstone")
     Equal(stone.itemID .. " " .. S[stone.key].text .. " " .. tostring(S[stone.key].shown), "19004 8 true",
-        "none carried: the Major Healthstone's key, the best rank on your bars")
+        "one with no key of its own: the Major Healthstone's key, the best rank on your bars")
     actionSlots[9], keyOf.ACTIONBUTTON9 = { "item", 5512 }, "9"
     K:Update()
     itemCount[5512] = 1
     B:RefreshAll()
     Equal(stone.itemID .. " " .. S[stone.key].text, "5512 9", "a Minor one made: its own key, as soon as the bars refresh")
-    itemCount[5512] = 0
+    itemCount[5512], itemCount[19004] = 0, 0
     B:TakeOff("cd", "family:healthstone")
     actionSlots[8], actionSlots[9], actionSlots[10] = nil, nil, nil
     K:Update()

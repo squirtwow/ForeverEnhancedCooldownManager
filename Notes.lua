@@ -10,6 +10,15 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.2.1",
+        sections = {
+            { "Fixed", {
+                "Items and potions you don't carry no longer show on your bars; the bar closes up and they come back when you have one. Putting one on while you carry none says so.",
+                "Ammo no longer shows for classes that never use it (a warlock sharing a hunter's profile). Hunters, warriors and rogues still see it greyed at 0 when out.",
+            } },
+        },
+    },
+    {
         version = "1.2.0",
         sections = {
             { "Added", {

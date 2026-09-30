@@ -80,6 +80,8 @@ local FAMILIES = {
 S.FAMILIES = FAMILIES
 -- Mana Potions are only offered to classes with mana (or kept on a bar).
 local NO_MANA = { WARRIOR = true, ROGUE = true }
+-- Only these classes fire bows, guns and crossbows, so only they use ammo.
+local AMMO_CLASSES = { HUNTER = true, WARRIOR = true, ROGUE = true }
 local FAMILY_NOTE = "Best you carry (Needs testing)"
 
 local familyOf, familyByKey = {}, {}
@@ -230,6 +232,32 @@ function S:Pick(entry)
     return true
 end
 
+-- Whether you carry any of a bag item, or any rank of a healthstone or potion
+-- family: true or false, or nil while the game won't say (the bars then keep
+-- what they knew). An item worn (a cloak with a use, say) counts as carried.
+-- Only asked of bag items and families; trinkets and ammo aren't.
+function S:Carries(entry)
+    local ids
+    if entry and entry.kind == "family" then
+        ids = entry.family.items
+    elseif entry and entry.kind == "item" then
+        ids = { entry.itemID }
+    else
+        return nil
+    end
+    for _, id in ipairs(ids) do
+        local count = C_Item.GetItemCount(id, false, true)
+        if not (Open(count) and type(count) == "number") then return nil end
+        if count > 0 then return true end
+    end
+    if entry.kind == "item" and C_Item.IsEquippedItem then
+        local worn = C_Item.IsEquippedItem(entry.itemID)
+        if not Open(worn) then return nil end
+        if worn then return true end
+    end
+    return false
+end
+
 local function AddFamily(family)
     local itemID = shown[family.key] or family.items[1]
     local entry = Add({ key = family.key, name = family.name, kind = "family", line = S.LINES.items, family = family,
@@ -247,7 +275,7 @@ local function NoCooldown(itemID)
 end
 
 -- Your two trinket slots, whatever is in them, your ammunition for its
--- count, then usable items in your bags.
+-- count (for a class that uses it), then usable items in your bags.
 local AMMO = INVSLOT_AMMO or 0
 local AMMO_ICON = "Interface\\Icons\\INV_Ammo_Arrow_01"
 
@@ -255,6 +283,15 @@ local function AddAmmo(itemID)
     Add({ key = "ammo", name = itemID and ("Ammo: " .. ItemName(itemID, GetInventoryItemLink("player", AMMO))) or "Ammo",
         kind = "ammo", line = S.LINES.items, slot = AMMO, itemID = itemID,
         icon = itemID and GetInventoryItemTexture("player", AMMO) or AMMO_ICON, rankText = "" })
+end
+
+-- Whether your class uses ammo. Any other class (a warlock on a profile
+-- shared with a hunter, say) isn't offered it and passes over it on a bar,
+-- where it stays for the characters that use it. Unknown: it does.
+function S:UsesAmmo()
+    local _, class = UnitClass("player")
+    if not (Open(class) and type(class) == "string") then return true end
+    return AMMO_CLASSES[class] == true
 end
 
 local function ScanItems()
@@ -268,7 +305,7 @@ local function ScanItems()
         end
     end
     local ammo = GetInventoryItemID("player", AMMO)
-    if ammo then AddAmmo(ammo) end
+    if ammo and S:UsesAmmo() then AddAmmo(ammo) end
     -- Healthstones and potions, one entry each whatever rank you carry.
     local _, class = UnitClass("player")
     for _, family in ipairs(FAMILIES) do
@@ -287,8 +324,9 @@ local function ScanItems()
 end
 
 -- Anything on a bar that isn't in your spellbook or bags right now: spells
--- added by name or ID, items you've run out of, and Mana Potions kept on a
--- bar by a class without mana (a profile shared with one that has it).
+-- added by name or ID, items you've run out of (the bars leave them off until
+-- you carry one again), your ammo with none equipped, and Mana Potions kept
+-- on a bar by a class without mana (a profile shared with one that has it).
 local function ScanSaved()
     local custom = ns.CustomSpells and ns.CustomSpells() or {}
     for _, key in ipairs(ns.BAR_KEYS) do
@@ -296,7 +334,8 @@ local function ScanSaved()
             if not byKey[saved] then
                 local itemID = tonumber(saved:match("^item:(%d+)$"))
                 if saved == "ammo" then
-                    AddAmmo(nil) -- none equipped now: shown empty
+                    -- None equipped now: shown empty, to a class that uses it.
+                    if S:UsesAmmo() then AddAmmo(nil) end
                 elseif familyByKey[saved] then
                     AddFamily(familyByKey[saved])
                 elseif itemID then
@@ -349,10 +388,11 @@ end
 -- spellbook, procs or bags is yours, and a buff added by name stays on the
 -- Buffs bar whoever casts it (another class's buff can land on you). Another
 -- race's racial isn't yours either: it's in the game data (ns.RANKS) with no
--- class, and not in your spellbook. Anything else unknown (items, spells the
--- data doesn't have) is everyone's.
+-- class, and not in your spellbook. Ammo is only for the classes that use it.
+-- Anything else unknown (items, spells the data doesn't have) is everyone's.
 function S:ForMe(key, bar)
     if type(key) ~= "string" then return false end
+    if key == "ammo" then return self:UsesAmmo() end
     local entry = byKey[key]
     if entry and (not entry.added or bar == "buff") then return true end
     local name = key:gsub("@%d+$", "")
