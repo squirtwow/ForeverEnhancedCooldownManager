@@ -104,7 +104,9 @@ local function Text(value)
 end
 
 -- Every spell ID a buff of this name can carry: the ranks you know, all ranks
--- in the game data, and its group version.
+-- in the game data, and its group version. A passive added by its ID also
+-- carries the aura of its own it gives (Plainsrunning's speed buff), which
+-- is what lights it on the Buffs or Debuffs bar.
 local function BuffIDs(name, known)
     local ids, seen = {}, {}
     local function Add(list)
@@ -119,6 +121,10 @@ local function BuffIDs(name, known)
     local ranks = ns.RANKS or {}
     Add(ranks[name])
     if GROUP[name] then Add(ranks[GROUP[name]]) end
+    for _, id in ipairs(known or {}) do
+        Add(ns.PASSIVE_BUFFS and ns.PASSIVE_BUFFS[id])
+        Add(ns.PASSIVE_DEBUFFS and ns.PASSIVE_DEBUFFS[id])
+    end
     return ids
 end
 
@@ -324,9 +330,10 @@ local function ScanItems()
 end
 
 -- Anything on a bar that isn't in your spellbook or bags right now: spells
--- added by name or ID, items you've run out of (the bars leave them off until
--- you carry one again), your ammo with none equipped, and Mana Potions kept
--- on a bar by a class without mana (a profile shared with one that has it).
+-- added by name or ID (each keeping the IDs it was added with, as added),
+-- items you've run out of (the bars leave them off until you carry one
+-- again), your ammo with none equipped, and Mana Potions kept on a bar by a
+-- class without mana (a profile shared with one that has it).
 local function ScanSaved()
     local custom = ns.CustomSpells and ns.CustomSpells() or {}
     for _, key in ipairs(ns.BAR_KEYS) do
@@ -343,7 +350,7 @@ local function ScanSaved()
                 elseif custom[saved] then
                     local ids = BuffIDs(saved, custom[saved])
                     Add({ key = saved, name = saved, kind = "spell", line = S.LINES.added, ids = ids,
-                        spellID = ids[#ids], icon = C_Spell.GetSpellTexture(ids[1]), rankText = "", added = true })
+                        spellID = ids[#ids], icon = C_Spell.GetSpellTexture(ids[1]), rankText = "", added = custom[saved] })
                 end
             end
         end
@@ -382,26 +389,179 @@ local function ProcClasses()
     return procClasses
 end
 
--- Whether an entry on a bar is for you. One profile can serve every class:
--- each character passes over the other classes' spells and procs, which stay
--- in the profile for the characters that use them. Anything in your own
--- spellbook, procs or bags is yours, and a buff added by name stays on the
--- Buffs bar whoever casts it (another class's buff can land on you). Another
--- race's racial isn't yours either: it's in the game data (ns.RANKS) with no
--- class, and not in your spellbook. Ammo is only for the classes that use it.
--- Anything else unknown (items, spells the data doesn't have) is everyone's.
+-- Whether a list of class tokens or race IDs ("DRUID HUNTER", "95 96") holds
+-- yours: nil while the game won't say who you are.
+local function Holds(list, mine)
+    if not (Open(mine) and (type(mine) == "string" or type(mine) == "number")) then return nil end
+    return (" " .. list .. " "):find(" " .. mine .. " ", 1, true) ~= nil
+end
+
+-- Whether you or your pet know any of these spells: nil while the game
+-- won't say.
+local function Knows(ids)
+    local book = C_SpellBook
+    if not (book and book.IsSpellKnown) then return nil end
+    local banks = { BANK }
+    local pet = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Pet
+    if pet then banks[2] = pet end
+    local hidden = false
+    for _, id in ipairs(ids or {}) do
+        for _, bank in ipairs(banks) do
+            local known = book.IsSpellKnown(id, bank)
+            if not Open(known) then
+                hidden = true
+            elseif known then
+                return true
+            end
+        end
+    end
+    if hidden then return nil end
+    return false
+end
+
+-- Items on a bar by key: a trinket slot, a bag item, or a healthstone or
+-- potion family.
+local function ItemKey(key)
+    return key:find("^item:%d+$") ~= nil or key:find("^slot:%d+$") ~= nil or key:find("^family:") ~= nil
+end
+
+-- Passive spells, by ID, from the game data (ns.PASSIVES, and the passives
+-- with an aura of their own, a totem's buff among them), and every ID the
+-- data covers: those and every ID in ns.RANKS, which are active unless
+-- listed as passive. Gathered the first time it's asked.
+local passiveIDs, coveredIDs
+local function Gather()
+    if passiveIDs then return end
+    passiveIDs, coveredIDs = {}, {}
+    for _, ids in pairs(ns.PASSIVES or {}) do
+        for _, id in ipairs(ids) do passiveIDs[id], coveredIDs[id] = true, true end
+    end
+    for _, links in ipairs({ ns.PASSIVE_BUFFS or {}, ns.PASSIVE_DEBUFFS or {} }) do
+        for id in pairs(links) do passiveIDs[id], coveredIDs[id] = true, true end
+    end
+    for _, ids in pairs(ns.RANKS or {}) do
+        for _, id in ipairs(ids) do coveredIDs[id] = true end
+    end
+end
+-- What the game said of spells the data doesn't cover.
+local asked = {}
+
+-- Whether a spell is passive: from the game data, or for a spell it doesn't
+-- cover (one from a later build) from the game, never from a hidden answer.
+-- Nil while no one can say.
+local function IsPassive(id)
+    if type(id) ~= "number" then return nil end
+    Gather()
+    if coveredIDs[id] then return passiveIDs[id] == true end
+    if asked[id] ~= nil then return asked[id] end
+    local api = C_Spell and C_Spell.IsSpellPassive
+    if not api then return nil end
+    local ok, passive = pcall(api, id)
+    if not (ok and Open(passive) and type(passive) == "boolean") then return nil end
+    asked[id] = passive
+    return passive
+end
+
+-- Why spells can't be tracked on a bar because they're passive: nil when
+-- they can. Passive only when every one is (a name shared with an active
+-- spell, a troll's Regeneration and a mage's, is told apart by its IDs) and
+-- the game data or the game says so. A passive has nothing to track on the
+-- Cooldowns or Utility bar, nor on the Buffs or Debuffs bar unless it gives
+-- an aura of its own there that comes and goes (Plainsrunning's speed buff,
+-- a talent's proc of the same name) or is one (a totem's buff).
+local function Untracked(name, ids, bar)
+    if type(ids) ~= "table" or #ids == 0 then return nil end
+    for _, id in ipairs(ids) do
+        if IsPassive(id) ~= true then return nil end
+    end
+    local buff, debuff = false, false
+    for _, id in ipairs(ids) do
+        buff = buff or (ns.PASSIVE_BUFFS ~= nil and ns.PASSIVE_BUFFS[id] ~= nil)
+        debuff = debuff or (ns.PASSIVE_DEBUFFS ~= nil and ns.PASSIVE_DEBUFFS[id] ~= nil)
+    end
+    if (bar == "buff" and buff) or (bar == "debuff" and debuff) then return nil end
+    if buff then return name .. " is passive. Only its buff can be tracked, on the Buffs bar." end
+    if debuff then return name .. " is passive. Only its debuff can be tracked, on the Debuffs bar." end
+    return name .. " is passive, so there's nothing to track."
+end
+
+-- The spells a bar entry is judged by: the ones it was added with, or for a
+-- name with nothing else to go on (another character's spell that isn't in
+-- your spellbook), the game data's IDs for that name. None for your own
+-- spells, procs and items: the spellbook passes over passives.
+local function Judged(key)
+    local entry = byKey[key]
+    if entry then return entry.added end
+    local name = key:gsub("@%d+$", "")
+    return ns.RANKS and ns.RANKS[name] or ns.PASSIVES and ns.PASSIVES[name]
+end
+
+-- Why an entry can't be tracked on a bar because it's passive (Underwater
+-- Breathing anywhere, Plainsrunning but on the Buffs bar), or nil.
+function S:PassiveNote(key, bar)
+    if type(key) ~= "string" then return nil end
+    local entry = byKey[key]
+    return Untracked(entry and entry.name or (key:gsub("@%d+$", "")), Judged(key), bar)
+end
+
+-- The same for what "Add by name or spell ID" finds, as it would go on a bar:
+-- judged by the ID dragged or typed, else the IDs it would be remembered by,
+-- else the entry's. A troll mage dragging the troll's Regeneration is told
+-- it's passive, though the mage's Regeneration is in the spellbook.
+function S:AddNote(text, bar)
+    local found, ids, id = self:Resolve(text)
+    if not found then return nil end
+    local entry = byKey[found]
+    return Untracked(entry and entry.name or found, (id and { id }) or ids or Judged(found), bar)
+end
+
+-- Whether an entry on a bar is for you. One profile can serve every class and
+-- race: each character passes over what only other characters can have, which
+-- stays in the profile for them. Anything in your own spellbook, procs or bags
+-- is yours. A passive added to a bar shows for no one where it has nothing to
+-- track (S:PassiveNote), and stays in the profile. A buff added by name stays
+-- on the Buffs bar whoever casts it (another class's buff can land on you, a
+-- gnome priest's Contingency Plan too), unless it's a racial, which no one
+-- else can give you. Otherwise a spell is yours when your class and race can
+-- have it (ns.SPELL_CLASSES and ns.SPELL_RACES): so not another race's
+-- racial (Plainsrunning's buff for anyone but a tauren), nor a race-only
+-- class spell. A spell neither names (a profession's, another character's
+-- general spell, an all-class one you haven't got) is yours on a cooldown bar
+-- only once you know it. Ammo is only for the classes that use it; items are
+-- everyone's (the bars leave off any you don't carry).
 function S:ForMe(key, bar)
     if type(key) ~= "string" then return false end
     if key == "ammo" then return self:UsesAmmo() end
     local entry = byKey[key]
-    if entry and (not entry.added or bar == "buff") then return true end
+    if entry and not entry.added then return true end
+    if ItemKey(key) then return true end
+    if self:PassiveNote(key, bar) then return false end
     local name = key:gsub("@%d+$", "")
     local classes = ns.SPELL_CLASSES and ns.SPELL_CLASSES[name]
     local procs = ProcClasses()[name]
-    if not classes and not procs then return not (ns.RANKS and ns.RANKS[name]) end
-    local _, mine = UnitClass("player")
-    if type(mine) ~= "string" then return true end
-    return (" " .. (classes or "") .. " " .. (procs or "") .. " "):find(" " .. mine .. " ", 1, true) ~= nil
+    local races = ns.SPELL_RACES and ns.SPELL_RACES[name]
+    local racial = races and not classes and not procs
+    if entry and bar == "buff" and not racial then return true end
+    if classes or procs then
+        -- While the game won't say your class, it's yours, as it always was.
+        local _, class = UnitClass("player")
+        if Holds((classes or "") .. " " .. (procs or ""), class) == false then return false end
+        if not races then return true end
+    end
+    if races then
+        local race
+        if UnitRace then race = select(3, UnitRace("player")) end
+        local holds = Holds(races, race)
+        if holds ~= nil then return holds end
+    end
+    -- Anything else not in your spellbook isn't yours, unless added by name
+    -- or ID. On the Buffs or Debuffs bar that stays, as it always did: a
+    -- talent's or item's effect (Improved Shadow Bolt's Shadow Vulnerability)
+    -- is never a spell you know, and only lights while it's up. On a cooldown
+    -- bar it's yours once you or your pet know it (and while the game won't say).
+    if not entry then return false end
+    if ns.AURA_BARS and ns.AURA_BARS[bar] then return true end
+    return Knows(entry.ids) ~= false
 end
 
 -- An entry's icon, even for a spell you haven't learned yet (from the game
@@ -466,7 +626,8 @@ function S:Suggest(text, limit)
 end
 
 -- Works out what "Add by name or spell ID" means. Returns the key to store,
--- the spell IDs to remember when it isn't in your spellbook, or nil and why.
+-- the spell IDs to remember when it isn't in your spellbook, and the ID given
+-- (if one was), or nil and why.
 function S:Resolve(text)
     text = type(text) == "string" and text:match("^%s*(.-)%s*$") or ""
     if text == "" then return nil, "Type a spell name or ID first." end
@@ -474,8 +635,8 @@ function S:Resolve(text)
     if id then
         local name = C_Spell.GetSpellName and Text(C_Spell.GetSpellName(id))
         if not name then return nil, "No spell has ID " .. id .. "." end
-        if byKey[name] then return name end
-        return name, { id }
+        if byKey[name] then return name, nil, id end
+        return name, { id }, id
     end
     local lower = text:lower()
     for key, entry in pairs(byKey) do

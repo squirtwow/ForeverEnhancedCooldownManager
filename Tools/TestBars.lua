@@ -255,6 +255,8 @@ local function Environment(keepCVars)
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
+    -- A Skyborne, so Walk on Air (in the spellbook) is your own racial.
+    _G.UnitRace = function(unit) assert(unit == "player"); return "Skyborne", "Skyborne", 96 end
     _G.UnitPower = function() return 0 end
     _G.UnitCastingInfo = function() return nil end
     _G.UnitChannelInfo = function() return nil end
@@ -593,6 +595,107 @@ do
     Equal(rawget(ns.BarData("cd"), "hideReady"), nil, "the old setting is gone")
 end
 
+-- Reactive abilities ----------------------------------------------------------------------
+-- The gold edge goes on each spell the game data gates on something happening
+-- in the fight (ns.REACTIVE, from Ranks.lua): after a dodge, parry or block, a
+-- kill or an Enrage, or on a wounded target, and Overpower with the combo
+-- point a dodge gives. Only while the game says it's usable: never while it
+-- isn't, or while the answer is hidden. A spell gated by a stance (Intercept),
+-- a Seal (Judgement), a form (Tiger's Fury) or an aura you put up yourself
+-- (Swiftmend, Conflagrate, Rewind Time) never gets it.
+
+do
+    local REACTIVE = {
+        { "Counterattack", 19306 }, { "Divine Grace", 1277370 }, { "Enraged Regeneration", 402913 }, { "Execute", 20658 },
+        { "Hammer of Wrath", 24275 }, { "Mongoose Bite", 1495 }, { "Overpower", 7384 }, { "Raging Blow", 402911 },
+        { "Revenge", 6572 }, { "Riposte", 14251 }, { "Victory Rush", 402927 },
+    }
+    local OTHERS = { { "Intercept", 20252 }, { "Judgement", 20271 }, { "Tiger's Fury", 5217 }, { "Swiftmend", 18562 },
+        { "Conflagrate", 17962 }, { "Rewind Time", 401462 } }
+    local listed, expected = {}, {}
+    for name, value in pairs(ns.REACTIVE) do listed[#listed + 1] = name .. (value == true and "" or "=" .. tostring(value)) end
+    table.sort(listed)
+    for i, spell in ipairs(REACTIVE) do expected[i] = spell[1] end
+    Equal(table.concat(listed, ", "), table.concat(expected, ", "),
+        "the reactive abilities from the game data: these eleven, from five classes, and nothing else")
+
+    -- All of them in the spellbook (Execute at rank 2, with rank 1 on the bar
+    -- too), with the others, every one on the Cooldowns bar.
+    Environment()
+    local items = { { name = "Execute", subName = "Rank 1", spellID = 5308, iconID = 1 } }
+    for _, spell in ipairs(REACTIVE) do
+        items[#items + 1] = { name = spell[1], subName = spell[1] == "Execute" and "Rank 2" or "", spellID = spell[2], iconID = 1 }
+    end
+    for _, spell in ipairs(OTHERS) do items[#items + 1] = { name = spell[1], subName = "", spellID = spell[2], iconID = 1 } end
+    book = { { name = "General", items = items } }
+    local rns = Load({ useBars = true })
+    local RB = rns.Bars
+    local keys = {}
+    for _, spell in ipairs(REACTIVE) do keys[#keys + 1] = spell[1] end
+    keys[#keys + 1] = "Execute@1"
+    for _, spell in ipairs(OTHERS) do keys[#keys + 1] = spell[1] end
+    local added = 0
+    for _, key in ipairs(keys) do
+        if RB:Assign(key, "cd") then added = added + 1 end
+    end
+    local bar = RB:Get("cd")
+    Equal(added .. " " .. bar.count, "18 18", "all eighteen on the bar")
+    Equal(bar.icons[12].name .. " " .. bar.icons[12].spellID, "Execute@1 5308", "Execute's rank 1 on its own")
+    local function Lit()
+        local names = {}
+        for i = 1, bar.count do
+            if S[bar.icons[i].glow].shown then names[#names + 1] = bar.icons[i].name end
+        end
+        return table.concat(names, ", ")
+    end
+    local function Set(value, which)
+        for _, spell in ipairs(which) do usable[spell[2]] = value end
+    end
+    local all = table.concat(expected, ", ") .. ", Execute@1"
+    RB:RefreshAll()
+    Equal(Lit(), all, "every reactive ability usable: each has the gold edge, a lower rank too; the others never")
+    Set(false, REACTIVE)
+    Set(false, OTHERS)
+    usable[5308] = false
+    RB:RefreshAll()
+    Equal(Lit(), "", "none usable: no gold edge anywhere")
+    Set(SECRET, REACTIVE)
+    Set(SECRET, OTHERS)
+    usable[5308] = SECRET
+    RB:RefreshAll()
+    Equal(Lit(), "", "a hidden usable answer is never read, so no gold edge")
+    -- Each icon by its own answer: every other one usable.
+    local odd = {}
+    for i, spell in ipairs(REACTIVE) do
+        usable[spell[2]] = i % 2 == 1
+        if i % 2 == 1 then odd[#odd + 1] = spell[1] end
+    end
+    usable[5308] = false
+    Set(true, OTHERS)
+    RB:RefreshAll()
+    Equal(Lit(), table.concat(odd, ", "), "each lit only while it's usable itself; the stance, Seal, form and own-aura spells, usable, never")
+    -- In a fight, the same: the edge comes and goes with the game's own
+    -- events, as the answer changes.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    Set(true, REACTIVE)
+    usable[5308] = true
+    Fire("SPELL_UPDATE_USABLE")
+    Equal(Lit(), all, "in a fight: lit as each becomes usable")
+    usable[7384] = false
+    Fire("SPELL_UPDATE_USABLE")
+    Equal(Lit():find("Overpower", 1, true), nil, "and Overpower's goes once it's used")
+    -- A new target: Execute and Hammer of Wrath follow its health.
+    usable[20658], usable[5308], usable[24275] = false, false, false
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Lit():find("Execute", 1, true) or Lit():find("Hammer", 1, true), nil, "a healthy new target: no edge on Execute or Hammer of Wrath")
+    target = false
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(#printed, 0, "no errors from reactive abilities")
+end
+
 -- Buffs bar -------------------------------------------------------------------------------
 
 Environment()
@@ -848,11 +951,20 @@ do
     ns.BUFF_SLOTS = 2
     barPage.icons[3].link:Click()
     Equal(tostring(B:Joined("buff", 3)) .. " " .. S[win.note].text, "true Buffs is full.", "a split past the bar's slots is refused")
+    -- Dropped onto another icon, the two swap places and each spot stays
+    -- joined or not, so a full bar needs no more room.
     S[barPage.icons[3]].scripts.OnDragStart(barPage.icons[3])
     S[barPage.icons[1]].mouseOver = true
     S[barPage.icons[3]].scripts.OnDragStop(barPage.icons[3])
     S[barPage.icons[1]].mouseOver = nil
-    Equal(Shape("buff") .. " " .. S[win.note].text, "Thorns, Walk on Air+Nature's Grace Buffs is full.",
+    Equal(Shape("buff") .. " | " .. S[win.note].text, "Nature's Grace, Walk on Air+Thorns | Swapped Nature's Grace and Thorns.",
+        "swapped with the icon it's dropped on, each spot keeping its join, even on a full bar")
+    -- Put last, one dragged out of its group would need an icon of its own.
+    S[barPage.icons[2]].scripts.OnDragStart(barPage.icons[2])
+    S[barPage.tray].mouseOver = true
+    S[barPage.icons[2]].scripts.OnDragStop(barPage.icons[2])
+    S[barPage.tray].mouseOver = nil
+    Equal(Shape("buff") .. " " .. S[win.note].text, "Nature's Grace, Walk on Air+Thorns Buffs is full.",
         "and so is dragging one out of its group")
     ns.BUFF_SLOTS = 16
     -- Closing the window mid-drag: the icon's spot comes back, nothing is
@@ -1605,16 +1717,40 @@ Equal(page.icons[1].name == "Moonfire" and page.icons[3].name == "Overpower", tr
 local third = page.icons[3]
 S[third].scripts.OnDragStart(third)
 Equal(S[third].alpha, 0, "picked up, its spot is empty")
+-- Held over another icon: that one is outlined in the accent, and the footer
+-- says the two will swap.
 S[page.icons[1]].mouseOver = true
+S[page.ghost].scripts.OnUpdate(page.ghost)
+Equal(tostring(S[page.mark].shown) .. " " .. tostring(S[page.mark].points[1][2] == page.icons[1]) .. " " .. S[w.note].text,
+    "true true Let go to swap Overpower and Moonfire.", "held over another icon, it's outlined and the footer says they'll swap")
+Equal(S[page.mark].border[1] .. " " .. tostring(S[page.ghost.texture].desaturated), "0.88 false", "outlined in the accent, the held icon in colour")
 S[third].scripts.OnDragStop(third)
 S[page.icons[1]].mouseOver = nil
-Equal(table.concat(ns.BarData("cd").spells, ","), "Overpower,Moonfire,Wrath", "dragging onto an icon takes its place")
+Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. S[w.note].text, "Overpower,Wrath,Moonfire Swapped Overpower and Moonfire.",
+    "dropped onto another icon, the two swap places and the one between stays put")
+Equal(tostring(S[page.mark].shown) .. " " .. tostring(w.dragging), "false nil", "let go, the outline and the footer's drag note go")
+-- The icon next to it: they swap too.
+S[page.icons[2]].scripts.OnDragStart(page.icons[2])
+S[page.icons[3]].mouseOver = true
+S[page.icons[2]].scripts.OnDragStop(page.icons[2])
+S[page.icons[3]].mouseOver = nil
+Equal(table.concat(ns.BarData("cd").spells, ","), "Overpower,Moonfire,Wrath", "swapped with the icon beside it")
 S[page.icons[1]].scripts.OnDragStart(page.icons[1])
+S[page.icons[1]].mouseOver = true
+S[page.ghost].scripts.OnUpdate(page.ghost)
+Equal(tostring(S[page.mark].shown) .. " " .. S[w.note].text, "false Let go to leave Overpower where it is.",
+    "over its own spot, nothing is outlined")
+S[page.icons[1]].mouseOver = nil
 S[page.tray].mouseOver = true
+S[page.ghost].scripts.OnUpdate(page.ghost)
+Equal(tostring(S[page.mark].shown) .. " " .. S[w.note].text, "false Let go to put Overpower last.", "over the tray's empty space, it goes last")
 S[page.icons[1]].scripts.OnDragStop(page.icons[1])
 S[page.tray].mouseOver = nil
 Equal(table.concat(ns.BarData("cd").spells, ","), "Moonfire,Wrath,Overpower", "dropping on empty tray space moves it to the end")
 S[page.icons[1]].scripts.OnDragStart(page.icons[1])
+S[page.ghost].scripts.OnUpdate(page.ghost)
+Equal(tostring(S[page.ghost.texture].desaturated) .. " " .. S[w.note].text, "true Let go to take Moonfire off Cooldowns.",
+    "off the bar, the held icon greys and the footer says it comes off")
 S[page.icons[1]].scripts.OnDragStop(page.icons[1])
 Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. S[w.note].text, "Wrath,Overpower Took Moonfire off Cooldowns.",
     "dragged off the tray, it comes off the bar")
@@ -2263,6 +2399,15 @@ Equal(tiles[1].name .. " " .. tostring(S[tiles[1].texture].desaturated) .. " " .
     "Rake true Moonfire", "the Layout page draws yours, the unlearned one greyed")
 B:Clear("cd")
 Equal(table.concat(ns.BarData("cd").spells, ","), "Garrote", "Clear takes yours off and leaves the rogue's")
+-- /fecm reset asks just as the Layout page's Reset button does; Cancel changes nothing.
+w:Hide()
+w:Select("cd")
+SlashCmdList.FECM(" Reset ")
+Equal(tostring(S[w].shown) .. " " .. w.selected .. " " .. tostring(S[w.confirm.shade].shown), "true layout true",
+    "/fecm reset opens the Layout page and asks first")
+Equal(S[w.confirm.dialog.title].text, "Reset your layout?", "the same question as the Reset button")
+w.confirm.no:Click()
+Equal(S[w.confirm.shade].shown, false, "Cancel closes it, nothing reset")
 -- The Buffs bar's slots are for your own buffs.
 B:SetAura("buff", "Evasion", true)
 B:SetAura("buff", "Sprint", true)
@@ -2279,13 +2424,745 @@ Equal(#(B:Mine("util")) .. " " .. B:Get("util").count .. " | " .. tostring(ns.Sp
     .. " " .. tostring(ns.Spells:ForMe("Garrote", "debuff")) .. " " .. B:Get("debuff").count, "0 0 | true false 0",
     "a rogue's spell or debuff added by name isn't yours; a paladin's buff is")
 -- Racials: yours from your spellbook; another race's (an orc's Blood Fury in a
--- shared profile) stays off your bars; anything the data doesn't know stays.
+-- shared profile) stays off your bars. Items are everyone's; a spell no class
+-- or race owns that isn't in your spellbook (another character's profession)
+-- isn't yours.
 Equal(tostring(ns.Spells:ForMe("Walk on Air", "cd")) .. " " .. tostring(ns.Spells:ForMe("Blood Fury", "cd"))
     .. " " .. tostring(ns.Spells:ForMe("Will of the Forsaken", "util")) .. " " .. tostring(ns.Spells:ForMe("Blood Fury", "buff"))
-    .. " " .. tostring(ns.Spells:ForMe("Major Healing Potion", "cd")), "true false false false true",
-    "your racial is yours, another race's isn't, on any bar; unknown names stay")
+    .. " " .. tostring(ns.Spells:ForMe("item:118", "cd")) .. " " .. tostring(ns.Spells:ForMe("slot:14", "util"))
+    .. " " .. tostring(ns.Spells:ForMe("family:mana", "cd")) .. " " .. tostring(ns.Spells:ForMe("Attack", "cd"))
+    .. " " .. tostring(ns.Spells:ForMe("First Aid", "cd")), "true false false false true true true true false",
+    "your racial is yours, another race's isn't, on any bar; items and your general spells are; another's profession isn't")
 B:Add("cd", "Blood Fury")
 Equal(table.concat(B:Mine("cd"), ","):find("Blood Fury", 1, true), nil, "an orc's racial in the profile doesn't show on your bar")
+
+-- A profile shared across races ------------------------------------------------------------
+-- The user's tauren hunter shares a profile with an undead warlock, whose
+-- Underwater Breathing (a passive racial, so added by its ID), Cannibalize and
+-- Will of the Forsaken sit next to the hunter's Serpent Sting. Each shows only
+-- on the character whose race has it, and stays in the profile for the other.
+do
+local function Undead(book) -- the warlock's spellbook: its racials and Shoot
+    table.insert(book[1].items, { name = "Cannibalize", subName = "Racial", spellID = 20577, iconID = 2 })
+    table.insert(book[1].items, { name = "Will of the Forsaken", subName = "Racial", spellID = 7744, iconID = 3 })
+    table.insert(book[1].items, { name = "Underwater Breathing", subName = "Racial Passive", spellID = 5227, isPassive = true })
+    table.insert(book[1].items, { name = "Shoot", spellID = 5019, iconID = 4 })
+end
+-- Spells the game says you and your pet know, by ID; nil: the game can't say.
+local known, petKnown
+local function KnownSpells(ids, pets)
+    known, petKnown = ids, pets or {}
+    if not ids then
+        C_SpellBook.IsSpellKnown = nil
+        return
+    end
+    Enum.SpellBookSpellBank.Pet = 1
+    C_SpellBook.IsSpellKnown = function(id, bank)
+        assert(bank == 0 or bank == 1, "the player's or the pet's spells")
+        if bank == 1 then return petKnown[id] == true end
+        return known[id] == true
+    end
+end
+local function Racials(race, class)
+    _G.UnitRace = function() return race == 5 and "Undead" or "Tauren", race == 5 and "Scourge" or "Tauren", race end
+    _G.UnitClass = function() return class, class end
+end
+local shared = { joins = { buff = {}, debuff = {} }, debuff = {}, buff = {},
+    cd = { "Hunter's Mark", "Underwater Breathing", "Serpent Sting", "Cannibalize", "Will of the Forsaken", "Shoot" },
+    util = { "Revive Pet" } }
+local savedRaces = { useBars = true, notesSeen = "dev", profiles = { Shared = shared }, everyone = "Shared",
+    custom = { ["Underwater Breathing"] = { 5227 } } }
+-- The warlock first: its active racials are its own. Its passive one, added
+-- by ID before passives were turned away, has nothing to track, so it shows
+-- for no one, the warlock included, and stays in the profile.
+Environment()
+Racials(5, "WARLOCK")
+Undead(book)
+KnownSpells({ [5227] = true, [20577] = true, [7744] = true, [5019] = true })
+ns = Load(savedRaces)
+B = ns.Bars
+Equal(table.concat((B:Mine("cd")), ","), "Cannibalize,Will of the Forsaken,Shoot",
+    "the undead warlock's own active racials and Shoot; not its passive Underwater Breathing, nor the hunter's spells")
+local onScreen = {}
+for i = 1, B:Get("cd").count do onScreen[i] = B:Get("cd").icons[i].name end
+Equal(table.concat(onScreen, ","), "Cannibalize,Will of the Forsaken,Shoot", "the three on its bar on screen")
+Equal(tostring(ForeverEnhancedCooldownManagerDB.custom["Underwater Breathing"][1]) .. " " .. ns.BarData("cd").spells[2],
+    "5227 Underwater Breathing", "the passive stays in the profile, in its place")
+-- Now the tauren hunter on the same profile.
+Environment()
+Racials(6, "HUNTER")
+KnownSpells({})
+ns = Load(savedRaces)
+B = ns.Bars
+Equal(table.concat((B:Mine("cd")), ","), "Hunter's Mark,Serpent Sting",
+    "the hunter's own spells only: no Underwater Breathing next to Serpent Sting, no Cannibalize or Will of the Forsaken")
+Equal(B:Get("cd").count .. " " .. #(B:Mine("util")), "0 1", "nothing of the warlock's on the hunter's bar on screen")
+Equal(table.concat(ns.BarData("cd").spells, ","), "Hunter's Mark,Underwater Breathing,Serpent Sting,Cannibalize,Will of the Forsaken,Shoot",
+    "the warlock's spells stay in the profile, in their places")
+Equal(ForeverEnhancedCooldownManagerDB.custom["Underwater Breathing"][1], 5227, "and its added racial stays remembered")
+SlashCmdList.FECM("")
+w = FECMFrame
+w:Select("cd")
+page = w.pages.bar
+Equal(page.icons[1].name .. " " .. page.icons[2].name .. " " .. tostring(page.icons[3] == nil or not S[page.icons[3]].shown)
+    .. " " .. S[w.nav.cd.count].text, "Hunter's Mark Serpent Sting true 2", "the bar's page and the list on the left show the hunter's two")
+w:Select("layout")
+local rowTiles = w.pages.layout.rows.cd.tiles
+Equal(rowTiles[1].name .. " " .. rowTiles[2].name .. " " .. tostring(rowTiles[3].name), "Hunter's Mark Serpent Sting nil",
+    "the Layout page's Cooldowns row too")
+-- Swapping the hunter's two on the bar's page keeps the warlock's in their places.
+Equal((B:Swap("cd", 1, 3)), true, "the hunter swaps Hunter's Mark and Serpent Sting")
+Equal(table.concat(ns.BarData("cd").spells, ","), "Serpent Sting,Underwater Breathing,Hunter's Mark,Cannibalize,Will of the Forsaken,Shoot",
+    "the warlock's racial keeps its place between them")
+-- Moving a hidden racial to another bar isn't offered: it can't show there for the hunter.
+local moved, why = B:Transfer("cd", "util", "Cannibalize")
+Equal(tostring(moved) .. " " .. tostring(why), "false Cannibalize can't show on the Utility bar for you.", "another race's racial can't be moved for you")
+local traded, tradeWhy = B:CanTrade("util", "Revive Pet", "cd", "Underwater Breathing")
+Equal(tostring(traded) .. " " .. tostring(tradeWhy), "false Underwater Breathing is passive, so there's nothing to track.",
+    "nor is a passive swapped onto another bar, which says why")
+-- Another race's racial on the Buffs bar takes none of the hunter's slots.
+table.insert(ns.BarData("buff").spells, "Will of the Forsaken")
+B:Changed()
+Equal(B:SlotsUsed("buff") .. " " .. B:Get("buff").count, "0 0", "another race's racial on the Buffs bar takes none of the hunter's slots")
+-- The tauren's own racial is the hunter's, learned or not and at any rank.
+Equal(tostring(ns.Spells:ForMe("War Stomp", "cd")) .. " " .. tostring(ns.Spells:ForMe("War Stomp@1", "cd")), "true true",
+    "the tauren's own War Stomp is the hunter's")
+-- Class spells only some races get: an undead priest's Touch of Weakness is
+-- an undead priest's, not a troll priest's (whose Hex of Weakness it is), nor
+-- an undead hunter's.
+Racials(5, "PRIEST")
+Equal(tostring(ns.Spells:ForMe("Touch of Weakness", "debuff")) .. " " .. tostring(ns.Spells:ForMe("Hex of Weakness", "debuff")),
+    "true false", "an undead priest has Touch of Weakness, not a troll's Hex of Weakness")
+Racials(5, "HUNTER")
+Equal(tostring(ns.Spells:ForMe("Touch of Weakness", "debuff")) .. " " .. tostring(ns.Spells:ForMe("Cannibalize", "cd")),
+    "false true", "an undead hunter has the undead racial, not the priest spell")
+-- While the game won't say your race, another race's racial still stays off.
+_G.UnitRace = function() return SECRET, SECRET, SECRET end
+Equal(tostring(ns.Spells:ForMe("Cannibalize", "cd")) .. " " .. tostring(ns.Spells:ForMe("Underwater Breathing", "cd")),
+    "false false", "a hidden race keeps another race's racials off (the game says the hunter doesn't know them)")
+Racials(6, "HUNTER")
+-- A spell added by name or ID that no class or race owns (another
+-- character's profession): yours once you know it, and while the game can't say.
+ForeverEnhancedCooldownManagerDB.custom["Find Herbs"] = { 2383 }
+table.insert(ns.BarData("util").spells, "Find Herbs")
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Find Herbs", "util")) .. " " .. #(B:Mine("util")) .. " " .. B:Get("util").count,
+    "false 1 0", "the herbalist's Find Herbs isn't the hunter's")
+known[2383] = true
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Find Herbs", "util")) .. " " .. B:Get("util").count, "true 1", "once the hunter learns it, it shows")
+KnownSpells(nil)
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Find Herbs", "util")), "true", "while the game can't say, it shows, as before")
+KnownSpells({})
+-- Not in your spellbook and not added: another character's profession isn't yours.
+table.insert(ns.BarData("util").spells, "Smelting")
+Equal(tostring(ns.Spells:ForMe("Smelting", "util")) .. " " .. table.concat((B:Mine("util")), ","), "false Revive Pet",
+    "the miner's Smelting stays in the profile, off the hunter's rows")
+-- A pet's spell added by ID counts while your pet knows it.
+ForeverEnhancedCooldownManagerDB.custom.Screech = { 24423 }
+table.insert(ns.BarData("util").spells, "Screech")
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Screech", "util")), "false", "no pet with Screech: not shown")
+KnownSpells({}, { [24423] = true })
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Screech", "util")), "true", "your pet knows it: it shows")
+-- The Cooldowns page's list leaves off what's hidden for the hunter, as the
+-- bar does: the warlock's Underwater Breathing isn't listed (ticked, though
+-- not on the hunter's bar) or offered when searching. The pet's Screech,
+-- added and known, is; Find Herbs, added and not known, isn't.
+w:Select("util")
+w:Select("cd")
+Equal(tostring((Row("Underwater Breathing"))) .. " " .. tostring((Row("Find Herbs"))) .. " " .. tostring(Row("Screech") ~= nil)
+    .. " " .. tostring(Row("Moonfire") ~= nil), "nil nil true true",
+    "the hunter's Cooldowns list leaves off the warlock's racial and the herbalist's spell, as the bar does")
+Search("underwater")
+Equal(tostring((Row("Underwater Breathing"))) .. " " .. tostring((Other("Underwater Breathing"))), "nil nil",
+    "searching neither lists it nor offers it to add again")
+Search("")
+-- On the Buffs bar too: the undead's added Underwater Breathing is always on,
+-- with no buff of its own, so it takes no slot and leaves no greyed spot. A
+-- gnome priest's Contingency Plan added by name stays: a gnome priest can
+-- cast it on the hunter.
+B:SetOption("buff", "showMissing", true)
+ForeverEnhancedCooldownManagerDB.custom["Contingency Plan"] = { 1277462 }
+table.insert(ns.BarData("buff").spells, "Underwater Breathing")
+table.insert(ns.BarData("buff").spells, "Contingency Plan")
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Underwater Breathing", "buff")) .. " " .. tostring(ns.Spells:ForMe("Contingency Plan", "buff"))
+    .. " " .. table.concat((B:Mine("buff")), ",") .. " " .. B:SlotsUsed("buff") .. " " .. B:Get("buff").count,
+    "false true Contingency Plan 1 1",
+    "an added always-on passive stays off the hunter's Buffs bar; a race-only buff another player casts on you stays")
+w:Select("buff")
+Equal(tostring((Row("Underwater Breathing"))) .. " " .. tostring(Row("Contingency Plan") ~= nil), "nil true",
+    "and off the Buffs page's list")
+-- On the Debuffs bar, a debuff added by ID that no class or race owns (a
+-- talent's or item's effect, like Improved Shadow Bolt's Shadow Vulnerability)
+-- stays, as it always did: the game never says you know it. A cooldown bar
+-- still asks.
+ForeverEnhancedCooldownManagerDB.custom["Shadow Vulnerability"] = { 17794 }
+table.insert(ns.BarData("debuff").spells, "Shadow Vulnerability")
+B:SetOption("debuff", "showMissing", true)
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Shadow Vulnerability", "debuff")) .. " " .. table.concat((B:Mine("debuff")), ",")
+    .. " " .. B:Get("debuff").count .. " " .. tostring(ns.Spells:ForMe("Shadow Vulnerability", "cd")),
+    "true Shadow Vulnerability 1 false",
+    "an effect debuff added by ID shows on the Debuffs bar, though the game never says you know it")
+w:Select("debuff")
+Equal(Row("Shadow Vulnerability") ~= nil, true, "and is listed on the Debuffs page")
+-- Back on the undead warlock: its active racial is on its Buffs bar; its
+-- passive one isn't, even there, and isn't listed on its own pages.
+Racials(5, "WARLOCK")
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Underwater Breathing", "buff")) .. " " .. table.concat((B:Mine("buff")), ","),
+    "false Will of the Forsaken,Contingency Plan", "the undead's active racial is on its Buffs bar, its passive one isn't")
+w:Select("cd")
+Equal(tostring((Row("Underwater Breathing"))) .. " " .. tostring(Row("Moonfire") ~= nil), "nil true",
+    "nor is its passive listed on its own Cooldowns page")
+Racials(6, "HUNTER")
+w:Hide()
+end
+
+-- Passives: nothing to track ------------------------------------------------------------------
+-- A passive has nothing to track on the Cooldowns or Utility bar, and on the
+-- Buffs or Debuffs bar only by an aura of its own that comes and goes
+-- (Plainsrunning's speed buff, a talent's proc). Which spells are passive
+-- comes from the game data (ns.PASSIVES), else from the game. One is turned
+-- away however it comes (dragged from the spellbook onto a bar's page or a
+-- Layout row, typed, searched for, swapped or moved), and one already saved
+-- shows for no one but stays in the profile.
+do
+local data = {}
+assert(loadfile("Ranks.lua"))("ForeverEnhancedCooldownManager", data)
+local function Holds(list, value)
+    for _, item in ipairs(list or {}) do if item == value then return true end end
+    return false
+end
+local function IDs(list) return list and table.concat(list, ",") or "none" end
+-- From the game data: a name shared with an active spell lists only its
+-- passive IDs (the troll's Regeneration, not the mage's); a passive's buff
+-- of its own has its name and icon (Plainsrunning's, a talent's proc, not an
+-- NPC's Regeneration) and isn't hidden (not either Dual Wield
+-- Specialization's).
+Equal(IDs(data.PASSIVES.Regeneration) .. " " .. IDs(data.RANKS.Regeneration) .. " " .. IDs(data.PASSIVE_BUFFS[20555])
+    .. " " .. IDs(data.PASSIVES.Endurance) .. " " .. IDs(data.PASSIVE_BUFFS[20550]), "20555 401417 none 13742,20550 none",
+    "the troll's Regeneration and the tauren's Endurance are passive with no buff; the mage's Regeneration is active")
+Equal(IDs(data.PASSIVES.Plainsrunning) .. " " .. IDs(data.PASSIVE_BUFFS[1259918]) .. " " .. IDs(data.PASSIVE_BUFFS[12319])
+    .. " " .. IDs(data.PASSIVE_BUFFS[16487]) .. " " .. IDs(data.PASSIVE_BUFFS[13715]) .. " " .. IDs(data.PASSIVE_BUFFS[23584]),
+    "1259918 1299038 12966,16257,17687 16488,437713 none none", "Plainsrunning's speed buff, Flurry's and Blood Craze's buffs")
+Equal(IDs(data.PASSIVE_DEBUFFS[11180]) .. " " .. IDs(data.PASSIVE_BUFFS[11180]) .. " " .. IDs(data.PASSIVE_DEBUFFS[1259918])
+    .. " " .. tostring(data.PASSIVES["Shadow Vulnerability"]), "12579 none none nil",
+    "Winter's Chill gives a debuff, Plainsrunning none; Shadow Vulnerability isn't a passive")
+-- A passive with a cooldown isn't listed (Reincarnation, an hour, nor the
+-- resurrection it gives, 21169, which holds that cooldown): its cooldown is
+-- worth tracking (the user's call). A talent's other effects stay
+-- active (Master of Elements' mana, Frostbite's freeze). One that's simply
+-- always on gives no aura of its own, though an NPC's or a potion's aura has
+-- its name and icon (Parry, a pet's Fire Resistance). One whose description
+-- names its aura gives it, whatever its icon (Inspiration's armor buff,
+-- Spirit of Redemption, Vindication's debuff).
+Equal(IDs(data.PASSIVES.Reincarnation) .. " " .. IDs(data.RANKS.Reincarnation) .. " " .. IDs(data.PASSIVE_BUFFS[20608])
+    .. " " .. IDs(data.PASSIVE_DEBUFFS[20608]) .. " " .. IDs(data.PASSIVE_BUFFS[21169]) .. " " .. IDs(data.PASSIVE_DEBUFFS[21169])
+    .. " " .. IDs(data.PASSIVE_BUFFS[3127]) .. " " .. IDs(data.PASSIVE_BUFFS[18848])
+    .. " " .. IDs(data.PASSIVE_BUFFS[23992]) .. " " .. IDs(data.PASSIVE_BUFFS[24488]),
+    "none 20608,21169 none none none none none none none none",
+    "Reincarnation and its resurrection aren't listed; Parry and a pet's resistances give no buff")
+Equal(IDs(data.PASSIVES["Master of Elements"]) .. " " .. IDs(data.PASSIVES.Frostbite) .. " " .. IDs(data.PASSIVES["Eye for an Eye"])
+    .. " " .. IDs(data.PASSIVES["Magic Absorption"]), "29074 11071 9799 29441",
+    "only a passive's own resurrection goes with it: a talent's other effects stay active")
+Equal(IDs(data.PASSIVE_BUFFS[14892]) .. " " .. IDs(data.PASSIVE_BUFFS[20711]) .. " " .. IDs(data.PASSIVE_DEBUFFS[9452]),
+    "14893 27827 67,440667", "the auras a passive's description names, whatever their icon")
+-- The game marks a totem's buff passive (and a battle standard's, a
+-- campfire's), though it comes and goes on everyone near: each is its own
+-- buff. Not a hidden one (Honor Among Thieves' party aura).
+Equal(IDs(data.PASSIVE_BUFFS[8076]) .. " " .. IDs(data.PASSIVE_BUFFS[25362]) .. " " .. IDs(data.PASSIVE_BUFFS[5677])
+    .. " " .. IDs(data.PASSIVE_BUFFS[8836]) .. " " .. IDs(data.PASSIVE_BUFFS[1283391]) .. " " .. IDs(data.PASSIVE_DEBUFFS[8076])
+    .. " " .. IDs(data.PASSIVE_BUFFS[432264]), "8076 25362 5677 8836 1283391 none none",
+    "totem buffs, and a campfire's, are their own buffs; a hidden aura isn't")
+-- The game's names: every spell in the data and the auras its passives give,
+-- the class procs, and spells the data doesn't cover (an effect, two active
+-- racials it has no IDs for, and made-up spells from a later build), and
+-- the totem buffs.
+local named = { [17794] = "Shadow Vulnerability", [1229504] = "Faction Banner", [1260270] = "Rapid Regeneration",
+    [16870] = "Clearcasting", [12536] = "Clearcasting", [16246] = "Clearcasting", [17941] = "Shadow Trance",
+    [14143] = "Remorseless", [6150] = "Quick Shots", [1400001] = "Moonlit Path", [1400002] = "Starlit Path",
+    [1400003] = "Sunlit Path", [1400004] = "Dawnlit Path", [8076] = "Strength of Earth", [25362] = "Strength of Earth",
+    [8836] = "Grace of Air", [5677] = "Mana Spring" }
+for _, list in ipairs({ data.RANKS, data.PASSIVES }) do
+    for name, ids in pairs(list) do
+        for _, id in ipairs(ids) do named[id] = named[id] or name end
+    end
+end
+for _, links in ipairs({ data.PASSIVE_BUFFS, data.PASSIVE_DEBUFFS }) do
+    for id, auras in pairs(links) do
+        for _, aura in ipairs(auras) do named[aura] = named[aura] or named[id] end
+    end
+end
+-- What's on the cursor, what the game is asked about passives and what it
+-- says (true, false, a hidden answer, or "error").
+local cursor, asks, says
+local function Start(race, class, saved, general)
+    Environment()
+    if general then book[1].items = general end
+    _G.UnitRace = function() return "Race", "Race", race end
+    _G.UnitClass = function() return class, class end
+    _G.C_Spell.GetSpellName = function(id) return named[id] end
+    _G.GetCursorInfo = function() if cursor then return cursor[1], cursor[2], cursor[3], cursor[4] end end
+    _G.ClearCursor = function() cursor = nil end
+    asks, says = {}, {}
+    _G.C_Spell.IsSpellPassive = function(id)
+        asks[#asks + 1] = id
+        if says[id] == "error" then error("no such spell") end
+        return says[id]
+    end
+    ns = Load(saved or { useBars = true, notesSeen = "dev" })
+    B = ns.Bars
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    page = w.pages.bar
+end
+local function Drop(target)
+    S[target].scripts.OnReceiveDrag(target)
+    return S[w.note].text
+end
+local function List(key) return table.concat(ns.BarData(key).spells, ",") end
+-- Holds a Layout page tile over a row (and an icon in it), then lets go: the
+-- footer while held, then after.
+local function Held(tile, row, onto)
+    local lp = w.pages.layout
+    S[tile].scripts.OnDragStart(tile)
+    S[row].mouseOver = true
+    if onto then S[onto].mouseOver = true end
+    S[lp.ghost].scripts.OnUpdate(lp.ghost)
+    local seen = S[w.note].text
+    S[tile].scripts.OnDragStop(tile)
+    S[row].mouseOver = nil
+    if onto then S[onto].mouseOver = nil end
+    return seen .. " | " .. S[w.note].text
+end
+
+-- A tauren hunter: its Endurance is always on, its Plainsrunning gives a speed buff.
+Start(6, "HUNTER")
+-- Paladin auras, hunter aspects, stances, forms and Shadowmeld aren't
+-- passive: kept or added, they stay as they were.
+local held = {}
+for _, name in ipairs({ "Devotion Aura", "Retribution Aura", "Aspect of the Hawk", "Aspect of the Cheetah", "Battle Stance",
+    "Defensive Stance", "Bear Form", "Cat Form", "Travel Form", "Shadowform", "Shadowmeld", "Stealth", "Ghost Wolf" }) do
+    if data.PASSIVES[name] or not data.RANKS[name] or ns.Spells:PassiveNote(name, "cd") or ns.Spells:AddNote(name, "buff") then
+        held[#held + 1] = name
+    end
+end
+Equal(table.concat(held, ","), "", "auras, aspects, stances, forms and Shadowmeld aren't passive")
+w:Select("cd")
+Search("20550")
+Equal(tostring((Other("20550"))), "nil", "searching Endurance's ID on the Cooldowns page doesn't offer it")
+Search("1259918")
+Equal(tostring((Other("1259918"))), "nil", "nor Plainsrunning's")
+Search("expans")
+Equal(tostring((Other("Expansive Mind"))) .. " " .. tostring(Other("Blood Fury") == nil), "nil true",
+    "nor a passive found by name (Expansive Mind), while an active racial (Blood Fury) still is")
+Search("blood f")
+Equal(Other("Blood Fury") ~= nil, true, "Blood Fury offered")
+w:Select("buff")
+Search("1259918")
+Equal(Other("1259918") ~= nil, true, "on the Buffs page Plainsrunning is offered: it has a buff of its own")
+Search("20550")
+Equal(tostring((Other("20550"))), "nil", "Endurance isn't: it has none")
+Search("")
+w:Select("cd")
+cursor = { "spell", 1, "spell", 20550 }
+Equal(Drop(page.tray) .. " " .. List("cd") .. " " .. tostring(cursor ~= nil) .. " " .. tostring(ns.CustomSpells().Endurance),
+    "Endurance is passive, so there's nothing to track.  true nil",
+    "dragged from the spellbook onto the Cooldowns page: turned away, saying why, still on the cursor, not remembered")
+w:Select("layout")
+local rows = w.pages.layout.rows
+Equal(Drop(rows.util) .. " " .. List("util"), "Endurance is passive, so there's nothing to track. ",
+    "onto the Layout page's Utility row too")
+Equal(Drop(rows.buff) .. " " .. List("buff"), "Endurance is passive, so there's nothing to track. ",
+    "and the Buffs row: always on, it has no buff of its own")
+cursor = { "spell", 1, "spell", 1259918 }
+Equal(Drop(rows.cd) .. " " .. List("cd"), "Plainsrunning is passive. Only its buff can be tracked, on the Buffs bar. ",
+    "Plainsrunning onto the Cooldowns row: turned away, saying where it goes")
+Equal(Drop(rows.buff) .. " " .. List("buff") .. " " .. tostring(cursor), "Added Plainsrunning to Buffs. Plainsrunning nil",
+    "onto the Buffs row it goes on")
+Equal(table.concat(ns.Spells:Find("Plainsrunning").ids, ",") .. " " .. tostring(B:Get("buff").slotIDs[1][1299038])
+    .. " " .. B:Get("buff").count, "1259918,1299038 true 1", "lit by its speed buff")
+local ok, said = B:Add("util", "Touch of the Grave")
+Equal(tostring(ok) .. " " .. said, "false Touch of the Grave is passive, so there's nothing to track.", "typed by name, turned away")
+ok, said = B:Add("debuff", "1259918")
+Equal(tostring(ok) .. " " .. said, "false Plainsrunning is passive. Only its buff can be tracked, on the Buffs bar.",
+    "Plainsrunning has no debuff to track")
+-- Swapped or moved off the Buffs row, it would show nowhere: the footer says why.
+B:Assign("Moonfire", "cd")
+w:Refresh()
+Equal(rows.buff.tiles[1].name .. " " .. rows.cd.tiles[1].name, "Plainsrunning Moonfire", "Plainsrunning and Moonfire on the Layout page")
+Equal(Held(rows.buff.tiles[1], rows.cd, rows.cd.tiles[1]), "Can't swap: Plainsrunning is passive. Only its buff can be tracked,"
+    .. " on the Buffs bar. | Plainsrunning is passive. Only its buff can be tracked, on the Buffs bar.",
+    "held over a Cooldowns icon, then let go: refused, saying why")
+Equal(Held(rows.buff.tiles[1], rows.util), "Let go to move Plainsrunning to Utility. | Plainsrunning is passive. Only its buff"
+    .. " can be tracked, on the Buffs bar.", "moved to the Utility row: refused, saying why")
+Equal(List("cd") .. " | " .. List("util") .. " | " .. List("buff"), "Moonfire |  | Plainsrunning", "nothing moved")
+-- Plainsrunning is a tauren's: not a troll's, sharing the profile.
+_G.UnitRace = function() return "Troll", "Troll", 8 end
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Plainsrunning", "buff")) .. " " .. B:Get("buff").count .. " " .. List("buff"), "false 0 Plainsrunning",
+    "a troll doesn't see the tauren's Plainsrunning, which stays")
+w:Hide()
+
+-- A warrior's procs and talent buffs share their passive talent's name: the
+-- talent dragged onto the Buffs page tracks its buff.
+Start(1, "WARRIOR")
+w:Select("buff")
+cursor = { "spell", 1, "spell", 12319 }
+Equal(Drop(page.tray) .. " " .. List("buff") .. " " .. tostring(ns.CustomSpells().Flurry),
+    "Added Flurry to Buffs. Flurry nil", "the Flurry talent onto the Buffs page puts the warrior's Flurry proc there")
+Equal(ns.Spells:Find("Flurry").kind .. " " .. tostring(ns.Spells:ForMe("Flurry", "buff")), "proc true", "shown, as the proc it is")
+cursor = { "spell", 1, "spell", 12317 }
+Equal(Drop(page.tray) .. " " .. List("buff"), "Added Enrage to Buffs. Flurry,Enrage", "the Enrage talent too")
+cursor = { "spell", 1, "spell", 16487 }
+Equal(Drop(page.tray) .. " " .. List("buff"), "Added Blood Craze to Buffs. Flurry,Enrage,Blood Craze",
+    "a talent's buff that isn't a listed proc (Blood Craze), by the talent's ID")
+Equal(table.concat(ns.Spells:Find("Blood Craze").ids, ",") .. " " .. table.concat((B:Mine("buff")), ",") .. " " .. B:Get("buff").count,
+    "16487,16488,437713 Flurry,Enrage,Blood Craze 3", "lit by its buff, all three on the Buffs bar")
+w:Select("cd")
+cursor = { "spell", 1, "spell", 12319 }
+Equal(Drop(page.tray), "Procs only go on the Buffs bar.", "the Flurry talent onto the Cooldowns page: a proc")
+cursor = { "spell", 1, "spell", 16487 }
+Equal(Drop(page.tray) .. " " .. List("cd"), "Blood Craze is passive. Only its buff can be tracked, on the Buffs bar. ",
+    "Blood Craze's talent onto the Cooldowns page: turned away")
+w:Hide()
+
+-- A debuff of its own: a mage's Winter's Chill talent goes on the Debuffs
+-- bar, lit by the debuff. An effect debuff added by ID (Shadow Vulnerability,
+-- which the data doesn't cover; the game says it isn't passive) stays.
+Start(1, "MAGE")
+w:Select("debuff")
+cursor = { "spell", 1, "spell", 11180 }
+Equal(Drop(page.tray) .. " " .. List("debuff") .. " " .. table.concat(ns.Spells:Find("Winter's Chill").ids, ","),
+    "Added Winter's Chill to Debuffs. Winter's Chill 11180,12579", "the Winter's Chill talent onto the Debuffs page, lit by its debuff")
+w:Select("buff")
+cursor = { "spell", 1, "spell", 11180 }
+Equal(Drop(page.tray) .. " " .. List("buff"), "Winter's Chill is passive. Only its debuff can be tracked, on the Debuffs bar. ",
+    "not on the Buffs page")
+says[17794] = false
+ok = B:Add("debuff", "17794")
+Equal(tostring(ok) .. " " .. table.concat((B:Mine("debuff")), ",") .. " " .. B:Get("debuff").count .. " " .. table.concat(asks, ","),
+    "true Winter's Chill,Shadow Vulnerability 2 17794", "Shadow Vulnerability by ID shows on the Debuffs bar; the game was asked")
+w:Hide()
+
+-- Regeneration: a mage's active spell, and a troll's passive racial. A troll
+-- warrior added its own (and a tauren's Endurance) before passives were
+-- turned away: neither shows, on any bar, and both stay in the profile.
+local regen = { joins = { buff = {}, debuff = {} }, cd = { "Regeneration", "Endurance" }, util = {},
+    buff = { "Regeneration", "Endurance" }, debuff = {} }
+local savedRegen = { useBars = true, notesSeen = "dev", profiles = { Shared = regen }, everyone = "Shared",
+    custom = { Regeneration = { 20555 }, Endurance = { 20550 } } }
+Start(8, "WARRIOR", savedRegen)
+Equal(table.concat((B:Mine("cd")), ",") .. "|" .. table.concat((B:Mine("buff")), ",") .. "|" .. B:Get("cd").count .. "|" .. B:Get("buff").count,
+    "||0|0", "the troll's passive Regeneration and the tauren's Endurance show on no bar")
+Equal(List("cd") .. " " .. List("buff") .. " " .. ForeverEnhancedCooldownManagerDB.custom.Regeneration[1] .. " "
+    .. ForeverEnhancedCooldownManagerDB.custom.Endurance[1], "Regeneration,Endurance Regeneration,Endurance 20555 20550",
+    "and stay in the profile")
+w:Select("cd")
+Equal(tostring((Row("Regeneration"))) .. " " .. tostring((Row("Endurance"))), "nil nil", "nor are they listed")
+w:Hide()
+-- A human mage on the same profile: Regeneration is its own active spell.
+Start(1, "MAGE", savedRegen, { { name = "Regeneration", spellID = 401417, iconID = 5 } })
+Equal(table.concat((B:Mine("cd")), ",") .. " " .. B:Get("cd").count .. " " .. B:Get("cd").icons[1].spellID,
+    "Regeneration 1 401417", "the mage's own Regeneration shows; the tauren's Endurance doesn't")
+-- The troll's passive Regeneration dragged in is turned away, though the
+-- mage's Regeneration is in the spellbook; the mage's own goes on.
+w:Select("util")
+cursor = { "spell", 1, "spell", 20555 }
+Equal(Drop(page.tray) .. " " .. List("util"), "Regeneration is passive, so there's nothing to track. ",
+    "the troll's Regeneration, turned away by its own ID")
+cursor = { "spell", 1, "spell", 401417 }
+Equal(Drop(page.tray) .. " " .. List("util"), "Added Regeneration to Utility. Regeneration", "the mage's own Regeneration goes on")
+w:Hide()
+
+-- A priest where a troll saved its passive Regeneration: the mage's
+-- Regeneration (a heal over time a mage can put on you), by its ID, is
+-- judged by that ID. The Buffs page's search offers it and it goes on,
+-- remembered with the troll's, so it shows, lit by the mage's, and stays off
+-- the priest's Cooldowns bar (a mage's spell). Already on the Buffs bar, it
+-- shows at once; a full bar leaves what was remembered as it was.
+do
+local function SharedRegen(buff, util)
+    return { useBars = true, notesSeen = "dev", everyone = "Shared", custom = { Regeneration = { 20555 } },
+        profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = { "Regeneration" }, util = util or {},
+            buff = buff or {}, debuff = {} } } }
+end
+Start(1, "PRIEST", SharedRegen())
+w:Select("buff")
+Search("20555")
+Equal(tostring((Other("20555"))), "nil", "the troll's Regeneration isn't offered by its ID")
+Search("401417")
+Equal(Other("401417") ~= nil, true, "the mage's is")
+Other("401417").check:Click()
+Equal(S[w.note].text .. " " .. table.concat(ForeverEnhancedCooldownManagerDB.custom.Regeneration, ",") .. " "
+    .. table.concat((B:Mine("buff")), ",") .. " " .. tostring((B:Get("buff").slotIDs[1] or {})[401417]) .. " "
+    .. table.concat((B:Mine("cd")), ","), "Added Regeneration to Buffs. 20555,401417 Regeneration true ",
+    "added, remembered with the troll's, shown and lit by the mage's; not on the priest's Cooldowns bar")
+Search("")
+w:Hide()
+Start(1, "PRIEST", SharedRegen({ "Regeneration" }))
+Equal(table.concat((B:Mine("buff")), ","), "", "the troll's alone on the Buffs bar doesn't show")
+-- Held over the bar first, the footer says it goes on (it shows now), not
+-- that it's there already.
+ok, said = B:CanAdd("buff", "401417")
+Equal(tostring(ok) .. " " .. said .. " " .. table.concat(ForeverEnhancedCooldownManagerDB.custom.Regeneration, ","),
+    "true Drop to add Regeneration to Buffs. 20555", "held over the Buffs bar: it goes on, and nothing is remembered yet")
+ok, said = B:Add("buff", "401417")
+Equal(tostring(ok) .. " " .. said .. " " .. table.concat((B:Mine("buff")), ",") .. " " .. B:Get("buff").count,
+    "true Added Regeneration to Buffs. Regeneration 1", "given the mage's ID, it shows at once")
+w:Hide()
+local filler = {}
+for i = 1, 40 do filler[i] = "Filler " .. i end
+Start(1, "PRIEST", SharedRegen(nil, filler))
+ok = B:Add("util", "401417")
+Equal(tostring(ok) .. " " .. table.concat(ForeverEnhancedCooldownManagerDB.custom.Regeneration, ","), "false 20555",
+    "a full bar: nothing remembered")
+w:Hide()
+end
+
+-- Totem buffs: the game marks them passive, but they come and go on everyone
+-- near the totem. By its ID one goes on the Buffs bar, lit by itself, and
+-- the game data decides (the game isn't asked). The Cooldowns bar says where
+-- it goes. Saved ones show.
+Start(2, "WARRIOR")
+says[25362], says[8836], says[5677] = false, false, false
+w:Select("buff")
+Search("25362")
+Equal(Other("25362") ~= nil, true, "the Buffs page's search offers Strength of Earth by its buff's ID")
+w:Select("cd")
+Search("25362")
+Equal(tostring((Other("25362"))), "nil", "the Cooldowns page's doesn't")
+Search("")
+ok, said = B:Add("buff", "25362")
+Equal(tostring(ok) .. " " .. said .. " " .. table.concat(ns.Spells:Find("Strength of Earth").ids, ",") .. " "
+    .. tostring((B:Get("buff").slotIDs[1] or {})[25362]) .. " " .. #asks, "true Added Strength of Earth to Buffs. 25362 true 0",
+    "on the Buffs bar, lit by itself")
+ok, said = B:Add("cd", "8836")
+Equal(tostring(ok) .. " " .. said, "false Grace of Air is passive. Only its buff can be tracked, on the Buffs bar.",
+    "not on the Cooldowns bar")
+w:Hide()
+Start(2, "WARRIOR", { useBars = true, notesSeen = "dev", everyone = "Shared",
+    custom = { ["Strength of Earth"] = { 25362 }, ["Mana Spring"] = { 5677 } },
+    profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = {}, util = {},
+        buff = { "Strength of Earth", "Mana Spring" }, debuff = {} } } })
+says[25362], says[5677] = false, false
+B:Changed()
+Equal(table.concat((B:Mine("buff")), ",") .. " " .. B:Get("buff").count .. " " .. tostring((B:Get("buff").slotIDs[1] or {})[25362])
+    .. " " .. tostring((B:Get("buff").slotIDs[2] or {})[5677]) .. " " .. #asks, "Strength of Earth,Mana Spring 2 true true 0",
+    "saved totem buffs show")
+w:Hide()
+
+-- Reincarnation is passive, but its hour's cooldown shows whether a shaman
+-- can come back, so it goes on the cooldown bars like an active spell
+-- (the user's call): searched for, typed, by its ID, dragged or saved.
+Start(8, "SHAMAN")
+w:Select("cd")
+Search("reinc")
+Equal(tostring((Other("Reincarnation")) ~= nil), "true", "searching by name offers it")
+Search("")
+ok, said = B:Add("cd", "Reincarnation")
+Equal(tostring(ok) .. " " .. tostring(List("cd"):find("Reincarnation", 1, true) ~= nil), "true true", "typed by name: on Cooldowns")
+Equal(said:find("is passive", 1, true) == nil, true, "with no passive note")
+w:Hide()
+Start(8, "SHAMAN")
+ok, said = B:Add("util", "20608")
+Equal(tostring(ok) .. " " .. tostring(List("util"):find("Reincarnation", 1, true) ~= nil), "true true", "by its ID on Utility")
+w:Hide()
+Start(8, "SHAMAN")
+w:Select("util")
+cursor = { "spell", 1, "spell", 20608 }
+Drop(page.tray)
+Equal(tostring(List("util"):find("Reincarnation", 1, true) ~= nil) .. " " .. tostring(cursor == nil), "true true",
+    "dragged from the spellbook: on the bar, off the cursor")
+cursor = nil
+w:Hide()
+Start(8, "SHAMAN", { useBars = true, notesSeen = "dev", everyone = "Shared", custom = { Reincarnation = { 20608 } },
+    profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = { "Reincarnation" }, util = {}, buff = {}, debuff = {} } } })
+Equal(table.concat((B:Mine("cd")), ",") .. "|" .. B:Get("cd").count, "Reincarnation|1", "saved, it shows on the shaman's bar")
+w:Hide()
+Start(8, "SHAMAN", { useBars = true, notesSeen = "dev", everyone = "Shared", custom = { Reincarnation = { 21169 } },
+    profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = {}, util = { "Reincarnation" }, buff = {}, debuff = {} } } })
+Equal(table.concat((B:Mine("util")), ",") .. "|" .. B:Get("util").count, "Reincarnation|1", "saved by its resurrection's ID: shows too")
+w:Hide()
+
+-- Parry is simply always on: an NPC's Parry buff, with its name and icon,
+-- isn't its. Turned away from the Buffs bar; saved, hidden but kept.
+Start(1, "WARRIOR")
+ok, said = B:Add("buff", "3127")
+Equal(tostring(ok) .. " " .. said .. " " .. List("buff"), "false Parry is passive, so there's nothing to track. ",
+    "Parry turned away from the Buffs bar")
+w:Hide()
+Start(1, "WARRIOR", { useBars = true, notesSeen = "dev", everyone = "Shared", custom = { Parry = { 3127 } },
+    profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = {}, util = {}, buff = { "Parry" }, debuff = {} } } })
+Equal(table.concat((B:Mine("buff")), ",") .. "|" .. B:Get("buff").count .. "|" .. List("buff"), "|0|Parry",
+    "saved, it shows for no one and stays")
+w:Hide()
+
+-- Inspiration's talent names its armor buff, which has another icon: on the
+-- Buffs bar it's lit by that buff.
+Start(1, "PRIEST")
+w:Select("buff")
+cursor = { "spell", 1, "spell", 14892 }
+Equal(Drop(page.tray) .. " " .. List("buff") .. " " .. table.concat(ns.Spells:Find("Inspiration").ids, ","),
+    "Added Inspiration to Buffs. Inspiration 14892,14893", "the Inspiration talent onto the Buffs page, lit by its buff")
+w:Select("cd")
+cursor = { "spell", 1, "spell", 14892 }
+Equal(Drop(page.tray) .. " " .. List("cd"), "Inspiration is passive. Only its buff can be tracked, on the Buffs bar. ",
+    "not onto the Cooldowns page")
+w:Hide()
+
+-- The game data decides for what it covers, whatever the game says, and
+-- the game isn't asked. A spell it doesn't cover (one from a later build):
+-- the game says, once; a hidden answer, an error or no way to ask leaves
+-- it as any other spell.
+Start(6, "HUNTER")
+says[5227], says[8921] = false, true
+ok, said = B:Add("cd", "5227")
+Equal(tostring(ok) .. " " .. said .. " " .. #asks, "false Underwater Breathing is passive, so there's nothing to track. 0",
+    "Underwater Breathing is passive by the data, though the game says otherwise, and it isn't asked")
+ok = B:Add("cd", "8921")
+Equal(tostring(ok) .. " " .. List("cd") .. " " .. #asks, "true Moonfire 0", "Moonfire is active by the data, though the game says otherwise")
+says[1400001], says[1400002], says[1400003] = true, SECRET, "error"
+ok, said = B:Add("util", "1400001")
+Equal(tostring(ok) .. " " .. said .. " " .. table.concat(asks, ","), "false Moonlit Path is passive, so there's nothing to track. 1400001",
+    "a spell the data doesn't cover, passive by the game")
+B:Add("util", "1400001")
+Equal(table.concat(asks, ","), "1400001", "asked once")
+Equal(tostring((B:Add("util", "1400002"))) .. " " .. tostring((B:Add("util", "1400003"))), "true true",
+    "a hidden answer or an error: it goes on")
+_G.C_Spell.IsSpellPassive = nil
+Equal(tostring((B:Add("util", "1400004"))) .. " " .. List("util"), "true Starlit Path,Sunlit Path,Dawnlit Path",
+    "no way to ask: it goes on")
+-- One the game called passive, saved before passives were turned away, shows for no one.
+ForeverEnhancedCooldownManagerDB.custom["Moonlit Path"] = { 1400001 }
+table.insert(ns.BarData("util").spells, "Moonlit Path")
+B:Changed()
+Equal(table.concat((B:Mine("util")), ",") .. " " .. B:Get("util").count, "Starlit Path,Sunlit Path,Dawnlit Path 3",
+    "a saved spell the game called passive stays off")
+-- A passive saved by its name alone, with no IDs remembered for it, is
+-- judged by the game data's IDs for that name: a night elf's Quickness.
+_G.UnitRace = function() return "Race", "Race", 4 end
+table.insert(ns.BarData("util").spells, "Quickness")
+B:Changed()
+Equal(tostring(ns.Spells:Find("Quickness")) .. " " .. tostring(ns.Spells:ForMe("Quickness", "util")) .. " "
+    .. table.concat((B:Mine("util")), ","), "nil false Starlit Path,Sunlit Path,Dawnlit Path",
+    "a night elf's Quickness saved by name alone stays off too")
+-- A name the data has active IDs for as well isn't taken for passive: a
+-- hunter's Frost Resistance (the pet's teaching spell) saved by name.
+table.insert(ns.BarData("util").spells, "Frost Resistance")
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Frost Resistance", "util")), "true", "a hunter's Frost Resistance, passive and active IDs, stays")
+w:Hide()
+
+-- Every race-limited spell in the game data, for every race and class: an
+-- active one shows on the Cooldowns and Utility bars only for its race (and
+-- class, where only some classes get it), and on the Debuffs bar the same; a
+-- passive never does. On the Buffs bar an active racial shows for its race,
+-- and a race-only class spell (one a player of that race can cast on you)
+-- for anyone; a passive only with a buff of its own (Plainsrunning, for a
+-- tauren). Each added as by name: its first ID in the data, or the game's ID
+-- for the two active ones the data has no IDs for.
+local unlisted = { ["Faction Banner"] = 1229504, ["Rapid Regeneration"] = 1260270 }
+local names, first, custom, missing = {}, {}, {}, {}
+for name in pairs(data.SPELL_RACES) do names[#names + 1] = name end
+table.sort(names)
+for _, name in ipairs(names) do
+    local ids = data.RANKS[name] or data.PASSIVES[name]
+    if not ids then missing[#missing + 1] = name end
+    first[name] = ids and ids[1] or unlisted[name]
+    custom[name] = { first[name] }
+end
+Equal(table.concat(missing, ","), "Faction Banner,Rapid Regeneration", "the only two the data has no IDs for")
+local passives, buffed = {}, {}
+for _, name in ipairs(names) do
+    if Holds(data.PASSIVES[name], first[name]) then
+        passives[#passives + 1] = name
+        if data.PASSIVE_BUFFS[first[name]] then buffed[#buffed + 1] = name end
+    end
+end
+Equal(table.concat(passives, ","), "Axe Specialization,Beast Slaying,Big Game Hunter,Elemental Insight,"
+    .. "Engineering Specialization,Expansive Mind,Galestrider Riding,Gnomish,Hardiness,Horse Riding,Kodo Riding,"
+    .. "Mace Specialization,Mechanostrider Piloting,Plainsrunning,Quickness,Quickness Passive,Ram Riding,Raptor Riding,"
+    .. "Sword Specialization,The Human Spirit,Tiger Riding,Touch of the Grave,Undead Horsemanship,Underwater Breathing,"
+    .. "Wind Blessed,Wisp Spirit,Wolf Riding", "the race-limited passives in the game data")
+Equal(table.concat(buffed, ","), "Plainsrunning", "of which only Plainsrunning gives a buff of its own")
+-- A bar holds 40, so the first 40 go on Cooldowns and Buffs, the rest on
+-- Utility and the last 40 on Debuffs: each is on a bar, so each is an entry.
+local profile = { joins = { buff = {}, debuff = {} }, cd = {}, util = {}, buff = {}, debuff = {} }
+for i, name in ipairs(names) do
+    table.insert(i <= 40 and profile.cd or profile.util, name)
+    if i <= 40 then table.insert(profile.buff, name) end
+    if i > #names - 40 then table.insert(profile.debuff, name) end
+end
+Start(6, "HUNTER", { useBars = true, notesSeen = "dev", profiles = { Shared = profile }, everyone = "Shared", custom = custom },
+    { { name = "Attack", spellID = 6603 } })
+for _, id in pairs(unlisted) do says[id] = false end
+local everyone = {}
+for _, list in pairs(data.SPELL_RACES) do
+    for race in list:gmatch("%d+") do everyone[tonumber(race)] = true end
+end
+local races = {}
+for race in pairs(everyone) do races[#races + 1] = race end
+table.sort(races)
+Equal(everyone[1] and everyone[2] and everyone[3] and everyone[4] and everyone[5] and everyone[6] and everyone[7]
+    and everyone[8] and everyone[95] and everyone[96], true, "every Forever race among them")
+local CLASSES = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
+local function In(list, value) return list ~= nil and (" " .. list .. " "):find(" " .. value .. " ", 1, true) ~= nil end
+local function Expected(name, race, class)
+    local id, classes = first[name], data.SPELL_CLASSES[name]
+    local passive = Holds(data.PASSIVES[name], id)
+    local yours = In(data.SPELL_RACES[name], race) and (classes == nil or In(classes, class))
+    return {
+        cd = not passive and yours,
+        util = not passive and yours,
+        buff = (not passive or data.PASSIVE_BUFFS[id] ~= nil) and (classes ~= nil or In(data.SPELL_RACES[name], race)),
+        debuff = (not passive or data.PASSIVE_DEBUFFS[id] ~= nil) and yours,
+    }
+end
+local BARS = { "cd", "util", "buff", "debuff" }
+for _, name in ipairs(names) do
+    local wrong = {}
+    for _, race in ipairs(races) do
+        _G.UnitRace = function() return "Race", "Race", race end
+        for _, class in ipairs(CLASSES) do
+            _G.UnitClass = function() return class, class end
+            local want = Expected(name, race, class)
+            for _, bar in ipairs(BARS) do
+                local got = ns.Spells:ForMe(name, bar)
+                if got ~= want[bar] then wrong[#wrong + 1] = race .. " " .. class .. " " .. bar .. " " .. tostring(got) end
+            end
+        end
+    end
+    Equal(table.concat(wrong, "; "), "", name .. ", for every race and class")
+end
+Equal(#ns.BarData("cd").spells + #ns.BarData("util").spells .. " " .. #ns.BarData("buff").spells .. " "
+    .. #ns.BarData("debuff").spells, #names .. " 40 40", "every one on a bar")
+-- On screen, for a few: the bars show just what's theirs.
+for _, who in ipairs({ { 6, "HUNTER" }, { 5, "WARLOCK" }, { 7, "PRIEST" }, { 8, "MAGE" }, { 96, "DRUID" } }) do
+    _G.UnitRace = function() return "Race", "Race", who[1] end
+    _G.UnitClass = function() return who[2], who[2] end
+    B:Changed()
+    for _, bar in ipairs(BARS) do
+        local want = {}
+        for _, name in ipairs(ns.BarData(bar).spells) do
+            if Expected(name, who[1], who[2])[bar] then want[#want + 1] = name end
+        end
+        Equal(table.concat((B:Mine(bar)), ",") .. " " .. B:Get(bar).count,
+            table.concat(want, ",") .. " " .. math.min(#want, ns.AURA_BARS[bar] and ns.BUFF_SLOTS or #want),
+            "a race " .. who[1] .. " " .. who[2] .. "'s " .. bar .. " bar")
+    end
+end
+_G.UnitRace = function() return "Race", "Race", 6 end
+_G.UnitClass = function() return "HUNTER", "HUNTER" end
+Equal(tostring(Holds((B:Mine("buff")), "Plainsrunning")) .. " " .. tostring(Holds((B:Mine("cd")), "Plainsrunning")), "true false",
+    "the tauren hunter's Plainsrunning is on its Buffs bar only")
+w:Hide()
+end
 
 -- What's new -------------------------------------------------------------------------------
 
@@ -4039,6 +4916,80 @@ do
     hostile = true
     Equal(#printed, 0, "no errors from whole-bar boxes")
 
+    -- A last row short of the rest (the user's Utility: 5 icons, 4 across)
+    -- is boxed round its own icons, not left in an empty box the width of the
+    -- bar: the full rows get one box, the short row another.
+    ;(function()
+    Environment()
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    for _, name in ipairs({ "Attack", "Moonfire", "Wrath", "Thorns", "Overpower" }) do B:Assign(name, "util") end
+    B:SetOption("util", "perRow", 4)
+    ns.Set("iconShadow", "bar")
+    B:ApplyDecor()
+    local util = B:Get("util")
+    local size = ns.IconSize(ns.BarData("util"))
+    local function Anchor(region, i)
+        local p = S[region].points[i]
+        if not p then return "-" end
+        local to = p[2] == util and "bar" or "?"
+        for n, icon in ipairs(util.icons) do if p[2] == icon then to = "icon" .. n end end
+        return p[1] .. ">" .. to .. "." .. p[3] .. "(" .. (p[4] or 0) .. "," .. (p[5] or 0) .. ")"
+    end
+    local function Box(region) return Anchor(region, 1) .. " " .. Anchor(region, 2) end
+    Equal(ns.BarData("util").wrap .. " " .. ns.BarData("util").grow .. " " .. util.count, "down centre 5", "five icons, a row of four and one under it")
+    Equal(Box(util.block), "TOPLEFT>bar.TOPLEFT(0,0) BOTTOMRIGHT>bar.TOPRIGHT(0," .. -size .. ")", "the bar's box goes round the full row only")
+    Equal(Box(util.tail), "TOPLEFT>icon5.TOPLEFT(0,0) BOTTOMRIGHT>icon5.BOTTOMRIGHT(0,0)", "the short row's box round its one icon")
+    Equal(Shown(util.decor.shadow[1]) .. " " .. Shown(util.tailDecor.shadow[1]) .. " " .. Shown(util.tailDecor.border),
+        "true true false", "both shadowed, as chosen (no border)")
+    Equal(tostring(S[util.decor.shadow[1][1]].points[1][2] == util.block) .. " " .. tostring(S[util.tailDecor.shadow[1][1]].points[1][2] == util.tail),
+        "true true", "each ring follows its box")
+    -- A full last row: one box round the bar, as before.
+    B:Assign("Overpower", nil)
+    Equal(#S[util.block].points .. " " .. tostring(Last(util.block, "SetAllPoints") == util) .. " " .. Shown(util.tailDecor.shadow[1])
+        .. " " .. Shown(util.decor.shadow[1]), "0 true false true", "four icons, four across: the whole bar, no second box")
+    -- Growing up (above the display) and from the right: the short row is on
+    -- top, its first icon on the right.
+    B:Assign("Overpower", "util")
+    B:Assign("Walk on Air", "util")
+    ns.BarData("util").wrap, ns.BarData("util").grow = "up", "left"
+    B:Relayout("util")
+    Equal(Box(util.block) .. " | " .. Box(util.tail), "BOTTOMLEFT>bar.BOTTOMLEFT(0,0) TOPRIGHT>bar.BOTTOMRIGHT(0," .. size .. ") | "
+        .. "TOPLEFT>icon6.TOPLEFT(0,0) BOTTOMRIGHT>icon5.BOTTOMRIGHT(0,0)", "the full row at the bottom, the short one above it")
+    -- Laid out again on its own (as when a potion runs out, even in a fight),
+    -- a row that fills up loses its second box at once.
+    local utilSpells = ns.BarData("util").spells
+    local held = { table.remove(utilSpells), table.remove(utilSpells) }
+    B:Relayout("util")
+    Equal(util.count .. " " .. Shown(util.tailDecor.shadow[1]) .. " " .. Shown(util.decor.shadow[1]), "4 false true",
+        "four left: one box again")
+    utilSpells[#utilSpells + 1], utilSpells[#utilSpells + 2] = held[2], held[1]
+    B:Relayout("util")
+    Equal(util.count .. " " .. Shown(util.tailDecor.shadow[1]), "6 true", "six again: the short row's box is back")
+    -- One short of a full row is short too: five in rows of three.
+    B:Assign("Walk on Air", nil)
+    B:SetOption("util", "perRow", 3)
+    Equal(util.count .. " " .. Shown(util.tailDecor.shadow[1]) .. " " .. Box(util.tail), "5 true "
+        .. "TOPLEFT>icon5.TOPLEFT(0,0) BOTTOMRIGHT>icon4.BOTTOMRIGHT(0,0)", "three and two: the two boxed on their own")
+    -- Hiding ready icons: no box at all, short row or not.
+    B:SetOption("util", "whenReady", "hide")
+    Equal(Shown(util.decor.shadow[1]) .. " " .. Shown(util.tailDecor.shadow[1]), "false false", "a bar that hides its ready icons gets neither")
+    B:SetOption("util", "whenReady", "show")
+    Equal(Shown(util.decor.shadow[1]) .. " " .. Shown(util.tailDecor.shadow[1]), "true true", "both back")
+    -- Fixed Buffs spots work the same; packed ones never get a box.
+    for _, name in ipairs({ "Thorns", "Moonfire", "Wrath", "Walk on Air", "Clearcasting" }) do B:SetAura("buff", name, true) end
+    B:SetOption("buff", "perRow", 4)
+    B:SetOption("buff", "showMissing", true)
+    local buff = B:Get("buff")
+    local tailTo = S[buff.tail].points[1]
+    Equal(tostring(tailTo and tailTo[2] == buff.holders[5]) .. " " .. Shown(buff.tailDecor.shadow[1]), "true true",
+        "five fixed Buffs spots, four across: the fifth boxed on its own")
+    B:SetOption("buff", "showMissing", false)
+    Equal(tostring(buff.short) .. " " .. Shown(buff.tailDecor.shadow[1]) .. " " .. Shown(buff.decor.shadow[1]), "false false false",
+        "packed: no box, and no short row")
+    Equal(#printed, 0, "no errors from short rows")
+    end)()
+
     -- Blizzard's packed icons can't be used while auras are secret, so the
     -- Look page changes theirs once the fight is over; yours change at once.
     Environment()
@@ -4139,6 +5090,204 @@ do
         "Moonfire@1 Fixed ranks can't go on the Buffs bar, which counts every rank already.", "dragged onto the Buffs row, it stays")
 end
 
+-- Swapping: an icon dropped onto another trades places with it ------------------------------
+
+do
+    Environment()
+    Book(true)
+    Display()
+    ns = Load({ useBars = true, prdSkin = false })
+    B = ns.Bars
+    local function List(key) return table.concat(ns.BarData(key).spells, ",") end
+    local function Lists() return List("cd") .. " | " .. List("util") .. " | " .. List("buff") .. " | " .. List("debuff") end
+    -- On one bar, by place in its list: just the two move.
+    for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+    local ok, said = B:Swap("cd", 1, 3)
+    Equal(tostring(ok) .. " " .. said .. " " .. List("cd"), "true Swapped Moonfire and Overpower. Overpower,Wrath,Moonfire",
+        "two entries on a bar swap places, the one between staying put")
+    Equal(tostring(B:Swap("cd", 2, 2)) .. " " .. tostring(B:Swap("cd", 1, 9)) .. " " .. List("cd"), "false false Overpower,Wrath,Moonfire",
+        "not with itself or with nothing")
+
+    -- The Layout page: the icons as drawn in each row.
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    w:Select("layout")
+    local lp = w.pages.layout
+    local rows = lp.rows
+    -- Holds a tile over another tile (in its row, as in the game) or just a
+    -- row, then lets go. Gives the footer while it was held and what was
+    -- outlined: the icon under it, the row, or nothing.
+    local function Drag(tile, onto, row)
+        S[tile].scripts.OnDragStart(tile)
+        if row then S[row].mouseOver = true end
+        if onto then S[onto].mouseOver = true end
+        S[lp.ghost].scripts.OnUpdate(lp.ghost)
+        local mark = S[lp.mark]
+        local at = mark.shown and mark.points[1] and mark.points[1][2]
+        local where = not mark.shown and "none" or at == onto and "icon" or row and at == row.strip and "row" or "elsewhere"
+        local seen = S[w.note].text .. " | " .. where
+        S[tile].scripts.OnDragStop(tile)
+        if row then S[row].mouseOver = nil end
+        if onto then S[onto].mouseOver = nil end
+        return seen
+    end
+    local cd, util, buff = rows.cd, rows.util, rows.buff
+    -- The reported case: two icons on the same bar, one dropped on the other.
+    Equal(Drag(cd.tiles[3], cd.tiles[1], cd), "Let go to swap Moonfire and Overpower. | icon",
+        "held over an icon in its own row: that one outlined, and the footer says they'll swap")
+    Equal(S[lp.mark].border[1], .88, "outlined in the accent")
+    Equal(tostring(S[lp.ghost.texture].desaturated), "false", "the held icon in full colour")
+    Equal(List("cd") .. " | " .. S[w.note].text, "Moonfire,Wrath,Overpower | Swapped Moonfire and Overpower.",
+        "dropped on it, the two swap places in the row")
+    Equal(cd.tiles[1].name .. " " .. cd.tiles[3].name .. " " .. tostring(S[lp.mark].shown) .. " " .. tostring(w.dragging),
+        "Moonfire Overpower false nil", "drawn that way, the outline and the drag note gone")
+    -- An empty spot in its own row, or its own spot: nothing changes.
+    Equal(cd.tiles[6].name, nil, "an empty spot")
+    Equal(Drag(cd.tiles[1], cd.tiles[6], cd), "Let go to leave Moonfire where it is. | none", "over an empty spot in its own row, nothing outlined")
+    Equal(Drag(cd.tiles[1], cd.tiles[1], cd), "Let go to leave Moonfire where it is. | none", "nor over its own spot")
+    Equal(List("cd"), "Moonfire,Wrath,Overpower", "and letting go there changes nothing")
+    -- Another class's spell (a shared profile) isn't drawn, and stays put.
+    table.insert(ns.BarData("cd").spells, 2, "Garrote")
+    w:Refresh()
+    Equal(cd.tiles[2].name, "Wrath", "another class's spell isn't drawn")
+    Drag(cd.tiles[1], cd.tiles[2], cd)
+    Equal(List("cd"), "Wrath,Garrote,Moonfire,Overpower", "swapped round it, it stays where it was")
+    table.remove(ns.BarData("cd").spells, 2)
+
+    -- Between two rows: each takes the other's place on the other's bar.
+    B:Assign("Walk on Air", "util")
+    B:Assign("Attack", "util")
+    w:Refresh()
+    Equal(Drag(util.tiles[1], cd.tiles[2], cd), "Let go to swap Walk on Air and Moonfire. | icon",
+        "held over an icon in another row: outlined, and the footer says they'll swap")
+    Equal(Lists() .. " | " .. S[w.note].text, "Wrath,Walk on Air,Overpower | Moonfire,Attack |  |  | Swapped Walk on Air and Moonfire.",
+        "the two swap bars, each in the other's place")
+    -- An empty spot in another row still moves it there, at the end.
+    Equal(Drag(cd.tiles[1], util.tiles[5], util), "Let go to move Wrath to Utility. | row",
+        "held over another row's empty spot: that row outlined, and the footer says it moves there")
+    Equal(Lists() .. " | " .. S[w.note].text, "Walk on Air,Overpower | Moonfire,Attack,Wrath |  |  | Moved Wrath to Utility.",
+        "and letting go moves it to the end of that bar")
+    -- Between a cooldown bar and the Buffs bar.
+    B:SetAura("buff", "Thorns", true)
+    w:Refresh()
+    Equal(Drag(buff.tiles[1], cd.tiles[1], cd), "Let go to swap Thorns and Walk on Air. | icon", "held over Walk on Air")
+    Equal(Lists() .. " | " .. S[w.note].text, "Thorns,Overpower | Moonfire,Attack,Wrath | Walk on Air |  | Swapped Thorns and Walk on Air.",
+        "Buffs and Cooldowns swap too")
+    B:Assign("Thorns", nil)
+    B:Assign("Walk on Air", "cd")
+    B:SetAura("buff", "Walk on Air", false)
+    Equal(Lists(), "Overpower,Walk on Air | Moonfire,Attack,Wrath |  | ", "set up again")
+
+    -- Only what each bar can show, once: otherwise nothing moves and the
+    -- footer says why.
+    B:SetAura("buff", "Thorns", true)
+    B:Assign("Moonfire@1", "cd")
+    w:Refresh()
+    local before = Lists()
+    -- Held over an icon it can't swap with, the footer already says why:
+    -- nothing outlined, the held icon greyed.
+    Equal(Drag(cd.tiles[3], buff.tiles[1], buff),
+        "Can't swap: Fixed ranks can't go on the Buffs bar, which counts every rank already. | none",
+        "held over an icon it can't swap with: the footer says why before letting go, nothing outlined")
+    Equal(tostring(S[lp.ghost.texture].desaturated), "true", "and the held icon greyed")
+    Equal(Lists() .. " | " .. S[w.note].text, before .. " | Fixed ranks can't go on the Buffs bar, which counts every rank already.",
+        "a fixed rank can't swap onto Buffs")
+    B:SetAura("buff", "Clearcasting", true)
+    ok, said = B:Trade("buff", "Clearcasting", "cd", "Overpower")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Procs only go on the Buffs bar.", "a proc can't swap onto Cooldowns")
+    B:Assign("family:healing", "util")
+    ok, said = B:Trade("util", "family:healing", "buff", "Thorns")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Items can't go on the Buffs bar.", "nor an item onto Buffs")
+    B:Assign("Thorns", "util")
+    ok, said = B:Trade("buff", "Thorns", "cd", "Overpower")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Thorns is already on Utility.", "nor onto one cooldown bar while it's on the other")
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetAura("debuff", "Wrath", true)
+    ok, said = B:Trade("debuff", "Moonfire", "util", "Attack")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Moonfire is already on Utility.", "nor onto a cooldown bar it's already on")
+    ok, said = B:Trade("util", "Moonfire", "debuff", "Wrath")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Moonfire is already on Debuffs.", "nor onto an aura bar it's already on")
+    B:SetAura("buff", "Clearcasting", false)
+    Equal(Lists(), "Overpower,Walk on Air,Moonfire@1 | Moonfire,Attack,Wrath,family:healing,Thorns | Thorns | Moonfire,Wrath",
+        "nothing moved")
+    -- A paladin's buff added by name shows on your Buffs bar only: it doesn't
+    -- swap or move onto a cooldown bar, where it would be hidden with no icon
+    -- left to drag it back.
+    B:Add("buff", "Blessing of Might")
+    w:Refresh()
+    before = Lists()
+    Equal(buff.tiles[2].name, "Blessing of Might", "a paladin's buff on the Buffs row")
+    Equal(Drag(buff.tiles[2], cd.tiles[1], cd), "Can't swap: Blessing of Might can't show on the Cooldowns bar for you. | none",
+        "held over a Cooldowns icon: the footer says why")
+    Equal(Lists() .. " | " .. S[w.note].text, before .. " | Blessing of Might can't show on the Cooldowns bar for you.",
+        "and letting go there leaves both where they were")
+    ok, said = B:Trade("cd", "Overpower", "buff", "Blessing of Might")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Blessing of Might can't show on the Cooldowns bar for you.",
+        "nor does a Cooldowns icon swap with it")
+    ok, said = B:Transfer("buff", "util", "Blessing of Might")
+    Equal(tostring(ok) .. " " .. tostring(said) .. " | " .. Lists(),
+        "false Blessing of Might can't show on the Utility bar for you. | " .. before, "nor is it moved to another row")
+    B:SetAura("buff", "Blessing of Might", false)
+
+    -- The Buffs row: a joined group moves whole, and stays on its bar.
+    B:SetAura("buff", "Nature's Grace", true)
+    B:SetJoined("buff", 2, true)
+    B:SetAura("buff", "Walk on Air", true)
+    w:Refresh()
+    Equal(Shape("buff") .. " | " .. buff.tiles[1].name .. " " .. buff.tiles[2].name, "Thorns+Nature's Grace, Walk on Air | Thorns Walk on Air",
+        "a joined pair is one icon on the Layout page")
+    Equal(Drag(buff.tiles[2], buff.tiles[1], buff), "Let go to swap Walk on Air and Thorns. | icon", "held over the pair")
+    Equal(Shape("buff") .. " | " .. S[w.note].text, "Walk on Air, Thorns+Nature's Grace | Swapped Walk on Air and Thorns.",
+        "the pair and the icon swap, the pair still joined")
+    Equal(B:Trade("buff", "Thorns", "buff", "Nature's Grace"), false, "a group doesn't swap with itself")
+    ok, said = B:Trade("buff", "Thorns", "cd", "Overpower")
+    Equal(tostring(ok) .. " " .. tostring(said) .. " | " .. Shape("buff") .. " | " .. List("cd"),
+        "false Joined icons only swap on their own bar. | Walk on Air, Thorns+Nature's Grace | Overpower,Walk on Air,Moonfire@1",
+        "a joined icon doesn't swap onto another bar")
+    ok, said = B:Trade("cd", "Overpower", "buff", "Thorns")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Joined icons only swap on their own bar.", "nor does another bar's icon swap into one")
+
+    -- In a fight: swapped as moving is, the Buffs bar catching up once it's over.
+    lockdown = true
+    containerCallsInCombat = 0
+    ok = B:Trade("buff", "Walk on Air", "buff", "Thorns")
+    Equal(tostring(ok) .. " " .. Shape("buff") .. " " .. tostring(B:Get("buff").pendingLayout) .. " " .. containerCallsInCombat,
+        "true Thorns+Nature's Grace, Walk on Air true 0", "saved at once, the Buffs bar untouched till the fight ends")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(B:Get("buff").pendingLayout, nil, "and redrawn after it")
+    -- A join an old profile kept for the entry arriving doesn't join it to
+    -- the icon before its new place.
+    B:Assign("Walk on Air", nil)
+    ns.Joins("buff").Attack = true
+    ok = B:Trade("util", "Attack", "buff", "Walk on Air")
+    Equal(tostring(ok) .. " " .. Shape("buff") .. " | " .. List("util"),
+        "true Thorns+Nature's Grace, Attack | Moonfire,Walk on Air,Wrath,family:healing,Thorns", "it arrives on its own")
+    B:Assign("Walk on Air", "cd")
+    B:Swap("cd", 2, 3)
+    w:Refresh()
+    -- Dragged off still takes it off.
+    Equal(Drag(cd.tiles[1]), "Let go to take Overpower off Cooldowns. | none", "held off the rows: the footer says it comes off")
+    Equal(tostring(S[lp.ghost.texture].desaturated), "true", "and the held icon greyed")
+    Equal(List("cd") .. " | " .. S[w.note].text, "Walk on Air,Moonfire@1 | Took Overpower off Cooldowns.", "and it does")
+    -- In a profile shared with a rogue, a Buffs icon joined only to the
+    -- rogue's buff (hidden for you) looks like one on its own: the footer
+    -- says why it stays on its bar. In its own row it still swaps.
+    B:SetAura("buff", "Evasion", true)
+    B:SetJoined("buff", 4, true)
+    w:Refresh()
+    Equal(Shape("buff") .. " | " .. buff.tiles[2].name, "Thorns+Nature's Grace, Attack+Evasion | Attack",
+        "Attack joined to the rogue's Evasion, drawn on its own")
+    local hidden = "Attack is joined to another character's spell, so it only swaps on Buffs."
+    Equal(Drag(buff.tiles[2], cd.tiles[1], cd), "Can't swap: " .. hidden .. " | none", "held over another row's icon: the footer says why")
+    ok, said = B:Trade("cd", "Walk on Air", "buff", "Attack")
+    Equal(tostring(ok) .. " " .. tostring(said) .. " | " .. List("cd"), "false " .. hidden .. " | Walk on Air,Moonfire@1",
+        "nor does another row's icon swap into it")
+    Equal(Drag(buff.tiles[2], buff.tiles[1], buff), "Let go to swap Attack and Thorns. | icon", "in its own row it swaps")
+    Equal(Shape("buff"), "Attack+Evasion, Thorns+Nature's Grace", "the rogue's buff going with it")
+    Equal(#printed, 0, "no errors from swapping")
+end
+
 -- A Buffs or Debuffs bar dragged as a fight starts is let go first ---------------------------
 
 do
@@ -4180,6 +5329,17 @@ Equal(tostring(Has(druid, "Wrath")) .. " " .. tostring(Has(druid, "Thorns")), "f
 Equal(tostring(Has(ns.DEBUFFS.ROGUE, "Rupture")) .. " " .. tostring(Has(ns.DEBUFFS.WARRIOR, "Sunder Armor")), "true true",
     "every class has its own")
 Equal(ns.RANKS["Jeff Dummy 1"], nil, "no test dummies")
+-- Each race's spells, by race ID, from the same data: racials, passive ones
+-- too, and class spells only some races get. Spells any race can have
+-- aren't listed.
+do
+local races = ns.SPELL_RACES
+Equal(races["Underwater Breathing"] .. " " .. races.Cannibalize .. " " .. races["Will of the Forsaken"] .. " " .. races["War Stomp"]
+    .. " " .. races["Blood Fury"] .. " " .. races["Walk on Air"], "5 5 5 6 2 95 96",
+    "the undead's racials (the passive one too), the tauren's, the orc's and the Skyborne's")
+Equal(races["Touch of Weakness"] .. " " .. races["Hex of Weakness"] .. " " .. tostring(races["Holy Light"]) .. " " .. tostring(races["Serpent Sting"])
+    .. " " .. tostring(races["Find Herbs"]), "5 8 nil nil nil", "a race's priest spells; class and profession spells any race can have aren't listed")
+end
 
 -- Taking a bar out, putting it back, and Reset ----------------------------------------------
 
@@ -4277,6 +5437,17 @@ Equal(tostring(S[lp.cancel].shown) .. " " .. tostring(S[lp.rows.debuff.target].s
 lp.rows.debuff.tiles[1]:Click()
 Equal(table.concat(ns.BarData("debuff").spells, ","), "Faerie Fire,Moonfire", "and nothing is added")
 Equal(lp.drawError, nil, "the Layout page drew without errors")
+-- An undead priest finds the undead priest's Touch of Weakness, not the troll
+-- priest's Hex of Weakness, which would never show for it.
+_G.UnitClass = function() return "Priest", "PRIEST" end
+_G.UnitRace = function() return "Undead", "Scourge", 5 end
+search:SetText("weakness")
+S[search].scripts.OnTextChanged(search, true)
+Equal(lp.found[1].spell .. " " .. tostring(S[lp.found[2]].shown), "Touch of Weakness false", "your race's debuffs only")
+search:SetText("")
+S[search].scripts.OnEditFocusLost(search)
+_G.UnitClass = function() return "Druid", "DRUID" end
+_G.UnitRace = function() return "Skyborne", "Skyborne", 96 end
 
 -- A first install: the window and a welcome ------------------------------------------
 
@@ -5184,7 +6355,7 @@ end
         for i, sample in ipairs(samples) do list[i] = S[sample.key].shown and S[sample.key].text or "-" end
         return table.concat(list, " ")
     end
-    Equal(S[lw.keybinds.text].text .. " " .. tostring(lw.keybinds:GetChecked()), "Keybinds on icons (Needs testing) false",
+    Equal(S[lw.keybinds.text].text .. " " .. tostring(lw.keybinds:GetChecked()), "Keybinds on icons false",
         "a tick on the Look page, off to start with")
     Equal(S[lw.keyPlace].alpha .. " " .. S[lw.keySize].alpha .. " " .. Keys(), "0.35 0.35 - - - -", "its choices greyed, and no keys on the preview")
     -- Greyed, both still say why on hover, and the slider ignores clicks.
@@ -6114,9 +7285,14 @@ end)()
     Equal(RowNote(cd, cd.up), "Cooldowns is already at the top.", "greyed, the top row's up arrow says why")
     Equal(tostring(cd.up.usable) .. " " .. tostring(Last(cd.up, "SetMotionScriptsWhileDisabled")), "false true",
         "greyed buttons still hear the mouse")
-    Equal(RowNote(cd, cd.down), "Move Cooldowns down the stack, past the display, swapping places with Utility.", "down, past the display")
-    Equal(RowNote(util, util.up), "Move Utility up the stack, past the display, swapping places with Cooldowns.", "up, past the display")
-    Equal(RowNote(util, util.down), "Move Utility down the stack, swapping places with Buffs.", "down, the same side")
+    -- Rows keep their width (a preset's shape), so each note says how many
+    -- would then fit across each bar.
+    Equal(RowNote(cd, cd.down), "Move Cooldowns down the stack, past the display, swapping places with Utility."
+        .. " Rows keep their width, so Cooldowns would be 5 across and Utility 6.", "down, past the display")
+    Equal(RowNote(util, util.up), "Move Utility up the stack, past the display, swapping places with Cooldowns."
+        .. " Rows keep their width, so Utility would be 6 across and Cooldowns 5.", "up, past the display")
+    Equal(RowNote(util, util.down), "Move Utility down the stack, swapping places with Buffs."
+        .. " Rows keep their width, so Utility would be 4 across and Buffs 5.", "down, the same side")
     Equal(RowNote(rows.debuff, rows.debuff.down), "Debuffs is already at the bottom.", "the bottom row's down arrow says why")
     Equal(RowNote(util, util.out), "Take Utility out of your layout. It asks first, and its spells stay.", "x")
     Equal(NoteOf(display.up, display.buttons) .. " | " .. NoteOf(display.down, display.buttons),
@@ -6154,10 +7330,21 @@ end)()
     -- Beside the display.
     L:Apply("sides")
     lp:Refresh()
-    Equal(RowNote(cd, cd.down), "Move Cooldowns down, to the left of the display, swapping places with Buffs.", "down beside the display")
-    Equal(RowNote(rows.buff, rows.buff.up), "Move Buffs up, above the display, swapping places with Cooldowns.", "up above it")
-    Equal(RowNote(rows.buff, rows.buff.down), "Move Buffs down, to the right of the display, swapping places with Debuffs.", "across it")
-    Equal(RowNote(rows.debuff, rows.debuff.down), "Move Debuffs down, below the display, swapping places with Utility.", "down below it")
+    Equal(RowNote(cd, cd.down), "Move Cooldowns down, to the left of the display, swapping places with Buffs."
+        .. " Rows keep their width, so Cooldowns would be 4 across and Buffs 8.", "down beside the display")
+    Equal(RowNote(rows.buff, rows.buff.up), "Move Buffs up, above the display, swapping places with Cooldowns."
+        .. " Rows keep their width, so Buffs would be 8 across and Cooldowns 4.", "up above it")
+    Equal(RowNote(rows.buff, rows.buff.down), "Move Buffs down, to the right of the display, swapping places with Debuffs.",
+        "across it (both 4 across, so nothing to say about widths)")
+    Equal(RowNote(rows.debuff, rows.debuff.down), "Move Debuffs down, below the display, swapping places with Utility."
+        .. " Rows keep their width, so Debuffs would be 6 across and Utility 4.", "down below it")
+    -- Clicked, the footer says what changed, widths and all.
+    rows.debuff.down:Click()
+    Equal(Text() .. " " .. ns.BarData("debuff").perRow .. " " .. ns.BarData("util").perRow,
+        "Debuffs and Utility swapped rows. Rows keep their width, so Debuffs is now 6 across and Utility 4. 6 4",
+        "swapped: the footer says each bar's new width")
+    Leave(rows.debuff.down)
+    w:Refresh() -- the next refresh puts the footer back to resting on the credit
     -- The display skips rows taken out, and says when it can't move.
     L:Apply("pyramid")
     L:TakeOut("cd")
@@ -6193,7 +7380,7 @@ end)()
         Leave(row)
         return on, back, enterFirst and (restedOn or restedBack), buttons
     end
-    local HINT = "- and + change how many fit across; the arrows swap rows. Drag an icon to another row, or off to remove it."
+    local HINT = "- and + change how many fit across; the arrows swap rows. Drag an icon onto another to swap them, to another row, or off to remove it."
     local flashes = {}
     for _, key in ipairs({ "cd", "util" }) do
         local row = rows[key]
@@ -6218,7 +7405,7 @@ end)()
     local onTile = Move(cd, tile)
     Over(nil, tile)
     local tileBack = Move(tile, cd)
-    Equal(onTile .. " | " .. tileBack, "Moonfire. Drag it to another row, or off to remove it. | " .. HINT,
+    Equal(onTile .. " | " .. tileBack, "Moonfire. Drag it onto another icon to swap them, to another row, or off to remove it. | " .. HINT,
         "row to an icon and back: the icon's note, then the row's")
     Over(nil, cd)
     Leave(cd)
@@ -6256,7 +7443,7 @@ end)()
     Equal(NoteOf(cd.tiles[1], cd) .. " | " .. NoteOf(cd), "Debuffs go in the Debuffs row. | Debuffs go in the Debuffs row.",
         "and another row's icons and the row itself say it can't go there")
     lp.cancel:Click()
-    Equal(NoteOf(cd.tiles[1], cd) .. " | " .. NoteOf(cd), "Moonfire. Drag it to another row, or off to remove it. | " .. HINT,
+    Equal(NoteOf(cd.tiles[1], cd) .. " | " .. NoteOf(cd), "Moonfire. Drag it onto another icon to swap them, to another row, or off to remove it. | " .. HINT,
         "cancelled, their usual notes")
     B:SetAura("debuff", "Moonfire", false)
     lp:Refresh()
@@ -6289,7 +7476,7 @@ end)()
     -- A bar page's icons: the tray, an icon, its x, and back.
     w:Select("cd")
     local icon = bp.icons[1]
-    local TRAY = "Drop a spell or item here from your spellbook, bags or action bars. Drag an icon to move it."
+    local TRAY = "Drop a spell or item here from your spellbook, bags or action bars. Drag an icon onto another to swap them."
     Over(true, bp.tray)
     Enter(bp.tray)
     local onTray = Text()
@@ -6302,8 +7489,8 @@ end)()
     Over(nil, icon)
     local trayBack = Move(icon, bp.tray)
     Equal(table.concat({ onTray, onIcon, onRemove, iconBack, trayBack }, " | "), table.concat({ TRAY,
-        "Moonfire. Drag it to move it, or off the bar to take it off.", "Take Moonfire off Cooldowns.",
-        "Moonfire. Drag it to move it, or off the bar to take it off.", TRAY }, " | "),
+        "Moonfire. Drag it onto another icon to swap them, or off the bar to take it off.", "Take Moonfire off Cooldowns.",
+        "Moonfire. Drag it onto another icon to swap them, or off the bar to take it off.", TRAY }, " | "),
         "tray, icon, its x, the icon, the tray: each its own note")
     -- Off the x past the icon's edge, straight onto the tray: the tray's note.
     Over(true, icon, icon.remove)
@@ -6450,6 +7637,352 @@ end)()
     for _ in pairs(tried) do count = count + 1 end
     Equal(table.concat(quiet), "", "on every page, each control showing has its note on hover and gives the footer back")
     Equal(count > 120, true, "most of them showing on one page or another (" .. count .. ")")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Held over a bar from the spellbook or your bags -----------------------------------------
+-- A spell or item on the game cursor, over a bar's drop target (a Layout row
+-- or its icons, a bar page's tray or icons, a bar on screen while unlocked):
+-- the footer says what dropping it there does, worked out without changing
+-- anything, in the drop's own words. A drop turned away keeps saying why
+-- while it's still held, wherever the mouse goes (a passive, Dodge, dragged
+-- onto the Cooldowns row: the row's own note took the footer straight
+-- back). Putting it away, picking up something else or closing the window
+-- gives the footer back.
+;(function()
+    Environment()
+    Display()
+    local cursor, clears = nil, 0
+    _G.GetCursorInfo = function() if cursor then return cursor[1], cursor[2], cursor[3], cursor[4] end end
+    _G.ClearCursor = function() cursor, clears = nil, clears + 1 end
+    bagItems = { { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 } }
+    itemCount[118] = 1
+    local ns = Load({ useBars = true, notesSeen = "dev", prdSkin = false })
+    local names = { [81] = "Dodge", [5176] = "Wrath", [8921] = "Moonfire", [467] = "Thorns", [16870] = "Clearcasting",
+        [1243] = "Power Word: Fortitude" }
+    _G.C_Spell.GetSpellName = function(id) return names[id] end
+    local B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("layout")
+    local lp = w.pages.layout
+    local rows = lp.rows
+    local function Footer() return S[w.note].text end
+    local function Enter(control) S[control].scripts.OnEnter(control) end
+    local function Leave(control) S[control].scripts.OnLeave(control) end
+    local function Own(control)
+        local hint = rawget(control, "hint")
+        if type(hint) == "function" then hint = hint(control) end
+        return hint
+    end
+    -- Every bar's list and what's remembered, to show nothing changed.
+    local function State()
+        local parts = {}
+        for _, key in ipairs(ns.BAR_KEYS) do parts[#parts + 1] = key .. "=" .. table.concat(ns.BarData(key).spells, ",") end
+        local custom = {}
+        for name, ids in pairs(ns.CustomSpells()) do custom[#custom + 1] = name .. ":" .. table.concat(ids, ",") end
+        table.sort(custom)
+        return table.concat(parts, " ") .. " | " .. table.concat(custom, " ")
+    end
+    -- Held over a control: what the footer says. Nothing changes, and it
+    -- stays on the cursor.
+    local function Over(control, held)
+        cursor = held
+        local before, cleared = State(), clears
+        S[control].mouseOver = true
+        Enter(control)
+        local text = Footer()
+        S[control].mouseOver = nil
+        Leave(control)
+        Equal(State() .. " " .. clears .. " " .. tostring(cursor == held), before .. " " .. cleared .. " true",
+            "held over it, nothing changes and it stays on the cursor (" .. tostring(text) .. ")")
+        return text
+    end
+    local DODGE, WRATH, MOONFIRE, THORNS = { "spell", 1, "spell", 81 }, { "spell", 2, "spell", 5176 },
+        { "spell", 3, "spell", 8921 }, { "spell", 4, "spell", 467 }
+    local PASSIVE = "Dodge is passive, so there's nothing to track."
+    local HINT = Own(rows.cd)
+
+    -- The Layout page's rows and their icons.
+    Equal(rows.cd:IsVisible() and rows.cd.tiles[1]:IsVisible() and rows.util:IsVisible() and rows.buff:IsVisible(), true,
+        "the Layout page's rows showing")
+    Equal(Over(rows.cd, DODGE), PASSIVE, "a passive held over the Cooldowns row: the footer says why it can't go there")
+    Equal(Over(rows.cd.tiles[1], DODGE), PASSIVE, "over an icon in the row too")
+    Equal(Over(rows.buff, { "item", 118 }), "Items can't go on the Buffs bar.", "an item held over the Buffs row")
+    Equal(Over(rows.util, WRATH), "Drop to add Wrath to Utility.", "a spell held over the Utility row: what dropping does")
+    Equal(Over(rows.cd.tiles[1], WRATH), "Drop to add Wrath to Cooldowns.", "over a Cooldowns icon: added to that bar")
+    Equal(Over(rows.cd, MOONFIRE), "Moonfire is already on Cooldowns.", "one already on that bar")
+    Equal(Over(rows.util, MOONFIRE), "Drop to move Moonfire from Cooldowns to Utility.", "one on the other cooldown bar moves")
+    Equal(Over(rows.buff, THORNS), "Drop to add Thorns to Buffs.", "a buff over the Buffs row")
+    Equal(Over(rows.cd, { "item", 118 }), "Drop to add Healing Potions to Cooldowns.", "a potion from your bags")
+    Equal(Over(rows.cd, { "macro", 4 }), "Only spells and items can go on a bar.", "anything else")
+    Equal(Over(rows.cd, { "spell", 1, "spell", SECRET }) .. " " .. Over(rows.cd, { SECRET, 118 }),
+        "Only spells and items can go on a bar. Only spells and items can go on a bar.", "what the game won't say")
+    Equal(Over(rows.cd, nil) .. " | " .. Over(rows.cd.tiles[1], nil), HINT .. " | " .. Own(rows.cd.tiles[1]),
+        "with nothing held, the row's and the icon's own notes")
+    -- Full: the Utility bar's list, then the Buffs bar's slots for your own icons.
+    local util = ns.BarData("util").spells
+    for i = 1, ns.BAR_MAX_SPELLS do util[i] = "Filler " .. i end
+    B:Changed()
+    w:Refresh()
+    Equal(Over(rows.util, WRATH), "Utility is full.", "a full bar says so")
+    cursor = WRATH
+    S[rows.util].scripts.OnReceiveDrag(rows.util)
+    Equal(Footer() .. " " .. tostring(cursor == WRATH), "Utility is full. true", "and so does the drop, leaving it on the cursor")
+    for i = #util, 1, -1 do util[i] = nil end
+    local buff, custom = ns.BarData("buff").spells, ns.CustomSpells()
+    for i = 1, ns.BUFF_SLOTS do
+        buff[i] = "Filler " .. i
+        custom["Filler " .. i] = { 900000 + i }
+    end
+    B:Changed()
+    w:Refresh()
+    Equal(B:SlotsUsed("buff") .. " " .. #buff, ns.BUFF_SLOTS .. " " .. ns.BUFF_SLOTS, "every Buffs slot taken, the list has room")
+    Equal(Over(rows.buff, THORNS), "Buffs is full.", "a Buffs bar with every slot taken says so")
+    cursor = THORNS
+    S[rows.buff].scripts.OnReceiveDrag(rows.buff)
+    Equal(Footer() .. " " .. tostring(cursor == THORNS) .. " " .. #buff, "Buffs is full. true " .. ns.BUFF_SLOTS, "and so does the drop")
+    for i = #buff, 1, -1 do buff[i] = nil end
+    B:Changed()
+    w:Refresh()
+    cursor = nil
+
+    -- Dropped and turned away, it stays on the cursor, and so does why, as
+    -- the mouse moves between the row, its icons and its buttons, and
+    -- anywhere else in the window; a click there tries again.
+    cursor = DODGE
+    S[rows.cd].mouseOver = true
+    Enter(rows.cd)
+    S[rows.cd].scripts.OnReceiveDrag(rows.cd)
+    Equal(Footer() .. " " .. tostring(cursor == DODGE) .. " " .. clears, PASSIVE .. " true 0",
+        "dropped on the Cooldowns row: turned away, saying why, still on the cursor")
+    local trail = {}
+    for _, control in ipairs({ rows.cd.tiles[1], rows.cd, rows.cd.wider, rows.cd.up, rows.cd.out, rows.cd.tiles[1], lp.unlock }) do
+        Enter(control)
+        trail[#trail + 1] = Footer()
+        Leave(control)
+        trail[#trail + 1] = Footer()
+    end
+    local kept = true
+    for _, text in ipairs(trail) do kept = kept and text == PASSIVE end
+    Equal(kept, true, "why stays in the footer over its icons, the row, its buttons and elsewhere (" .. table.concat(trail, " / ") .. ")")
+    Equal(rows.cd.wider:IsVisible(), true, "the row's buttons were up")
+    rows.cd:Click()
+    Equal(Footer() .. " " .. tostring(cursor == DODGE), PASSIVE .. " true", "clicked to drop it in: the same answer")
+    Enter(rows.cd.tiles[1])
+    Equal(Footer(), PASSIVE, "and over the icon after")
+    Leave(rows.cd.tiles[1])
+    -- Put away: the footer goes back at once, wherever the mouse is.
+    Enter(rows.cd.wider)
+    Equal(Footer(), PASSIVE, "held over the + button: why it was turned away")
+    cursor = nil
+    Fire("CURSOR_CHANGED", true, 0, 4, 0)
+    Equal(Footer(), Own(rows.cd.wider), "put away: the + button's own note, at once")
+    Leave(rows.cd.wider)
+    Enter(rows.cd)
+    Equal(Footer(), HINT, "and the row's over the row")
+    -- Picked up again, nothing has been turned away yet: the button's note.
+    Enter(rows.cd.wider)
+    cursor = DODGE
+    Fire("CURSOR_CHANGED", false, 4, 0, 0)
+    Equal(Footer(), Own(rows.cd.wider), "Dodge picked up again: the + button keeps its own note")
+    Leave(rows.cd.wider)
+    -- Turned away, then something else picked up: that's held now.
+    Enter(rows.cd)
+    S[rows.cd].scripts.OnReceiveDrag(rows.cd)
+    Equal(Footer(), PASSIVE, "turned away again")
+    cursor = WRATH
+    Fire("CURSOR_CHANGED", false, 4, 4, 0)
+    Equal(Footer(), "Drop to add Wrath to Cooldowns.", "Wrath picked up instead, over the row: what dropping it does")
+    Enter(rows.cd.wider)
+    Equal(Footer(), Own(rows.cd.wider), "and the + button's own note: Dodge's answer is gone with it")
+    Leave(rows.cd.wider)
+    -- Closing the window lets go of why, though Dodge is still held.
+    cursor = DODGE
+    Enter(rows.cd)
+    S[rows.cd].scripts.OnReceiveDrag(rows.cd)
+    Leave(rows.cd)
+    Equal(Footer(), PASSIVE, "turned away, off the row")
+    w:Hide()
+    w:Show()
+    w:Select("layout")
+    Enter(rows.cd.wider)
+    Equal(Footer(), Own(rows.cd.wider), "the window closed and opened again: the + button's own note")
+    Leave(rows.cd.wider)
+    S[rows.cd].mouseOver = nil
+    Leave(rows.cd)
+    Equal(S[w.cursorWatch].events.CURSOR_CHANGED, true, "the footer hears the cursor change")
+    -- Already on that bar: put away as before, saying so.
+    cursor = MOONFIRE
+    S[rows.cd].scripts.OnReceiveDrag(rows.cd)
+    Equal(Footer() .. " " .. tostring(cursor) .. " " .. table.concat(ns.BarData("cd").spells, ","),
+        "Moonfire is already on Cooldowns. nil Moonfire", "Moonfire dropped on Cooldowns again: already there, and let go of")
+    Equal(select(2, B:Add("cd", "Moonfire")), "Moonfire is already on Cooldowns.", "typed too")
+    -- Put away with the mouse never moving onto anything new (still on the
+    -- row it was dropped on, or out over empty space): why goes with it,
+    -- rather than staying on as the last message.
+    cursor = DODGE
+    S[rows.cd].mouseOver = true
+    Enter(rows.cd)
+    S[rows.cd].scripts.OnReceiveDrag(rows.cd)
+    Equal(Footer(), PASSIVE, "Dodge dropped on the row and turned away")
+    cursor = nil
+    Fire("CURSOR_CHANGED", true, 0, 4, 0)
+    Equal(Footer(), HINT, "put away, the mouse still on the row: the row's own note, not why")
+    S[rows.cd].mouseOver = nil
+    Leave(rows.cd)
+    Equal(Footer():find("^Made with") ~= nil, true, "then off the row: the footer rests, why gone with it (" .. tostring(Footer()) .. ")")
+    cursor = DODGE
+    S[rows.cd].mouseOver = true
+    Enter(rows.cd)
+    rows.cd:Click()
+    Equal(Footer(), PASSIVE, "clicked in: turned away again")
+    S[rows.cd].mouseOver = nil
+    Leave(rows.cd)
+    Equal(Footer(), PASSIVE, "off the row onto empty space, still held: why")
+    cursor = nil
+    Fire("CURSOR_CHANGED", true, 0, 4, 0)
+    Equal(Footer():find("^Made with") ~= nil and Footer() == w.lastNote, true,
+        "put away there: the footer rests on the credit, why gone with it (" .. tostring(Footer()) .. ")")
+    -- The game says the cursor changed as a drop lets go of it, before the
+    -- drop says what it did: that's what the footer shows.
+    local clear = _G.ClearCursor
+    _G.ClearCursor = function()
+        clear()
+        Fire("CURSOR_CHANGED", true, 0, 4, 0)
+    end
+    cursor = WRATH
+    S[rows.util].mouseOver = true
+    Enter(rows.util)
+    S[rows.util].scripts.OnReceiveDrag(rows.util)
+    Equal(Footer() .. " " .. tostring(cursor), "Added Wrath to Utility. nil", "Wrath dropped on Utility: added, and said")
+    S[rows.util].mouseOver = nil
+    Leave(rows.util)
+    Equal(Footer(), "Added Wrath to Utility.", "and still said off the row")
+    _G.ClearCursor = clear
+    B:Assign("Wrath", nil)
+    w:Refresh()
+
+    -- A bar's page: its tray and icons.
+    w:Select("cd")
+    local page = w.pages.bar
+    Equal(Over(page.tray, DODGE), PASSIVE, "the Cooldowns page's tray")
+    Equal(Over(page.tray, WRATH), "Drop to add Wrath to Cooldowns.", "a spell held over it")
+    Equal(page.icons[1]:IsVisible(), true, "Moonfire's icon showing")
+    Equal(Over(page.icons[1], WRATH), "Drop to add Wrath to Cooldowns.", "and over its icons")
+    cursor = DODGE
+    S[page.tray].scripts.OnReceiveDrag(page.tray)
+    Enter(page.icons[1])
+    Equal(Footer(), PASSIVE, "dropped on the tray and turned away, why stays over its icons")
+    Leave(page.icons[1])
+    Enter(page.icons[1].remove)
+    Equal(Footer(), PASSIVE, "and over an icon's x")
+    Leave(page.icons[1].remove)
+    -- Clicked onto an icon, as onto the tray round it: dropped there.
+    page.icons[1]:Click()
+    Equal(Footer() .. " " .. tostring(cursor == DODGE) .. " " .. table.concat(ns.BarData("cd").spells, ","),
+        PASSIVE .. " true Moonfire", "Dodge clicked onto an icon: turned away, still held")
+    cursor = WRATH
+    page.icons[1]:Click()
+    Equal(Footer() .. " " .. tostring(cursor) .. " " .. table.concat(ns.BarData("cd").spells, ","),
+        "Added Wrath to Cooldowns. nil Moonfire,Wrath", "Wrath clicked onto an icon: added, and let go of")
+    B:Assign("Wrath", nil)
+    w:Refresh()
+    page.icons[1]:Click()
+    Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. tostring(cursor), "Moonfire nil",
+        "an icon clicked with nothing held: nothing changes")
+    cursor = nil
+    Fire("CURSOR_CHANGED", true, 0, 4, 0)
+    w:Select("buff")
+    Equal(Over(page.tray, { "item", 118 }), "Items can't go on the Buffs bar.", "the Buffs page: no items")
+    Equal(Over(page.tray, nil), Own(page.tray), "nothing held: the tray's own note")
+    -- A bar on screen while unlocked.
+    w:Select("layout")
+    lp.unlock:Click()
+    local mover = B:Get("cd").mover
+    Equal(mover:IsVisible(), true, "the Cooldowns bar unlocked")
+    Equal(Over(mover, WRATH), "Drop to add Wrath to Cooldowns.", "a spell held over a bar on screen")
+    Equal(Over(mover, DODGE), PASSIVE, "a passive")
+    lp.unlock:Click()
+    -- In a fight: the same answers, and nothing touched.
+    lockdown = true
+    local calls = containerCallsInCombat
+    Equal(Over(rows.buff, THORNS) .. " " .. Over(rows.cd, DODGE), "Drop to add Thorns to Buffs. " .. PASSIVE, "in a fight too")
+    Equal(containerCallsInCombat, calls, "nothing on the Buffs bar touched in the fight")
+    lockdown = false
+    cursor = nil
+
+    -- An item already on that bar says so too, held and dropped.
+    B:Assign("family:healing", "cd")
+    Equal(Over(rows.cd, { "item", 118 }), "Healing Potions is already on Cooldowns.", "a potion already on that bar")
+    cursor = { "item", 118 }
+    S[rows.cd].scripts.OnReceiveDrag(rows.cd)
+    Equal(Footer() .. " " .. tostring(cursor) .. " " .. table.concat(ns.BarData("cd").spells, ","),
+        "Healing Potions is already on Cooldowns. nil Moonfire,family:healing", "dropped: already there, and let go of")
+    -- A name kept without IDs (another character's), given one: it goes on
+    -- with that ID, not "already there".
+    local util = ns.BarData("util").spells
+    util[1] = "Power Word: Fortitude"
+    B:Changed()
+    Equal(Over(rows.util, { "spell", 6, "spell", 1243 }), "Drop to add Power Word: Fortitude to Utility.",
+        "a name on the bar with nothing to show it by, given its ID: added")
+    util[1] = nil
+    B:Changed()
+
+    -- What the footer says before a drop is what the drop does, for every bar
+    -- and anything held: turned away with the same words, or put on (or
+    -- already there) as said.
+    local function Save()
+        local saved = { custom = {} }
+        for _, key in ipairs(ns.BAR_KEYS) do saved[key] = { table.unpack(ns.BarData(key).spells) } end
+        for name, ids in pairs(ns.CustomSpells()) do saved.custom[name] = { table.unpack(ids) } end
+        return saved
+    end
+    local function Restore(saved)
+        for _, key in ipairs(ns.BAR_KEYS) do
+            local spells = ns.BarData(key).spells
+            for i = #spells, 1, -1 do spells[i] = nil end
+            for i, name in ipairs(saved[key]) do spells[i] = name end
+        end
+        local now = ns.CustomSpells()
+        for name in pairs(now) do now[name] = nil end
+        for name, ids in pairs(saved.custom) do now[name] = { table.unpack(ids) } end
+        B:Changed()
+    end
+    -- The drop's own words for what was said before it.
+    local function Done(said)
+        local name, bar = said:match("^Drop to add (.+) to (%a+)%.$")
+        if not name then name, bar = said:match("^Drop to move (.+) from %a+ to (%a+)%.$") end
+        return name and ("Added " .. name .. " to " .. bar .. ".") or said
+    end
+    local held = { DODGE, WRATH, MOONFIRE, THORNS, { "spell", 5, "spell", 16870 }, { "spell", 6, "spell", 1243 },
+        { "spell", 7, "spell", 99999 }, { "item", 118 }, { "item", 117 }, { "item", 2516 }, { "item", 11111 },
+        { "macro", 4 }, { "spell", 1, "spell", SECRET }, { SECRET, 118 } }
+    local base = Save()
+    local before = State()
+    local differ, kinds = {}, {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        for _, thing in ipairs(held) do
+            cursor = thing
+            local can, said = B:CursorNote(key)
+            local unchanged = State() == before and cursor == thing
+            local ok, message = B:AddFromCursor(key)
+            local expected = can and Done(said) or said
+            local agree = can == ok and type(message) == "string" and message:sub(1, #expected) == expected
+                and (ok or message == said) and unchanged and (ok == (cursor == nil))
+            if not agree then
+                differ[#differ + 1] = key .. " " .. tostring(thing[4] or thing[2]) .. ": " .. tostring(said) .. " / " .. tostring(message)
+            end
+            kinds[(can and (said:find("^Drop to") and "drop" or "already")) or "refused"] = true
+            Restore(base)
+        end
+    end
+    Equal(table.concat(differ, "; "), "", "on every bar, what's said before a drop is what the drop does")
+    Equal(tostring(kinds.drop) .. " " .. tostring(kinds.already) .. " " .. tostring(kinds.refused), "true true true",
+        "added, already there and turned away all tried")
+    cursor = nil
+    Equal(B:CursorNote("cd"), nil, "nothing held: nothing to say")
     Equal(#printed, 0, "no errors")
 end)()
 

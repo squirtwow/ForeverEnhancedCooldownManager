@@ -2,7 +2,8 @@
 -- the stack they make around Blizzard's Personal Resource Display, drawn to
 -- scale with your own icons in it, and (Live preview) the border, shadow and
 -- keybinds the Look page gives them. Drag a spell from your spellbook onto a
--- row to add it; hover a row for - and + (how many icons fit across) and the
+-- row to add it, and an icon onto another to swap them (in its row or
+-- another); hover a row for - and + (how many icons fit across) and the
 -- arrows (up or down the stack, past the display). All bars sizes every bar
 -- together, and Show grow arrows marks which way each grows while you
 -- arrange them.
@@ -16,7 +17,7 @@ local CLEAR = 28 -- room kept at the top of the drawing's box for its hint, and 
 local UNDER = 86 -- room under the box for the three rows of controls there
 local SCALE = .7 -- the drawing's largest scale
 local HEALTH, POWER = { .1, .8, .1 }, { 0, .5, 1 } -- Blizzard's own colours
-local HINT = "- and + change how many fit across; the arrows swap rows. Drag an icon to another row, or off to remove it."
+local HINT = "- and + change how many fit across; the arrows swap rows. Drag an icon onto another to swap them, to another row, or off to remove it."
 
 -- A small square button with an arrow on it, in the accent.
 local function Arrow(parent, up)
@@ -231,13 +232,15 @@ function ns.BuildLayoutPage(window, page, width, height)
     local found = {}
     page.search, page.results, page.found, page.cancel = search, results, found, cancel
 
-    -- Your class's debuffs matching the text, the ones you know first.
+    -- Your class's debuffs matching the text, the ones you know first. Not
+    -- one only another race gets (a troll priest's Hex of Weakness for an
+    -- undead priest), which wouldn't show for you.
     local function Debuffs(text)
         local _, class = UnitClass("player")
         local known, other = {}, {}
         text = (text or ""):lower():match("^%s*(.-)%s*$")
         for _, name in ipairs(ns.DEBUFFS and ns.DEBUFFS[class] or {}) do
-            if text == "" or name:lower():find(text, 1, true) then
+            if (text == "" or name:lower():find(text, 1, true)) and ns.Spells:ForMe(name, "debuff") then
                 table.insert(ns.Spells:Find(name) and known or other, name)
             end
         end
@@ -391,7 +394,8 @@ function ns.BuildLayoutPage(window, page, width, height)
         above = "above the display", below = "below the display" }
     local function InStack(place) return place == "above" or place == "below" end
     -- An arrow's note: which way, past the display or beside it when the row
-    -- goes there, and the row it swaps places with.
+    -- goes there, the row it swaps places with, and (rows keeping their
+    -- width) how many would then fit across each.
     local function MoveNote(key, delta)
         local order, other = L:Rows(), nil
         for i, row in ipairs(order) do
@@ -404,6 +408,7 @@ function ns.BuildLayoutPage(window, page, width, height)
             or InStack(from) and InStack(to) and " the stack, past the display"
             or (", " .. PLACES[to])
         return "Move " .. name .. " " .. way .. how .. ", swapping places with " .. ns.BAR_NAMES[other] .. "."
+            .. L:Widths(key, other, true)
     end
     -- - and +: one fewer or more across, and how many now.
     local function AcrossNote(key, delta)
@@ -427,8 +432,9 @@ function ns.BuildLayoutPage(window, page, width, height)
         return "Your resource display is already at the " .. (delta < 0 and "top." or "bottom.")
     end
 
-    -- An icon being dragged follows the cursor: onto another row it moves
-    -- there, anywhere else it comes off its bar.
+    -- An icon being dragged follows the cursor: onto another icon the two
+    -- swap places (in its row or another), onto another row it moves there,
+    -- anywhere else it comes off its bar.
     local ghost = CreateFrame("Frame", nil, page)
     ghost:SetSize(24, 24)
     ghost:SetFrameLevel(page:GetFrameLevel() + 40)
@@ -438,25 +444,95 @@ function ns.BuildLayoutPage(window, page, width, height)
     ns.Style:Zoom(ghost.texture)
     ghost:Hide()
     page.ghost = ghost
+    -- The icon it would swap with, or the row it would move to, outlined in
+    -- the accent. Takes no mouse.
+    local mark = CreateFrame("Frame", nil, box, "BackdropTemplate")
+    mark:SetFrameLevel(box:GetFrameLevel() + 30)
+    mark:EnableMouse(false)
+    T:Flat(mark, { 0, 0, 0, 0 }, T.CONTROL_BORDER)
+    T:Paint(function(accent) mark:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
+    mark:Hide()
+    page.mark = mark
+    local picked -- { from = bar, name = entry } while an icon is dragged
+    local function Named(name)
+        local entry = ns.Spells:Find(name)
+        return entry and entry.name or name
+    end
+    -- Where a held icon would land: the row under the mouse, and the icon
+    -- there when it's on one (an empty spot is just the row).
+    local function Target()
+        for key, row in pairs(rows) do
+            if row:IsShown() then
+                for _, tile in ipairs(row.tiles) do
+                    if tile.name and tile:IsShown() and tile:IsMouseOver() then return key, tile end
+                end
+            end
+        end
+        for key, row in pairs(rows) do
+            if row:IsShown() and row:IsMouseOver() then return key end
+        end
+    end
+    -- While an icon is held: what it would swap with or move to outlined,
+    -- the footer saying what letting go does, and the icon greyed where
+    -- letting go takes it off or the swap would be refused (with why, and
+    -- nothing outlined). Only when that changes.
+    local said, marked
+    local function Track()
+        local held = picked
+        if not held then
+            said, marked = nil, nil
+            mark:Hide()
+            return window:DragNote(nil)
+        end
+        local target, onto = Target()
+        local name, text, around, refused = Named(held.name), nil, nil, false
+        if onto and onto.name ~= held.name then
+            local can, why = B:CanTrade(held.bar, held.name, target, onto.name)
+            if can then
+                text, around = "Let go to swap " .. name .. " and " .. Named(onto.name) .. ".", onto
+            else
+                refused = true
+                text = why and ("Can't swap: " .. why) or ("Can't swap " .. name .. " and " .. Named(onto.name) .. ".")
+            end
+        elseif target == held.bar then
+            text = "Let go to leave " .. name .. " where it is."
+        elseif target then
+            text, around = "Let go to move " .. name .. " to " .. ns.BAR_NAMES[target] .. ".", rows[target].strip
+        else
+            text = "Let go to take " .. name .. " off " .. ns.BAR_NAMES[held.bar] .. "."
+        end
+        ghost.texture:SetDesaturated(target == nil or refused)
+        if text == said and around == marked then return end
+        said, marked = text, around
+        mark:SetShown(around ~= nil)
+        if around then
+            mark:ClearAllPoints()
+            mark:SetPoint("TOPLEFT", around, "TOPLEFT", -3, 3)
+            mark:SetPoint("BOTTOMRIGHT", around, "BOTTOMRIGHT", 3, -3)
+        end
+        window:DragNote(text)
+    end
     ghost:SetScript("OnUpdate", function(self)
         local x, y = GetCursorPosition()
         local scale = UIParent:GetEffectiveScale()
         self:ClearAllPoints()
         self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+        Track()
     end)
-    local picked -- { from = bar, name = entry } while an icon is dragged
     local function DropPicked()
         ghost:Hide()
         local from = picked
         picked = nil
+        Track()
         -- Dropped after the window closed (Escape, say): it stays where it was.
         if not (from and page:IsVisible()) then return end
-        local target
-        for key, row in pairs(rows) do
-            if row:IsShown() and row:IsMouseOver() then target = key end
-        end
-        if target == from.bar then return window:Refresh() end
-        if target then
+        local target, onto = Target()
+        if onto and onto.name ~= from.name then
+            -- Onto another icon: the two swap places, on one bar or two.
+            Done(B:Trade(from.bar, from.name, target, onto.name))
+        elseif target == from.bar then
+            window:Refresh()
+        elseif target then
             Done(B:Transfer(from.bar, target, from.name))
         else
             Done(B:TakeOff(from.bar, from.name))
@@ -467,6 +543,7 @@ function ns.BuildLayoutPage(window, page, width, height)
     page:HookScript("OnHide", function()
         picked = nil
         ghost:Hide()
+        Track()
     end)
 
     -- A tile's key, when it has one to show (worked out as it's drawn). Text
@@ -491,9 +568,11 @@ function ns.BuildLayoutPage(window, page, width, height)
             -- Nothing is still held from a drag that never landed.
             picked = nil
             ghost:Hide()
+            Track()
             if not self.name then return end
             picked = { bar = row.key, name = self.name }
             ghost.texture:SetTexture(self.texture:GetTexture())
+            ghost.texture:SetDesaturated(false)
             ghost:Show()
             -- Picked up: its spot is empty until it lands somewhere.
             T:Fill(self.texture, T.CONTROL_BORDER)
@@ -507,6 +586,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         -- A spell from your spellbook dropped here joins the row's bar; a
         -- debuff found by the search goes in this spot.
         tile:SetScript("OnReceiveDrag", function() B:Dropped(row.key) end)
+        tile.drop = row.key -- held over it, the footer says what dropping does
         tile:SetScript("OnClick", function(self)
             if placing then return Place(row.key, self.name and B:Index(row.key, self.name)) end
             if B:Dropped(row.key) then return end
@@ -518,7 +598,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         window:Hint(tile, function(self)
             if placing then return PlaceNote(row.key, self.name) end
             local entry = self.name and ns.Spells:Find(self.name)
-            return entry and (entry.name .. ". Drag it to another row, or off to remove it.") or HINT
+            return entry and (entry.name .. ". Drag it onto another icon to swap them, to another row, or off to remove it.") or HINT
         end)
         row.tiles[i] = tile
         return tile
@@ -576,6 +656,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         -- A spell dropped on a row joins that bar; a found debuff goes at the
         -- end of it; a click without either keeps the row's buttons up.
         row:SetScript("OnReceiveDrag", function(self) B:Dropped(self.key) end)
+        row.drop = key -- held over it, the footer says what dropping does
         row:SetScript("OnClick", function(self)
             if placing then return Place(self.key) end
             if B:Dropped(self.key) then return end

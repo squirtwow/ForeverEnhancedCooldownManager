@@ -853,8 +853,10 @@ local function Load()
     SLASH_FECM1 = "/ccm"
     SLASH_FECM2 = "/fecm"
     SlashCmdList.FECM = function(msg)
-        msg = type(msg) == "string" and msg or ""
-        if msg:match("^%s*new%s*$") and ns.ShowNotes then
+        msg = type(msg) == "string" and msg:lower() or ""
+        if msg:match("^%s*reset%s*$") and ns.AskReset then
+            ns.AskReset()
+        elseif msg:match("^%s*new%s*$") and ns.ShowNotes then
             ns.ShowNotes()
         elseif msg:match("^%s*tour%s*$") and ns.Tour then
             ns.Tour:Start()

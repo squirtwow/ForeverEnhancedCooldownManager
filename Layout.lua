@@ -399,9 +399,20 @@ function L:CanSwap(key, delta)
     return at ~= nil and rows[at + delta] ~= nil
 end
 
+-- What swapping two bars' rows does to how many fit across each: rows keep
+-- their width, so each bar takes the other's. Said before the swap (ahead)
+-- or after it; nothing when they're the same.
+function L:Widths(key, other, ahead)
+    local mine, theirs = ns.BarData(key).perRow, ns.BarData(other).perRow
+    if mine == theirs then return "" end
+    if ahead then mine, theirs = theirs, mine end
+    return " Rows keep their width, so " .. ns.BAR_NAMES[key] .. (ahead and " would be " or " is now ") .. mine
+        .. " across and " .. ns.BAR_NAMES[other] .. " " .. theirs .. "."
+end
+
 -- Swaps a bar with the row above or below it. The rows keep how many fit
 -- across, so a preset's shape stays with the bars in a new order; each bar
--- keeps its own icon size.
+-- keeps its own icon size. True, and what changed.
 function L:Swap(key, delta)
     if InCombatLockdown() then return false, "Finish combat first." end
     if not self:CanSwap(key, delta) then return false end
@@ -419,7 +430,7 @@ function L:Swap(key, delta)
     local a, b = ns.BarData(key), ns.BarData(other)
     a.perRow, b.perRow = b.perRow, a.perRow
     ns.Bars:Rebuild()
-    return true
+    return true, ns.BAR_NAMES[key] .. " and " .. ns.BAR_NAMES[other] .. " swapped rows." .. self:Widths(key, other)
 end
 
 function L:CanMoveDisplay(delta)

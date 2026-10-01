@@ -70,7 +70,7 @@ right at home next to EraUI.
 - The display widens to your widest row, and your bars follow it as it moves or
   changes with your form
 - Change it row by row: how many icons fit across, which bar goes in which row
-  and where the display sits; drag icons between rows or off to remove them;
+  and where the display sits; drag icons between rows, onto each other to swap them, or off to remove them;
   take a whole bar out; Reset or Undo
 - All bars: one slider sizes every bar together; Live preview shows your look
   and keybinds on the icons
@@ -90,6 +90,7 @@ right at home next to EraUI.
 - A minimap button: click it for the settings, right-click for What's new, drag
   it round the minimap, or turn it off on the General page
 - `/ccm` opens the settings; they're also under Options > AddOns
+- `/ccm reset` resets your layout, after asking first
 - `/ccm tour` takes the tour again, and `/ccm new` shows What's new again
 - Found a bug or have an idea? The Discord button on the General page and in
   What's new gives you the invite, or type `/ccm discord`

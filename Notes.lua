@@ -10,6 +10,26 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.3.0",
+        sections = {
+            { "Added", {
+                "Swap icons: drop one icon onto another to swap them.",
+                "The footer tells you what dropping a spell will do, or why it can't go there.",
+                "/fecm reset asks before resetting your layout.",
+                "Gold edge on Victory Rush, Hammer of Wrath and Divine Grace when they're ready.",
+            } },
+            { "Changed", {
+                "Passive spells can't go on bars, but Reincarnation still can. Passives with their own buff, like Plainsrunning, can go on Buffs.",
+                "Row arrows show how many icons fit across.",
+                "Keybinds on icons is no longer marked Needs testing.",
+            } },
+            { "Fixed", {
+                "Shared profiles no longer show another race's racials.",
+                "No more empty box beside a short last row.",
+            } },
+        },
+    },
+    {
         version = "1.2.1",
         sections = {
             { "Fixed", {

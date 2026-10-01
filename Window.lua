@@ -267,7 +267,7 @@ local function BuildLook(window, page, width)
         if ns.Keybinds then ns.Keybinds:Update() end
         KeyLook()
     end
-    local keybinds = Choice("Keybinds on icons (Needs testing)", "keybinds", -2,
+    local keybinds = Choice("Keybinds on icons", "keybinds", -2,
         "The key that casts each spell or uses each item, from your action bars, on your Cooldowns and Utility bars. Blizzard's icons get them while Apply this look to the Cooldown Manager is on.",
         Rekey, KEYS_X)
     local placeItems = {}
@@ -886,17 +886,51 @@ local function BuildFooter(window)
         self.message = text
     end
 
+    -- With a spell or item on the game cursor: over a bar's drop target (a
+    -- control with .drop, the bar's key or a function giving it), what
+    -- dropping it there does, worked out without changing anything;
+    -- anywhere else, why it was last turned away, while it's still held.
+    -- Nil while the cursor holds nothing.
+    function window:Holding(hovered)
+        local held = ns.Bars:Holding()
+        if not held then
+            self.refused = nil
+            return nil
+        end
+        local key = hovered and hovered.drop
+        if type(key) == "function" then key = key(hovered) end
+        if key then
+            local _, text = ns.Bars:CursorNote(key)
+            return text
+        end
+        local refused = self.refused
+        if refused and refused.held == held then return refused.text end
+        self.refused = nil
+    end
+    -- A drop turned away: why stays up while what was dropped is still held,
+    -- wherever the mouse goes (the row, its icons, its buttons).
+    function window:Refused(text)
+        self.refused = { held = ns.Bars:Holding(), text = text }
+    end
+
     -- The hovered control's note, worked out afresh (some change as you
     -- click), or what the footer rests on: the last message, or the credit.
     -- A message just said goes in front of the hovered control's note until
-    -- the mouse moves onto a control, or the next refresh.
+    -- the mouse moves onto a control, or the next refresh. What's held on
+    -- the cursor goes in front of both.
     function window:ShowNote()
         local hovered = self.hovered
         if hovered and not hovered:IsVisible() then hovered, self.hovered = nil, nil end
         local text = hovered and not self.saying and hovered.hint
         if type(text) == "function" then text = text(hovered) end
         self.lastNote = self.said or Credit()
-        note:SetText(text or self.lastNote)
+        note:SetText(self.dragging or self:Holding(hovered) or text or self.lastNote)
+    end
+    -- While an icon is dragged in the window, what letting go of it does
+    -- goes in front of everything; nil once it's let go.
+    function window:DragNote(text)
+        self.dragging = text
+        self:ShowNote()
     end
     function window:Note(control)
         self.hovered, self.saying = control, nil
@@ -928,7 +962,15 @@ local function BuildFooter(window)
         control:HookScript("OnLeave", function() window:Unnote(control) end)
     end
     -- Closed, nothing is under the mouse any more: open, the footer rests.
-    window:HookScript("OnHide", function() window.hovered = nil end)
+    window:HookScript("OnHide", function() window.hovered, window.dragging, window.refused = nil, nil, nil end)
+    -- Something picked up or put away (or dropped on a bar): the footer
+    -- follows at once, while the window is open.
+    local cursor = CreateFrame("Frame", nil, window)
+    cursor:RegisterEvent("CURSOR_CHANGED")
+    cursor:SetScript("OnEvent", function()
+        if window:IsShown() then window:ShowNote() end
+    end)
+    window.cursorWatch = cursor
     -- A new accent recolours the heart and name at once.
     T:Paint(function() window:ShowNote() end)
 end
@@ -1085,6 +1127,15 @@ function ns.ShowWindow()
     local window = ns.window or BuildWindow()
     window:Show()
     window:Raise()
+end
+
+-- /fecm reset: opens the Layout page and asks, just as its Reset button does.
+function ns.AskReset()
+    ns.ShowWindow()
+    local window = ns.window
+    window:Select("layout")
+    local reset = window.pages.layout.reset
+    if reset then reset:Click() end
 end
 
 function ns.Toggle()

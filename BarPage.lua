@@ -1,5 +1,5 @@
 -- A bar's page in the /ccm window: its icons in the order they show (drag
--- one onto another to move it, x to take it off), its options, and a
+-- one onto another to swap them, x to take it off), its options, and a
 -- searchable list of your spells with a tick box to put each on the bar.
 local _, ns = ...
 local T = ns.Theme
@@ -93,7 +93,10 @@ function ns.BuildBarPage(window, page, width)
     tray:EnableMouse(true)
     tray:SetScript("OnReceiveDrag", function() B:Dropped(state.bar) end)
     tray:SetScript("OnMouseUp", function() B:Dropped(state.bar) end)
-    window:Hint(tray, "Drop a spell or item here from your spellbook, bags or action bars. Drag an icon to move it.")
+    -- Held over the tray or its icons, the footer says what dropping does.
+    local function Bar() return state.bar end
+    tray.drop = Bar
+    window:Hint(tray, "Drop a spell or item here from your spellbook, bags or action bars. Drag an icon onto another to swap them.")
     local empty = T:Text(tray, "GameFontHighlightSmall", T.MUTED)
     empty:SetPoint("LEFT", 12, 0)
     empty:SetWidth(inner - 24)
@@ -109,28 +112,76 @@ function ns.BuildBarPage(window, page, width)
     ns.Style:Zoom(ghost.texture)
     ghost:Hide()
     page.ghost = ghost
+    -- The icon it would swap with, outlined in the accent. Takes no mouse.
+    local mark = CreateFrame("Frame", nil, tray, "BackdropTemplate")
+    mark:SetFrameLevel(tray:GetFrameLevel() + 10)
+    mark:EnableMouse(false)
+    T:Flat(mark, { 0, 0, 0, 0 }, T.CONTROL_BORDER)
+    T:Paint(function(accent) mark:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
+    mark:Hide()
+    page.mark = mark
+
+    -- Where a dragged icon lands: onto another icon swaps the two (the
+    -- place and the icon), anywhere else in the tray puts it last; nil off
+    -- the bar.
+    local function DropTarget()
+        for _, icon in ipairs(page.icons) do
+            if icon:IsShown() and icon:IsMouseOver() then return icon.index, icon end
+        end
+        if tray:IsMouseOver() then return #ns.BarData(state.bar).spells end
+    end
+
+    -- While an icon is held: the one it would swap with outlined, the footer
+    -- saying what letting go does, and the held icon greyed where letting go
+    -- takes it off. Only when that changes.
+    local said, marked
+    local function Track()
+        local from, held = state.drag, state.held
+        if not (from and held) then
+            said, marked = nil, nil
+            mark:Hide()
+            return window:DragNote(nil)
+        end
+        local to, onto = DropTarget()
+        local swap = onto ~= nil and to ~= from
+        local text
+        if swap then
+            text = "Let go to swap " .. held.name .. " and " .. onto.name .. "."
+        elseif to == from then
+            text = "Let go to leave " .. held.name .. " where it is."
+        elseif to then
+            text = "Let go to put " .. held.name .. " last."
+        else
+            text = "Let go to take " .. held.name .. " off " .. ns.BAR_NAMES[state.bar] .. "."
+        end
+        ghost.texture:SetDesaturated(to == nil)
+        local around = swap and onto or nil
+        if text == said and around == marked then return end
+        said, marked = text, around
+        mark:SetShown(around ~= nil)
+        if around then
+            mark:ClearAllPoints()
+            mark:SetPoint("TOPLEFT", around, "TOPLEFT", -3, 3)
+            mark:SetPoint("BOTTOMRIGHT", around, "BOTTOMRIGHT", 3, -3)
+        end
+        window:DragNote(text)
+    end
+
     ghost:SetScript("OnUpdate", function(self)
         local x, y = GetCursorPosition()
         local scale = UIParent:GetEffectiveScale()
         self:ClearAllPoints()
         self:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+        Track()
     end)
     -- The window closing mid-drag drops nothing: the icon's spot comes back,
     -- and no icon is left on the cursor for next time.
     page:HookScript("OnHide", function()
-        state.drag = nil
+        state.drag, state.held = nil, nil
         ghost:Hide()
+        Track()
         for _, icon in ipairs(page.icons) do icon:SetAlpha(1) end
     end)
-
-    -- Where a dragged icon lands: on another icon takes its place, anywhere
-    -- else in the tray goes to the end.
-    local function DropTarget()
-        for _, icon in ipairs(page.icons) do
-            if icon:IsShown() and icon:IsMouseOver() then return icon.index end
-        end
-        if tray:IsMouseOver() then return #ns.BarData(state.bar).spells end
-    end
 
     local function TrayIcon(i)
         local icon = page.icons[i]
@@ -176,17 +227,25 @@ function ns.BuildBarPage(window, page, width)
         T:Paint(function(accent) T:Fill(icon.bridge, accent) end)
         icon:RegisterForDrag("LeftButton")
         icon:SetScript("OnDragStart", function(self)
-            state.drag = self.index
+            state.drag, state.held = self.index, self
             self:SetAlpha(0) -- picked up: its spot is empty until it lands
             ghost.texture:SetTexture(self.texture:GetTexture())
+            ghost.texture:SetDesaturated(false)
             ghost:Show()
         end)
         icon:SetScript("OnDragStop", function(self)
             ghost:Hide()
             self:SetAlpha(1)
-            local from, to = state.drag, DropTarget()
-            state.drag = nil
-            if from and to and to ~= from then
+            local from = state.drag
+            local to, onto = DropTarget()
+            state.drag, state.held = nil, nil
+            Track()
+            if from and onto and to ~= from then
+                -- Onto another icon: the two swap places.
+                local _, message = B:Swap(state.bar, from, to)
+                if message then window:Say(message) end
+                window:Refresh()
+            elseif from and to and to ~= from then
                 local _, message = B:MoveTo(state.bar, from, to)
                 if message then window:Say(message) end
                 window:Refresh()
@@ -197,10 +256,14 @@ function ns.BuildBarPage(window, page, width)
                 window:Refresh()
             end
         end)
+        -- A spell or item dropped on an icon, or clicked onto it, joins the
+        -- bar, as on the tray round it; a click with nothing held does nothing.
         icon:SetScript("OnReceiveDrag", function() B:Dropped(state.bar) end)
+        icon:SetScript("OnClick", function() B:Dropped(state.bar) end)
+        icon.drop = Bar
         -- The footer names the icon under the mouse; its x says what it does.
         window:Hint(icon, function(self)
-            return self.name and (self.name .. ". Drag it to move it, or off the bar to take it off.")
+            return self.name and (self.name .. ". Drag it onto another icon to swap them, or off the bar to take it off.")
         end)
         page.icons[i] = icon
         return icon
@@ -495,8 +558,15 @@ function ns.BuildBarPage(window, page, width)
         local line
         local known = {}
         for _, entry in ipairs(list) do
-            known[entry.name] = true
-            if Fits(entry) and (text == "" or entry.name:lower():find(text, 1, true) or (id and entry.spellID == id)) then
+            -- Another character's spell added to a shared profile, or a
+            -- passive with nothing to track here, stays off your list, as it
+            -- stays off your bar (unticking it here would take it off
+            -- theirs). Nor is it offered under Other spells, but for an ID
+            -- that isn't passive given for a passive's name (the mage's
+            -- Regeneration, where a troll's is saved).
+            if not ns.Spells:PassiveNote(entry.key, state.bar) then known[entry.name] = true end
+            if Fits(entry) and ns.Spells:ForMe(entry.key, state.bar)
+                and (text == "" or entry.name:lower():find(text, 1, true) or (id and entry.spellID == id)) then
                 if text == "" and entry.line ~= line then
                     line = entry.line
                     Header(line or "")
@@ -508,17 +578,19 @@ function ns.BuildBarPage(window, page, width)
             end
         end
         -- Searching also finds spells outside your spellbook, by name or ID.
+        -- Not a passive this bar can't track (Underwater Breathing), which
+        -- would only be turned away.
         if #text >= 3 or id then
             local others = {}
             if id then
                 local name = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
-                if type(name) == "string" and not known[name] then
+                if type(name) == "string" and not known[name] and not ns.Spells:AddNote(text, state.bar) then
                     others[1] = { name = name, label = name .. " (ID " .. id .. ")", lookup = text,
                         icon = C_Spell.GetSpellTexture(id) }
                 end
             else
                 for _, found in ipairs(ns.Spells:Suggest(text, 8)) do
-                    if not known[found.name] then
+                    if not known[found.name] and not ns.Spells:AddNote(found.name, state.bar) then
                         others[#others + 1] = { name = found.name, label = found.name, lookup = found.name,
                             icon = found.icon or (found.spellID and C_Spell.GetSpellTexture(found.spellID)) }
                     end
