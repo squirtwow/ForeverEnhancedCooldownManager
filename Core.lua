@@ -82,6 +82,12 @@ ns.DEFAULTS = {
     emoteColour = "default", -- boss emotes and whispers, the same way
     bossCasts = false, -- the boss frames' cast bars in your bar design
     bossColour = "default", -- their colour: gold (green channelling), or a bar colour
+    -- Raid Timers' sizes, in percent of Blizzard's own: each part's, times all of them together.
+    pullBarSize = 100, -- the countdown's bar
+    pullNumberSize = 100, -- its big numbers
+    warningSize = 100, -- raid warning text
+    emoteSize = 100, -- boss emote text
+    raidSize = 100, -- all four together
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
     keybinds = false, -- each Cooldowns/Utility icon's key, from your action bars (Look page)
@@ -102,8 +108,11 @@ ns.CAST_HEIGHT = { 10, 32, 18 }
 ns.MINIMAP_ANGLE = { 0, 359, 225 }
 ns.KEYBIND_SIZE = { 50, 150, 100 } -- min, max, default (percent)
 ns.BAR_SCALE = { 50, 150, 100 } -- min, max, default (percent)
+ns.RAID_SIZE = { 50, 200, 100 } -- each Raid Timers size (percent)
+ns.RAID_SIZE_ALL = { 50, 150, 100 } -- all of them together, so the biggest is three times Blizzard's
 local NUMBERS = { castHeight = ns.CAST_HEIGHT, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
-    barScale = ns.BAR_SCALE }
+    barScale = ns.BAR_SCALE, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE, warningSize = ns.RAID_SIZE,
+    emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
 ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }

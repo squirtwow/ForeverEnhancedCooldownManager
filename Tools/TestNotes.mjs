@@ -96,21 +96,38 @@ test('every tour step has the version it arrived in', async () => {
     const [, number, placeholder] = step.versions[0];
     if (!placeholder) assert.ok(released.has(number), `"${number}" has notes in Notes.lua`);
   }
-  assert.ok(steps.length >= 12, 'every step checked');
+  assert.ok(steps.length >= 19, 'every step checked');
 });
+
+// Releases that added no tour steps. Steps written after one of these wait
+// for the next update's number while its notes are still the newest.
+const ADDED_NO_STEPS = ['1.2.1', '1.3.0', '1.4.0'];
 
 // A release never shows steps still waiting for their number, so it gives
 // them its number when its notes get it. Once the newest notes are a release
-// newer than every numbered step, a step still waiting was left behind.
+// newer than every numbered step, a step still waiting was left behind,
+// unless that release added no steps: then it's the next update's.
 test('tour steps waiting for their number get it with the notes', async () => {
   const newest = gameNotes(await read('Notes.lua'))[0].version;
   const steps = await tourSteps();
   const waiting = steps.filter(step => step.versions[0]?.[2]).map(step => step.title);
   const numbered = steps.map(step => step.versions[0]?.[1]).filter(Boolean);
   if (!/^\d+(\.\d+)*$/.test(newest) || waiting.length === 0) return;
-  assert.ok(numbered.some(number => compareVersions(number, newest) >= 0),
+  const stepless = ADDED_NO_STEPS.some(version => compareVersions(version, newest) === 0);
+  assert.ok(stepless || numbered.some(number => compareVersions(number, newest) >= 0),
     `${waiting.join(', ')} still wait as ns.UNRELEASED, but the newest notes are ${newest}, newer than every numbered step:`
-    + ` give them ${newest} if they shipped in it, or add the next update's notes as Unreleased first`);
+    + ` give them ${newest} if they shipped in it, or add the next update's notes as Unreleased first.`
+    + ` Only if ${newest} added no tour steps at all, list it in ADDED_NO_STEPS`);
+});
+
+// A release listed as adding no tour steps really added none.
+test('releases listed as adding no tour steps added none', async () => {
+  const numbered = (await tourSteps()).map(step => step.versions[0]?.[1]).filter(Boolean);
+  for (const version of ADDED_NO_STEPS) {
+    assert.match(version, /^\d+\.\d+(\.\d+)?$/, `"${version}" is a version number`);
+    assert.ok(!numbered.some(number => compareVersions(number, version) === 0),
+      `${version} has tour steps: take it off ADDED_NO_STEPS`);
+  }
 });
 
 test('every section has bullets, and none use em dashes', async () => {

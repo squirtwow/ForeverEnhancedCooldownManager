@@ -52,6 +52,12 @@ end
 -- The end of the Look step, once the look is on or waiting for a reload.
 local PICK = " Pick its design, colour, border and shadow here. Your own bars use them too."
 
+-- Whether there's a Raid Timers page: its files only load after a full
+-- restart. Asked before the window is made, for What's new's button.
+local function RaidTimersPage()
+    return ns.BuildRaidTimersPage ~= nil
+end
+
 -- The steps of the full tour, the basics. version: the version the step
 -- arrived in. page: the page it opens (none keeps the one showing). when:
 -- whether it can show here, if it can't always. target: the part it
@@ -270,6 +276,56 @@ local NEWS = {
         -- Above it, clear of Unlock bars to the right.
         side = "above",
     },
+    {
+        version = "1.4.1",
+        page = "raid",
+        when = RaidTimersPage,
+        title = "Raid Timers",
+        text = "Your look on Blizzard's pull countdown, raid warnings, boss emotes and boss cast bars,"
+            .. " in raids and dungeons. Each part is off until you tick it.",
+        -- No watch: ticking one lights its preview, and the step stays so it
+        -- can be seen.
+        try = "Try it: tick one and watch the preview.",
+        already = function() return ns.Get("pullTimer") or ns.Get("raidWarnings") or ns.Get("bossCasts") end,
+        alreadyText = "Already on: the preview shows your look.",
+        -- The preview and the ticks along its foot as one part; the box under
+        -- its right end, over the raid warnings' choices, so the countdown's
+        -- and the boss cast bars' ticks stay in sight.
+        target = function(w) return w.pages.raid.top end,
+        side = "below",
+        align = "end",
+    },
+    {
+        version = "1.4.1",
+        page = "raid",
+        when = RaidTimersPage,
+        title = "Sizes",
+        -- The boss cast bars have no size here: they keep Blizzard's.
+        text = "Size the countdown, raid warnings and emotes once ticked, or all of them with All sizes."
+            .. " Boss cast bars keep Blizzard's size.",
+        -- All sizes, the last of them; the box under it, below the options,
+        -- so each part's own sizes stay in sight.
+        target = function(w)
+            local sizes = w.pages.raid.sizes
+            return sizes[#sizes]
+        end,
+        side = "below",
+        align = "end",
+    },
+    {
+        version = "1.4.1",
+        page = "raid",
+        when = RaidTimersPage,
+        title = "Edit Mode",
+        -- No Try it: Edit Mode opening closes the window and the tour with
+        -- it, so this step is the last.
+        text = "Boss cast bars only show in a boss fight. To see them now, click the Edit Mode button,"
+            .. " then tick Boss Frames in Edit Mode.",
+        -- The button; the box under it, clear of it and the boss cast bars'
+        -- tick.
+        target = function(w) return w.pages.raid.editMode end,
+        side = "below",
+    },
 }
 
 -- Where the box goes against what it points at, and its arrow on the box's
@@ -477,13 +533,14 @@ function Tour:Start()
     Show(1)
 end
 
--- The newest version a step arrived in, no newer than the one running (for a
--- copy straight from the source, the newest there is).
+-- The newest version a step that can show here arrived in, no newer than the
+-- one running (for a copy straight from the source, the newest there is).
 local function Latest(now)
     local compare, latest = ns.CompareVersions, nil
     for _, list in ipairs({ STEPS, NEWS }) do
         for _, step in ipairs(list) do
-            if (compare(step.version, now) or 1) < 1 and (not latest or compare(step.version, latest) == 1) then
+            if (compare(step.version, now) or 1) < 1 and (not step.when or step.when(window))
+                and (not latest or compare(step.version, latest) == 1) then
                 latest = step.version
             end
         end
@@ -495,8 +552,9 @@ end
 -- the version seen before it and no newer than the one running, so versions
 -- skipped come together. With no version seen (What's new opened by hand, or
 -- none noted), the latest update's: the steps of the newest version that
--- added any, so an update that adds none still offers the last ones. Only
--- steps that can show.
+-- added any that can show here, so an update that adds none, or whose steps
+-- wait for a full restart, still offers the last ones. Only steps that can
+-- show.
 function Tour:News(seen)
     local now, compare = ns.Version(), ns.CompareVersions
     local byHand = not compare(seen, now)

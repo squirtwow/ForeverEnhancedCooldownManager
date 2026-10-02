@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.1
+
+### Added
+- Raid Timers: size sliders for the countdown bar, its numbers, raid warnings and boss emotes, or all at once.
+- Raid Timers: an Edit Mode button beside Boss cast bars.
+- Show me what's new now tours the Raid Timers page.
+
+### Changed
+- Raid Timers: the "In the game" section is gone, for a tidier page.
+
 ## 1.4.0
 
 ### Added

@@ -9,11 +9,15 @@
 -- bars show, to put the addon's combo points under the lowest. Raid Timers
 -- follow the same rules on Blizzard's countdown (TimerTracker), raid warnings
 -- (RaidWarningFrame) and boss cast bars: only the cosmetic setters each part
--- allows, never their size or text, nothing that shows or hides them, and
--- never the private boss emote anchor or the deadly debuff frame. Only the
--- art the look replaces may be made see-through (and a boss bar's fill while
--- Edit Mode shows it with no cast), and only the countdown's time may be
--- moved (into Split's box, and back).
+-- allows, never their text, nothing that shows or hides them, and never the
+-- private boss emote anchor or the deadly debuff frame. Only the art the look
+-- replaces may be made see-through (and a boss bar's fill while Edit Mode
+-- shows it with no cast), and only the countdown's time may be moved (into
+-- Split's box, and back). Sizes: the one approved exception to never scaling
+-- Blizzard's frames is the countdown, its bar and its two big digits (never
+-- the timer frame, the glow or the logo); raid warning lines may only have
+-- their text height set, as Blizzard's times yours. Nothing is scaled or
+-- sized at 100%, and the boss frames and their cast bars never are.
 local checks = 0
 local function Equal(actual, expected, label)
     checks = checks + 1
@@ -33,6 +37,8 @@ local FORBIDDEN = {
     -- A bar's values and a line's text: Blizzard's, and secret in a fight.
     SetValue = true, SetMinMaxValues = true, SetText = true, ClearText = true, SetTextHeight = true,
     SetMaxLines = true, GetNumLines = true, GetStringWidth = true, GetStringHeight = true,
+    -- Every other way to size one, besides SetScale, SetSize, SetWidth and SetHeight.
+    SetTextScale = true, SetFontHeight = true, SetIgnoreParentScale = true,
 }
 -- True while Blizzard's own code runs in the test: it may do what the addon may not.
 local blizzardCalling = false
@@ -155,6 +161,18 @@ function Proto:SetShadowOffset(x, y) S[self].shadowOffset = x .. "," .. y end
 function Proto:SetShadowColor(r, g, b, a) S[self].shadowColour = { r, g, b, a } end
 function Proto:GetStringWidth() return 40 end
 function Proto:Click() S[self].scripts.OnClick(self) end
+-- Sizes, where a part allows them: each call the addon makes is counted.
+local sizeCalls = 0
+function Proto:SetScale(scale)
+    if not blizzardCalling then sizeCalls = sizeCalls + 1 end
+    S[self].scale = scale
+end
+function Proto:SetTextHeight(height)
+    if not blizzardCalling then sizeCalls = sizeCalls + 1 end
+    S[self].textHeight = height
+end
+-- Whether the game protects it (none of these are, unless a test says so).
+function Proto:IsProtected() return S[self].protected == true, false end
 
 local function Seal(obj)
     S[obj].sealed, S[obj].blizzard = true, true
@@ -1225,11 +1243,13 @@ do
         Seal(timer)
         Keep(timer)
         Keep(bar)
+        -- The approved exception: the bar and the two big digits may be scaled.
+        S[bar].allow = { SetScale = true }
         Keep(backing, nil, true)
         Keep(border, nil, true)
         for _, key in ipairs(DIGIT_KEYS) do
             Keep(timer[key])
-            S[timer[key]].allow = { SetVertexColor = true, SetDesaturated = true }
+            S[timer[key]].allow = { SetVertexColor = true, SetDesaturated = true, SetScale = key:match("^digit") ~= nil }
         end
         Untouchable(fill)
         Untouchable(timer.GoTexture)
@@ -1284,7 +1304,11 @@ do
         local active = {}
         pool = setmetatable({}, { __newindex = function() error("wrote on Blizzard's pool", 2) end })
         rawset(pool, "EnumerateActive", function() return pairs(active) end)
-        rawset(pool, "Release", function(_, line) assert(blizzardCalling); active[line] = nil end)
+        rawset(pool, "Release", function(_, line)
+            assert(blizzardCalling)
+            active[line] = nil
+            rawset(line, "textScalingTime", nil) -- FadingFrame_StopTextScaling
+        end)
         rawset(pool, "Acquire", function()
             assert(blizzardCalling, "acquired from Blizzard's pool")
             for _, line in ipairs(lines) do
@@ -1296,6 +1320,13 @@ do
             local line = New("FontString", frame)
             Seal(line)
             Keep(line, { SetFontObject = true, SetJustifyH = true })
+            -- Only its text height, for your sizes.
+            S[line].allow = { SetTextHeight = true }
+            -- Blizzard's FadingFrame_InitSlot: 20 high, growing to 30 and back over 0.4 s.
+            rawset(line, "textScalingMinHeight", 20)
+            rawset(line, "textScalingMaxHeight", 30)
+            rawset(line, "textScalingUpTime", .2)
+            rawset(line, "textScalingDownTime", .4)
             lines[#lines + 1] = line
             active[line] = true
             return line
@@ -1311,7 +1342,28 @@ do
             -- Each message's place in the order, the newest the frame's count.
             rawset(self, "messageCounter", (rawget(self, "messageCounter") or 0) + 1)
             rawset(line, "messageOrder", self.messageCounter)
+            rawset(line, "textScalingTime", 0) -- FadingFrame_StartTextScaling
         end)
+        -- Blizzard's, run each frame for every line showing: grows a new
+        -- line from 20 to 30 and back, then leaves it at 20.
+        _G.FadingFrame_UpdateTextScaling = function(line, elapsed)
+            assert(blizzardCalling, "called Blizzard's FadingFrame_UpdateTextScaling")
+            local now = rawget(line, "textScalingTime")
+            if not now then return end
+            now = now + elapsed
+            local low, high, up, down = line.textScalingMinHeight, line.textScalingMaxHeight, line.textScalingUpTime,
+                line.textScalingDownTime
+            if now <= up then
+                rawset(line, "textScalingTime", now)
+                line:SetTextHeight(math.floor(low + (high - low) * now / up))
+            elseif now <= down then
+                rawset(line, "textScalingTime", now)
+                line:SetTextHeight(math.floor(high - (high - low) * (now - up) / (down - up)))
+            else
+                line:SetTextHeight(low)
+                rawset(line, "textScalingTime", nil)
+            end
+        end
         Seal(frame)
         Keep(frame, { Show = true, Hide = true })
         _G.RaidWarningFrame = frame
@@ -1334,6 +1386,12 @@ do
     local function Release(line)
         blizzardCalling = true
         pool:Release(line)
+        blizzardCalling = false
+    end
+    -- One frame of Blizzard's RaidWarningFrame OnUpdate: each line showing grows or shrinks.
+    local function Frames(elapsed)
+        blizzardCalling = true
+        for line in pool:EnumerateActive() do FadingFrame_UpdateTextScaling(line, elapsed) end
         blizzardCalling = false
     end
 
@@ -1457,6 +1515,8 @@ do
     Bosses()
     Game(nil)
     plainSay = frame.AddMessage
+    local plainFading = FadingFrame_UpdateTextScaling
+    sizeCalls = 0
     ns = Load({ pullTimer = true, raidWarnings = true, bossCasts = true })
     Equal(tostring(frame.AddMessage == plainSay) .. " " .. tostring(S[bars[1].Border].alpha), "true 1",
         "nothing hooked or touched before login")
@@ -1554,6 +1614,15 @@ do
     Equal(Colour(boss) .. " " .. S[boss.Spark].alpha, "0.6,0.43,0.91,0.45 0", "your purple, see-through for Outline, no spark")
     ns.Set("barStyle", "glass")
     Equal(#printed, 0, "no errors from the raid timers")
+    -- Every size at 100%, as for everyone at first: nothing of Blizzard's is
+    -- scaled or sized, and Blizzard's growing text isn't even hooked.
+    Say(WARNING)
+    Frames(.1)
+    local midway = S[lines[3] or first].textHeight
+    Frames(.5)
+    Equal(sizeCalls .. " " .. midway .. " " .. S[first].textHeight .. " " .. tostring(FadingFrame_UpdateTextScaling == plainFading)
+        .. " " .. tostring(S[bar].scale) .. " " .. tostring(S[timer.digit1].scale), "0 25 20 true nil nil",
+        "sizes at 100%: Blizzard's heights as it sets them, nothing scaled, its text growing left unhooked")
 
     -- Only hooks were added to Blizzard's frames.
     Equal(Keys(frame) .. " " .. Keys(bars[1]) .. " " .. Keys(tracker) .. " " .. Keys(timer), "3 9 1 9",
@@ -1599,9 +1668,168 @@ do
     Release(lines[3] or first)
     Say(WARNING)
     Cast(boss, "ui-castingbar-filling-standard")
-    Equal(S[bar].barTexture .. " " .. S[boss].barTexture .. " " .. S[first].face, PLAIN .. " ui-castingbar-filling-standard "
+    Equal(S[bar].barTexture .. " " .. S[boss].barTexture .. " " .. S[lines[3] or first].face, PLAIN .. " ui-castingbar-filling-standard "
         .. "Fonts\\FRIZQT__.TTF 20 ", "and nothing restyled any more as Blizzard carries on")
     Equal(#printed, 0, "no errors switching off")
+
+    -- Sizes. The countdown's bar and big digits take a scale (the approved
+    -- exception, the countdown only); raid warning lines take Blizzard's text
+    -- height times yours, as Blizzard grows each new one and after; each part's
+    -- size times Size (all of them).
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    Game(nil)
+    sizeCalls = 0
+    ns = Load({ pullTimer = true, raidWarnings = true, bossCasts = true, pullBarSize = 150, pullNumberSize = 200,
+        warningSize = 150, emoteSize = 50 })
+    Fire("PLAYER_LOGIN")
+    Countdown(40)
+    timer = tracker.timerList[1]
+    bar = timer.bar
+    -- A number as the game prints it (2, not 2.0), or nil.
+    local function G(value) return value and string.format("%g", value) or "nil" end
+    local function Scales(each)
+        return G(S[each.bar].scale) .. " " .. G(S[each.digit1].scale) .. " " .. G(S[each.digit2].scale)
+    end
+    Equal(Scales(timer), "1.5 2 2", "the countdown bar at 150%, its big digits at 200%")
+    Equal(tostring(S[timer].scale) .. " " .. tostring(S[timer.glow1].scale) .. " " .. tostring(S[timer.GoTexture].scale) .. " "
+        .. tostring(S[tracker].scale), "nil nil nil nil", "never the timer frame, the glow (pinned to its digit) or the logo")
+    Countdown(60)
+    Equal(Scales(tracker.timerList[2]), "1.5 2 2", "a second countdown frame too")
+    -- The same frame again: Blizzard never scales it, so nothing is set again.
+    local calls = sizeCalls
+    Free(timer)
+    Countdown(10)
+    Equal((sizeCalls - calls) .. " " .. Scales(timer), "0 1.5 2 2", "the frame reused: still sized, nothing set again")
+    -- Size, all of them together.
+    ns.Set("raidSize", 120)
+    ns.RaidTimers:Apply()
+    Equal(Scales(timer) .. " | " .. Scales(tracker.timerList[2]), "1.8 2.4 2.4 | 1.8 2.4 2.4", "Size at 120%: each times 1.2")
+    -- In a fight, a piece the game protected would wait (none of the countdown's are).
+    S[bar].protected, combat = true, true
+    ns.Set("raidSize", 100)
+    ns.RaidTimers:Apply()
+    Equal(Scales(timer), "1.8 2 2", "in a fight a protected piece waits; the rest change")
+    S[bar].protected, combat = nil, false
+    ns.RaidTimers:Apply()
+    Equal(Scales(timer), "1.5 2 2", "and takes its size once it can")
+
+    -- Raid warnings in their sizes: the font, and Blizzard's height times yours.
+    Say(WARNING)
+    Say(EMOTE, 2)
+    local warning, emote = lines[1], lines[2]
+    Equal(S[warning].face .. " " .. G(S[warning].textHeight) .. " | " .. S[emote].face .. " " .. G(S[emote].textHeight),
+        "Fonts\\FRIZQT__.TTF 30 OUTLINE 30 | Fonts\\FRIZQT__.TTF 10 OUTLINE 10", "a raid warning at 150%, a boss emote at 50%")
+    Frames(.1)
+    Equal(G(S[warning].textHeight) .. " " .. G(S[emote].textHeight), "37.5 12.5", "as Blizzard grows them (25 high): 37.5 and 12.5")
+    Frames(.2)
+    Equal(G(S[warning].textHeight) .. " " .. G(S[emote].textHeight), "37.5 12.5", "and shrinks them back (25 again)")
+    Frames(.2)
+    Equal(G(S[warning].textHeight) .. " " .. G(S[emote].textHeight), "30 10", "at rest (20): 30 and 10")
+    calls = sizeCalls
+    Frames(.1)
+    Frames(.1)
+    Equal(sizeCalls - calls, 0, "lines at rest are left alone, frame after frame")
+    -- A line handed out again: Blizzard sets 20 for its new message, then yours.
+    Release(warning)
+    Say(EMOTE, 2)
+    Equal(S[warning].face .. " " .. G(S[warning].textHeight), "Fonts\\FRIZQT__.TTF 10 OUTLINE 10", "a line handed out again, now an emote: 50%")
+    ns.Set("emoteSize", 100)
+    ns.RaidTimers:Apply()
+    Equal(G(S[warning].textHeight) .. " " .. G(S[emote].textHeight) .. " " .. S[emote].face, "20 20 Fonts\\FRIZQT__.TTF 20 OUTLINE",
+        "back to 100%: Blizzard's height on the lines showing, at once")
+    calls = sizeCalls
+    Frames(.1)
+    Frames(.5)
+    Equal((sizeCalls - calls) .. " " .. G(S[warning].textHeight), "0 20", "and Blizzard's own heights from then on")
+    -- A height that can't be read (a secret) is never set.
+    Say(WARNING)
+    local third = lines[3]
+    rawset(third, "textScalingMinHeight", SECRET)
+    calls = sizeCalls
+    ns.RaidTimers:Apply()
+    Equal(sizeCalls - calls, 0, "Blizzard's heights unreadable: none of yours set")
+    rawset(third, "textScalingMinHeight", 20)
+
+    -- Off, mid-growth: Blizzard's height and scale back on everything at once.
+    ns.Set("emoteSize", 50)
+    ns.Set("raidSize", 150)
+    ns.RaidTimers:Apply()
+    Say(WARNING)
+    Frames(.1)
+    local growing = lines[#lines]
+    Equal(G(S[growing].textHeight) .. " " .. Scales(timer), "56.25 2.25 3 3", "Size at 150%: a raid warning 225% as it grows")
+    ns.Set("pullTimer", false)
+    ns.Set("raidWarnings", false)
+    ns.RaidTimers:Apply()
+    Equal(Scales(timer) .. " | " .. Scales(tracker.timerList[2]), "1 1 1 | 1 1 1", "off: the countdown back to Blizzard's scale")
+    Equal(G(S[growing].textHeight) .. " " .. G(S[warning].textHeight) .. " " .. S[growing].face, "25 20 Fonts\\FRIZQT__.TTF 20 ",
+        "the lines at Blizzard's height for now (25 still growing, 20 at rest), in its font")
+    calls = sizeCalls
+    Frames(.1)
+    Frames(.5)
+    Free(timer)
+    Countdown(10)
+    Say(WARNING)
+    Frames(.1)
+    Equal((sizeCalls - calls) .. " " .. Scales(timer), "0 1 1 1", "then nothing sized as Blizzard carries on")
+    -- Everything else stays refused: scaling the timer frame, the glow, the
+    -- logo, the tracker, a raid warning line or its frame, a boss frame or bar.
+    local refused = 0
+    for _, each in ipairs({ tracker, timer, timer.glow1, timer.glow2, timer.GoTexture, warning, frame, bars[1],
+        Boss1TargetFrame, bars[2].Icon }) do
+        if not pcall(function() each:SetScale(2) end) then refused = refused + 1 end
+    end
+    Equal(refused .. " " .. tostring(pcall(function() bar:SetTextHeight(20) end)) .. " "
+        .. tostring(pcall(function() bars[1].Text:SetTextHeight(20) end)), "10 false false",
+        "scaling anything else of Blizzard's, or sizing other text, is refused")
+    -- Nor any other way to size them: text scale, font height, ignoring the parent's scale.
+    refused = 0
+    for _, try in ipairs({
+        function() bar.timeText:SetTextScale(2) end, function() warning:SetTextScale(2) end,
+        function() warning:SetFontHeight(30) end, function() timer:SetIgnoreParentScale(true) end,
+        function() bar:SetIgnoreParentScale(true) end, function() timer.digit1:SetIgnoreParentScale(true) end,
+    }) do
+        if not pcall(try) then refused = refused + 1 end
+    end
+    Equal(refused, 6, "no text scale, font height or ignored parent scale on Blizzard's countdown or raid warnings")
+    -- Ticked again with sizes kept: the boss bars still Blizzard's size.
+    ns.Set("pullTimer", true)
+    ns.Set("raidWarnings", true)
+    ns.RaidTimers:Apply()
+    Cast(bars[1], "ui-castingbar-filling-standard")
+    Equal(Scales(timer) .. " " .. tostring(S[bars[1]].scale) .. " " .. tostring(S[Boss1TargetFrame].scale), "2.25 3 3 nil nil",
+        "on again: the countdown sized again, the boss bars and frames never")
+    Equal(#printed, 0, "no errors with sizes")
+
+    -- Only Emote size changed (Warning size and All sizes at 100): Blizzard's
+    -- growing text is hooked all the same, so a boss emote keeps your size
+    -- as Blizzard grows it and once it rests; raid warnings stay Blizzard's.
+    do
+        Environment()
+        Viewers(0)
+        Tracker()
+        Warnings()
+        Bosses()
+        Game(nil)
+        local plainGrowth = FadingFrame_UpdateTextScaling
+        sizeCalls = 0
+        ns = Load({ raidWarnings = true, emoteSize = 150 })
+        Fire("PLAYER_LOGIN")
+        Say(EMOTE, 2)
+        Say(WARNING)
+        local emoteLine, warningLine = lines[1], lines[2]
+        Frames(.1)
+        local growing = G(S[emoteLine].textHeight) .. " " .. G(S[warningLine].textHeight)
+        Frames(.5)
+        Equal(tostring(FadingFrame_UpdateTextScaling ~= plainGrowth) .. " " .. growing .. " | " .. G(S[emoteLine].textHeight) .. " "
+            .. G(S[warningLine].textHeight), "true 37.5 25 | 30 20",
+            "only Emote size changed: growth hooked, the emote at 150% as it grows and at rest, the raid warning Blizzard's")
+        Equal(#printed, 0, "no errors with only Emote size changed")
+    end
 
     -- Edit Mode's Boss Frames shows the boss bars as Blizzard left them: full
     -- (each bar's first PLAYER_ENTERING_WORLD fills it with no cast), with no

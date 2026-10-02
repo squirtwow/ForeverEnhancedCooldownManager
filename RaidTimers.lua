@@ -12,12 +12,16 @@
 -- Looks only. Blizzard still decides what shows, when and where. Its frames
 -- get cosmetic setters from hooks that run after its own code, and the
 -- addon's own pieces drawn on them. No key is written on them, and nothing
--- protected is shown, hidden, moved, sized or scaled. Blizzard's art that
--- your look replaces is made see-through (alpha 0), as is a boss bar's fill
--- while Edit Mode shows it with no cast, and the countdown's time
--- is moved only into Split's box, and put back after. Nothing that can be
--- secret in a fight (the countdown's time, a message's text, a boss's cast)
--- is read.
+-- is shown, hidden or moved. Blizzard's art that your look replaces is made
+-- see-through (alpha 0), as is a boss bar's fill while Edit Mode shows it
+-- with no cast, and the countdown's time is moved only into Split's box, and
+-- put back after. Sizes: the countdown (its bar and big numbers, never
+-- protected) is the one thing of Blizzard's ever scaled; raid warnings and
+-- boss emotes take theirs as text, the height Blizzard draws them at times
+-- yours. The boss frames and their cast bars keep Blizzard's size. At 100%
+-- nothing is sized, and each size is put back exactly when its part goes
+-- off or back to 100%. Nothing that can be secret in a fight (the
+-- countdown's time, a message's text, a boss's cast) is read.
 -- Blizzard's boss timeline and boss warnings aren't in WoW Forever; if they
 -- arrive they get a part of their own here.
 local _, ns = ...
@@ -49,12 +53,16 @@ local PULL_SIZE = 12 -- the countdown's time, as big as Blizzard's
 local WARNING_SIZE = 20 -- a raid warning at rest; Blizzard grows it to 30 and back as it arrives
 local BOSS_SIZE = 10 -- a boss cast's spell name
 local SPLIT_BOX = 40 -- the Split design's time box on the countdown bar
+local PULL_NUMBER_Y = 49 -- the preview's big number: its middle, this far under the top (8 under the bar at 100%)
 local BOSSES = 5
 local DIGITS = { "digit1", "digit2", "glow1", "glow2" } -- the countdown's big numbers and their glow
 
 local pulls = setmetatable({}, { __mode = "k" }) -- Blizzard's countdown frames restyled, and the pieces added
+local scaled = setmetatable({}, { __mode = "k" }) -- countdown pieces (and previews) at a scale of yours: that scale
 local warnings = setmetatable({}, { __mode = "k" }) -- raid warning lines restyled: true, or "tinted" while in your colour
 local given = setmetatable({}, { __mode = "k" }) -- the colour Blizzard gave each of those lines for its message
+local heights = setmetatable({}, { __mode = "k" }) -- those lines drawn at a size of yours: that size
+local bouncing = setmetatable({}, { __mode = "k" }) -- those lines Blizzard was growing or shrinking last frame
 local bosses = setmetatable({}, { __mode = "k" }) -- boss cast bars restyled, and the pieces added
 local samples = setmetatable({}, { __mode = "k" }) -- the window's previews, and their pieces
 local hooked = { bars = {} }
@@ -71,6 +79,11 @@ end
 
 local function Secret(value)
     return issecretvalue ~= nil and issecretvalue(value) == true
+end
+
+-- A plain number of Blizzard's, never a secret one.
+local function Number(value)
+    return not Secret(value) and type(value) == "number"
 end
 
 -- Fits region to anchor, out pixels past its edge all round.
@@ -148,6 +161,30 @@ local function Design(bar, parts, colour)
     Solid(parts.edge, outline and colour or { 0, 0, 0 })
     ShowPieces(parts, true, design)
     return design
+end
+
+-- Sizes ---------------------------------------------------------------------------------
+
+-- A part's size times Size (all of them), as a scale: 1 is Blizzard's own.
+function R:Scale(key)
+    return ns.Get(key) * ns.Get("raidSize") / 10000
+end
+
+-- Whether a frame can't be scaled now: one the game protects, in a fight.
+-- The countdown's never are; should that change, the size waits.
+local function Locked(region)
+    if not (InCombatLockdown and InCombatLockdown()) then return false end
+    if type(region.IsProtected) ~= "function" then return true end
+    local ok, protected = pcall(region.IsProtected, region)
+    return not ok or Secret(protected) or protected ~= false
+end
+
+-- A countdown piece at a scale: set only off 1, and 1 put back after (Blizzard
+-- never scales them, so 1 is its own). Nothing is called while it's already so.
+local function Resize(region, scale)
+    if not region or (scaled[region] or 1) == scale or Locked(region) then return end
+    region:SetScale(scale)
+    scaled[region] = scale ~= 1 and scale or nil
 end
 
 -- Colours ------------------------------------------------------------------------------
@@ -263,6 +300,20 @@ local function PullLook(timer, parts, on)
     Numbers(timer, ns.Get("pullNumbers"), colour)
 end
 
+-- Its sizes, the one exception to never scaling Blizzard's frames (approved
+-- for the countdown only): a scale on the bar and on each big digit, 1 when
+-- off. Blizzard never scales them and never reads their size: the bar hangs
+-- from the top of its timer frame, so it grows from its top centre, and the
+-- digits are laid out from widths Blizzard keeps itself, round the frame's
+-- centre (from 30 seconds) or the screen's (the last 10), so the numbers grow
+-- round their centre. The glow is pinned to its digit's corners and follows.
+local function PullSize(timer, on)
+    Resize(timer.bar, on and R:Scale("pullBarSize") or 1)
+    local numbers = on and R:Scale("pullNumberSize") or 1
+    Resize(timer.digit1, numbers)
+    Resize(timer.digit2, numbers)
+end
+
 -- Every countdown frame Blizzard has made, restyled (made the first time).
 local function RestylePulls()
     local tracker = _G.TimerTracker
@@ -272,7 +323,10 @@ local function RestylePulls()
     for _, timer in ipairs(list) do
         if type(timer) == "table" and timer.bar then
             if on and not pulls[timer] then pulls[timer] = PullParts(timer) end
-            if pulls[timer] then PullLook(timer, pulls[timer], on) end
+            if pulls[timer] then
+                PullLook(timer, pulls[timer], on)
+                PullSize(timer, on)
+            end
         end
     end
 end
@@ -293,8 +347,11 @@ end
 -- outline and shadow, and a colour when one is chosen, for raid warnings and
 -- boss emotes apart. The colour Blizzard gave each message is kept, to put
 -- back on lines still showing when its colour is chosen again or the part is
--- switched off. Their text is never read, and their place, size and fading
--- stay Blizzard's.
+-- switched off. Their text is never read, and their place and fading stay
+-- Blizzard's. Their size is text too: Blizzard draws each line 20 high,
+-- growing a new one to 30 and back over its first moments, so the font alone
+-- can't size it; with a size of yours each line is drawn at Blizzard's
+-- height times yours, set again each time Blizzard sets it.
 
 local function EmoteType()
     local util = _G.RaidWarningUtil
@@ -319,11 +376,12 @@ local function GivenColour(line, emote)
     return type(info) == "table" and RGB(info[emote and "RAID_BOSS_EMOTE" or "RAID_WARNING"]) or nil
 end
 
--- Your font, outline and shadow on a line, and your colour for its kind.
--- With Blizzard's colour chosen, plain goes back on it (when given). Says
--- whether the line is now in a colour of yours.
+-- Your font, outline and shadow on a line, in its kind's size, and your
+-- colour for its kind. With Blizzard's colour chosen, plain goes back on it
+-- (when given). Says whether the line is now in a colour of yours, and its size.
 local function DressWarning(line, emote, plain)
-    Face(line, Style.FONTS[ns.Get("warningFont")] or Style.FONTS.friz, WARNING_SIZE,
+    local scale = R:Scale(emote and "emoteSize" or "warningSize")
+    Face(line, Style.FONTS[ns.Get("warningFont")] or Style.FONTS.friz, math.floor(WARNING_SIZE * scale + .5),
         R.OUTLINES[ns.Get("warningOutline")] or "OUTLINE")
     if ns.Get("warningShadow") then
         line:SetShadowOffset(1, -1)
@@ -334,13 +392,49 @@ local function DressWarning(line, emote, plain)
     local key = ns.Get(emote and "emoteColour" or "warningColour")
     local colour = key ~= "default" and R:TextColour(key) or plain
     if colour then line:SetTextColor(colour[1], colour[2], colour[3], 1) end
-    return key ~= "default"
+    return key ~= "default", scale
 end
 
 -- Whether a line is a boss emote or whisper: the kind Blizzard gave it.
 local function IsEmote(line)
     local kind = line.messageType
     return not Secret(kind) and kind == EmoteType()
+end
+
+-- The height Blizzard draws a line at now: each new message grows from 20 to
+-- 30 and back over its first moments (FadingFrame_UpdateTextScaling, every
+-- frame), then stays at 20. Worked out from the timings Blizzard keeps on
+-- the line, read only, as it works them out; nil when they can't be read.
+local function DrawnHeight(line)
+    local low, high = line.textScalingMinHeight, line.textScalingMaxHeight
+    local up, down, now = line.textScalingUpTime, line.textScalingDownTime, line.textScalingTime
+    if not Number(low) then return nil end
+    if now == nil then return low end
+    if not (Number(now) and Number(high) and Number(up) and Number(down)) or up <= 0 then return nil end
+    if now <= up then return math.floor(low + (high - low) * now / up) end
+    if now <= down then return math.floor(high - (high - low) * (now - up) / (down - up)) end
+    return low
+end
+
+-- A line in your size: Blizzard's height for it now, times yours. Nothing at
+-- 100% on a line never sized; Blizzard's height back on one that was.
+local function Height(line, scale)
+    if scale == 1 and not heights[line] then return end
+    local height = DrawnHeight(line)
+    if not height then return end
+    line:SetTextHeight(height * scale)
+    heights[line] = scale ~= 1 and scale or nil
+end
+
+-- After Blizzard grows or shrinks a line, and once more as it stops: the
+-- same height in your size. Lines at rest are left alone.
+local function Bounced(line)
+    if not warnings[line] or not ns.Get("raidWarnings") then return end
+    local now = line.textScalingTime
+    if Secret(now) then return end
+    local was = bouncing[line]
+    bouncing[line] = now ~= nil or nil
+    if now ~= nil or was then Height(line, R:Scale(IsEmote(line) and "emoteSize" or "warningSize")) end
 end
 
 -- Blizzard's own font and shadow back, from its font for these lines, and
@@ -359,6 +453,7 @@ local function PlainWarning(line, tinted)
     line:SetShadowColor(0, 0, 0, 1)
     local colour = tinted and GivenColour(line, IsEmote(line))
     if colour then line:SetTextColor(colour[1], colour[2], colour[3], 1) end
+    Height(line, 1)
 end
 
 -- After Blizzard adds a message (frame and its colour), or a choice changes.
@@ -373,8 +468,9 @@ local function RestyleWarnings(frame, colorInfo)
     for line in pool:EnumerateActive() do
         if newest and line.messageOrder == newest then given[line] = RGB(colorInfo) end
         local emote = IsEmote(line)
-        local tinted = DressWarning(line, emote, warnings[line] == "tinted" and GivenColour(line, emote) or nil)
+        local tinted, scale = DressWarning(line, emote, warnings[line] == "tinted" and GivenColour(line, emote) or nil)
         warnings[line] = tinted and "tinted" or true
+        Height(line, scale)
     end
 end
 
@@ -387,14 +483,20 @@ function R:ApplyWarnings()
                 Safe("a raid warning", RestyleWarnings, added, colorInfo)
             end)
         end
+        -- Only once a text size isn't 100%: Blizzard growing and shrinking each line.
+        local sized = self:Scale("warningSize") ~= 1 or self:Scale("emoteSize") ~= 1
+        if sized and not hooked.fading and type(_G.FadingFrame_UpdateTextScaling) == "function" then
+            hooked.fading = true
+            hooksecurefunc("FadingFrame_UpdateTextScaling", function(line) Safe("a raid warning", Bounced, line) end)
+        end
         Safe("a raid warning", RestyleWarnings)
         return
     end
-    -- Off: every line dressed so far goes back to Blizzard's font, and its
-    -- colour, shown or not, as the pool hands lines out again as they are.
+    -- Off: every line dressed so far goes back to Blizzard's font, colour and
+    -- height, shown or not, as the pool hands lines out again as they are.
     for line, state in pairs(warnings) do
         Safe("a raid warning", PlainWarning, line, state == "tinted")
-        warnings[line], given[line] = nil, nil
+        warnings[line], given[line], bouncing[line] = nil, nil, nil
     end
 end
 
@@ -607,10 +709,19 @@ function R:SamplePull(parent)
     bar.timeText:SetPoint("CENTER", bar, "CENTER", 0, 0)
     bar.timeText:SetText("0:42")
     timer.bar = bar
-    timer.digit1 = timer:CreateTexture(nil, "OVERLAY")
+    -- The big number centred on a spot of its own under the bar, as the game
+    -- centres its numbers on the timer: it grows round its middle, and the
+    -- bar's size never moves it. Drawn over the bar, so a big bar never
+    -- hides it (in the game the bar has faded by the time they show).
+    local spot = CreateFrame("Frame", nil, timer)
+    spot:SetSize(1, 1)
+    spot:SetPoint("CENTER", timer, "TOP", 0, -PULL_NUMBER_Y)
+    spot:SetFrameLevel(bar:GetFrameLevel() + 1)
+    timer.spot = spot
+    timer.digit1 = spot:CreateTexture(nil, "OVERLAY")
     timer.digit1:SetTexture(NUMBERS)
     timer.digit1:SetSize(48, 32)
-    timer.digit1:SetPoint("TOP", bar, "BOTTOM", 0, -8)
+    timer.digit1:SetPoint("CENTER", spot, "CENTER", 0, 0)
     self:SampleNumber(timer, 5)
     samples[timer] = PullParts(timer, border, backing)
     self:SampleLook(timer)
@@ -625,7 +736,8 @@ function R:SampleNumber(timer, n)
 end
 
 -- Two lines like Blizzard's: a raid warning and a boss emote, each in
--- Blizzard's colour for it.
+-- Blizzard's colour for it, the second under the first as Blizzard stacks
+-- them, so each shows its size.
 function R:SampleWarnings(parent)
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(210, 60)
@@ -636,7 +748,11 @@ function R:SampleWarnings(parent)
         { text = "Boss emote", colour = info.RAID_BOSS_EMOTE or { r = 1, g = .867, b = 0 }, emote = true },
     }) do
         local line = frame:CreateFontString(nil, "ARTWORK", WARNING_FONT)
-        line:SetPoint("TOP", frame, "TOP", 0, -(i - 1) * 30)
+        if i == 1 then
+            line:SetPoint("TOP", frame, "TOP", 0, 0)
+        else
+            line:SetPoint("TOP", lines[i - 1], "BOTTOM", 0, -10)
+        end
         line:SetWidth(210)
         line:SetJustifyH("CENTER")
         line:SetText(sample.text)
@@ -698,6 +814,7 @@ function R:SampleLook(sample)
         for _, line in ipairs(sample.lines) do DressWarning(line, line.emote, line.blizzard) end
     elseif sample.digit1 then
         PullLook(sample, parts, true)
+        PullSize(sample, true)
     else
         BossLook(sample.bar, parts, true)
         -- The spark where the fill ends, as Blizzard's does.

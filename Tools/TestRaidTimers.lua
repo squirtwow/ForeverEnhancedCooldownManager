@@ -443,6 +443,51 @@ local function Colour(obj)
     return string.format("%g,%g,%g,%g", r, g, b, a or 1)
 end
 
+-- Where things are on a page: every place worked out from the anchors the
+-- page set, each frame at its size, text about six units a letter (wider
+-- than the game's) and twelve a line, a tick its box and label. Rect gives
+-- left, top, width and height from the page's top left, y down.
+local function Placer(page)
+    local function Size(obj)
+        local s = S[obj]
+        if s.kind == "FontString" then
+            if s.width > 0 then return s.width, obj:GetStringHeight() end
+            return #(s.text or "") * 6, 12
+        end
+        if obj.box and obj.text then return 18 + #(S[obj.text].text or "") * 6, 16 end
+        return s.width, s.height
+    end
+    local function At(point, left, top, width, height)
+        local x = point:find("LEFT") and left or point:find("RIGHT") and left + width or left + width / 2
+        local y = point:find("TOP") and top or point:find("BOTTOM") and top + height or top + height / 2
+        return x, y
+    end
+    local function Rect(obj)
+        local s = S[obj]
+        local width, height = Size(obj)
+        assert(#s.points == 1, "one anchor each")
+        local p = s.points[1]
+        local point, relative, relativePoint, x, y = p[1], s.parent, p[1], p[2] or 0, p[3] or 0
+        if type(p[2]) == "table" then point, relative, relativePoint, x, y = p[1], p[2], p[3], p[4] or 0, p[5] or 0 end
+        local left, top, w, h = 0, 0, 0, 0
+        if relative ~= page then left, top, w, h = Rect(relative) end
+        local ax, ay = At(relativePoint, left, top, w, h)
+        local ox, oy = At(point, 0, 0, width, height)
+        return ax + x - ox, ay - y - oy, width, height
+    end
+    return Rect
+end
+-- Everything showing that was made in a frame: in it, or in what's in it.
+local function Within(frame)
+    local found = {}
+    for _, obj in ipairs(objects) do
+        local parent = S[obj].parent
+        while parent and parent ~= frame do parent = S[parent] and S[parent].parent end
+        if parent == frame and S[obj].shown then found[#found + 1] = obj end
+    end
+    return found
+end
+
 -- The window: Raid Timers under More ------------------------------------------------------
 
 Environment()
@@ -473,21 +518,61 @@ end
 Equal(S[page.status].text:find("Tick one", 1, true) ~= nil, true, "the title row says how to start")
 Equal(S[page.pull].alpha .. " " .. S[page.warnings].alpha .. " " .. S[page.boss].alpha, "0.35 0.35 0.35",
     "the previews dimmed while their parts are off")
+-- Sizes: each part's, then all of them, at 100 and greyed while their parts are off.
+do
+    local labels, values, greyed, notes = {}, {}, 0, {}
+    for _, slider in ipairs(page.sizes) do
+        labels[#labels + 1] = S[slider.label].text
+        values[#values + 1] = tostring(slider.current)
+        if slider.usable == false and S[slider].alpha == .35 then greyed = greyed + 1 end
+        notes[#notes + 1] = slider.hint()
+    end
+    Equal(table.concat(labels, ", "), "Bar size, Number size, Warning size, Emote size, All sizes", "a size for each, and all sizes")
+    Equal(table.concat(values, " ") .. " " .. greyed, "100 100 100 100 100 5", "each at 100, greyed while its part is off")
+    Equal(notes[1] .. " | " .. notes[3] .. " | " .. notes[5], "Tick Pull and start countdown first. | Tick Raid warnings and"
+        .. " boss emotes first. | Tick the countdown or the raid warnings first. The boss cast bars keep Blizzard's size.",
+        "and each says why on hover")
+    Equal(tostring(Last(page.pull.bar, "SetScale")) .. " " .. tostring(Last(page.pull.digit1, "SetScale")), "nil nil",
+        "at 100% the preview is never scaled")
+end
 Equal(TimerTracker_StartTimerOfType ~= nil and rawget(RaidWarningFrame, "AddMessage") ~= nil, true, "Blizzard's own functions in place")
 local plainStart, plainSay = TimerTracker_StartTimerOfType, rawget(RaidWarningFrame, "AddMessage")
 local plainFill = rawget(Boss1TargetFrameSpellBar, "UpdateBarFillTexture")
 
 -- The previews: the addon's own frames, dressed like Blizzard's would be.
 local pull, warnings, boss = page.pull, page.warnings, page.boss
-Equal(pull ~= TimerTracker and pull.bar ~= nil and S[pull].parent == page.tray, true, "the countdown preview is the addon's own frame")
+Equal(pull ~= TimerTracker and pull.bar ~= nil and S[pull].parent == page.boxes.pull and S[page.boxes.pull].parent == page.tray,
+    true, "the countdown preview is the addon's own frame")
+Equal(tostring(Last(page.boxes.pull, "SetClipsChildren")) .. " " .. tostring(Last(page.boxes.warnings, "SetClipsChildren")) .. " "
+    .. tostring(Last(page.boxes.boss, "SetClipsChildren")) .. " "
+    .. tostring(S[warnings].parent == page.boxes.warnings and S[boss].parent == page.boxes.boss), "true true true true",
+    "each preview in a box of its own that cuts a big size at its edge")
 Equal(Last(pull.bar, "SetStatusBarTexture") .. " " .. Colour(pull.bar), FLAT .. " 1,0,0,1",
     "a countdown bar in your texture, in Blizzard's red")
 Equal(S[pull.bar.timeText].template .. " " .. Last(pull.bar.timeText, "SetFontObject"), "GameFontHighlight FECMFont12",
     "its time in your font")
 Equal(S[pull.digit1].texture .. " " .. tostring(S[pull.digit1].desaturated), "Interface\\Timer\\BigTimerNumbers false",
     "a big number from Blizzard's own sheet, in its gold")
+-- Centred on a spot of its own, as the game centres its numbers: it grows
+-- round its middle, the bar's size never moves it, and it's drawn over the
+-- bar. At Number size 200% it still fits its box.
+do
+    local spot, digit = pull.spot, S[pull.digit1].points
+    local at = S[spot].points
+    Equal(#digit .. " " .. table.concat({ digit[1][1], tostring(digit[1][2] == spot), digit[1][3], digit[1][4], digit[1][5] }, " ")
+        .. " | " .. #at .. " " .. table.concat({ at[1][1], tostring(at[1][2] == pull), at[1][3], at[1][4] }, " ") .. " "
+        .. tostring(S[spot].parent == pull) .. " " .. Last(spot, "SetFrameLevel"),
+        "1 CENTER true CENTER 0 0 | 1 CENTER true TOP 0 true 2",
+        "the preview's number centred on a spot under the bar, never on the bar, and over it")
+    local middle, half = -at[1][5] - S[pull].points[1][3], S[pull.digit1].height / 2
+    Equal(string.format("%g %g %g %g %g", middle - half, middle + half, middle - 2 * half, middle + 2 * half,
+        S[page.boxes.pull].height), "33 65 17 81 88",
+        "8 under the bar at 100%, as before; at 200% still inside its 88-high box")
+end
 local line1, line2 = warnings.lines[1], warnings.lines[2]
 Equal(S[line1].text .. " / " .. S[line2].text, "Raid warning / Boss emote", "a raid warning and a boss emote")
+Equal(tostring(S[line2].points[1][2] == line1) .. " " .. S[line2].points[1][3], "true BOTTOM",
+    "the emote under the warning, as Blizzard stacks them, so each shows its size")
 Equal(Last(line1, "SetFont", 1) .. " " .. Last(line1, "SetFont", 2) .. " " .. Last(line1, "SetFont", 3),
     "Fonts\\FRIZQT__.TTF 20 OUTLINE", "in Friz Quadrata, outlined, as big as Blizzard's at rest")
 Equal(string.format("%g,%g,%g", S[line1].colour[1], S[line1].colour[2], S[line1].colour[3]), "1,0.282,0",
@@ -553,26 +638,137 @@ page.bossColours.swatches[4]:Click()
 Equal(ns.Get("bossColour") .. " " .. Colour(boss.bar), "green 0.38,0.74,0.3,1", "a colour for boss casts")
 Equal(S[page.bossNote].text:find("secret", 1, true) ~= nil, true, "the note says what the game keeps secret")
 
+-- Sizes, the parts on: usable, saved, and on the preview at once.
+do
+    local function G(value) return value and string.format("%g", value) or "nil" end
+    local barSize, numberSize, warningSize, emoteSize, allSizes = table.unpack(page.sizes)
+    Equal(tostring(barSize.usable) .. " " .. tostring(warningSize.usable) .. " " .. tostring(allSizes.usable) .. " " .. S[barSize].alpha,
+        "true true true 1", "the parts on: their sizes usable")
+    Equal(barSize.hint():find("100 is Blizzard's size", 1, true) ~= nil and allSizes.hint():find("Frame Size in Edit Mode", 1, true) ~= nil,
+        true, "each says what it does; all sizes points to Edit Mode for the boss frames")
+    -- All sizes names the four it multiplies (two sit in the other column);
+    -- the bar's says two countdowns overlap when big, the texts' that long
+    -- ones wrap past Blizzard's five lines.
+    Equal(tostring(allSizes.hint():find("^Bar, Number, Warning and Emote size together") ~= nil) .. " "
+        .. tostring(barSize.hint():find("Two countdowns at once overlap above about 180", 1, true) ~= nil) .. " "
+        .. tostring(warningSize.hint():find("more lines than Blizzard's usual 5", 1, true) ~= nil) .. " "
+        .. tostring(emoteSize.hint():find("more lines than Blizzard's usual 5", 1, true) ~= nil), "true true true true",
+        "the notes say what all sizes covers, and what big sizes do")
+    barSize:Choose(150)
+    numberSize:Choose(200)
+    Equal(ns.Get("pullBarSize") .. " " .. ns.Get("pullNumberSize") .. " " .. G(Last(pull.bar, "SetScale")) .. " "
+        .. G(Last(pull.digit1, "SetScale")), "150 200 1.5 2", "the countdown's sizes saved, the preview's bar and number at them")
+    warningSize:Choose(150)
+    emoteSize:Choose(50)
+    Equal(Last(line1, "SetFont", 2) .. " " .. Last(line2, "SetFont", 2), "30 10",
+        "the preview's raid warning at 150%, its boss emote at 50%")
+    allSizes:Choose(120)
+    Equal(G(Last(pull.bar, "SetScale")) .. " " .. G(Last(pull.digit1, "SetScale")) .. " " .. Last(line1, "SetFont", 2) .. " "
+        .. Last(line2, "SetFont", 2), "1.8 2.4 36 12", "all sizes at 120%: each one times 1.2, in proportion")
+    Equal(barSize.current .. " " .. allSizes.current, "150 120", "the sliders show what's saved")
+    -- Snapped to steps of 5 and kept within the limits.
+    allSizes:Choose(500)
+    barSize:Choose(12)
+    numberSize:Choose(203)
+    Equal(ns.Get("raidSize") .. " " .. ns.Get("pullBarSize") .. " " .. ns.Get("pullNumberSize"), "150 50 200",
+        "all sizes 50 to 150, each 50 to 200, in steps of 5")
+    allSizes:Choose(110)
+    barSize:Choose(120)
+    -- Untick a part: its sizes grey and say why; the preview dims, keeping them.
+    page.pullTick:Click()
+    Equal(tostring(barSize.usable) .. " " .. tostring(allSizes.usable) .. " " .. barSize.hint() .. " " .. G(Last(pull.bar, "SetScale")),
+        "false true Tick Pull and start countdown first. 1.32", "the countdown off: its sizes greyed, all sizes still for the warnings")
+    page.pullTick:Click()
+end
+
 -- Every control says what it does on hover.
-local controls = { page.pullTick, page.warningTick, page.bossTick, page.shadow }
+local controls = { page.pullTick, page.warningTick, page.bossTick, page.shadow, page.editMode }
 for _, group in ipairs({ page.numbers, page.font, page.outline }) do
     for _, button in ipairs(group.buttons) do controls[#controls + 1] = button end
 end
 for _, row in ipairs({ page.pullColours, page.bossColours, page.warningColours, page.emoteColours }) do
     for _, swatch in ipairs(row.swatches) do controls[#controls + 1] = swatch end
 end
+for _, slider in ipairs(page.sizes) do controls[#controls + 1] = slider end
 local quiet = 0
 for _, control in ipairs(controls) do
-    if type(control.hint) ~= "string" or control.hint == "" or control.hint:find("\226\128\148", 1, true) then quiet = quiet + 1 end
+    local hint = type(control.hint) == "function" and control.hint(control) or control.hint
+    if type(hint) ~= "string" or hint == "" or hint:find("\226\128\148", 1, true) then quiet = quiet + 1 end
 end
-Equal(#controls .. " " .. quiet, "38 0", "every tick, choice and colour has a note, none with an em dash")
-local help = {}
-for _, line in ipairs(page.help) do help[#help + 1] = S[line].text end
-help = table.concat(help, "\n")
-Equal(help:find("/countdown", 1, true) ~= nil and help:find("/rw", 1, true) ~= nil and help:find("Edit Mode", 1, true) ~= nil, true,
-    "how to see each part in the game")
-Equal(help:find("aren't in WoW Forever yet", 1, true) ~= nil and help:find("\226\128\148", 1, true) == nil, true,
-    "and that Blizzard's boss timeline isn't in WoW Forever yet; no em dashes")
+Equal(#controls .. " " .. quiet, "44 0", "every tick, choice, colour, size and button has a note, none with an em dash")
+-- No "In the game" section: no heading, no how-to lines anywhere on the page.
+-- The boss cast bars' how-to stays in the Edit Mode button's own note.
+do
+    local found = {}
+    for _, obj in ipairs(Within(page)) do
+        local text = S[obj].kind == "FontString" and tostring(S[obj].text or "") or ""
+        for _, phrase in ipairs({ "IN THE GAME", "In the game", "/countdown", "/rw", "boss timeline", "WoW Forever yet" }) do
+            if text:find(phrase, 1, true) then found[#found + 1] = text end
+        end
+    end
+    local editNote = page.editMode.hint(page.editMode)
+    Equal(tostring(page.help) .. " " .. #found .. " " .. tostring(editNote:find("Tick Boss Frames there to see the boss cast bars", 1, true) ~= nil),
+        "nil 0 true", "no In the game section on the page; the Edit Mode button's note still says to tick Boss Frames")
+end
+-- The page fits above the footer, and nothing on it overlaps (see Placer).
+do
+    local FOOTER = 489 -- the page's height, down to the window's footer
+    local Rect = Placer(page)
+    local function Overlap(a, b)
+        return a[1] < b[1] + b[3] and b[1] < a[1] + a[3] and a[2] < b[2] + b[4] and b[2] < a[2] + a[4]
+    end
+    -- Every piece of the options, and the three preview boxes: inside their
+    -- frame, and none on another.
+    local function Laid(parent, list)
+        local left, top, width, height = Rect(parent)
+        local rects, outside, overlaps = {}, {}, {}
+        for _, obj in ipairs(list) do
+            local l, t, w, h = Rect(obj)
+            local rect = { l, t, w, h, S[obj].text or (obj.text and S[obj.text].text) or (obj.label and S[obj.label].text) or S[obj].kind }
+            if l < left or t < top or l + w > left + width or t + h > top + height then outside[#outside + 1] = rect[5] end
+            for _, other in ipairs(rects) do
+                if Overlap(rect, other) then overlaps[#overlaps + 1] = rect[5] .. " on " .. other[5] end
+            end
+            rects[#rects + 1] = rect
+        end
+        return #rects, table.concat(outside, ", "), table.concat(overlaps, ", ")
+    end
+    local inside = {}
+    for _, obj in ipairs(objects) do
+        if S[obj].parent == page.options and S[obj].shown then inside[#inside + 1] = obj end
+    end
+    local count, outside, overlaps = Laid(page.options, inside)
+    Equal(count .. " | " .. outside .. " | " .. overlaps, "49 |  | ",
+        "every tick, label, colour, choice, size, the Edit Mode button and the boss note inside the options, none on another")
+    count, outside, overlaps = Laid(page.tray, { page.boxes.pull, page.boxes.warnings, page.boxes.boss })
+    Equal(count .. " | " .. outside .. " | " .. overlaps, "3 |  | ", "the three preview boxes inside the preview, side by side")
+    -- The boss note at its longest, still inside the options.
+    local note, top = 0, select(2, Rect(page.bossNote)) - select(2, Rect(page.options))
+    for _, text in ipairs({ S[page.bossNote].text,
+        "EraUI's Cast Bars style these while they're on (/era, Casting). This waits until they're off, or for a newer EraUI.",
+        "While this is on, they take your look instead of EraUI's. In a fight the game keeps each cast secret, so the bar keeps one colour." }) do
+        page.bossNote:SetText(text)
+        note = math.max(note, page.bossNote:GetStringHeight())
+    end
+    FECMFrame:Refresh()
+    -- The page closes up under the options: nothing of its own below them,
+    -- and they end above the footer. (page.top, the tour's two-cornered
+    -- outline target, sits on the preview and the tick row.)
+    local lowest, below, pieces = 0, {}, 0
+    local _, optionsTop, _, optionsHeight = Rect(page.options)
+    for _, obj in ipairs(objects) do
+        if S[obj].parent == page and S[obj].shown and obj ~= page.top then
+            pieces = pieces + 1
+            local _, t, _, h = Rect(obj)
+            lowest = math.max(lowest, t + h)
+            if t + h > optionsTop + optionsHeight then below[#below + 1] = S[obj].text or S[obj].kind end
+        end
+    end
+    Equal(pieces .. " " .. lowest .. " " .. (optionsTop + optionsHeight) .. " | " .. table.concat(below, ", ") .. " | "
+        .. tostring(lowest <= FOOTER) .. " " .. tostring(top + note <= optionsHeight), "4 388 388 |  | true true",
+        "the title, its status, the preview and the options; nothing below the options, which end above the footer (489);"
+            .. " the boss note inside them at its longest")
+end
 
 -- The previews animate on their own, never through Blizzard's code.
 local tick = S[page.tray].scripts.OnUpdate
@@ -589,8 +785,409 @@ Equal(string.format("%g", Last(pull.digit1, "SetTexCoord", 1)), "0.5", "then 2")
 lockdown = true
 page.outline.buttons[1]:Click()
 Equal(ns.Get("warningOutline") .. " " .. Last(line1, "SetFont", 3), "none ", "changed in a fight, as looks only")
+page.sizes[4]:Choose(60)
+Equal(ns.Get("emoteSize") .. " " .. Last(line2, "SetFont", 2), "60 13", "and sizes too")
 lockdown = false
 Equal(#printed, 0, "no errors on the page")
+
+-- Edit Mode: opened only by the game's own /editmode, from a click on a
+-- secure button of the game's. It's made the first time the mouse comes over
+-- the page's Edit Mode button, out of a fight, and is never part of the
+-- window, so the window can always be moved and closed in a fight. Once Edit
+-- Mode shows, the window closes, as Edit Mode opens under it.
+-- A press goes to whatever takes the mouse on top under it, so this keeps the
+-- game's layering too: each frame's strata (its own, or its parent's), its
+-- level (its own, never under its parent's), and the window coming to the
+-- front of its strata whenever it's pressed or opened (it's toplevel). The
+-- secure button's OnClick is the template's, as SecureActionButton_OnClick
+-- (Blizzard_FrameXML/SecureTemplates.lua, forever branch) runs it for an
+-- addon's button, which never gets isKeyPress or isSecureAction: the action
+-- on the press with Action Button Use Key Down on, on the release with it off.
+do
+    local made, makes, touched, panels = nil, 0, 0, 0
+    -- Anything that would hold the window in a fight: none of it in one.
+    local PROTECTED = { "SetPoint", "SetAllPoints", "ClearAllPoints", "Show", "Hide", "SetShown", "SetFrameLevel",
+        "SetFrameStrata", "RegisterForClicks", "SetParent", "SetScale", "SetScript", "SetSize", "EnableMouse", "Raise" }
+    function Proto:SetAllPoints(relative) S[self].points = { { "ALL", relative } } end
+    -- A frame's strata, as set (the window's was set as it was made); UIParent's children start at MEDIUM.
+    function Proto:SetFrameStrata(strata) S[self].strata = strata end
+    function Proto:GetFrameStrata() return S[self].strata or Last(self, "SetFrameStrata") or "MEDIUM" end
+    -- Like the game: IsMouseOver is only where the mouse is (mouseOver);
+    -- IsMouseMotionFocus is whether the frame is what the mouse is on, with
+    -- nothing else over it there (focus).
+    function Proto:IsMouseMotionFocus() return S[self].focus == true end
+
+    -- The game's layering.
+    local RANK = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+    local REGION = { Texture = true, FontString = true, Font = true }
+    local flatLevel = Proto.GetFrameLevel
+    local function Strata(f)
+        local own = S[f].strata or Last(f, "SetFrameStrata")
+        if own then return own end
+        local parent = S[f].parent
+        return parent and S[parent] and Strata(parent) or "MEDIUM"
+    end
+    local function Level(f)
+        local parent = S[f].parent
+        local floor = parent and S[parent] and Level(parent) + 1 or 0
+        return math.max(S[f].level or Last(f, "SetFrameLevel") or floor, floor)
+    end
+    local function InTree(f, root)
+        while f do
+            if f == root then return true end
+            f = S[f] and S[f].parent
+        end
+        return false
+    end
+    function Proto:GetFrameLevel() return Level(self) end
+    function Proto:SetFrameLevel(level) S[self].level, S[self].last.SetFrameLevel = level, table.pack(level) end
+    function Proto:EnableMouse(on) S[self].mouse, S[self].last.EnableMouse = on, table.pack(on) end
+    -- To the front of its strata: above every other frame showing in it.
+    function Proto:Raise()
+        local strata, top = Strata(self), 0
+        for _, f in ipairs(objects) do
+            if not REGION[S[f].kind] and f:IsVisible() and not InTree(f, self) and Strata(f) == strata then
+                top = math.max(top, Level(f))
+            end
+        end
+        S[self].level, S[self].last.Raise = math.max(Level(self), top + 1), table.pack()
+    end
+
+    -- The game's own click on the secure button.
+    local useKeyDown = "1" -- Action Button Use Key Down, on as the game starts
+    local canEnter = true -- EditModeManagerFrame:CanEnterEditMode()
+    local opened, ranOn, chat = 0, nil, {}
+    local function TemplateClick(self, _, down)
+        local onPress = useKeyDown == "1"
+        if not ((down and onPress) or (not down and not onPress)) then return end
+        local a = S[self].attributes
+        if a.type == "macro" and a.macrotext == "/editmode" then
+            -- The game's /editmode: Edit Mode, or a line in chat saying it can't.
+            ranOn = down and "press" or "release"
+            if canEnter then
+                opened = opened + 1
+                S[EditModeManagerFrame].shown = true
+            else
+                chat[#chat + 1] = "can't enter Edit Mode"
+            end
+        end
+    end
+    -- Clicks it hears: the press, the release, or both.
+    local function Registered(f, down)
+        local call = S[f].last.RegisterForClicks
+        for i = 1, call and call.n or 0 do
+            if call[i] == (down and "AnyDown" or "AnyUp") or call[i] == (down and "LeftButtonDown" or "LeftButtonUp") then
+                return true
+            end
+        end
+        return false
+    end
+
+    local create = _G.CreateFrame
+    _G.CreateFrame = function(kind, name, parent, template)
+        local f = create(kind, name, parent, template)
+        if template == "SecureActionButtonTemplate" then
+            assert(not lockdown, "made a secure button in a fight")
+            made, makes = f, makes + 1
+            S[f].template, S[f].attributes = template, {}
+            S[f].scripts.OnClick = TemplateClick
+            for _, method in ipairs(PROTECTED) do
+                local plain = f[method]
+                rawset(f, method, function(self, ...)
+                    if lockdown then touched = touched + 1 end
+                    return plain(self, ...)
+                end)
+            end
+            rawset(f, "SetAttribute", function(self, key, value)
+                if lockdown then touched = touched + 1 end
+                S[self].attributes[key] = value
+            end)
+            rawset(f, "SetParent", function(self, parent)
+                if lockdown then touched = touched + 1 end
+                S[self].parent = parent
+            end)
+        end
+        return f
+    end
+    -- Whether the secure button sits anywhere inside the window.
+    local function InWindow()
+        local parent = S[made].parent
+        while parent do
+            if parent == FECMFrame then return true end
+            parent = S[parent] and S[parent].parent
+        end
+        return false
+    end
+    -- No addon code opens Edit Mode or a panel.
+    _G.ShowUIPanel = function() panels = panels + 1 end
+    rawset(EditModeManagerFrame, "EnterEditMode", function() panels = panels + 1 end)
+    -- As the game: hiding a frame runs OnHide on everything showing inside it.
+    local function HideTree(frame)
+        local inside = {}
+        for _, obj in ipairs(objects) do
+            if obj ~= frame and obj:IsVisible() then
+                local parent = S[obj].parent
+                while parent and parent ~= frame do parent = S[parent] and S[parent].parent end
+                if parent == frame then inside[#inside + 1] = obj end
+            end
+        end
+        Proto.Hide(frame)
+        for _, obj in ipairs(inside) do
+            if S[obj].scripts.OnHide then S[obj].scripts.OnHide(obj) end
+        end
+    end
+    -- The window hidden by the addon's own code, as the game would.
+    rawset(FECMFrame, "Hide", HideTree)
+    local function Enter(frame) S[frame].scripts.OnEnter(frame) end
+    local function Leave(frame) S[frame].scripts.OnLeave(frame) end
+    local function Footer() return S[FECMFrame.note].text end
+    local IN_A_FIGHT = "Edit Mode can't open in a fight. Try again once it's over."
+    local AGAIN = "Click Edit Mode again to open it, or type /editmode."
+    local button = page.editMode
+
+    -- Takes the mouse: a plain button as the game makes it; the secure one
+    -- only once told to, not left to the template.
+    local function Mouse(f)
+        local on = S[f].mouse
+        if on == nil and f ~= made then on = S[f].kind == "Button" end
+        return on == true
+    end
+    -- What a press on the page's Edit Mode button reaches: of the frames
+    -- there that take the mouse, the one on top (strata, then level). The
+    -- secure button is there when it's laid over the whole of the page's.
+    local function Under()
+        local best, height
+        for _, f in ipairs({ button, made }) do
+            local at = S[f].points
+            local there = f == button or (#at == 1 and at[1][1] == "ALL" and at[1][2] == button)
+            if there and f:IsVisible() and Mouse(f) then
+                local h = RANK[Strata(f)] * 1000000 + Level(f)
+                if not best or h > height then best, height = f, h end
+            end
+        end
+        return best
+    end
+    -- A left click there, as the game delivers it: to the secure button if
+    -- it's on top, the press and then the release (only while it still
+    -- shows), each followed by its PostClick; otherwise to the page's button,
+    -- whose press brings the window to the front (toplevel) and whose
+    -- release clicks it.
+    local function Press()
+        local target = Under()
+        if target == made then
+            for _, down in ipairs({ true, false }) do
+                if made:IsVisible() and Registered(made, down) then
+                    S[made].scripts.OnClick(made, "LeftButton", down)
+                    local post = S[made].scripts.PostClick
+                    if post then post(made, "LeftButton", down) end
+                end
+            end
+            return "secure"
+        elseif target == button then
+            FECMFrame:Raise()
+            button:Click()
+            return "page"
+        end
+        return "nothing"
+    end
+    -- Where the secure button is: shown, laid over the whole of the page's
+    -- button (both corners), and its strata.
+    local function Over()
+        local points = S[made].points
+        return tostring(S[made].shown) .. " " .. #points .. " " .. tostring(points[1] and points[1][1]) .. " "
+            .. tostring(points[1] and points[1][2] == button) .. " " .. Strata(made)
+    end
+    -- What a press there reaches, and whether its strata is above the window's.
+    local function OnTop()
+        return tostring(Under() == made) .. " " .. tostring(RANK[Strata(made)] > RANK[Strata(FECMFrame)])
+    end
+    -- A click with Use Key Down on ("1") or off ("0"): what it reached, how
+    -- many times Edit Mode opened, on the press or the release, and whether
+    -- the window and the secure button still show (and its anchors).
+    local function Click(keyDown)
+        useKeyDown, ranOn = keyDown, nil
+        local was = opened
+        local reached = Press()
+        return reached .. " " .. (opened - was) .. " " .. tostring(ranOn) .. " " .. tostring(S[FECMFrame].shown) .. " "
+            .. tostring(S[made].shown) .. " " .. #S[made].points
+    end
+    -- Edit Mode shut, the window opened again on the page, the mouse coming
+    -- onto the button (the page's hears OnEnter, then the secure one takes it).
+    local function Again()
+        S[EditModeManagerFrame].shown = false
+        ns.ShowWindow()
+        FECMFrame:Select("raid")
+        Enter(button)
+        Leave(button)
+        Enter(made)
+    end
+
+    Equal(S[button.label].text .. " " .. tostring(S[button].points[1][2] == page.bossTick) .. " " .. S[button].points[1][3] .. " "
+        .. tostring(made) .. " " .. tostring(Under() == button), "Edit Mode true RIGHT nil true",
+        "an Edit Mode button beside the Boss cast bars tick; nothing secure made yet")
+
+    Enter(button)
+    Equal(S[made].template .. " " .. S[made].name .. " " .. tostring(S[made].parent == UIParent) .. " " .. tostring(InWindow()),
+        "SecureActionButtonTemplate FECMEditModeButton true false",
+        "the mouse over it: a secure button of the game's, UIParent's, never inside the window")
+    Equal(S[made].attributes.type .. " " .. S[made].attributes.macrotext .. " " .. tostring(Last(made, "RegisterForClicks", 1)) .. " "
+        .. tostring(Last(made, "RegisterForClicks", 2)) .. " " .. tostring(Registered(made, true)) .. " " .. tostring(Registered(made, false))
+        .. " " .. tostring(S[made].mouse), "macro /editmode AnyUp AnyDown true true true",
+        "a click runs the game's own /editmode, heard on the press and the release (either Use Key Down setting); it takes the mouse")
+    Equal(Strata(FECMFrame) .. " | " .. Over() .. " | " .. OnTop(), "FULLSCREEN_DIALOG | true 1 ALL true TOOLTIP | true true",
+        "laid over the whole of the page's button a strata above the window: a press there reaches it")
+    -- The game moves the mouse onto it, so the page's button hears OnLeave
+    -- first: that leaves the secure one where it is, under the mouse.
+    Leave(button)
+    Equal(Over() .. " | " .. OnTop(), "true 1 ALL true TOOLTIP | true true",
+        "the page's button's OnLeave, as the secure one takes the mouse, leaves it there")
+    Enter(made)
+    Equal(Footer() == button.hint(button) and Footer():find("Tick Boss Frames", 1, true) ~= nil
+        and Footer():find("closes this window", 1, true) ~= nil, true,
+        "its note in the footer: Edit Mode, closing this window, then Boss Frames")
+    -- The window brought to the front of its strata with the mouse resting
+    -- there (Options > AddOns' Open settings, which is ns.ShowWindow; a press
+    -- anywhere on the window does the same, /fecm only shows or hides it):
+    -- the page's button comes up over everything else in the window's
+    -- strata, but the secure one is a strata above.
+    ns.ShowWindow()
+    Equal(OnTop() .. " " .. tostring(Level(button) > Level(made)), "true true true",
+        "the window raised in its own strata: the secure one still what a press reaches")
+    -- What's new opened from the keyboard (/fecm new) with the mouse still
+    -- there: it opens over the window, right over the button, and the secure
+    -- one, a strata above it, is taken away first so it can't take What's
+    -- new's clicks. Closed again, the game's OnEnter puts it back on top.
+    ns.ShowNotes()
+    Equal(tostring(S[ns.notes].shown) .. " " .. tostring(S[made].shown) .. " " .. #S[made].points, "true false 0",
+        "What's new opened with the mouse on the button: the secure one taken away, not left on top of it")
+    ns.notes:Hide()
+    Enter(button)
+    Leave(button)
+    Enter(made)
+    Equal(Over() .. " | " .. OnTop(), "true 1 ALL true TOOLTIP | true true",
+        "What's new closed, the mouse on the button: the secure one back over it, on top")
+    Leave(made)
+    Equal(tostring(S[made].shown) .. " " .. #S[made].points .. " " .. tostring(Footer():find("Edit Mode", 1, true)), "false 0 nil",
+        "the mouse gone: hidden, anchored to nothing, the footer at rest")
+    -- The window closed, or the page switched, with the mouse still there.
+    Enter(button)
+    HideTree(FECMFrame)
+    Equal(tostring(S[made].shown) .. " " .. #S[made].points, "false 0", "the window closed under the mouse: taken away too")
+    ns.ShowWindow()
+    Enter(button)
+    HideTree(page)
+    Equal(tostring(S[made].shown) .. " " .. #S[made].points, "false 0", "another page chosen: taken away too")
+    FECMFrame:Select("raid")
+
+    -- Back on the page, the mouse resting on the button: the game sends no
+    -- new OnEnter, so a press reaches the page's own button. That raises the
+    -- window, and out of a fight puts the secure one straight back over it,
+    -- on top, with the footer saying to click again; the message stays as
+    -- the secure one takes the mouse, and the next click opens Edit Mode.
+    Equal(Press() .. " | " .. Footer() .. " | " .. Over() .. " | " .. OnTop() .. " " .. opened,
+        "page | " .. AGAIN .. " | true 1 ALL true TOOLTIP | true true 0",
+        "a press on the page's own button: the secure one back on top, the footer says to click again")
+    Leave(button)
+    Enter(made)
+    Equal(Footer(), AGAIN, "the message stays as the secure one takes the mouse")
+    Equal(Click("1"), "secure 1 press false false 0",
+        "the next click: Edit Mode opens, the window closes and the secure button goes with it")
+    Again()
+
+    -- A fight: taken away as it starts, before the game locks secure buttons.
+    -- The mouse rests on the button from here on, through the whole fight,
+    -- with nothing over it.
+    S[button].mouseOver, S[button].focus = true, true
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    Equal(tostring(S[made].shown) .. " " .. #S[made].points .. " " .. S[button].alpha .. " " .. tostring(button.usable),
+        "false 0 0.35 false", "a fight: the secure button gone before the lock, the page's button greyed")
+    Enter(button)
+    Equal(tostring(S[made].shown) .. " " .. Footer(), "false " .. IN_A_FIGHT,
+        "the mouse over it in a fight: nothing secure moved, the note says why")
+    -- Clicked in a fight: the page's own button takes it, with its own message, the hover note gone first.
+    Leave(button)
+    local resting = Footer()
+    Equal(Press() .. " " .. tostring(resting ~= IN_A_FIGHT) .. " " .. Footer(), "page true " .. IN_A_FIGHT,
+        "clicked in a fight: the page's button says so itself")
+    -- The window moves and closes in a fight, and What's new opens and
+    -- closes: nothing secure is in it, holds on to it or is touched.
+    FECMFrame:StartMoving()
+    FECMFrame:StopMovingOrSizing()
+    ns.ShowNotes()
+    ns.notes:Hide()
+    HideTree(FECMFrame)
+    ns.ShowWindow()
+    FECMFrame:Select("raid")
+    Equal(tostring(S[FECMFrame].shown) .. " " .. #S[made].points .. " " .. touched, "true 0 0",
+        "the window moved, closed and opened, and What's new opened, in a fight; the secure button never touched")
+    -- The fight over with the mouse still on the button: the game sends no
+    -- new OnEnter, so the secure button goes back over it at once.
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(S[button].alpha .. " " .. tostring(button.usable) .. " | " .. Over() .. " | " .. OnTop(),
+        "1 true | true 1 ALL true TOOLTIP | true true",
+        "the fight over, the mouse never moved: the button back, the secure one over it again, on top")
+    local placedInWindow = InWindow()
+    Leave(button)
+    Enter(made)
+    Equal(Footer() == button.hint(button), true, "and its note, as the game moves the mouse onto it")
+
+    -- Clicked when Edit Mode can't open: the game says so in chat, and the
+    -- window and the secure button stay. Clicked when it can: Edit Mode
+    -- opens once, on the press with Use Key Down on (as the game starts) or
+    -- on the release with it off; then the window closes (Edit Mode opens
+    -- under it) and the secure button goes with it, so a release after the
+    -- press finds nothing.
+    canEnter = false
+    Equal(Click("1") .. " " .. #chat, "secure 0 press true true 1 1", "Edit Mode can't open: the game says why; the window stays")
+    canEnter = true
+    Equal(Click("1"), "secure 1 press false false 0", "Use Key Down on: Edit Mode opens on the press, the window closes")
+    Again()
+    Equal(Click("0"), "secure 1 release false false 0", "Use Key Down off: on the release, the window closes")
+    S[EditModeManagerFrame].shown = false
+    -- A fight ending with the window closed, or the mouse elsewhere: nothing placed.
+    local function Fight()
+        Fire("PLAYER_REGEN_DISABLED")
+        lockdown = true
+        lockdown = false
+        Fire("PLAYER_REGEN_ENABLED")
+        return tostring(S[made].shown) .. " " .. #S[made].points
+    end
+    local closed = Fight()
+    ns.ShowWindow()
+    FECMFrame:Select("raid")
+    S[button].mouseOver, S[button].focus = false, false
+    Equal(closed .. " | " .. Fight(), "false 0 | false 0", "a fight ends with the window closed, or the mouse off the button: nothing placed")
+    -- The mouse where the button is, but What's new (or the "Are you sure?"
+    -- shade) over it as the fight ends: the button isn't what the mouse is
+    -- on, so the secure one isn't laid over them.
+    S[button].mouseOver = true
+    Equal(Fight(), "false 0", "a fight ends with the mouse there but What's new over the button: nothing placed")
+    S[button].mouseOver = false
+    -- A fight starting or ending refreshes the window only while this page
+    -- shows: here its Edit Mode message is no longer true and goes; on
+    -- another page, that page's message stays.
+    local reached, said = Press(), Footer()
+    local fought = Fight()
+    Equal(reached .. " " .. tostring(said == AGAIN) .. " " .. fought .. " " .. tostring(Footer() == AGAIN), "page true false 0 false",
+        "the page's own button clicked, then a fight: its Click again message gone with the fight")
+    FECMFrame:Select("general")
+    FECMFrame:Say("Kept.")
+    FECMFrame:Refresh()
+    said = Footer()
+    fought = Fight()
+    Equal(said .. " " .. fought .. " " .. Footer(), "Kept. false 0 Kept.", "on another page, a fight leaves its message alone")
+    FECMFrame:Select("raid")
+    Equal(makes .. " " .. touched .. " " .. panels .. " " .. #printed .. " " .. tostring(placedInWindow) .. " "
+        .. tostring(S[made].parent == UIParent) .. " " .. tostring(S[made].scripts.OnClick == TemplateClick) .. " "
+        .. tostring(S[made].scripts.PreClick), "1 0 0 0 false true true nil",
+        "one secure button, never touched in a fight, still UIParent's after every placing; its OnClick still the"
+            .. " template's, no PreClick; no addon code opened Edit Mode or a panel; no errors")
+    _G.CreateFrame = create
+    Proto.GetFrameLevel, Proto.SetFrameLevel, Proto.EnableMouse, Proto.Raise = flatLevel, nil, nil, nil
+    Proto.IsMouseMotionFocus = nil
+end
 
 -- Kept over a reload; anything invalid reads as the default.
 local saved = ForeverEnhancedCooldownManagerDB
@@ -603,6 +1200,11 @@ Equal(S[Boss2TargetFrameSpellBar.Border].alpha, 0, "and Blizzard's boss bars res
 saved.pullNumbers, saved.warningOutline, saved.emoteColour, saved.bossColour = "pink", 3, "charcoal", "white"
 Equal(ns.Get("pullNumbers") .. " " .. ns.Get("warningOutline") .. " " .. ns.Get("emoteColour") .. " " .. ns.Get("bossColour"),
     "gold outline default default", "anything else is ignored: text colours and bar colours stay apart")
+Equal(ns.Get("pullBarSize") .. " " .. ns.Get("pullNumberSize") .. " " .. ns.Get("warningSize") .. " " .. ns.Get("emoteSize") .. " "
+    .. ns.Get("raidSize"), "120 200 150 60 110", "sizes kept over a reload")
+saved.pullBarSize, saved.pullNumberSize, saved.warningSize, saved.emoteSize, saved.raidSize = 400, 20, "big", true, 200
+Equal(ns.Get("pullBarSize") .. " " .. ns.Get("pullNumberSize") .. " " .. ns.Get("warningSize") .. " " .. ns.Get("emoteSize") .. " "
+    .. ns.Get("raidSize"), "100 100 100 100 100", "sizes out of their limits read as 100")
 
 -- EraUI's Classic cast bars on: the boss bars are EraUI's, and the page says so.
 Environment()
@@ -665,6 +1267,234 @@ Equal(S[page.boss].alpha .. " " .. S[Boss1TargetFrameSpellBar.Border].alpha .. "
 Equal(S[page.bossNote].text:find("\226\128\148", 1, true), nil, "no em dash in the note")
 Equal(#printed, 0, "no errors")
 
+-- What's new's tour: three steps for this page, of the update after 1.4.0
+-- (Unreleased until the release numbers them). They open the page and point:
+-- at the preview and its switches, at All sizes, then at the Edit Mode
+-- button. The box never covers what a step asks you to use. Places are from
+-- the page's top left, y down.
+do
+    Environment()
+    BlizzardFrames()
+    ns = LoadAll({ useBars = true, notesSeen = "1.3.0" })
+    local Tour = ns.Tour
+    local function Titles(list)
+        local titles = {}
+        for _, step in ipairs(list) do titles[#titles + 1] = step.title end
+        return table.concat(titles, ", ")
+    end
+    -- One version for all three, newer than 1.4.0: Unreleased now, the
+    -- release's number once it gives them one.
+    local function Versions(list)
+        local same, newer = true, true
+        for _, step in ipairs(list) do
+            same = same and step.version == list[1].version
+            newer = newer and ns.CompareVersions(step.version, "1.4.0") == 1
+        end
+        return tostring(same) .. " " .. tostring(newer)
+    end
+    local RAID = "Raid Timers, Sizes, Edit Mode"
+    local added = Tour:News("1.2.0")
+    Equal(Titles(added) .. " | " .. Versions(added), RAID .. " | true true",
+        "after 1.2.0: three steps for Raid Timers, one version newer than 1.4.0 (Unreleased until the release numbers them)")
+    Equal(Titles(Tour:News("1.3.0")) .. " | " .. Titles(Tour:News("1.4.0")) .. " | " .. Titles(Tour:News(nil)),
+        RAID .. " | " .. RAID .. " | " .. RAID, "after 1.3.0 or 1.4.0 the same three, and by hand too: the newest there are")
+    -- Short and plain: no em dashes, no longer than the basics' steps, and
+    -- Edit Mode opened by its button, never typed.
+    local basics = 0
+    for _, step in ipairs(Tour:News("0.9.0")) do
+        local text = type(step.text) == "function" and step.text() or step.text
+        if step.version == "1.0.0" then basics = math.max(basics, #text) end
+    end
+    for _, step in ipairs(added) do
+        local all = step.title .. " " .. step.text .. " " .. (step.try or "") .. " " .. (step.alreadyText or "")
+        Equal(tostring(all:find("\226\128\148", 1, true)) .. " " .. tostring(basics > 0 and #step.text <= basics) .. " "
+            .. tostring(all:lower():find("/editmode", 1, true)), "nil true nil",
+            step.title .. ": no em dash, no longer than the basics' steps, no /editmode to type")
+    end
+    -- How many of the phrases the text has.
+    local function Has(text, ...)
+        local found = 0
+        for _, phrase in ipairs({ ... }) do
+            if text:find(phrase, 1, true) then found = found + 1 end
+        end
+        return found
+    end
+    Equal(Has(added[1].text, "pull countdown", "raid warnings", "boss emotes", "boss cast bars") .. " "
+        .. Has(added[1].text, "in raids and dungeons", "Each part is off until you tick it."),
+        "4 2", "the first names all four parts, where they work and that each is off until ticked")
+    -- Only the countdown, raid warnings and emotes have sizes (R:Scale): the
+    -- boss cast bars keep Blizzard's, and the step says so.
+    Equal(Has(added[2].text, "countdown", "raid warnings", "emotes", "All sizes", "Boss cast bars keep Blizzard's size.") .. " "
+        .. tostring(added[2].text:lower():find("each part", 1, true)) .. " " .. tostring(added[2].text:find("Edit Mode", 1, true)),
+        "5 nil nil", "the second names the three parts with sizes and All sizes, and says the boss cast bars keep Blizzard's size")
+    Equal(Has(added[3].text, "Edit Mode button", "Boss Frames", "boss fight") .. " " .. tostring(added[3].try),
+        "3 nil", "the third: the Edit Mode button and Boss Frames, no Try it (Edit Mode closes the window)")
+
+    -- After an update from 1.3.0: What's new offers them.
+    for _, timer in ipairs(timers) do timer() end
+    local notes = FECMNotes
+    Equal(tostring(S[notes].shown) .. " " .. tostring(notes.seen) .. " " .. tostring(S[notes.tour].shown), "true 1.3.0 true",
+        "What's new after an update from 1.3.0 offers Show me what's new")
+    notes.tour:Click()
+    local w, box = FECMFrame, FECMTour
+    local raid = w.pages.raid
+    Equal(tostring(S[notes].shown) .. " " .. S[box.count].text .. " " .. w.selected .. " " .. S[box.title].text .. " "
+        .. tostring(S[w.nav.raid.fill].shown), "false 1 of 3 raid RAID TIMERS true",
+        "it closes What's new and opens More > Raid Timers on the first step")
+
+    -- Where things are on the page.
+    local tray, options = S[raid.tray], S[raid.options]
+    local x0, trayTop = tray.points[1][2], -tray.points[1][3]
+    local optionsTop = trayTop + tray.height - options.points[1][5]
+    local right = x0 + options.width
+    local FOOTER = 489 -- the page's height, down to the window's footer
+    local OUTLINE = 4 -- how far outside its part the tour's outline sits
+    -- left, top, width, height of something on the options, by its one anchor
+    local function On(obj)
+        local at = S[obj].points[1]
+        local width, height = S[obj].width, S[obj].height
+        if obj.box and obj.text then width, height = 18 + #S[obj.text].text * 6, 16 end -- a tick: its box and label
+        return { x0 + at[2], optionsTop - at[3], width, height }
+    end
+    local function Overlap(a, b)
+        return a[1] < b[1] + b[3] and b[1] < a[1] + a[3] and a[2] < b[2] + b[4] and b[2] < a[2] + a[4]
+    end
+    local function Inside(a, b)
+        return a[1] >= b[1] and a[2] >= b[2] and a[1] + a[3] <= b[1] + b[3] and a[2] + a[4] <= b[2] + b[4]
+    end
+    local function Grow(rect, by)
+        return { rect[1] - by, rect[2] - by, rect[3] + 2 * by, rect[4] + 2 * by }
+    end
+    -- How many of the rects a rect overlaps.
+    local function Covers(rect, list)
+        local count = 0
+        for _, other in ipairs(list) do
+            if Overlap(rect, other) then count = count + 1 end
+        end
+        return count
+    end
+    local pullTick, warningTick, bossTick = On(raid.pullTick), On(raid.warningTick), On(raid.bossTick)
+    local edit = S[raid.editMode]
+    Equal(edit.points[1][1] .. " " .. tostring(edit.points[1][2] == raid.bossTick) .. " " .. edit.points[1][3] .. " " .. edit.points[1][4],
+        "LEFT true RIGHT 10", "the Edit Mode button right of the boss cast bars' tick")
+    local editRect = { bossTick[1] + bossTick[3] + 10, bossTick[2] + bossTick[4] / 2 - edit.height / 2, edit.width, edit.height }
+    local sizes = raid.sizes
+    local sizeRects = { On(sizes[1]), On(sizes[2]), On(sizes[3]), On(sizes[4]), On(sizes[5]) }
+    local noteRect = On(raid.bossNote)
+    noteRect[4] = raid.bossNote:GetStringHeight() -- text: as tall as its lines
+    -- The box: its size as the tour fitted it round its text, hanging from its anchor.
+    local function Box(anchorRight, anchorBottom)
+        local p = S[box].points[1]
+        return { anchorRight + p[4] - S[box].width, anchorBottom - p[5], S[box].width, S[box].height }
+    end
+
+    -- The first step: the preview and the two ticks along its foot as one part.
+    local top, o, p = S[raid.top].points, S[box.outline].points, S[box].points[1]
+    Equal(top[1][1] .. " " .. tostring(top[1][2] == raid.tray) .. " " .. top[1][3] .. " | " .. top[2][1] .. " "
+        .. tostring(top[2][2] == raid.options) .. " " .. top[2][3] .. " " .. top[2][4] .. " " .. top[2][5] .. " | "
+        .. tostring(S[raid.top].parent == raid) .. " " .. tostring(Last(raid.top, "EnableMouse")),
+        "TOPLEFT true TOPLEFT | BOTTOMRIGHT true TOPRIGHT 0 -20 | true nil",
+        "one part from the preview's top left to the foot of the tick row, the page's own (not the options'), taking no clicks")
+    local part = { x0, trayTop, right + top[2][4] - x0, optionsTop - top[2][5] - trayTop }
+    Equal(tostring(Inside(pullTick, part)) .. " " .. tostring(Inside(warningTick, part)) .. " " .. tostring(Overlap(bossTick, part)),
+        "true true false", "round the countdown's and the raid warnings' ticks; the boss cast bars' tick is further down")
+    Equal(tostring(o[1][2] == raid.top and o[2][2] == raid.top) .. " " .. tostring(S[box.outline].shown) .. " " .. p[1] .. " "
+        .. tostring(p[2] == raid.top) .. " " .. p[3] .. " " .. S[box.arrow].points[1][3],
+        "true true TOPRIGHT true BOTTOMRIGHT TOPRIGHT", "outlining it, the box under its right end, its arrow at that end")
+    local first = Box(part[1] + part[3], part[2] + part[4])
+    Equal(tostring(first[1] >= x0 + 312) .. " " .. tostring(first[1] + first[3] <= right) .. " "
+        .. tostring(first[2] + first[4] <= FOOTER) .. " " .. tostring(p[5] + S[box.arrow].height < o[2][5]),
+        "true true true true", "the box in the raid warnings' column, inside the page, its arrow's tip just under the outline")
+    Equal(tostring(Overlap(first, pullTick)) .. " " .. tostring(Overlap(first, warningTick)) .. " " .. tostring(Overlap(first, bossTick))
+        .. " " .. tostring(Overlap(first, editRect)), "false false false false",
+        "clear of all three ticks and the Edit Mode button")
+    Equal(S[box.text].text:find("Try it: tick one and watch the preview.", 1, true) ~= nil and not S[box.back].shown, true,
+        "asking you to tick one and watch the preview, with no Back on the first step")
+    raid.pullTick:Click()
+    S[box].scripts.OnUpdate(box, 1)
+    Equal(tostring(ns.Get("pullTimer")) .. " " .. S[raid.pull].alpha .. " " .. S[box.title].text, "true 1 RAID TIMERS",
+        "ticked: its preview lights up, and the step stays so it can be seen")
+    w:Select("look")
+    Equal(tostring(S[box].shown) .. " " .. tostring(S[box.outline].shown), "true false", "on another page the outline hides, the box stays")
+
+    -- The second step: All sizes alone, back on the page.
+    box.next:Click()
+    local allSizes = sizes[#sizes]
+    o, p = S[box.outline].points, S[box].points[1]
+    Equal(S[box.count].text .. " " .. w.selected .. " " .. S[box.title].text .. " " .. S[box.next.label].text .. " " .. tostring(S[box.back].shown),
+        "2 of 3 raid SIZES Next true", "then the sizes")
+    Equal(tostring(o[1][2] == allSizes) .. " " .. tostring(o[2][2] == allSizes) .. " " .. p[1] .. " " .. tostring(p[2] == allSizes)
+        .. " " .. p[3] .. " " .. S[box.arrow].points[1][3], "true true TOPRIGHT true BOTTOMRIGHT TOPRIGHT",
+        "outlining All sizes alone, the box under it at its right end")
+    -- The outline round All sizes touches nothing else: not the other sizes,
+    -- the Edit Mode button or the boss note's text.
+    local ring = Grow(sizeRects[5], OUTLINE)
+    Equal(Covers(ring, { sizeRects[1], sizeRects[2], sizeRects[3], sizeRects[4], editRect, bossTick, noteRect }) .. " "
+        .. noteRect[4], "0 36", "the outline crosses no other size, no button and no line of the boss note (3 lines here)")
+    local second = Box(sizeRects[5][1] + sizeRects[5][3], sizeRects[5][2] + sizeRects[5][4])
+    Equal(Covers(second, sizeRects) .. " " .. Covers(second, { editRect, bossTick }), "0 0",
+        "the box on none of the five sizes, the Edit Mode button or the boss cast bars' tick")
+    Equal(tostring(second[2] >= trayTop + tray.height) .. " " .. tostring(second[1] >= x0 + 312) .. " "
+        .. tostring(second[1] + second[3] <= right) .. " " .. (second[2] + second[4]) .. " " .. tostring(second[2] + second[4] <= FOOTER),
+        "true true true 486 true", "the preview in sight above, the box in the right column inside the page, ending above the footer")
+    -- With no In the game lines under the options, the box sits on nothing
+    -- at all: no piece of the options, nothing of the page's own.
+    do
+        local Rect = Placer(raid)
+        local list = {}
+        for _, obj in ipairs(objects) do
+            local parent = S[obj].parent
+            if S[obj].shown and (parent == raid.options or parent == raid)
+                and obj ~= raid.options and obj ~= raid.tray and obj ~= raid.top then
+                list[#list + 1] = { Rect(obj) }
+            end
+        end
+        Equal(#list .. " " .. Covers(second, list), "51 0", "the sizes box on none of the 49 pieces of the options, the title or its status")
+    end
+    Equal(tostring(sizes[1].usable) .. " " .. tostring(sizes[3].usable), "true false",
+        "the countdown's sizes work now it's ticked; the raid warnings' still wait for theirs")
+
+    -- The third step: the Edit Mode button, the last.
+    box.next:Click()
+    o, p = S[box.outline].points, S[box].points[1]
+    local arrow = S[box.arrow].points[1]
+    Equal(S[box.count].text .. " " .. w.selected .. " " .. S[box.title].text .. " " .. S[box.next.label].text .. " " .. tostring(S[box.back].shown)
+        .. " " .. tostring(S[box.text].text == added[3].text), "3 of 3 raid EDIT MODE Done true true",
+        "then the Edit Mode button, the last step, with no Try it line")
+    Equal(tostring(o[1][2] == raid.editMode) .. " " .. tostring(o[2][2] == raid.editMode) .. " " .. p[1] .. " "
+        .. tostring(p[2] == raid.editMode) .. " " .. p[3] .. " " .. p[4] .. " " .. p[5] .. " " .. arrow[1] .. " " .. arrow[3],
+        "true true TOPLEFT true BOTTOMLEFT 0 -14 BOTTOM TOPLEFT", "outlining the button, the box under it from its left, its arrow up at it")
+    ring = Grow(editRect, OUTLINE)
+    local third = { editRect[1] + p[4], editRect[2] + editRect[4] - p[5], S[box].width, S[box].height }
+    Equal(Covers(ring, { bossTick, sizeRects[1], sizeRects[2], sizeRects[3], sizeRects[4], sizeRects[5], noteRect }) .. " "
+        .. Covers(third, { editRect, bossTick }) .. " " .. tostring(third[1] >= x0) .. " " .. tostring(third[1] + third[3] <= right) .. " "
+        .. ("%g"):format(third[2] + third[4]) .. " " .. tostring(third[2] + third[4] <= FOOTER),
+        "0 0 true true 429 true", "the outline on nothing else, the box clear of the button and the tick, inside the page")
+    box.back:Click()
+    Equal(S[box.title].text, "SIZES", "Back: the sizes again")
+    box.back:Click()
+    Equal(S[box.title].text .. " " .. tostring(S[box.text].text:find("Already on: the preview shows your look.", 1, true) ~= nil),
+        "RAID TIMERS true", "and the first step, now saying one is on")
+    box.next:Click()
+    box.next:Click()
+    box.next:Click()
+    Equal(tostring(S[box].shown) .. " " .. tostring(S[w].shown) .. " " .. S[w.note].text,
+        "false true That's what's new. See it again any time from What's new, or with /ccm new.",
+        "Done ends it, leaving the window open and saying where it is")
+    Equal(tostring(ns.Get("raidWarnings")) .. " " .. tostring(ns.Get("bossCasts")) .. " " .. ns.Get("pullBarSize") .. " "
+        .. ns.Get("raidSize"), "false false 100 100", "the tour only changed what you did yourself")
+
+    -- By hand: the same three. The full tour is still the nine basics.
+    SlashCmdList.FECM("new")
+    notes.tour:Click()
+    Equal(S[box.count].text .. " " .. w.selected .. " " .. S[box.title].text, "1 of 3 raid RAID TIMERS", "/fecm new tours them again")
+    box.skip:Click()
+    SlashCmdList.FECM("tour")
+    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of 9 THE MENU", "the full tour is still the nine basics")
+    box.skip:Click()
+    Equal(#printed, 0, "no errors")
+end
+
 -- Before a full restart the new files aren't loaded: no More heading, no page.
 Environment()
 BlizzardFrames()
@@ -674,6 +1504,23 @@ ns = LoadAll(nil, { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBa
 ns.ShowWindow()
 Equal(tostring(FECMFrame.nav.raid) .. " " .. tostring(FECMFrame.moreHeading) .. " " .. tostring(FECMFrame.pages.raid), "nil nil nil",
     "without the new files: the list as before")
+-- And What's new leaves out the Raid Timers steps: after an update there's
+-- nothing new it can show, so no button; by hand, the last steps that can.
+do
+    local byHand = ns.Tour:News(nil)
+    Equal(#ns.Tour:News("1.3.0") .. " " .. #byHand .. " " .. byHand[1].version .. " " .. byHand[#byHand].version, "0 4 1.2.0 1.2.0",
+        "without them: nothing after 1.3.0, and by hand 1.2.0's four steps")
+    ns.ShowNotes("1.3.0")
+    Equal(tostring(S[FECMNotes].shown) .. " " .. tostring(S[FECMNotes.tour].shown), "true false",
+        "What's new after an update from 1.3.0, with no Show me what's new")
+    FECMNotes:Hide()
+    SlashCmdList.FECM("new")
+    Equal(tostring(S[FECMNotes.tour].shown), "true", "opened by hand, it offers the last steps that can show")
+    FECMNotes.tour:Click()
+    Equal(S[FECMTour.count].text .. " " .. FECMFrame.selected .. " " .. S[FECMTour.title].text, "1 of 4 cd HEALTHSTONES AND POTIONS",
+        "and never opens a page that isn't there")
+    FECMTour.skip:Click()
+end
 Equal(#printed, 0, "no errors")
 
 print = _G.print

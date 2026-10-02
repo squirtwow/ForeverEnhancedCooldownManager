@@ -10,6 +10,19 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.4.1",
+        sections = {
+            { "Added", {
+                "Raid Timers: size sliders for the countdown bar, its numbers, raid warnings and boss emotes, or all at once.",
+                "Raid Timers: an Edit Mode button beside Boss cast bars.",
+                "Show me what's new now tours the Raid Timers page.",
+            } },
+            { "Changed", {
+                "Raid Timers: the \"In the game\" section is gone, for a tidier page.",
+            } },
+        },
+    },
+    {
         version = "1.4.0",
         sections = {
             { "Added", {
@@ -319,6 +332,9 @@ function ns.ShowNotes(seen)
     window.tour:SetShown(tour)
     window.discord:ClearAllPoints()
     window.discord:SetPoint("RIGHT", tour and window.tour or window.done, "LEFT", -8, 0)
+    -- Raid Timers' secure Edit Mode button taken away first, or it would sit
+    -- on top of this and take its clicks (RaidTimersPage.lua).
+    if ns.EditModeAway then ns.EditModeAway() end
     window:Show()
     window:Raise()
     window:Layout()
