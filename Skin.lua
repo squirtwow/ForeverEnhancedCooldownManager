@@ -206,10 +206,11 @@ end
 -- bar; Look shows the ones the chosen design needs and colours them, at the
 -- start and whenever the choice changes.
 
--- A bar's own colour, when one is chosen for its spell, or the colour for all.
+-- A bar's own colour, when one is chosen for its spell (at any rank), or the
+-- colour for all.
 local function BarColour(item)
     local id = SpellOf(item)
-    return Style:BarColour(id and ns.BarColours()[id] or ns.Get("barColour"))
+    return Style:BarColour(id and ns.BarColourFor(id) or ns.Get("barColour"))
 end
 
 local function Solid(texture, colour, alpha)

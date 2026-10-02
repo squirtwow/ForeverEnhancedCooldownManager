@@ -10,6 +10,23 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.4.0",
+        sections = {
+            { "Added", {
+                "Raid Timers (under More): restyles the pull countdown, raid warnings, boss emotes and boss cast bars to match your bars. Each part stays off until you tick it.",
+            } },
+            { "Updated", {
+                "Ready for the level 30 patch: the druid's Shifting Power and the warlock's Soul Harvest.",
+            } },
+            { "Fixed", {
+                "Tracked Bar colours now stay at every rank of a spell.",
+            } },
+            { "Note", {
+                "The level 30 patch merged spell ranks, so check Cooldown Settings for any ranked spells Blizzard moved.",
+            } },
+        },
+    },
+    {
         version = "1.3.0",
         sections = {
             { "Added", {

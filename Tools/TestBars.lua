@@ -1932,6 +1932,23 @@ Equal(S[rows[2].chosen].text, "Default", "the other bar unchanged")
 rows[1].swatches[4]:Click()
 Equal(ns.BarColours()[16870], nil, "clicking it again goes back to the colour for all")
 Equal(S[rows[1].chosen].text, "Default", "and says so")
+-- Since build 70170 Blizzard shows every rank of a spell on one bar, under
+-- one rank's ID: a colour picked at another rank still shows, and changing
+-- it leaves the spell one colour, under the bar's own ID.
+ns.BarColours()[1244] = "blue" -- Power Word: Fortitude rank 2, picked before the patch
+w:Refresh()
+Equal(S[rows[2].chosen].text .. " " .. S[rows[2].swatches[3]].border[1], "Blue 1", "a colour saved at rank 2 shows on the rank 1 bar")
+ns.BarColours()[1243] = "green" -- and one at rank 1, the older pick
+w:Refresh()
+Equal(S[rows[2].chosen].text .. " " .. S[rows[2].swatches[3]].border[1], "Blue 1", "with colours at both ranks, the higher rank's")
+rows[2].swatches[3]:Click()
+Equal(tostring(ns.BarColours()[1244]) .. " " .. tostring(ns.BarColours()[1243]) .. " " .. S[rows[2].chosen].text,
+    "nil nil Default", "clicking it again goes back to the colour for all, at every rank")
+ns.BarColours()[1244] = "blue"
+rows[2].swatches[5]:Click()
+Equal(tostring(ns.BarColours()[1244]) .. " " .. tostring(ns.BarColours()[1243]) .. " " .. S[rows[2].chosen].text,
+    "nil purple Purple", "another colour goes under the bar's own ID")
+ns.SetBarColour(1243, nil)
 tracked = {}
 w:Refresh()
 Equal(S[rows[1]].shown, false, "rows go with the bars")
@@ -2642,14 +2659,17 @@ local function IDs(list) return list and table.concat(list, ",") or "none" end
 -- From the game data: a name shared with an active spell lists only its
 -- passive IDs (the troll's Regeneration, not the mage's); a passive's buff
 -- of its own has its name and icon (Plainsrunning's, a talent's proc, not an
--- NPC's Regeneration) and isn't hidden (not either Dual Wield
--- Specialization's).
+-- NPC's Regeneration) and isn't hidden (not Hack and Slash's or Thick
+-- Hide's, which share their talent's name and icon). Dual Wield
+-- Specialization gives none either.
 Equal(IDs(data.PASSIVES.Regeneration) .. " " .. IDs(data.RANKS.Regeneration) .. " " .. IDs(data.PASSIVE_BUFFS[20555])
     .. " " .. IDs(data.PASSIVES.Endurance) .. " " .. IDs(data.PASSIVE_BUFFS[20550]), "20555 401417 none 13742,20550 none",
     "the troll's Regeneration and the tauren's Endurance are passive with no buff; the mage's Regeneration is active")
 Equal(IDs(data.PASSIVES.Plainsrunning) .. " " .. IDs(data.PASSIVE_BUFFS[1259918]) .. " " .. IDs(data.PASSIVE_BUFFS[12319])
-    .. " " .. IDs(data.PASSIVE_BUFFS[16487]) .. " " .. IDs(data.PASSIVE_BUFFS[13715]) .. " " .. IDs(data.PASSIVE_BUFFS[23584]),
-    "1259918 1299038 12966,16257,17687 16488,437713 none none", "Plainsrunning's speed buff, Flurry's and Blood Craze's buffs")
+    .. " " .. IDs(data.PASSIVE_BUFFS[16487]) .. " " .. IDs(data.PASSIVE_BUFFS[13715]) .. " " .. IDs(data.PASSIVE_BUFFS[23584])
+    .. " " .. IDs(data.PASSIVE_BUFFS[13960]) .. " " .. IDs(data.PASSIVE_BUFFS[16929]),
+    "1259918 1299038 12966,16257,17687 16488,437713 none none none none",
+    "Plainsrunning's speed buff, Flurry's and Blood Craze's buffs; hidden auras aren't buffs")
 Equal(IDs(data.PASSIVE_DEBUFFS[11180]) .. " " .. IDs(data.PASSIVE_BUFFS[11180]) .. " " .. IDs(data.PASSIVE_DEBUFFS[1259918])
     .. " " .. tostring(data.PASSIVES["Shadow Vulnerability"]), "12579 none none nil",
     "Winter's Chill gives a debuff, Plainsrunning none; Shadow Vulnerability isn't a passive")
@@ -2672,6 +2692,13 @@ Equal(IDs(data.PASSIVES["Master of Elements"]) .. " " .. IDs(data.PASSIVES.Frost
     "only a passive's own resurrection goes with it: a talent's other effects stay active")
 Equal(IDs(data.PASSIVE_BUFFS[14892]) .. " " .. IDs(data.PASSIVE_BUFFS[20711]) .. " " .. IDs(data.PASSIVE_DEBUFFS[9452]),
     "14893 27827 67,440667", "the auras a passive's description names, whatever their icon")
+-- Build 70170 renamed the warlock's Soul Harvesting to Soul Harvest, its
+-- buff's name, so the buff its description names is now its own, and added
+-- the druid's Shifting Power, a Cat Form spell with a cooldown.
+Equal(IDs(data.PASSIVES["Soul Harvest"]) .. " " .. IDs(data.PASSIVE_BUFFS[437032]) .. " " .. tostring(data.RANKS["Soul Harvesting"])
+    .. " " .. tostring(data.SPELL_CLASSES["Shifting Power"]) .. " " .. IDs(data.RANKS["Shifting Power"])
+    .. " " .. IDs(data.PASSIVES["Shifting Power"]), "437032 1242853 nil DRUID 1322605 none",
+    "Soul Harvest gives its mana buff; Shifting Power is a druid's active spell")
 -- The game marks a totem's buff passive (and a battle standard's, a
 -- campfire's), though it comes and goes on everyone near: each is its own
 -- buff. Not a hidden one (Honor Among Thieves' party aura).

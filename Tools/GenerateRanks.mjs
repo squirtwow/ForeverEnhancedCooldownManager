@@ -6,7 +6,7 @@
 // shared across characters only shows each one what it can have, and which
 // spells are passive, so the bars pass over what has nothing to track, and
 // which are reactive, for the gold edge when one becomes usable.
-// Reads Blizzard's own game tables for build 1.60.1.70009 (wago.tools db2
+// Reads Blizzard's own game tables for build 1.60.1.70170 (wago.tools db2
 // exports of SpellName, Spell, SpellEffect, SpellMisc, SkillLineAbility,
 // ChrRaces, SpellAuraRestrictions and SpellPower).
 // Pass a cache directory; missing tables are downloaded into it. No addon
@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70009';
+const BUILD = '1.60.1.70170';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = process.argv[2];
 assert(cache, 'Pass a cache directory');
@@ -330,9 +330,10 @@ const linkLines = bar => [...auraLinks[bar].keys()].sort((a, b) => a - b)
 // Left out, as the edge would be noise: a Seal on you (5: Judgement, lit
 // almost all the time), your own Rejuvenation or Regrowth on the target (15:
 // Swiftmend), and the auras you put up yourself or a form (Cat Form for
-// Tiger's Fury, your Immolate for Conflagrate, your Temporal Beacon for
-// Rewind Time). Rune abilities with no SkillLineAbility row (Rampage, Deep
-// Freeze) have no way to be learned in this data, so they aren't listed.
+// Tiger's Fury and Shifting Power, your Immolate for Conflagrate, your
+// Temporal Beacon for Rewind Time). Rune abilities with no SkillLineAbility
+// row (Rampage, Deep Freeze) have no way to be learned in this data, so they
+// aren't listed.
 // The build fails on any other gate on a learnable spell, so a new one is
 // sorted before it ships, and unless every learnable spell of a listed name
 // is gated (a rank without the gate would be lit whenever it's usable).

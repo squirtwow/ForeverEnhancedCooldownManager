@@ -70,6 +70,18 @@ ns.DEFAULTS = {
     castTime = true,
     swingTimer = false, -- a swing timer in the cast bar's spot: Auto Shot for hunters, the main hand for everyone
     swingColour = "default", -- its colour: silver, or a bar colour
+    -- Raid Timers: Blizzard's own raid and dungeon timers restyled, each part on its own.
+    pullTimer = false, -- the pull and start countdown in your bar design
+    pullColour = "default", -- its bar: Blizzard's red, or a bar colour
+    pullNumbers = "gold", -- its big numbers: Blizzard's gold, white, or the bar's colour
+    raidWarnings = false, -- raid warnings and boss emotes in a font of your choice
+    warningFont = "friz",
+    warningOutline = "outline", -- none, outline or thick
+    warningShadow = true,
+    warningColour = "default", -- raid warnings: Blizzard's colour, or a text colour
+    emoteColour = "default", -- boss emotes and whispers, the same way
+    bossCasts = false, -- the boss frames' cast bars in your bar design
+    bossColour = "default", -- their colour: gold (green channelling), or a bar colour
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
     keybinds = false, -- each Cooldowns/Utility icon's key, from your action bars (Look page)
@@ -104,6 +116,14 @@ ns.FONT_KEYS = { "friz", "arial", "morpheus", "skurri" }
 ns.FONT_NAMES = { friz = "Friz Quadrata", arial = "Arial Narrow", morpheus = "Morpheus", skurri = "Skurri" }
 ns.BAR_TEXTURE_KEYS = { "flat", "classic", "raid", "skills" }
 ns.BAR_TEXTURE_NAMES = { flat = "Flat", classic = "Classic", raid = "Raid", skills = "Skills" }
+-- Raid Timers: the countdown's big numbers, the raid warnings' outline and their
+-- text colours (your class colour last; the colours themselves are in RaidTimers.lua).
+ns.NUMBER_KEYS = { "gold", "white", "bar" }
+ns.NUMBER_NAMES = { gold = "Gold", white = "White", bar = "Bar colour" }
+ns.OUTLINE_KEYS = { "none", "outline", "thick" }
+ns.OUTLINE_NAMES = { none = "None", outline = "Outline", thick = "Thick" }
+ns.TEXT_COLOUR_KEYS = { "white", "gold", "orange", "red", "purple", "class" }
+ns.TEXT_COLOUR_NAMES = { white = "White", gold = "Gold", orange = "Orange", red = "Red", purple = "Purple", class = "Class" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
@@ -117,6 +137,14 @@ for _, key in ipairs(ns.BAR_COLOUR_KEYS) do
     CHOICES.barColour[key], CHOICES.prdHealth[key], CHOICES.prdPower[key] = true, true, true
     CHOICES.prdComboColour[key], CHOICES.castColour[key], CHOICES.swingColour[key] = true, true, true
 end
+-- Raid Timers' choices.
+for _, key in ipairs({ "pullColour", "bossColour", "warningColour", "emoteColour" }) do CHOICES[key] = { default = true } end
+CHOICES.pullNumbers, CHOICES.warningFont, CHOICES.warningOutline = {}, {}, {}
+for _, key in ipairs(ns.BAR_COLOUR_KEYS) do CHOICES.pullColour[key], CHOICES.bossColour[key] = true, true end
+for _, key in ipairs(ns.TEXT_COLOUR_KEYS) do CHOICES.warningColour[key], CHOICES.emoteColour[key] = true, true end
+for _, key in ipairs(ns.NUMBER_KEYS) do CHOICES.pullNumbers[key] = true end
+for _, key in ipairs(ns.FONT_KEYS) do CHOICES.warningFont[key] = true end
+for _, key in ipairs(ns.OUTLINE_KEYS) do CHOICES.warningOutline[key] = true end
 
 function ns.Valid(key, value)
     local default = ns.DEFAULTS[key]
@@ -655,6 +683,42 @@ function ns.BarColours()
     return db.barColours
 end
 
+-- Spell ID -> its spell's name in ns.RANKS (Ranks.lua), made the first time
+-- it's needed, and again if the list itself changes.
+local rankNames, rankList = {}, nil
+local function RankName(id)
+    if ns.RANKS ~= rankList then
+        rankList, rankNames = ns.RANKS, {}
+        for name, ids in pairs(rankList or {}) do
+            for _, rank in ipairs(ids) do rankNames[rank] = name end
+        end
+    end
+    return rankNames[id]
+end
+
+-- Every rank of the spell with this ID, highest first; none if it has no ranks listed.
+local function SameSpell(spellID)
+    local name = RankName(spellID)
+    local ids, found = name and ns.RANKS[name] or {}, {}
+    for i = #ids, 1, -1 do found[#found + 1] = ids[i] end
+    return found
+end
+
+-- A Tracked Bar's own colour by its spell ID, or nil for the colour for all
+-- bars. Since build 70170 Blizzard shows every rank of a spell on one bar,
+-- under one of its ranks (usually the first), so a colour saved at any rank
+-- counts: the highest rank with one, even over the bar's own ID. Before,
+-- learning a rank dropped the colour, so the highest rank's is the latest
+-- pick. A spell with no ranks listed has only its own ID.
+function ns.BarColourFor(spellID)
+    if not (Finite(spellID) and spellID > 0) then return nil end
+    local colours = ns.BarColours()
+    for _, id in ipairs(SameSpell(spellID)) do
+        if colours[id] then return colours[id] end
+    end
+    return colours[spellID]
+end
+
 -- Spells added by name or ID that aren't in your spellbook: name -> spell IDs.
 function ns.CustomSpells()
     if not db then return {} end
@@ -707,9 +771,13 @@ function ns.Set(key, value)
 end
 
 -- A Tracked Bar's own colour, or nil to go back to the colour for all bars.
+-- Kept under the bar's spell ID; any other rank's colour goes, so it can't
+-- come back in its place.
 function ns.SetBarColour(spellID, key)
     if not db or not (Finite(spellID) and spellID > 0) then return end
-    ns.BarColours()[spellID] = key ~= nil and ns.Valid("barColour", key) and key or nil
+    local colours = ns.BarColours()
+    for _, id in ipairs(SameSpell(spellID)) do colours[id] = nil end
+    colours[spellID] = key ~= nil and ns.Valid("barColour", key) and key or nil
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 
@@ -873,6 +941,7 @@ local function Load()
     if ns.Keybinds then ns.Keybinds:Start() end
     if ns.Resource then ns.Resource:Start() end
     if ns.CastBar then ns.CastBar:Start() end
+    if ns.RaidTimers then ns.RaidTimers:Start() end
     if ns.Bars then ns.Bars:Start() end
     if ns.Layout then ns.Layout:Start() end
     if ns.MinimapButton then ns.MinimapButton:Start() end

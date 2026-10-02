@@ -432,7 +432,7 @@ local function BuildLook(window, page, width)
             local swatch = Swatch(row, ROW_SWATCH, function()
                 local entry = row.entry
                 if entry.spell then
-                    ns.SetBarColour(entry.spell, ns.BarColours()[entry.spell] ~= key and key or nil)
+                    ns.SetBarColour(entry.spell, ns.BarColourFor(entry.spell) ~= key and key or nil)
                 else
                     ns.Set(entry.setting, ns.Get(entry.setting) ~= key and key or "default")
                 end
@@ -576,7 +576,6 @@ local function BuildLook(window, page, width)
         fix:SetLabel(fixLabel or "")
         fix.action, fix.about = fixAction, fixNote
         fix:SetShown(fixAction ~= nil)
-        local own = ns.BarColours()
         for i, entry in ipairs(entries) do
             local row = Row(i)
             row.entry = entry
@@ -585,7 +584,7 @@ local function BuildLook(window, page, width)
                 local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(entry.spell)
                 row.name:SetText(type(name) == "string" and name or ("Spell " .. entry.spell))
                 row.icon:SetTexture(C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.spell) or 134400)
-                chosen = own[entry.spell]
+                chosen = ns.BarColourFor(entry.spell) -- saved at any rank of its spell
             else
                 row.name:SetText(entry.name)
                 row.icon:SetTexture(entry.icon)
@@ -761,6 +760,7 @@ local NAV_NOTES = {
     layout = "One-click layouts that stack your bars around your Personal Resource Display.",
     cast = "Your own cast bar and a swing timer, under your Personal Resource Display.",
     general = "Your bars on or off, the minimap button, the tour, the Discord and EraUI.",
+    raid = "Blizzard's pull countdown, raid warnings and boss cast bars, in your look.",
 }
 
 local function NavItem(window, nav, key, label, y, previews)
@@ -1051,6 +1051,22 @@ local function BuildWindow()
     local castPage = ns.BuildCastBarPage ~= nil
     if castPage then window.nav.cast = NavItem(window, nav, "cast", "Cast bar", y + 64) end
     window.nav.general = NavItem(window, nav, "general", "General", y + (castPage and 96 or 64))
+    -- More: pages for Blizzard's own frames beyond the Cooldown Manager,
+    -- headed like your bars. A new file, so only after a full restart.
+    local raidPage = ns.BuildRaidTimersPage ~= nil
+    if raidPage then
+        local more = y + (castPage and 128 or 96)
+        local moreRule = nav:CreateTexture(nil, "BORDER")
+        moreRule:SetPoint("TOPLEFT", 12, -(more + 4))
+        moreRule:SetPoint("RIGHT", -12, 0)
+        moreRule:SetHeight(1)
+        T:Fill(moreRule, T.BORDER)
+        local moreHeading = T:Text(nav, "GameFontHighlightSmall", T.MUTED)
+        moreHeading:SetPoint("TOPLEFT", 14, -(more + 14))
+        moreHeading:SetText("MORE")
+        window.moreHeading = moreHeading
+        window.nav.raid = NavItem(window, nav, "raid", "Raid Timers", more + 30)
+    end
     -- What's new in this version, at the foot of the list.
     local news = T:Button(nav, "What's new", NAV - 24, 22)
     news:SetPoint("BOTTOMLEFT", 12, 12)
@@ -1072,6 +1088,10 @@ local function BuildWindow()
     if castPage then
         window.pages.cast = Page()
         ns.BuildCastBarPage(window, window.pages.cast, WIDTH - NAV - 2)
+    end
+    if raidPage then
+        window.pages.raid = Page()
+        ns.BuildRaidTimersPage(window, window.pages.raid, WIDTH - NAV - 2)
     end
     BuildGeneral(window, window.pages.general)
     ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)

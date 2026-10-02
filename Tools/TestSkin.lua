@@ -6,7 +6,14 @@
 -- the height of the Personal Resource Display's extra mana bar, and the
 -- display's width while a layout matches it to your rows (the widths its own
 -- Bar Width setting changes). The one read allowed is whether the display's
--- bars show, to put the addon's combo points under the lowest.
+-- bars show, to put the addon's combo points under the lowest. Raid Timers
+-- follow the same rules on Blizzard's countdown (TimerTracker), raid warnings
+-- (RaidWarningFrame) and boss cast bars: only the cosmetic setters each part
+-- allows, never their size or text, nothing that shows or hides them, and
+-- never the private boss emote anchor or the deadly debuff frame. Only the
+-- art the look replaces may be made see-through (and a boss bar's fill while
+-- Edit Mode shows it with no cast), and only the countdown's time may be
+-- moved (into Split's box, and back).
 local checks = 0
 local function Equal(actual, expected, label)
     checks = checks + 1
@@ -23,7 +30,12 @@ local FORBIDDEN = {
     GetValue = true, GetCooldownTimes = true, GetSpellID = true, GetAuraData = true,
     GetAuraDataCached = true, RefreshLayout = true, RefreshData = true, Layout = true,
     SetTexture = true, SetFrameLevel = true,
+    -- A bar's values and a line's text: Blizzard's, and secret in a fight.
+    SetValue = true, SetMinMaxValues = true, SetText = true, ClearText = true, SetTextHeight = true,
+    SetMaxLines = true, GetNumLines = true, GetStringWidth = true, GetStringHeight = true,
 }
+-- True while Blizzard's own code runs in the test: it may do what the addon may not.
+local blizzardCalling = false
 
 local Proto = {}
 local New
@@ -31,7 +43,7 @@ local New
 local function Fallback(name)
     return function(self)
         local s = S[self]
-        if s.blizzard and FORBIDDEN[name] then error("called " .. name .. " on a Blizzard frame", 2) end
+        if s.blizzard and FORBIDDEN[name] and not blizzardCalling then error("called " .. name .. " on a Blizzard frame", 2) end
         s.calls[name] = (s.calls[name] or 0) + 1
     end
 end
@@ -42,13 +54,17 @@ New = function(kind, parent, blizzard)
         masks = {}, shown = true, calls = {}, scripts = {}, events = {}, blizzard = blizzard }
     setmetatable(obj, {
         __index = function(_, key)
-            local method = Proto[key]
-            if method then
-                if S[obj].blizzard and FORBIDDEN[key] and not (key == "IsShown" and S[obj].readable) then
+            -- On Blizzard's frames: nothing forbidden unless the part allows it
+            -- (allow), and nothing a part keeps to itself (deny; ALL for all).
+            local s = S[obj]
+            if s.blizzard and not blizzardCalling and type(key) == "string" and key:match("^[A-Z]") then
+                local blocked = FORBIDDEN[key] and not (s.allow and s.allow[key]) and not (key == "IsShown" and s.readable)
+                if blocked or (s.deny and (s.deny[key] or s.deny.ALL)) then
                     return function() error("called " .. key .. " on a Blizzard frame", 2) end
                 end
-                return method
             end
+            local method = Proto[key]
+            if method then return method end
             if type(key) == "string" and key:match("^[A-Z]") then return Fallback(key) end
         end,
         __newindex = function(t, key, value)
@@ -128,6 +144,15 @@ function Proto:GetChecked() return S[self].checked end
 function Proto:GetFont() return "font", 12, "" end
 -- The spell Blizzard's settings give a Tracked Bar.
 function Proto:GetBaseSpellID() return S[self].baseSpell end
+-- Raid Timers: what the restyle sets on Blizzard's countdown, raid warnings
+-- and boss cast bars, where each part allows it.
+function Proto:GetDrawLayer() return S[self].layer end
+function Proto:GetStatusBarTexture() return S[self].fill end
+function Proto:SetVertexColor(r, g, b) S[self].tint = { r, g, b } end
+function Proto:SetDesaturated(v) S[self].desaturated = v end
+function Proto:SetTextColor(r, g, b) S[self].textColour = { r, g, b } end
+function Proto:SetShadowOffset(x, y) S[self].shadowOffset = x .. "," .. y end
+function Proto:SetShadowColor(r, g, b, a) S[self].shadowColour = { r, g, b, a } end
 function Proto:GetStringWidth() return 40 end
 function Proto:Click() S[self].scripts.OnClick(self) end
 
@@ -209,7 +234,6 @@ end
 local acquired = {}
 -- Blizzard's own refreshes, run by the test as the game would. The addon may
 -- only post-hook them, never call them itself.
-local blizzardCalling = false
 local function Blizzard(viewer, method)
     blizzardCalling = true
     viewer[method](viewer)
@@ -254,9 +278,18 @@ local function Environment(keepCVars)
         if name then _G[name] = f end
         return f
     end
+    -- A global function by its name, or a table's; the hook is the addon's own
+    -- code, so it runs under the addon's rules even inside Blizzard's call.
     _G.hooksecurefunc = function(t, key, hook)
+        if type(t) == "string" then t, key, hook = _G, t, key end
         local original = t[key]
-        rawset(t, key, function(...) original(...); hook(...) end)
+        rawset(t, key, function(...)
+            original(...)
+            local was = blizzardCalling
+            blizzardCalling = false
+            hook(...)
+            blizzardCalling = was
+        end)
     end
     _G.print = function(msg) table.insert(printed, msg) end
     _G.wipe = function(t) for k in pairs(t) do t[k] = nil end return t end
@@ -316,6 +349,7 @@ local function Load(saved)
     assert(loadfile("Keybinds.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("Resource.lua"))("ForeverEnhancedCooldownManager", ns)
     assert(loadfile("CastBar.lua"))("ForeverEnhancedCooldownManager", ns)
+    assert(loadfile("RaidTimers.lua"))("ForeverEnhancedCooldownManager", ns)
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
     return ns
 end
@@ -522,6 +556,51 @@ ns.Skin:ApplyBarLook()
 Equal(ns.BarColours()[467] == nil and S[bar.Bar].barColour[2], .74, "and back to the colour for all")
 ns.Set("barColour", "orange")
 ns.Skin:ApplyBarLook()
+-- Since build 70170 Blizzard shows every rank of a spell on one bar, under
+-- one of its ranks (Thorns 467 at any rank), so a colour goes with the spell,
+-- by the ranks in Ranks.lua: the highest rank that has one (before the patch,
+-- learning a rank dropped the colour, so that's the latest pick).
+do
+    assert(loadfile("Ranks.lua"))("ForeverEnhancedCooldownManager", ns)
+    local colours = ForeverEnhancedCooldownManagerDB
+    S[other].baseSpell = 1126
+    other:OnCooldownIDSet()
+    colours.barColours = { [782] = "blue" } -- picked while Blizzard showed Thorns rank 2
+    ns.Skin:ApplyBarLook()
+    Equal(S[bar.Bar].barColour[3] .. " " .. S[other.Bar].barColour[3], "0.88 0.25",
+        "a colour saved on Thorns rank 2 colours the bar Blizzard gives rank 1, not Mark of the Wild's")
+    Equal(ns.BarColourFor(467) .. " " .. ns.BarColourFor(9910) .. " " .. tostring(ns.BarColourFor(1126))
+        .. " " .. tostring(ns.BarColourFor(16870)), "blue blue nil nil", "any rank of Thorns finds it; no other spell does")
+    S[other].baseSpell = 9910
+    other:OnCooldownIDSet()
+    Equal(S[other.Bar].barColour[3], .88, "and a bar given another rank of Thorns turns blue straight away")
+    colours.barColours = { [782] = "blue", [9910] = "purple" }
+    Equal(ns.BarColourFor(467) .. " " .. ns.BarColourFor(9910), "purple purple", "with colours at several ranks, the highest rank's")
+    colours.barColours = { [467] = "green", [9910] = "purple" }
+    ns.Skin:ApplyBarLook()
+    Equal(ns.BarColourFor(467) .. " " .. ns.BarColourFor(782) .. " " .. S[bar.Bar].barColour[3], "purple purple 0.91",
+        "even over the bar's own ID: rank 1's colour is the older pick")
+    colours.barColours = { [467] = "green" }
+    Equal(ns.BarColourFor(467) .. " " .. ns.BarColourFor(9910), "green green", "and the bar's own ID when it's the only one")
+    colours.barColours = { [782] = "blue", [9910] = "purple", [1126] = "green", [16870] = "charcoal" }
+    ns.SetBarColour(467, "class")
+    local stored = {}
+    for id, key in pairs(ns.BarColours()) do stored[#stored + 1] = id .. "=" .. key end
+    table.sort(stored)
+    Equal(table.concat(stored, " "), "1126=green 16870=charcoal 467=class",
+        "a new colour goes under the bar's ID, and the spell's other ranks lose theirs")
+    colours.barColours = { [782] = "blue", [1126] = "green" }
+    ns.SetBarColour(9910, nil)
+    ns.Skin:ApplyBarLook()
+    Equal(tostring(next(ns.BarColours(), nil)) .. " " .. S[bar.Bar].barColour[3], "1126 0.25",
+        "going back to the colour for all clears every rank")
+    ns.SetBarColour(16870, "blue")
+    Equal(ns.BarColours()[16870] .. " " .. ns.BarColours()[1126] .. " " .. ns.BarColourFor(16870), "blue green blue",
+        "a spell with no ranks listed keeps its own ID, and finds it there")
+    colours.barColours = {}
+    ns.RANKS = nil
+    Equal(tostring(ns.BarColourFor(467)), "nil", "and nothing breaks without the rank list")
+end
 v.barsActive[other] = nil
 
 -- The window's preview: the addon's own bar, drawn by the same code.
@@ -1104,6 +1183,743 @@ do
     local ok = pcall(kns.Keybinds.Update, kns.Keybinds)
     Equal(tostring(next(kns.Skin.keys)) .. " " .. tostring(ok) .. " " .. #printed, "nil true 0", "the look off: no keys on Blizzard's icons, no errors")
     _G.issecretvalue = nil
+end
+
+-- Raid Timers on Blizzard's own frames ---------------------------------------------------
+-- Its countdown frames, raid warning lines and boss cast bars, sealed like the
+-- viewers: each part allows only the cosmetic setters the restyle uses, and
+-- Blizzard's own functions here fail if the addon calls them.
+do
+    local DIGIT_KEYS = { "digit1", "digit2", "glow1", "glow2" }
+    local FLAT, PLAIN = "Interface\\Buttons\\WHITE8X8", "Interface\\TargetingFrame\\UI-StatusBar"
+    -- What a part keeps to itself: its place, size and alpha, and whatever else is named.
+    local function Keep(obj, extra, alpha)
+        local deny = { SetPoint = true, ClearAllPoints = true, SetAllPoints = true, SetAlpha = not alpha,
+            SetWidth = true, SetHeight = true }
+        for key in pairs(extra or {}) do deny[key] = true end
+        S[obj].deny = deny
+    end
+    local function Untouchable(obj) S[obj].deny = { ALL = true } end
+
+    -- Blizzard's StartTimerBar: the frame, its bar (named, its border named
+    -- after it), the black backing, the time, the numbers and the logo.
+    local function StartTimerBar(index)
+        local timer = New("Frame")
+        S[timer].name = "TimerTrackerTimer" .. index
+        local bar = New("StatusBar", timer)
+        S[bar].name = "TimerTrackerTimer" .. index .. "StatusBar"
+        local backing = New("Texture", bar)
+        S[backing].layer = "BACKGROUND"
+        -- The fill, listed with the bar's regions after it: never taken for the backing.
+        local fill = New("Texture", bar)
+        S[fill].layer = "BACKGROUND"
+        S[bar].fill = fill
+        local border = New("Texture", bar)
+        S[border].layer = "OVERLAY"
+        _G[S[bar].name .. "Border"] = border
+        rawset(bar, "timeText", New("FontString", bar))
+        S[bar.timeText].points = { { "CENTER", nil, nil, 0, 0 } }
+        rawset(timer, "bar", bar)
+        for _, key in ipairs(DIGIT_KEYS) do rawset(timer, key, New("Texture", timer)) end
+        rawset(timer, "GoTexture", New("Texture", timer))
+        Seal(timer)
+        Keep(timer)
+        Keep(bar)
+        Keep(backing, nil, true)
+        Keep(border, nil, true)
+        for _, key in ipairs(DIGIT_KEYS) do
+            Keep(timer[key])
+            S[timer[key]].allow = { SetVertexColor = true, SetDesaturated = true }
+        end
+        Untouchable(fill)
+        Untouchable(timer.GoTexture)
+        return timer, backing, border
+    end
+
+    local tracker, made
+    local function Tracker()
+        tracker = New("Frame")
+        rawset(tracker, "timerList", {})
+        Seal(tracker)
+        Untouchable(tracker)
+        _G.TimerTracker = tracker
+        made = {}
+        -- Blizzard's: reuses a free frame or makes the next, and sets the
+        -- numbers' art again each time.
+        _G.TimerTracker_StartTimerOfType = function(self, timerType, timeSeconds)
+            assert(blizzardCalling, "called Blizzard's TimerTracker_StartTimerOfType")
+            local timer
+            for _, each in ipairs(self.timerList) do
+                if each.isFree then timer = each end
+            end
+            if not timer then
+                local backing, border
+                timer, backing, border = StartTimerBar(#self.timerList + 1)
+                made[timer] = { backing = backing, border = border }
+                table.insert(self.timerList, timer)
+            end
+            rawset(timer, "isFree", false)
+            rawset(timer, "time", timeSeconds)
+            rawset(timer, "type", timerType)
+            for _, key in ipairs(DIGIT_KEYS) do timer[key]:SetTexture("Interface\\Timer\\BigTimerNumbers") end
+        end
+    end
+    local function Countdown(seconds)
+        blizzardCalling = true
+        TimerTracker_StartTimerOfType(tracker, 3, seconds, seconds)
+        blizzardCalling = false
+    end
+    local function Free(timer)
+        blizzardCalling = true
+        rawset(timer, "isFree", true)
+        blizzardCalling = false
+    end
+
+    -- Blizzard's RaidWarningFrame: its pool of lines (their text secret), and
+    -- the private boss emote anchor and deadly debuff frame under them.
+    local frame, pool, lines
+    local function Warnings()
+        frame = New("Frame")
+        lines = {}
+        local active = {}
+        pool = setmetatable({}, { __newindex = function() error("wrote on Blizzard's pool", 2) end })
+        rawset(pool, "EnumerateActive", function() return pairs(active) end)
+        rawset(pool, "Release", function(_, line) assert(blizzardCalling); active[line] = nil end)
+        rawset(pool, "Acquire", function()
+            assert(blizzardCalling, "acquired from Blizzard's pool")
+            for _, line in ipairs(lines) do
+                if not active[line] then
+                    active[line] = true
+                    return line
+                end
+            end
+            local line = New("FontString", frame)
+            Seal(line)
+            Keep(line, { SetFontObject = true, SetJustifyH = true })
+            lines[#lines + 1] = line
+            active[line] = true
+            return line
+        end)
+        rawset(frame, "fontStringPool", pool)
+        rawset(frame, "AddMessage", function(self, text, info, _, messageType)
+            assert(blizzardCalling, "called Blizzard's AddMessage")
+            local line = self.fontStringPool:Acquire()
+            line:SetText(text)
+            line:SetTextColor(info.r, info.g, info.b, 1)
+            line:SetTextHeight(20)
+            rawset(line, "messageType", messageType or 1)
+            -- Each message's place in the order, the newest the frame's count.
+            rawset(self, "messageCounter", (rawget(self, "messageCounter") or 0) + 1)
+            rawset(line, "messageOrder", self.messageCounter)
+        end)
+        Seal(frame)
+        Keep(frame, { Show = true, Hide = true })
+        _G.RaidWarningFrame = frame
+        _G.RaidWarningUtil = { MessageType = { RaidWarning = 1, BossEmote = 2, BGSystem = 3 } }
+        _G.GameFontNormalHuge = { GetFont = function() return "Fonts\\FRIZQT__.TTF", 20, "" end,
+            GetShadowOffset = function() return 1, -1 end }
+        local anchor, deadly = New("Frame"), New("Frame")
+        Seal(anchor)
+        Seal(deadly)
+        Untouchable(anchor)
+        Untouchable(deadly)
+        _G.PrivateRaidBossEmoteFrameAnchor, _G.DeadlyDebuffFrame = anchor, deadly
+    end
+    local WARNING, EMOTE = { r = 1, g = .282, b = 0 }, { r = 1, g = .867, b = 0 }
+    local function Say(info, messageType)
+        blizzardCalling = true
+        frame:AddMessage(SECRET, info, nil, messageType)
+        blizzardCalling = false
+    end
+    local function Release(line)
+        blizzardCalling = true
+        pool:Release(line)
+        blizzardCalling = false
+    end
+
+    -- Blizzard's Boss1-5 frames, each with its spell bar: the fill it picks
+    -- for each cast, its art, and the shield and finish flash it keeps. Their
+    -- container shows them; Edit Mode's Boss Frames tick sets its
+    -- isInEditMode and calls its UpdateShownState, as does closing Edit Mode.
+    local bars, box
+    local function Bosses()
+        bars = {}
+        box = New("Frame")
+        rawset(box, "isInEditMode", false)
+        rawset(box, "UpdateShownState", function()
+            assert(blizzardCalling, "called Blizzard's BossTargetFrameContainer:UpdateShownState")
+        end)
+        Seal(box)
+        Untouchable(box)
+        _G.BossTargetFrameContainer = box
+        for i = 1, 5 do
+            local boss = New("Button")
+            S[boss].name = "Boss" .. i .. "TargetFrame"
+            local bar = New("StatusBar", boss)
+            S[bar].name = "Boss" .. i .. "TargetFrameSpellBar"
+            for _, key in ipairs({ "TextBorder", "Background", "BorderShield", "Icon", "Border", "Spark", "Flash" }) do
+                rawset(bar, key, New("Texture", bar))
+            end
+            rawset(bar, "Text", New("FontString", bar))
+            local fill = New("Texture", bar)
+            S[bar].fill = fill
+            -- Blizzard's: UpdateBarFillTexture(isFull), the atlas from the cast's type.
+            rawset(bar, "UpdateBarFillTexture", function(self, isFull)
+                assert(blizzardCalling, "called Blizzard's UpdateBarFillTexture")
+                assert(type(isFull) == "boolean", "Blizzard passes isFull")
+                local atlas = S[self].pick
+                S[self].barTexture = atlas
+                S[S[self].fill].atlas = atlas
+            end)
+            rawset(boss, "spellbar", bar)
+            Seal(boss)
+            Untouchable(boss)
+            Keep(bar)
+            for _, key in ipairs({ "TextBorder", "Background", "Border", "Spark" }) do Keep(bar[key], nil, true) end
+            Keep(bar.Icon)
+            Keep(bar.Text)
+            Untouchable(bar.BorderShield)
+            Untouchable(bar.Flash)
+            -- The fill: only its alpha may change, never its place or size.
+            Keep(fill, nil, true)
+            _G["Boss" .. i .. "TargetFrame"], _G["Boss" .. i .. "TargetFrameSpellBar"] = boss, bar
+            bars[i] = bar
+        end
+    end
+    -- Blizzard picks a bar's fill: atlas for the cast's type, full as a cast
+    -- ends or with no cast at all (its first PLAYER_ENTERING_WORLD, a loading screen).
+    local function Cast(bar, atlas, full)
+        S[bar].pick = atlas
+        blizzardCalling = true
+        bar:UpdateBarFillTexture(full == true)
+        blizzardCalling = false
+    end
+    -- Blizzard marks a bar casting or channelling (after it picks the fill), or neither.
+    local function Casting(bar, casting, channeling)
+        rawset(bar, "casting", casting)
+        rawset(bar, "channeling", channeling)
+    end
+    -- Edit Mode's Boss Frames ticked (true) or unticked, or Edit Mode closed (false).
+    local function EditMode(on)
+        rawset(box, "isInEditMode", on)
+        blizzardCalling = true
+        box:UpdateShownState()
+        blizzardCalling = false
+    end
+    local function Alpha(bar) return S[S[bar].fill].alpha end
+    local function Colour(bar)
+        local c = S[bar].barColour
+        return string.format("%g,%g,%g,%g", c[1], c[2], c[3], c[4])
+    end
+
+    local SECRET_ATLAS = "ui-castingbar-interrupted-secret"
+    local function Game(era)
+        _G.C_AddOns = { IsAddOnLoaded = function(name) return era ~= nil and name == "EraUI" end }
+        _G.EraUI = era
+        -- A secret can be a string too: one that would read as broken off.
+        _G.issecretvalue = function(value) return value == SECRET or value == SECRET_ATLAS end
+    end
+    local function Keys(t)
+        local count = 0
+        for _ in pairs(t) do count = count + 1 end
+        return count
+    end
+
+    -- Off, as for everyone at first: nothing hooked, nothing touched.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    Game(nil)
+    local plainStart = TimerTracker_StartTimerOfType
+    local plainSay, plainFill = frame.AddMessage, bars[1].UpdateBarFillTexture
+    local plainShown = box.UpdateShownState
+    ns = Load(nil)
+    Fire("PLAYER_LOGIN")
+    Equal(tostring(TimerTracker_StartTimerOfType == plainStart) .. " " .. tostring(frame.AddMessage == plainSay)
+        .. " " .. tostring(bars[1].UpdateBarFillTexture == plainFill) .. " " .. tostring(box.UpdateShownState == plainShown),
+        "true true true true", "off: no hooks on the countdown, the raid warnings, the boss bars or their container")
+    Countdown(10)
+    local timer = tracker.timerList[1]
+    Say(WARNING)
+    Equal(tostring(S[timer.bar].barTexture) .. " " .. tostring(S[lines[1]].face) .. " " .. tostring(S[bars[1].Border].alpha),
+        "nil nil 1", "and Blizzard's look stays as it is")
+    EditMode(true)
+    Equal(Alpha(bars[1]) .. " " .. Alpha(bars[5]), "1 1", "off, Boss Frames in Edit Mode: Blizzard's fill left as it is")
+    EditMode(false)
+
+    -- All three on.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    Game(nil)
+    plainSay = frame.AddMessage
+    ns = Load({ pullTimer = true, raidWarnings = true, bossCasts = true })
+    Equal(tostring(frame.AddMessage == plainSay) .. " " .. tostring(S[bars[1].Border].alpha), "true 1",
+        "nothing hooked or touched before login")
+    Fire("PLAYER_LOGIN")
+
+    -- The countdown, after Blizzard sets it up.
+    Countdown(40)
+    timer = tracker.timerList[1]
+    local bar = timer.bar
+    Equal(S[bar].barTexture .. " " .. Colour(bar), FLAT .. " 1,0,0,1", "the countdown bar in your texture, Blizzard's red")
+    Equal(S[made[timer].border].alpha .. " " .. S[made[timer].backing].alpha, "0 0", "its old border and backing see-through")
+    Equal(S[bar.timeText].font, "FECMFont12", "its time in your font, as big as Blizzard's")
+    Equal(tostring(S[timer.digit1].desaturated) .. " " .. table.concat(S[timer.glow2].tint, ","), "false 1,1,1",
+        "the big numbers and their glow in Blizzard's gold")
+    local edge
+    for _, r in ipairs(S[bar].regions) do
+        if S[r].layer == "BACKGROUND" and S[r].sublevel == -8 then edge = r end
+    end
+    Equal(edge ~= nil and S[edge].sealed == nil and S[edge].color[1] == 0, true, "a black edge of the addon's own round the bar")
+    -- Blizzard sets the numbers' art again for each countdown: the tint goes on again after.
+    ns.Set("pullNumbers", "bar")
+    ns.Set("pullColour", "blue")
+    Free(timer)
+    Countdown(10)
+    Equal(#tracker.timerList .. " " .. tostring(S[timer.digit2].desaturated) .. " " .. table.concat(S[timer.digit2].tint, ","),
+        "1 true 0.24,0.55,0.88", "the same frame again: numbers in the bar's blue, after Blizzard set them up")
+    Equal(Colour(bar), "0.24,0.55,0.88,1", "and the bar blue")
+    ns.Set("barStyle", "split")
+    ns.RaidTimers:Apply()
+    local at = S[bar.timeText].points[1]
+    Equal(at[1] .. " " .. tostring(S[at[2]].sealed) .. " " .. tostring(S[at[2]].sublevel), "CENTER nil -7",
+        "Split: the time in the addon's own box")
+    ns.Set("barStyle", "glass")
+    ns.RaidTimers:Apply()
+    at = S[bar.timeText].points[1]
+    Equal(at[1] .. " " .. tostring(at[2] == bar), "CENTER true", "Glass: centred on the bar again, as Blizzard has it")
+    -- A second countdown at once (a battleground's gates): its own frame.
+    Countdown(60)
+    Equal(#tracker.timerList .. " " .. S[tracker.timerList[2].bar].barTexture, "2 " .. FLAT, "a second frame, restyled too")
+
+    -- Raid warnings and boss emotes: each line showing, after Blizzard adds one.
+    Say(WARNING)
+    local first = lines[1]
+    Equal(S[first].face .. " | " .. S[first].shadowOffset, "Fonts\\FRIZQT__.TTF 20 OUTLINE | 1,-1",
+        "a raid warning in your font, outlined, with a shadow")
+    Equal(table.concat(S[first].textColour, ","), "1,0.282,0", "in Blizzard's colour for it")
+    Say(EMOTE, 2)
+    local second = lines[2]
+    ns.Set("emoteColour", "purple")
+    ns.Set("warningFont", "skurri")
+    ns.Set("warningOutline", "thick")
+    ns.Set("warningShadow", false)
+    ns.RaidTimers:Apply()
+    Equal(S[second].face .. " | " .. S[second].shadowOffset .. " | " .. table.concat(S[second].textColour, ","),
+        "Fonts\\skurri.ttf 20 THICKOUTLINE | 0,0 | 0.72,0.52,1", "the lines showing change at once: the boss emote purple")
+    Equal(table.concat(S[first].textColour, ","), "1,0.282,0", "the raid warning keeps Blizzard's colour")
+    -- Lines are pooled: one handed out again is dressed again.
+    Release(first)
+    ns.Set("warningColour", "white")
+    Say(WARNING)
+    Equal(S[first].face .. " " .. table.concat(S[first].textColour, ","), "Fonts\\skurri.ttf 20 THICKOUTLINE 1,1,1",
+        "a line handed out again: dressed, in your white")
+    -- Blizzard's colour chosen again: back on the lines showing at once, each
+    -- in the colour Blizzard gave its message.
+    ns.Set("warningColour", "default")
+    ns.Set("emoteColour", "default")
+    ns.RaidTimers:Apply()
+    Equal(table.concat(S[first].textColour, ",") .. " | " .. table.concat(S[second].textColour, ","), "1,0.282,0 | 1,0.867,0",
+        "Blizzard's colours chosen again: back on the lines showing")
+    ns.Set("warningColour", "white")
+    ns.Set("emoteColour", "purple")
+    ns.RaidTimers:Apply()
+
+    -- Boss cast bars: dressed at login, and the fill after Blizzard picks one.
+    local boss = bars[1]
+    Equal(S[boss.Border].alpha .. " " .. S[boss.Background].alpha .. " " .. S[boss.TextBorder].alpha .. " " .. S[boss.Spark].alpha,
+        "0 0 0 1", "a boss bar's modern frame, backing and name box go; Glass keeps the spark")
+    Equal(S[boss.Text].font .. " " .. S[boss.Icon].coords, "FECMFont10 0.08,0.92,0.08,0.92", "the name in your font, the icon zoomed")
+    Equal(S[bars[5].Border].alpha, 0, "all five boss bars")
+    Cast(boss, "ui-castingbar-filling-standard")
+    Equal(S[boss].barTexture .. " " .. Colour(boss), FLAT .. " 1,0.7,0,1", "a cast: your texture, gold")
+    Cast(boss, "ui-castingbar-filling-channel")
+    Equal(Colour(boss), "0,0.8,0,1", "channelling: green")
+    Cast(boss, "ui-castingbar-uninterruptable")
+    Equal(Colour(boss), "0.5,0.5,0.5,1", "can't be interrupted: grey")
+    Cast(boss, "ui-castingbar-interrupted")
+    Equal(Colour(boss), "0.85,0.15,0.1,1", "broken off: red")
+    Cast(boss, SECRET)
+    Equal(Colour(boss), "1,0.7,0,1", "kept secret: gold, nothing read")
+    Cast(boss, SECRET_ATLAS)
+    Equal(Colour(boss), "1,0.7,0,1", "a secret that is a string: still gold, never read")
+    ns.Set("bossColour", "purple")
+    ns.Set("barStyle", "outline")
+    Cast(boss, "ui-castingbar-filling-channel")
+    Equal(Colour(boss) .. " " .. S[boss.Spark].alpha, "0.6,0.43,0.91,0.45 0", "your purple, see-through for Outline, no spark")
+    ns.Set("barStyle", "glass")
+    Equal(#printed, 0, "no errors from the raid timers")
+
+    -- Only hooks were added to Blizzard's frames.
+    Equal(Keys(frame) .. " " .. Keys(bars[1]) .. " " .. Keys(tracker) .. " " .. Keys(timer), "3 9 1 9",
+        "Blizzard's frames hold only their own parts and the addon's hooks")
+
+    -- Off again, from Split (the time moved, the spark gone), with the raid
+    -- warnings in your colours and without a shadow: Blizzard's own look back.
+    -- The addon's own pieces on a bar that are showing.
+    local function Pieces(region)
+        local count = 0
+        for _, r in ipairs(S[region].regions) do
+            if not S[r].sealed and S[r].shown then count = count + 1 end
+        end
+        return count
+    end
+    ns.Set("barStyle", "split")
+    ns.RaidTimers:Apply()
+    Equal(Pieces(bar) .. " " .. Pieces(boss) .. " " .. S[boss.Spark].alpha .. " " .. tostring(S[bar.timeText].points[1][2] == bar),
+        "4 2 0 false", "Split before: the edge, track and box on the countdown, the edge and track on the boss bar, no spark")
+    ns.Set("pullTimer", false)
+    ns.Set("raidWarnings", false)
+    ns.Set("bossCasts", false)
+    ns.RaidTimers:Apply()
+    ns.Set("barStyle", "glass")
+    Equal(S[bar].barTexture .. " " .. Colour(bar) .. " " .. S[made[timer].border].alpha .. " " .. S[made[timer].backing].alpha
+        .. " " .. S[bar.timeText].font, PLAIN .. " 1,0,0,1 1 1 GameFontHighlight", "the countdown bar, border, backing and time as Blizzard's")
+    at = S[bar.timeText].points[1]
+    Equal(#S[bar.timeText].points .. " " .. at[1] .. " " .. tostring(at[2] == bar) .. " " .. at[3] .. " " .. at[4] .. "," .. at[5],
+        "1 CENTER true CENTER 0,0", "its time centred on the bar again, out of Split's box")
+    Equal(Pieces(bar) .. " " .. Pieces(tracker.timerList[2].bar), "0 0", "none of the addon's pieces left on the countdown bars")
+    Equal(tostring(S[timer.digit1].desaturated) .. " " .. table.concat(S[timer.digit1].tint, ","), "false 1,1,1", "the numbers gold")
+    Equal(S[first].face .. "|" .. S[second].face, "Fonts\\FRIZQT__.TTF 20 |Fonts\\FRIZQT__.TTF 20 ",
+        "every line dressed so far back in Blizzard's font")
+    Equal(S[first].shadowOffset .. " " .. S[second].shadowOffset, "1,-1 1,-1", "and its shadow")
+    Equal(table.concat(S[first].textColour, ",") .. " | " .. table.concat(S[second].textColour, ","), "1,0.282,0 | 1,0.867,0",
+        "and the colour Blizzard gave each message, on the lines still showing")
+    Equal(S[boss.Border].alpha .. " " .. S[boss.Text].font .. " " .. S[boss.Icon].coords, "1 SystemFont_Shadow_Small 0,1,0,1",
+        "the boss bar's own art, font and icon back")
+    Equal(S[boss.Background].alpha .. " " .. S[boss.TextBorder].alpha .. " " .. S[boss.Spark].alpha .. " " .. Pieces(boss),
+        "1 1 1 0", "its backing, name box and spark too, none of the addon's pieces left")
+    Free(timer)
+    Countdown(5)
+    Release(lines[3] or first)
+    Say(WARNING)
+    Cast(boss, "ui-castingbar-filling-standard")
+    Equal(S[bar].barTexture .. " " .. S[boss].barTexture .. " " .. S[first].face, PLAIN .. " ui-castingbar-filling-standard "
+        .. "Fonts\\FRIZQT__.TTF 20 ", "and nothing restyled any more as Blizzard carries on")
+    Equal(#printed, 0, "no errors switching off")
+
+    -- Edit Mode's Boss Frames shows the boss bars as Blizzard left them: full
+    -- (each bar's first PLAYER_ENTERING_WORLD fills it with no cast), with no
+    -- name or icon. A full fill hides the track, so the addon's look showed
+    -- only a coloured line. There the bars show empty in your design: the fill
+    -- see-through while a bar isn't casting, shown again for every cast.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    Game(nil)
+    for _, each in ipairs(bars) do Cast(each, "ui-castingbar-full-standard", true) end
+    ns = Load({ bossCasts = true })
+    Fire("PLAYER_LOGIN")
+    boss = bars[1]
+    Equal(Alpha(boss) .. " " .. S[boss].barTexture .. " " .. Pieces(boss), "1 " .. FLAT .. " 3",
+        "outside Edit Mode: the fill as it is, in your texture, with the edge, track and shine")
+    EditMode(true)
+    Equal(Alpha(boss) .. " " .. Alpha(bars[5]) .. " " .. Pieces(boss) .. " " .. S[boss.Border].alpha, "0 0 3 0",
+        "Boss Frames ticked: all five empty, the edge, track and shine showing, Blizzard's frame gone")
+    -- A boss cast while it shows: Blizzard picks the fill before it marks the bar casting.
+    Cast(boss, "ui-castingbar-filling-standard")
+    Casting(boss, true)
+    Equal(Alpha(boss) .. " " .. Colour(boss) .. " " .. Alpha(bars[2]), "1 1,0.7,0,1 0",
+        "a boss cast in Edit Mode: its fill shows, gold; the other bars stay empty")
+    -- Blizzard fills it as the cast ends, still marked casting, then clears the mark.
+    Cast(boss, "ui-castingbar-full-standard", true)
+    Equal(Alpha(boss), 1, "the cast ending: its fill still shows")
+    Casting(boss, nil)
+    EditMode(true)
+    Equal(Alpha(boss), 0, "Boss Frames ticked again after it: empty again")
+    -- A channel is marked channelling, not casting.
+    Cast(boss, "ui-castingbar-filling-channel")
+    Casting(boss, nil, true)
+    EditMode(true)
+    Equal(Alpha(boss) .. " " .. Colour(boss), "1 0,0.8,0,1", "a channel while Boss Frames is ticked again: shown, green")
+    Casting(boss, nil, nil)
+    -- A full fill with no cast (a loading screen) while Edit Mode shows them: still empty.
+    Cast(boss, "ui-castingbar-full-standard", true)
+    Equal(Alpha(boss), 0, "Blizzard's full fill with no cast in Edit Mode: still empty")
+    -- Edit Mode closed: every fill shows again, for the next cast.
+    EditMode(false)
+    Equal(Alpha(boss) .. " " .. Alpha(bars[5]), "1 1", "Edit Mode closed: every fill shows again")
+    Cast(boss, "ui-castingbar-full-standard", true)
+    Equal(Alpha(boss), 1, "and a full fill outside Edit Mode shows")
+    -- Unticked while Edit Mode shows them: Blizzard's own full bar back at
+    -- once, and left alone after.
+    EditMode(true)
+    ns.Set("bossCasts", false)
+    ns.RaidTimers:Apply()
+    Equal(Alpha(boss) .. " " .. Alpha(bars[5]) .. " " .. S[boss.Border].alpha .. " " .. Pieces(boss), "1 1 1 0",
+        "switched off in Edit Mode: Blizzard's fill and frame back, none of the addon's pieces")
+    EditMode(true)
+    Cast(boss, "ui-castingbar-full-standard", true)
+    Equal(Alpha(boss), 1, "and left alone after, as Edit Mode refreshes and Blizzard fills it")
+    -- Ticked while Edit Mode shows them: empty at once.
+    ns.Set("bossCasts", true)
+    ns.RaidTimers:Apply()
+    Equal(Alpha(boss) .. " " .. Alpha(bars[5]) .. " " .. Pieces(boss), "0 0 3", "switched on in Edit Mode: empty at once")
+    -- The window's preview is the addon's own bar: Edit Mode never empties it.
+    local preview = ns.RaidTimers:SampleBoss(nil)
+    S[preview.bar].fill = New("Texture", preview.bar)
+    ns.RaidTimers:SampleLook(preview)
+    Equal(S[S[preview.bar].fill].alpha, 1, "the page's preview keeps its fill in Edit Mode")
+    EditMode(false)
+    Equal(#printed, 0, "no errors in Edit Mode")
+
+    -- EraUI's Classic cast bars style the boss bars while they're on: the
+    -- boss bars are left to it, never hooked or touched.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    Game({ GetSetting = function(_, key) if key == "castBars" or key == "enabled" then return true end end })
+    plainFill, plainShown = bars[1].UpdateBarFillTexture, box.UpdateShownState
+    ns = Load({ bossCasts = true })
+    Fire("PLAYER_LOGIN")
+    Equal(tostring(bars[1].UpdateBarFillTexture == plainFill) .. " " .. tostring(S[bars[1].Border].alpha) .. " "
+        .. tostring(ns.RaidTimers:BossOwner()), "true 1 EraUI", "EraUI's Cast Bars on: the boss bars are EraUI's")
+    Cast(bars[1], "ui-castingbar-filling-standard")
+    Equal(S[bars[1]].barTexture, "ui-castingbar-filling-standard", "Blizzard's fill, left as it is")
+    EditMode(true)
+    Equal(tostring(box.UpdateShownState == plainShown) .. " " .. Alpha(bars[1]), "true 1",
+        "EraUI's, Boss Frames in Edit Mode: their container never hooked, the fill left as it is")
+    EditMode(false)
+    -- Off in EraUI: the addon styles them.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    local eraCastBars = false
+    Game({ GetSetting = function(_, key)
+        if key == "enabled" then return true end
+        if key == "castBars" then return eraCastBars end
+    end })
+    ns = Load({ bossCasts = true })
+    Fire("PLAYER_LOGIN")
+    Equal(tostring(ns.RaidTimers:BossOwner()) .. " " .. S[bars[1].Border].alpha, "nil 0", "EraUI's Cast Bars off: the addon's look")
+    -- EraUI taking them back later, with the hooks in: handed back at once,
+    -- and Blizzard's next fill left to EraUI.
+    eraCastBars = true
+    ns.RaidTimers:Apply()
+    Cast(bars[1], "ui-castingbar-filling-channel")
+    Equal(tostring(ns.RaidTimers:BossOwner()) .. " " .. S[bars[1].Border].alpha .. " " .. S[bars[1]].barTexture,
+        "EraUI 1 ui-castingbar-filling-channel", "EraUI's again later: handed back, the next cast left as it is")
+    -- EraUI switched off as a whole: its skins don't run, so the addon's.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    Game({ GetSetting = function(_, key) return key ~= "enabled" end })
+    ns = Load({ bossCasts = true })
+    Fire("PLAYER_LOGIN")
+    Equal(tostring(ns.RaidTimers:BossOwner()) .. " " .. S[bars[1].Border].alpha, "nil 0", "EraUI switched off: the addon's look")
+    -- An EraUI whose settings can't be read: left to it, so the two never both style them.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    Game({})
+    ns = Load({ bossCasts = true })
+    Fire("PLAYER_LOGIN")
+    Equal(tostring(ns.RaidTimers:BossOwner()) .. " " .. S[bars[1].Border].alpha, "EraUI 1", "EraUI that can't say: left to EraUI")
+
+    -- A current EraUI shares the boss bars: at its login it says so through
+    -- the public API, and steps back while this part styles them, so the
+    -- switch decides even with its Cast Bars on. It hears each change of
+    -- hands: taking, before this look goes on; handing back, after
+    -- Blizzard's is back. first: its login runs before the addon's.
+    local era
+    local function SharingEraUI(first)
+        era = { heard = {} }
+        era.GetSetting = function(_, key) if key == "castBars" or key == "enabled" then return true end end
+        Game(era)
+        local function Login()
+            local watch = CreateFrame("Frame")
+            watch:RegisterEvent("PLAYER_LOGIN")
+            watch:SetScript("OnEvent", function()
+                era.callback = function()
+                    local boss = bars[1]
+                    table.insert(era.heard, tostring(ForeverEnhancedCooldownManagerAPI.StylesBossCastBars()) .. " "
+                        .. S[boss.Border].alpha .. " " .. S[boss.TextBorder].alpha .. " " .. tostring(S[boss.Text].font))
+                end
+                era.shared = ForeverEnhancedCooldownManagerAPI.ShareBossCastBars("EraUI", era.callback)
+            end)
+        end
+        return Login
+    end
+    local API = function() return ForeverEnhancedCooldownManagerAPI end
+    -- Its login first, the switch on: the addon's look once it logs in.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    SharingEraUI(true)()
+    plainFill = bars[1].UpdateBarFillTexture
+    ns = Load({ bossCasts = true })
+    Equal(tostring(API().StylesBossCastBars()) .. " " .. S[bars[1].Border].alpha, "false 1", "before login: not styling, nothing touched")
+    Fire("PLAYER_LOGIN")
+    Equal(tostring(era.shared) .. " " .. tostring(ns.RaidTimers:BossOwner()) .. " " .. tostring(ns.RaidTimers:SharedBy("EraUI")),
+        "true nil true", "a sharing EraUI, its Cast Bars on: the bars are the switch's to decide")
+    Equal(#era.heard .. " " .. tostring(era.heard[1]), "1 true 1 1 nil",
+        "it heard once, told the addon styles them, before this look went on")
+    Equal(tostring(API().StylesBossCastBars()) .. " " .. S[bars[1].Border].alpha .. " " .. S[bars[5].TextBorder].alpha
+        .. " " .. S[bars[1].Text].font .. " " .. tostring(bars[1].UpdateBarFillTexture ~= plainFill),
+        "true 0 0 FECMFont10 true", "then the addon's look, on all five, the fill hooked")
+    Cast(bars[1], "ui-castingbar-filling-channel")
+    Equal(Colour(bars[1]), "0,0.8,0,1", "a boss channel in the addon's green, EraUI's Cast Bars on")
+    -- Unticked: Blizzard's look back first, then EraUI hears, and gets them.
+    ns.Set("bossCasts", false)
+    ns.RaidTimers:Apply()
+    Equal(#era.heard .. " " .. tostring(era.heard[2]), "2 false 1 1 SystemFont_Shadow_Small",
+        "unticked: EraUI heard after Blizzard's look was back")
+    Equal(tostring(API().StylesBossCastBars()), "false", "and the API says so")
+    -- Then they're EraUI's: the addon leaves them alone, whatever changes.
+    S[bars[1].TextBorder].alpha, S[bars[1].Border].alpha = 0, .5
+    ns.Set("barStyle", "split")
+    ns.RaidTimers:Apply()
+    ns.Set("barStyle", "glass")
+    ns.RaidTimers:Apply()
+    Cast(bars[1], "ui-castingbar-filling-standard")
+    Equal(S[bars[1].TextBorder].alpha .. " " .. S[bars[1].Border].alpha .. " " .. S[bars[1]].barTexture .. " " .. #era.heard,
+        "0 0.5 ui-castingbar-filling-standard 2", "EraUI's again: never touched by the addon, as choices change and bosses cast")
+    -- Ticked again: EraUI hears first again.
+    ns.Set("bossCasts", true)
+    ns.RaidTimers:Apply()
+    Equal(#era.heard .. " " .. tostring(era.heard[3]) .. " " .. S[bars[1].Border].alpha, "3 true 0.5 0 SystemFont_Shadow_Small 0",
+        "ticked again: EraUI heard first, then the addon's look")
+    ns.RaidTimers:Apply()
+    Equal(#era.heard, 3, "a choice changed while it's on: no change of hands, nothing heard")
+    Equal(#printed, 0, "no errors handing over")
+
+    -- Its login after the addon's: the addon waits for EraUI's Cast Bars at
+    -- first, then takes the bars as EraUI shares them.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    local login = SharingEraUI(false)
+    ns = Load({ bossCasts = true })
+    login()
+    Fire("PLAYER_LOGIN")
+    Equal(#era.heard .. " " .. tostring(era.heard[1]) .. " " .. S[bars[1].Border].alpha .. " " .. tostring(API().StylesBossCastBars()),
+        "1 true 1 1 nil 0 true", "EraUI's login second: heard as the addon took them, then the addon's look")
+
+    -- Switch off with a sharing EraUI: nothing heard, nothing hooked or touched.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Warnings()
+    Bosses()
+    SharingEraUI(true)()
+    plainFill = bars[1].UpdateBarFillTexture
+    ns = Load({ bossCasts = false })
+    Fire("PLAYER_LOGIN")
+    Equal(#era.heard .. " " .. S[bars[1].Border].alpha .. " " .. tostring(bars[1].UpdateBarFillTexture == plainFill) .. " "
+        .. tostring(API().StylesBossCastBars()), "0 1 true false", "switch off: EraUI keeps them, nothing hooked, nothing heard")
+
+    -- Every EraUI with the switch on and off: who styles the boss bars.
+    for _, case in ipairs({
+        { "no EraUI", nil, true, "true 0" }, { "no EraUI", nil, false, "false 1" },
+        { "an older EraUI, Cast Bars on", "on", true, "false 1" }, { "an older EraUI, Cast Bars on", "on", false, "false 1" },
+        { "EraUI's Cast Bars off", "off", true, "true 0" }, { "EraUI's Cast Bars off", "off", false, "false 1" },
+        { "a sharing EraUI", "sharing", true, "true 0" }, { "a sharing EraUI", "sharing", false, "false 1" },
+    }) do
+        Environment()
+        Viewers(0)
+        Tracker()
+        Warnings()
+        Bosses()
+        if case[2] == "sharing" then
+            SharingEraUI(true)()
+        elseif case[2] then
+            Game({ GetSetting = function(_, key) if key == "enabled" then return true end if key == "castBars" then return case[2] == "on" end end })
+        else
+            Game(nil)
+        end
+        ns = Load({ bossCasts = case[3] })
+        Equal(API().StylesBossCastBars(), false, case[1] .. ", switch " .. (case[3] and "on" or "off") .. ": before login, not yet")
+        Fire("PLAYER_LOGIN")
+        Equal(tostring(API().StylesBossCastBars()) .. " " .. S[bars[3].Border].alpha, case[4],
+            case[1] .. ", switch " .. (case[3] and "on" or "off"))
+    end
+
+    -- The API is read-only, checks what it's given, and a listener's error stays its own.
+    Equal(API().version .. " " .. tostring(getmetatable(API())), "1 false", "version 1, its metatable hidden")
+    Equal(pcall(function() API().StylesBossCastBars = function() return true end end), false, "can't be written")
+    -- (A name nobody has shared under yet, so only the missing function refuses it.)
+    Equal(tostring(API().ShareBossCastBars(nil, print)) .. " " .. tostring(API().ShareBossCastBars("Someone", "x")) .. " "
+        .. tostring(API().ShareBossCastBars("", print)) .. " " .. tostring(ns.RaidTimers:SharedBy("EraUI")) .. " "
+        .. tostring(ns.RaidTimers:SharedBy("Someone")) .. " " .. tostring(ns.RaidTimers:SharedBy("")), "false false false true false false",
+        "an addon's name and a function needed")
+    -- The first to share under a name keeps it: another callback under EraUI's
+    -- name is refused and never heard, so it can't cut EraUI off; EraUI's own
+    -- again is fine, and changes nothing.
+    local squatter = 0
+    local heard = #era.heard
+    Equal(tostring(API().ShareBossCastBars("EraUI", function() squatter = squatter + 1 end)) .. " "
+        .. tostring(API().ShareBossCastBars("EraUI", era.callback)) .. " " .. #era.heard, "false true " .. heard,
+        "EraUI's name taken: another refused, EraUI's own again fine, nothing heard")
+    Equal(API().ShareBossCastBars("Another", function() error("its own trouble") end), true, "another addon can share them")
+    ns.Set("bossCasts", true)
+    ns.RaidTimers:Apply()
+    Equal(tostring(API().StylesBossCastBars()) .. " " .. S[bars[1].Border].alpha .. " " .. #printed, "true 0 0",
+        "a listener that fails: taken all the same, nothing reported")
+    ns.Set("bossCasts", false)
+    ns.RaidTimers:Apply()
+    Equal(tostring(API().StylesBossCastBars()) .. " " .. S[bars[1].Border].alpha .. " " .. #printed, "false 1 0",
+        "and handed back all the same")
+    Equal(squatter .. " " .. (#era.heard - heard) .. " " .. tostring(era.heard[#era.heard - 1]):match("^%a+") .. " "
+        .. tostring(era.heard[#era.heard]):match("^%a+"), "0 2 true false",
+        "EraUI heard both changes of hands, the refused one neither")
+    ns.Set("bossCasts", true)
+    ns.RaidTimers:Apply()
+    Equal(tostring(API().StylesBossCastBars()) .. " " .. S[bars[1].Border].alpha .. " " .. #printed, "true 0 0", "and taken again")
+
+    -- Blizzard's raid warnings loading late are hooked as they load.
+    Environment()
+    Viewers(0)
+    Tracker()
+    Bosses()
+    Game(nil)
+    _G.RaidWarningFrame = nil
+    ns = Load({ raidWarnings = true })
+    Fire("PLAYER_LOGIN")
+    Warnings()
+    Fire("ADDON_LOADED", "Blizzard_RaidWarning")
+    Say(WARNING)
+    Equal(S[lines[1]].face, "Fonts\\FRIZQT__.TTF 20 OUTLINE", "raid warnings loaded late: restyled")
+    -- A boss emote added while the part is off, then put in your colour and
+    -- back: Blizzard's usual colour for boss emotes, as its own wasn't seen.
+    _G.ChatTypeInfo = { RAID_WARNING = { r = .9, g = .3, b = .1 }, RAID_BOSS_EMOTE = { r = .9, g = .8, b = .1 } }
+    ns.Set("raidWarnings", false)
+    ns.RaidTimers:Apply()
+    Say(EMOTE, 2)
+    local late = lines[2]
+    Equal(S[late].face, nil, "added while off: left as Blizzard's")
+    ns.Set("raidWarnings", true)
+    ns.RaidTimers:Apply()
+    Equal(S[late].face .. " " .. table.concat(S[late].textColour, ","), "Fonts\\FRIZQT__.TTF 20 OUTLINE 1,0.867,0",
+        "ticked on: dressed, and still in the colour Blizzard gave it")
+    ns.Set("emoteColour", "red")
+    ns.RaidTimers:Apply()
+    Equal(table.concat(S[late].textColour, ","), "1,0.25,0.2", "ticked on: the boss emote showing in your red")
+    ns.Set("emoteColour", "default")
+    ns.RaidTimers:Apply()
+    Equal(table.concat(S[late].textColour, ","), "0.9,0.8,0.1", "Blizzard's colour again: its usual one for boss emotes")
+    _G.ChatTypeInfo = nil
+    Equal(#printed, 0, "no errors")
+    _G.issecretvalue = nil
+    _G.C_AddOns, _G.EraUI = nil, nil
 end
 
 print = _G.print

@@ -12,6 +12,7 @@ Style.lua
 Skin.lua
 Resource.lua
 CastBar.lua
+RaidTimers.lua
 Ranks.lua
 Spells.lua
 Keybinds.lua
@@ -22,6 +23,7 @@ Theme.lua
 BarPage.lua
 LayoutPage.lua
 CastBarPage.lua
+RaidTimersPage.lua
 ProfileMenu.lua
 Window.lua
 Tour.lua
