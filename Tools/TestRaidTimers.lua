@@ -363,7 +363,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "Bars.lua",
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -426,7 +426,7 @@ local function LoadAll(saved, files)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs(files or { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua",
-        "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "Bars.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
+        "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
         "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -1508,7 +1508,7 @@ end
 Environment()
 BlizzardFrames()
 ns = LoadAll(nil, { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua",
-    "Keybinds.lua", "Buffs.lua", "Bars.lua", "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua",
+    "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua",
     "ProfileMenu.lua", "Window.lua", "Tour.lua", "MinimapButton.lua", "Notes.lua" })
 ns.ShowWindow()
 Equal(tostring(FECMFrame.nav.raid) .. " " .. tostring(FECMFrame.moreHeading) .. " " .. tostring(FECMFrame.pages.raid), "nil nil nil",

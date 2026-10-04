@@ -222,6 +222,36 @@ local function Signature(ids)
     return table.concat(keys, ",")
 end
 
+-- Debuffs you put on yourself (Weakened Soul from your own shield, Recently
+-- Bandaged), after your buffs on the Buffs bar, when ticked. The game won't
+-- let an addon pick out a debuff on you by spell ID, only by who cast it, so
+-- this is one group for all of yours. Packed only: fixed spots belong to
+-- entries.
+local SELF_MAX = 4
+function F:SelfOn(bar)
+    return bar ~= nil and ns.AURA_BARS[bar.key].unit == "player" and bar.data ~= nil and bar.data.selfDebuffs == true
+        and self:Packed(bar.data)
+end
+
+function F:ApplySelf(bar, packed, spacing)
+    local container = bar.container
+    if ns.AURA_BARS[bar.key].unit ~= "player" then return end
+    local on = packed and bar.data.selfDebuffs == true
+    -- After the last entry, or before the first when the bar grows left.
+    local layout = { layoutIndex = bar.data.grow == "left" and 0 or ns.BUFF_SLOTS + 1, groupSpacing = spacing }
+    local signature = on and (layout.layoutIndex .. "|" .. spacing) or ""
+    if bar.appliedSelf == signature then return end
+    bar.appliedSelf = signature
+    if on and not bar.selfGroup then
+        container:AddAuraGroup("self", "HARMFUL", { initializeFrame = GroupLook(bar), maxFrameCount = SELF_MAX,
+            candidateFilters = { isFromPlayerOrPlayerPet = true }, layout = layout })
+        bar.selfGroup = true
+    elseif bar.selfGroup then
+        if on then container:SetAuraGroupLayout("self", layout) end
+        container:SetAuraGroupEnabled("self", on)
+    end
+end
+
 -- Tells the secure container which entries go where. Never in combat; a change
 -- made then waits for the fight to end. Only what changed is sent.
 function F:Apply(bar)
@@ -279,6 +309,7 @@ function F:Apply(bar)
             end
         end
     end
+    self:ApplySelf(bar, on and packed, spacing)
     if bar.appliedScale ~= scale then
         bar.appliedScale = scale
         container:SetScale(scale)

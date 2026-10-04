@@ -359,7 +359,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "Bars.lua",
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -8171,6 +8171,87 @@ end)()
     cursor = nil
     Equal(B:CursorNote("cd"), nil, "nothing held: nothing to say")
     Equal(#printed, 0, "no errors")
+end)()
+
+-- Buff and debuff times on the cooldown icons, as Blizzard's Cooldown Manager
+-- shows them (a player: "not able to track Shadow Word: Pain duration like in
+-- the baseline cooldown manager"), and debuffs on you on the Buffs bar ("not
+-- able to track the Weakened Soul Debuff"). ---------------------------------------
+;(function()
+    Environment()
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:AddItem("cd", 5512)
+    local cd = B:Get("cd")
+    Equal(tostring(cd.auraContainers) .. " " .. tostring(ns.BarData("cd").showAuras), "nil false", "off at first: nothing made")
+    B:SetOption("cd", "showAuras", true)
+    local made = cd.auraContainers
+    Equal(made and (S[made.p].unit .. " " .. S[made.t].unit), "player target", "ticked: one container for you, one for your target")
+    local p1, t1 = S[made.p].slots.p1, S[made.t].slots.t1
+    Equal(p1.filter .. " " .. t1.filter, "HELPFUL HARMFUL", "a buff on you, a debuff on your target")
+    Equal(tostring(t1.enabled) .. " " .. tostring(t1.filters.includeSpellIDs[8921] and t1.filters.includeSpellIDs[8924])
+        .. " " .. tostring(t1.filters.isFromPlayerOrPlayerPet), "true true true", "every rank of Moonfire, only yours")
+    Equal(t1.supplied.SetIcon ~= nil and t1.supplied.SetDurationCooldown ~= nil and t1.supplied.SetApplicationCount ~= nil, true,
+        "with its icon, time and stacks")
+    Equal(Last(cd.auraAnchors[1], "SetAllPoints") == cd.icons[1], true, "laid over Moonfire's icon")
+    local item = S[made.t].slots.t2
+    Equal(item == nil or item.enabled == false, true, "an item puts no aura on anyone: no time over it")
+    Equal(containerCallsInCombat, 0, "nothing set up in a fight")
+    -- An icon moving in a fight takes its time with it, by name.
+    B:SetOption("cd", "showAuras", false)
+    Equal(tostring(S[made.p].slots.p1.enabled) .. " " .. tostring(S[made.t].slots.t1.enabled), "false false",
+        "unticked: both switched off")
+    lockdown = true
+    B:SetOption("cd", "showAuras", true)
+    Equal(tostring(containerCallsInCombat) .. " " .. tostring(cd.auraPending), "0 true", "ticked in a fight: waits for it to end")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(tostring(S[made.t].slots.t1.enabled) .. " " .. tostring(cd.auraPending), "true nil", "and switches on once it's over")
+    -- First ticked in a fight on a bar with none made yet: made as it ends.
+    B:Assign("Wrath", "util")
+    local util = B:Get("util")
+    lockdown = true
+    B:SetOption("util", "showAuras", true)
+    Equal(tostring(util.auraContainers) .. " " .. tostring(util.auraPending), "nil true", "nothing made in a fight")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(util.auraContainers ~= nil and S[util.auraContainers.t].slots.t1.enabled, true, "made once it's over")
+    -- A new target: the debuff side looks again at once.
+    local refreshes = S[made.t].refreshes or 0
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal((S[made.t].refreshes or 0) - refreshes, 1, "a new target is looked at again")
+    Equal(#printed, 0, "no errors from buff and debuff times")
+
+    -- Debuffs you put on yourself on the Buffs bar: the game won't let an
+    -- addon pick out a debuff on you by spell ID, only by who cast it, so it's
+    -- one group for all of yours, after your buffs.
+    B:SetAura("buff", "Thorns", true)
+    local buff = B:Get("buff")
+    local groups = S[buff.container].groups
+    Equal(tostring(groups.self) .. " " .. tostring(ns.BarData("buff").selfDebuffs), "nil false", "off at first: no group")
+    B:SetOption("buff", "selfDebuffs", true)
+    local own = groups.self
+    Equal(own and (own.filter .. " " .. tostring(own.enabled) .. " " .. tostring(own.filters.isFromPlayerOrPlayerPet)
+        .. " " .. tostring(own.filters.includeSpellIDs)), "HARMFUL true true nil", "ticked: your debuffs on you, by who cast them, no spell IDs")
+    Equal(own.layout.layoutIndex > groups.g1.layout.layoutIndex, true, "after your buffs")
+    B:SetOption("buff", "grow", "left")
+    Equal(groups.self.layout.layoutIndex < groups.g1.layout.layoutIndex, true, "growing left: before them, at the far end")
+    B:SetOption("buff", "grow", "centre")
+    B:SetOption("buff", "showMissing", true)
+    Equal(groups.self.enabled, false, "fixed spots: off, they belong to entries")
+    B:SetOption("buff", "showMissing", false)
+    Equal(groups.self.enabled, true, "packed again: back on")
+    -- With nothing else on the Buffs bar, it still shows for them.
+    B:SetAura("buff", "Thorns", false)
+    Equal(tostring(S[buff].shown) .. " " .. tostring(groups.self.enabled), "true true", "an empty Buffs bar still shows your debuffs")
+    lockdown = true
+    B:SetOption("buff", "selfDebuffs", false)
+    Equal(tostring(containerCallsInCombat) .. " " .. tostring(groups.self.enabled), "0 true", "unticked in a fight: waits")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(groups.self.enabled, false, "and goes once it's over")
+    Equal(#printed, 0, "no errors from debuffs on you")
 end)()
 
 print = _G.print

@@ -665,6 +665,8 @@ local function Layout(bar)
     end
     bar.count = count
     bar:SetSize(B:Arrange(bar, bar.icons, count, data))
+    -- Buff and debuff times over the icons, when ticked (IconAuras.lua).
+    ns.IconAuras:Layout(bar, data)
     BarDecor(bar)
     Place(bar)
     Arrows(bar)
@@ -776,7 +778,8 @@ function B:UpdateShown()
                 -- Shown whenever it has entries; hiding out of combat fades it
                 -- right out instead, since the secure slots can't be hidden in
                 -- a fight.
-                local show = on and not out and (unlocked or bar.count > 0) or false
+                local has = bar.count > 0 or ns.BuffBar:SelfOn(bar)
+                local show = on and not out and (unlocked or has) or false
                 if bar:IsShown() ~= show then
                     if InCombatLockdown() then bar.pendingShown = true else bar:SetShown(show) end
                 end
@@ -1556,6 +1559,10 @@ function B:Start()
                 if bar and bar.pendingDecor then GroupDecor(bar) end
                 if bar then bar.pendingShown = nil end
             end
+            -- And the buff and debuff times on the cooldown icons.
+            for _, key in ipairs(ns.BAR_KEYS) do
+                if bars[key] then ns.IconAuras:CombatEnded(bars[key]) end
+            end
             -- Items used up or picked up in the fight come off or go on now,
             -- and families move on to the best one you carry.
             follow = true
@@ -1598,6 +1605,8 @@ function B:Start()
         else
             if event == "PLAYER_TARGET_CHANGED" then
                 ns.BuffBar:UpdateTarget(bars.debuff)
+                ns.IconAuras:UpdateTarget(bars.cd)
+                ns.IconAuras:UpdateTarget(bars.util)
                 B:UpdateShown()
             end
             dirty = true

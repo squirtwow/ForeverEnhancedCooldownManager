@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.3
+
+### Added
+- Cooldowns and Utility bars can show a spell's buff or debuff time, like Shadow Word: Pain.
+- Buffs bar can show your debuffs on you, like Weakened Soul.
+
 ## 1.4.2
 
 ### Changed

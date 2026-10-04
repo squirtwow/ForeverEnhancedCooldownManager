@@ -272,7 +272,7 @@ function ns.BuildBarPage(window, page, width)
     -- Options ------------------------------------------------------------------------
     local options = CreateFrame("Frame", nil, page)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
-    options:SetSize(inner, 112)
+    options:SetSize(inner, 134)
     page.optionsArea = options
     local size = T:Slider(options, "Icon size", ns.BAR_LIMITS.size, 2, 280, function(value)
         B:SetOption(state.bar, "size", value)
@@ -320,6 +320,15 @@ function ns.BuildBarPage(window, page, width)
     end)
     local showNames = Option("Show spell names", "showNames", -22, "Each spell's name under its icon.")
     local showTimer = Option("Show countdown numbers", "showTimer", -44, "The numbers counting down on this bar's icons.")
+    -- The cooldown bars only: an icon shows the time left on the buff its
+    -- spell put on you or its debuff on your target, as Blizzard's does.
+    local showAuras = Option("Show buff and debuff time", "showAuras", -107,
+        "While the buff a spell put on you, or its debuff on your target (like Shadow Word: Pain), is up,"
+            .. " its icon shows the time left with a gold edge.")
+    -- The Buffs bar only, in the same spot.
+    local showSelf = Option("Show your debuffs on you", "selfDebuffs", -107,
+        "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, after your buffs."
+            .. " Not with missing buffs greyed.")
 
     -- A label and joined buttons for a choice, with the footer explaining it:
     -- note is the same for every button, or one for each choice by its key.
@@ -368,7 +377,7 @@ function ns.BuildBarPage(window, page, width)
     local wrap = Pills("New rows", 320, -85, 110, ns.WRAP, ns.WRAP_NAMES, "wrap",
         "Where the next row goes when there are more icons than fit across.")
     page.options = { whenReady = whenReady, showMissing = showMissing, showNames = showNames,
-        showTimer = showTimer, outOfCombat = outOfCombat, grow = grow, wrap = wrap }
+        showTimer = showTimer, showAuras = showAuras, showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap }
 
     -- The spell list -------------------------------------------------------------------
     local listPanel = CreateFrame("Frame", nil, page, "BackdropTemplate")
@@ -698,6 +707,10 @@ function ns.BuildBarPage(window, page, width)
         showNames:SetChecked(data.showNames)
         outOfCombat:SetSelected(data.outOfCombat)
         showTimer:SetChecked(data.showTimer)
+        showAuras:SetShown(not aura)
+        showAuras:SetChecked(data.showAuras)
+        showSelf:SetShown(state.bar == "buff")
+        showSelf:SetChecked(data.selfDebuffs)
         showItems:SetShown(not aura)
         showRanks:SetShown(not aura)
         showItems:SetChecked(ns.Get("listItems"))

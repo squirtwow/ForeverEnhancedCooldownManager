@@ -10,6 +10,15 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.4.3",
+        sections = {
+            { "Added", {
+                "Cooldowns and Utility bars can show a spell's buff or debuff time, like Shadow Word: Pain.",
+                "Buffs bar can show your debuffs on you, like Weakened Soul.",
+            } },
+        },
+    },
+    {
         version = "1.4.2",
         sections = {
             { "Changed", {

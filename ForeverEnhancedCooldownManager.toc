@@ -17,6 +17,7 @@ Ranks.lua
 Spells.lua
 Keybinds.lua
 Buffs.lua
+IconAuras.lua
 Bars.lua
 Layout.lua
 Theme.lua

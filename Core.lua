@@ -177,8 +177,7 @@ ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs", debuff = "D
 ns.AURA_BARS = {
     buff = { unit = "player", filter = "HELPFUL", word = "buff" },
     debuff = { unit = "target", filter = "HARMFUL", mine = true, word = "debuff" },
-}
-ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 }, perRow = { 1, 20, 20 } } -- min, max, default
+}ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 }, perRow = { 1, 20, 20 } } -- min, max, default
 ns.ROW_GAP = { 0, 20, 0 } -- a layout's space between rows: touching unless you want room
 ns.ICON_GAP = { 0, 20, 0 } -- and between the icons in its rows
 ns.BAR_MAX_SPELLS = 40
@@ -626,6 +625,8 @@ function ns.BarData(key)
     bar.showMissing = bar.showMissing == true
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
+    bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
+    bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs bar: debuffs you put on yourself, off unless ticked
     bar.perRow = Limit(bar.perRow, ns.BAR_LIMITS.perRow)
     if not ns.GROW_NAMES[bar.grow] then bar.grow = "centre" end
     if not ns.WRAP_NAMES[bar.wrap] then bar.wrap = "down" end
