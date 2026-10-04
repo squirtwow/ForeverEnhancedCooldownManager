@@ -273,7 +273,7 @@ function ns.BuildRaidTimersPage(window, page, width)
     local function Either() return Pulling() or Warning() end
 
     -- The pull and start countdown.
-    local pullTick = Tick("Pull and start countdown" .. UNTESTED, "pullTimer", 0, -4,
+    local pullTick = Tick("Pull and start countdown", "pullTimer", 0, -4,
         "Blizzard's countdown bar for a pull or a battleground's gates, in the Look page's design, texture and font, and its big numbers.")
     local pullColours = Colours("Colour", "pullColour", ns.BAR_COLOUR_KEYS, BarColour, 0, -28,
         "A colour for the countdown bar. Click it again for Blizzard's red.")

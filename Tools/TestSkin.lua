@@ -1,7 +1,9 @@
 -- Run the actual addon files against mock copies of Blizzard's cooldown viewer
 -- frames, built from Blizzard_CooldownViewer's CooldownViewer.xml. Blizzard's
--- frames are sealed: writing any key on them, or calling anything that shows,
--- hides, scales or reads them, fails the test. The only size changes allowed
+-- frames are sealed: writing any key on them or a viewer's item pool (even
+-- one already there), calling anything that shows, hides, scales or reads them, setting their
+-- scripts, events, mouse or strata, moving or fading a whole icon or viewer,
+-- or calling any of Blizzard's own methods, fails the test. The only size changes allowed
 -- are a Tracked Bar's own status bar height, inside its unchanged item frame,
 -- the height of the Personal Resource Display's extra mana bar, and the
 -- display's width while a layout matches it to your rows (the widths its own
@@ -39,16 +41,40 @@ local FORBIDDEN = {
     SetMaxLines = true, GetNumLines = true, GetStringWidth = true, GetStringHeight = true,
     -- Every other way to size one, besides SetScale, SetSize, SetWidth and SetHeight.
     SetTextScale = true, SetFontHeight = true, SetIgnoreParentScale = true,
+    -- Its scripts, events, mouse, strata and secure attributes: Blizzard's own.
+    SetScript = true, EnableMouse = true, SetFrameStrata = true, RegisterEvent = true, RegisterUnitEvent = true,
+    UnregisterEvent = true, UnregisterAllEvents = true, SetAttribute = true,
 }
 -- True while Blizzard's own code runs in the test: it may do what the addon may not.
 local blizzardCalling = false
 
+-- Blizzard's own code writing a key on its frames (this test, as the game):
+-- kept with a sealed frame's fields, off the frame itself, so a write by the
+-- addon always reaches the seal, even over a key that's there already.
+local rawset0, rawget0 = rawset, rawget
+local function rawset(t, key, value)
+    local s = S[t]
+    if s and s.fields then s.fields[key] = value else rawset0(t, key, value) end
+    return t
+end
+local function rawget(t, key)
+    local s = S[t]
+    if s and s.fields then return s.fields[key] end
+    return rawget0(t, key)
+end
+
 local Proto = {}
 local New
 
+-- A method no mock models. On a sealed Blizzard frame only its own code may
+-- call one, or the addon where a part allows it: any other (a Blizzard
+-- mixin's, say) would run Blizzard's code from the addon's in the game.
 local function Fallback(name)
     return function(self)
         local s = S[self]
+        if s.sealed and not blizzardCalling and not (s.allow and s.allow[name]) then
+            error("called " .. name .. ", which a Blizzard frame keeps to itself", 2)
+        end
         if s.blizzard and FORBIDDEN[name] and not blizzardCalling then error("called " .. name .. " on a Blizzard frame", 2) end
         s.calls[name] = (s.calls[name] or 0) + 1
     end
@@ -60,9 +86,12 @@ New = function(kind, parent, blizzard)
         masks = {}, shown = true, calls = {}, scripts = {}, events = {}, blizzard = blizzard }
     setmetatable(obj, {
         __index = function(_, key)
+            local s = S[obj]
+            -- A sealed frame's own keys, as they were on the frame.
+            local fields = s.fields
+            if fields and fields[key] ~= nil then return fields[key] end
             -- On Blizzard's frames: nothing forbidden unless the part allows it
             -- (allow), and nothing a part keeps to itself (deny; ALL for all).
-            local s = S[obj]
             if s.blizzard and not blizzardCalling and type(key) == "string" and key:match("^[A-Z]") then
                 local blocked = FORBIDDEN[key] and not (s.allow and s.allow[key]) and not (key == "IsShown" and s.readable)
                 if blocked or (s.deny and (s.deny[key] or s.deny.ALL)) then
@@ -75,7 +104,7 @@ New = function(kind, parent, blizzard)
         end,
         __newindex = function(t, key, value)
             if S[t].sealed then error("wrote key '" .. tostring(key) .. "' on a Blizzard frame", 2) end
-            rawset(t, key, value)
+            rawset0(t, key, value)
         end,
     })
     if parent and S[parent] then
@@ -98,6 +127,7 @@ function Proto:ClearAllPoints() S[self].points = {} end
 function Proto:SetPoint(point, rel, relPoint, x, y) table.insert(S[self].points, { point, rel, relPoint, x, y }) end
 function Proto:SetAllPoints(rel) S[self].points = { { "ALL", rel } } end
 function Proto:SetAlpha(a) S[self].alpha = a end
+function Proto:GetAlpha() return S[self].alpha end
 function Proto:GetAtlas() return S[self].atlas end
 function Proto:RemoveMaskTexture(mask)
     local masks = S[self].masks
@@ -174,10 +204,26 @@ end
 -- Whether the game protects it (none of these are, unless a test says so).
 function Proto:IsProtected() return S[self].protected == true, false end
 
+-- Every frame sealed so far: nothing may ever be left on one (see the end).
+local sealed = setmetatable({}, { __mode = "k" })
 local function Seal(obj)
-    S[obj].sealed, S[obj].blizzard = true, true
-    for _, r in ipairs(S[obj].regions) do Seal(r) end
-    for _, c in ipairs(S[obj].children) do Seal(c) end
+    local s = S[obj]
+    s.sealed, s.blizzard = true, true
+    sealed[obj] = true
+    -- Its keys move off the frame, so writing any of them again reaches the seal.
+    if not s.fields then
+        local fields = {}
+        for key, value in next, obj do fields[key] = value end
+        for key in next, fields do rawset0(obj, key, nil) end
+        s.fields = fields
+    end
+    for _, r in ipairs(s.regions) do Seal(r) end
+    for _, c in ipairs(s.children) do Seal(c) end
+end
+-- What a cooldown item, buff icon, Tracked Bar or viewer keeps to itself, as
+-- a whole: its place and its alpha (its parts allow what the look needs).
+local function KeepsPlace(obj)
+    S[obj].deny = { SetPoint = true, ClearAllPoints = true, SetAllPoints = true, SetAlpha = true }
 end
 
 -- Keybinds: levels are read on Blizzard's frames and only set on the addon's
@@ -219,6 +265,7 @@ local function CooldownItem()
     item.ChargeCount.Current = New("FontString", item.ChargeCount)
     item.CooldownFlash = New("Frame", item)
     Seal(item)
+    KeepsPlace(item)
     return item, overlay
 end
 
@@ -230,6 +277,7 @@ local function BuffItem()
     item.Applications = New("Frame", item)
     item.Applications.Applications = New("FontString", item.Applications)
     Seal(item)
+    KeepsPlace(item)
     return item, overlay
 end
 
@@ -246,27 +294,36 @@ local function BarItem()
     item.Bar.Name = New("FontString", item.Bar)
     item.Bar.Duration = New("FontString", item.Bar)
     Seal(item)
+    KeepsPlace(item)
     return item, overlay
 end
 
 local acquired = {}
 -- Blizzard's own refreshes, run by the test as the game would. The addon may
 -- only post-hook them, never call them itself.
-local function Blizzard(viewer, method)
+local function Blizzard(viewer, method, ...)
     blizzardCalling = true
-    viewer[method](viewer)
+    viewer[method](viewer, ...)
     blizzardCalling = false
 end
 local function Viewer(name, make, preexisting)
     local viewer = New("Frame")
     local active = {}
     for i = 1, preexisting do active[make()] = true end
-    viewer.itemFramePool = { EnumerateActive = function() return pairs(active) end }
-    viewer.OnAcquireItemFrame = function(self, item) acquired[item] = (acquired[item] or 0) + 1 end
+    -- Blizzard's pool: read, never written.
+    viewer.itemFramePool = setmetatable({}, {
+        __index = { EnumerateActive = function() return pairs(active) end },
+        __newindex = function(_, key) error("wrote key " .. tostring(key) .. " on a Blizzard pool", 2) end,
+    })
+    viewer.OnAcquireItemFrame = function(self, item)
+        assert(blizzardCalling, "called OnAcquireItemFrame on a Blizzard viewer")
+        acquired[item] = (acquired[item] or 0) + 1
+    end
     viewer.make = make
     viewer.RefreshLayout = function() assert(blizzardCalling, "called RefreshLayout on a Blizzard viewer") end
     viewer.RefreshData = function() assert(blizzardCalling, "called RefreshData on a Blizzard viewer") end
     Seal(viewer)
+    KeepsPlace(viewer)
     S[viewer.itemFramePool] = nil
     return viewer, active
 end
@@ -420,15 +477,15 @@ end
 Equal(overlayHidden, true, "modern icon frame art hidden")
 
 local fresh = CooldownItem()
-v.essential:OnAcquireItemFrame(fresh)
+Blizzard(v.essential, "OnAcquireItemFrame", fresh)
 Equal(acquired[fresh], 1, "Blizzard's own OnAcquireItemFrame still runs first")
 Equal(ns.Skin:IsSkinned(fresh), true, "newly acquired icons are restyled")
-v.essential:OnAcquireItemFrame(fresh)
+Blizzard(v.essential, "OnAcquireItemFrame", fresh)
 Equal(S[fresh.Icon].zooms, 1, "a reused frame is not restyled twice")
 Equal(acquired[fresh], 2, "Blizzard still handles every acquire")
 
 local utility = CooldownItem()
-v.utility:OnAcquireItemFrame(utility)
+Blizzard(v.utility, "OnAcquireItemFrame", utility)
 Equal(InsetBy(utility.Icon, utility, 2), true, "utility icon inset 2")
 Equal(S[utility.Cooldown].countdownFont, "FECMFont15", "utility countdown sized for its smaller icons")
 Equal(S[utility.ChargeCount.Current].font, "FECMFont12", "utility charges readable")
@@ -523,7 +580,7 @@ ns.Skin:ApplyBarLook()
 Equal(S[bar.Bar].barTexture, RAID, "the texture picked, on Blizzard's Tracked Bars")
 local before = textures
 ns.Skin:ApplyBarLook()
-bar:OnCooldownIDSet()
+Blizzard(bar, "OnCooldownIDSet")
 Equal(textures, before, "not set again while it stays the same, even as Blizzard gives the bar a new spell")
 ns.Set("barTexture", "flat")
 ns.Skin:ApplyBarLook()
@@ -544,7 +601,7 @@ Equal(S[_G.FECMFont25].face, "Fonts\\FRIZQT__.TTF 25 THICKOUTLINE", "and back")
 S[bar].baseSpell = 467 -- Thorns
 local other = BarItem()
 S[other].baseSpell = 1126 -- Mark of the Wild
-v.bars:OnAcquireItemFrame(other)
+Blizzard(v.bars, "OnAcquireItemFrame", other)
 v.barsActive[other] = true
 rawset(other, "layoutIndex", 1) -- Blizzard's own order
 rawset(bar, "layoutIndex", 2)
@@ -561,12 +618,12 @@ Equal(S[bar.Bar].barColour[3], .91, "a bar's own colour stays when the colour fo
 Equal(S[other.Bar].barColour[2], .74, "which the others follow")
 -- Blizzard's bars are pooled and change spell; the colour follows at once.
 S[other].baseSpell = 467
-other:OnCooldownIDSet()
+Blizzard(other, "OnCooldownIDSet")
 Equal(S[other.Bar].barColour[3], .91, "a bar given Thorns turns purple straight away")
 local SECRET = {}
 _G.issecretvalue = function(value) return value == SECRET end
 S[other].baseSpell = SECRET
-other:OnCooldownIDSet()
+Blizzard(other, "OnCooldownIDSet")
 Equal(S[other.Bar].barColour[2], .74, "a spell that can't be read uses the colour for all")
 _G.issecretvalue = nil
 ns.SetBarColour(467, nil)
@@ -582,7 +639,7 @@ do
     assert(loadfile("Ranks.lua"))("ForeverEnhancedCooldownManager", ns)
     local colours = ForeverEnhancedCooldownManagerDB
     S[other].baseSpell = 1126
-    other:OnCooldownIDSet()
+    Blizzard(other, "OnCooldownIDSet")
     colours.barColours = { [782] = "blue" } -- picked while Blizzard showed Thorns rank 2
     ns.Skin:ApplyBarLook()
     Equal(S[bar.Bar].barColour[3] .. " " .. S[other.Bar].barColour[3], "0.88 0.25",
@@ -590,7 +647,7 @@ do
     Equal(ns.BarColourFor(467) .. " " .. ns.BarColourFor(9910) .. " " .. tostring(ns.BarColourFor(1126))
         .. " " .. tostring(ns.BarColourFor(16870)), "blue blue nil nil", "any rank of Thorns finds it; no other spell does")
     S[other].baseSpell = 9910
-    other:OnCooldownIDSet()
+    Blizzard(other, "OnCooldownIDSet")
     Equal(S[other.Bar].barColour[3], .88, "and a bar given another rank of Thorns turns blue straight away")
     colours.barColours = { [782] = "blue", [9910] = "purple" }
     Equal(ns.BarColourFor(467) .. " " .. ns.BarColourFor(9910), "purple purple", "with colours at several ranks, the highest rank's")
@@ -637,11 +694,13 @@ ns.Set("barColour", "orange")
 ns.Skin:ApplyBarLook()
 Equal(#printed, 0, "no errors with bars of their own colour")
 
--- Only hooksecurefunc touched Blizzard's viewers.
+-- Only hooksecurefunc touched Blizzard's viewers (their keys are kept with
+-- the seal, so nothing at all is on the frame itself).
 for _, viewer in ipairs({ v.essential, v.utility, v.buffs, v.bars }) do
     local keys = 0
-    for key in pairs(viewer) do if key ~= "make" then keys = keys + 1 end end
-    Equal(keys, 4, "viewer holds only its pool and its own acquire, layout and refresh functions, hooked")
+    for key in pairs(S[viewer].fields) do if key ~= "make" then keys = keys + 1 end end
+    Equal(keys .. " " .. tostring(next(viewer)), "4 nil",
+        "viewer holds only its pool and its own acquire, layout and refresh functions, hooked")
 end
 Equal(#printed, 0, "no errors reported")
 
@@ -649,12 +708,12 @@ Equal(#printed, 0, "no errors reported")
 
 local broken = New("Frame")
 Seal(broken)
-v.essential:OnAcquireItemFrame(broken)
+Blizzard(v.essential, "OnAcquireItemFrame", broken)
 Equal(#printed, 1, "a restyle failure is reported")
 Equal(printed[1]:find("Please report this", 1, true) ~= nil, true, "with a clear message")
 local broken2 = New("Frame")
 Seal(broken2)
-v.utility:OnAcquireItemFrame(broken2)
+Blizzard(v.utility, "OnAcquireItemFrame", broken2)
 Equal(#printed, 1, "reported only once per session")
 
 -- Charcoal look off: nothing is hooked or restyled -----------------------------------
@@ -666,7 +725,7 @@ Equal(ns.Skin.started, nil, "skin not started when off")
 Equal(ns.Skin:IsSkinned(First(v.essentialActive)), false, "icons keep Blizzard's look")
 Equal(rawget(v.essential, "OnAcquireItemFrame") == v.essential.OnAcquireItemFrame, true, "no hook installed")
 local plain = CooldownItem()
-v.essential:OnAcquireItemFrame(plain)
+Blizzard(v.essential, "OnAcquireItemFrame", plain)
 Equal(#S[plain.Icon].masks, 1, "new icons keep the rounded mask")
 
 -- Blizzard's Cooldown Manager loading after the addon -------------------------------------
@@ -748,6 +807,8 @@ local function PRD()
     frame.AlternatePowerBar.powerName = "MANA"
     frame.UpdatePowerBar = function() end
     frame.UpdateAlternatePowerBar = function() end
+    -- The room Blizzard leaves between its bars: a getter the addon may read.
+    frame.GetBarPadding = function() return 4 end
     -- Edit Mode's bar height, for both power bars.
     frame.SetPowerBarHeight = function(self, height)
         self.PowerBar:SetHeight(height)
@@ -1025,7 +1086,7 @@ Equal(tostring(S[row.border[1]].shown) .. " " .. tostring(S[row.shadow[1][1]].sh
 -- One cooldown and Blizzard's empty second item: the box goes round the one
 -- icon, not the empty slot.
 local spare = CooldownItem()
-v.essential:OnAcquireItemFrame(spare)
+Blizzard(v.essential, "OnAcquireItemFrame", spare)
 v.essentialActive[spare] = true
 Blizzard(v.essential, "RefreshData")
 local top = S[row.border[1]].points[1]
@@ -1099,38 +1160,38 @@ do
 
     -- Pooled items change spell: the key follows, and the count with it.
     S[essential].baseSpell = 5176
-    essential:OnCooldownIDSet()
+    Blizzard(essential, "OnCooldownIDSet")
     Equal(tostring(S[text].shown) .. " " .. Count(essential), "false BOTTOMRIGHT true BOTTOMRIGHT -2 2",
         "given a spell with no key: none, and its charge count back where Blizzard puts it")
     S[essential].baseSpell = 8924
-    essential:OnCooldownIDSet()
+    Blizzard(essential, "OnCooldownIDSet")
     Equal(S[text].text .. " " .. tostring(S[text].shown) .. " " .. Count(essential), "S1 true TOPRIGHT true TOPRIGHT -2 -2",
         "given one with a key: shown at once, the count up clear of it")
     -- Blizzard's pool takes it back and empties it without OnCooldownIDCleared
     -- (ResetCooldownData), then hands it out again as an Edit Mode placeholder:
     -- ClearCooldownID fires nothing on an item already empty.
     S[essential].baseSpell = nil
-    views.essential:OnAcquireItemFrame(essential)
+    Blizzard(views.essential, "OnAcquireItemFrame", essential)
     Equal(tostring(S[text].shown) .. " " .. #printed, "false 0", "handed out again as an empty placeholder: the old key goes")
     S[essential].baseSpell = 8924
-    essential:OnCooldownIDSet()
+    Blizzard(essential, "OnCooldownIDSet")
     Equal(S[text].text .. " " .. tostring(S[text].shown), "S1 true", "and comes back when Blizzard gives it a spell")
     S[utility].equipSlot = nil
-    views.utility:OnAcquireItemFrame(utility)
+    Blizzard(views.utility, "OnAcquireItemFrame", utility)
     Equal(tostring(S[small.text].shown) .. " " .. Count(utility), "false BOTTOMRIGHT true BOTTOMRIGHT -2 2",
         "a trinket's Utility icon handed out again empty: no key either, its count at the bottom")
     S[utility].equipSlot = 13
-    utility:OnCooldownIDSet()
+    Blizzard(utility, "OnCooldownIDSet")
     Equal(S[small.text].text .. " " .. tostring(S[small.text].shown) .. " " .. Count(utility), "2 true TOPRIGHT true TOPRIGHT -2 -2",
         "and back with its trinket, its count up")
     S[essential].baseSpell = nil
-    essential:OnCooldownIDCleared()
+    Blizzard(essential, "OnCooldownIDCleared")
     Equal(tostring(S[text].shown), "false", "cleared, as for Edit Mode's placeholders: gone")
 
     -- A spell kept secret in a fight: nothing until it's over.
     combat = true
     S[essential].baseSpell = SECRET
-    essential:OnCooldownIDSet()
+    Blizzard(essential, "OnCooldownIDSet")
     Equal(tostring(S[text].shown) .. " " .. #printed .. " " .. Count(essential), "false 0 BOTTOMRIGHT true BOTTOMRIGHT -2 2",
         "a secret spell in a fight: no key, no error, the count at the bottom")
     combat = false
@@ -1175,12 +1236,12 @@ do
     Equal(tostring(kns.Skin.keys[First(views.buffsActive)]) .. " " .. tostring(kns.Skin.keys[First(views.barsActive)]), "nil nil",
         "Tracked Buffs and Tracked Bars get none")
     local held = 0
-    for _ in pairs(essential) do held = held + 1 end
-    Equal(held, 7, "Blizzard's icon holds only its own parts and the two hooks")
+    for _ in pairs(S[essential].fields) do held = held + 1 end
+    Equal(held .. " " .. tostring(next(essential)), "7 nil", "Blizzard's icon holds only its own parts and the two hooks")
     for _, viewer in ipairs({ views.essential, views.utility, views.buffs, views.bars }) do
         local count = 0
-        for name in pairs(viewer) do if name ~= "make" then count = count + 1 end end
-        Equal(count, 4, "each viewer still holds only its own four")
+        for name in pairs(S[viewer].fields) do if name ~= "make" then count = count + 1 end end
+        Equal(count .. " " .. tostring(next(viewer)), "4 nil", "each viewer still holds only its own four")
     end
     Equal(#printed, 0, "no errors from keybinds")
 
@@ -1477,9 +1538,12 @@ do
         -- A secret can be a string too: one that would read as broken off.
         _G.issecretvalue = function(value) return value == SECRET or value == SECRET_ATLAS end
     end
+    -- The keys a frame holds: a sealed one's kept with its seal, and any left
+    -- on the frame itself.
     local function Keys(t)
         local count = 0
         for _ in pairs(t) do count = count + 1 end
+        for _ in pairs(S[t] and S[t].fields or {}) do count = count + 1 end
         return count
     end
 
@@ -1831,6 +1895,40 @@ do
         Equal(#printed, 0, "no errors with only Emote size changed")
     end
 
+    -- A size changed after login, as the page's slider does: Blizzard's growing
+    -- text hooked then, and the next warning keeps your size as it grows and
+    -- rests. Other text Blizzard grows (loss of control) is never sized.
+    do
+        Environment()
+        Viewers(0)
+        Tracker()
+        Warnings()
+        Bosses()
+        Game(nil)
+        local plainGrowth = FadingFrame_UpdateTextScaling
+        ns = Load({ raidWarnings = true })
+        Fire("PLAYER_LOGIN")
+        ns.Set("warningSize", 150)
+        ns.RaidTimers:Apply()
+        Say(WARNING)
+        Frames(.1)
+        local mid = string.format("%g", S[lines[1]].textHeight)
+        Frames(.5)
+        Equal(tostring(FadingFrame_UpdateTextScaling ~= plainGrowth) .. " " .. mid .. " " .. string.format("%g", S[lines[1]].textHeight),
+            "true 37.5 30", "Warning size changed after login: growth hooked, 150% as it grows and at rest")
+        local other = New("FontString")
+        Seal(other)
+        rawset(other, "textScalingMinHeight", 20)
+        rawset(other, "textScalingMaxHeight", 30)
+        rawset(other, "textScalingUpTime", .2)
+        rawset(other, "textScalingDownTime", .4)
+        rawset(other, "textScalingTime", 0)
+        blizzardCalling = true
+        FadingFrame_UpdateTextScaling(other, .1)
+        blizzardCalling = false
+        Equal(string.format("%g", S[other].textHeight) .. " " .. #printed, "25 0", "Blizzard's other growing text left alone")
+    end
+
     -- Edit Mode's Boss Frames shows the boss bars as Blizzard left them: full
     -- (each bar's first PLAYER_ENTERING_WORLD fills it with no cast), with no
     -- name or icon. A full fill hides the track, so the addon's look showed
@@ -2148,6 +2246,16 @@ do
     Equal(#printed, 0, "no errors")
     _G.issecretvalue = nil
     _G.C_AddOns, _G.EraUI = nil, nil
+end
+
+-- Nothing was ever left on a sealed frame, even by rawset, which skips the seal.
+do
+    local count, written = 0, nil
+    for frame in pairs(sealed) do
+        count = count + 1
+        written = written or next(frame)
+    end
+    Equal(tostring(count > 100) .. " " .. tostring(written), "true nil", "no key left on any of Blizzard's frames")
 end
 
 print = _G.print

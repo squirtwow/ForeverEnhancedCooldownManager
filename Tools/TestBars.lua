@@ -377,6 +377,20 @@ end
 Environment()
 local ns = Load(nil)
 local B = ns.Bars
+-- The next frame (for the loaded bars, or these): the icon refreshes asked
+-- for since the last one happen now, once. A global, as this file's main
+-- chunk has no room for another local.
+function NextFrame(bars)
+    local driver = (bars or ns.Bars).driver
+    S[driver].scripts.OnUpdate(driver, 0)
+end
+-- Gear changed, as the game says, and the rebuild it waits for: the timers
+-- it queued run.
+function GearChanged()
+    local from = #timers
+    Fire("PLAYER_EQUIPMENT_CHANGED")
+    for i = from + 1, #timers do timers[i]() end
+end
 local list = ns.Spells:List()
 Equal(#list, 11, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower, two druid procs, then the healthstone and"
     .. " potion families; passive and future spells left out")
@@ -680,15 +694,25 @@ do
     lockdown = true
     Set(true, REACTIVE)
     usable[5308] = true
-    Fire("SPELL_UPDATE_USABLE")
-    Equal(Lit(), all, "in a fight: lit as each becomes usable")
+    -- A cast's burst of events refreshes the icons once, on the next frame.
+    cooldownCalls = {}
+    for _, event in ipairs({ "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "BAG_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE" }) do
+        Fire(event)
+    end
+    local waiting = #cooldownCalls
+    NextFrame(RB)
+    NextFrame(RB)
+    Equal(waiting .. " " .. #cooldownCalls .. " " .. Lit(), "0 18 " .. all,
+        "in a fight: lit as each becomes usable, four events refreshing the 18 icons once, on the next frame")
     usable[7384] = false
     Fire("SPELL_UPDATE_USABLE")
+    NextFrame(RB)
     Equal(Lit():find("Overpower", 1, true), nil, "and Overpower's goes once it's used")
     -- A new target: Execute and Hammer of Wrath follow its health.
     usable[20658], usable[5308], usable[24275] = false, false, false
     target = true
     Fire("PLAYER_TARGET_CHANGED")
+    NextFrame(RB)
     Equal(Lit():find("Execute", 1, true) or Lit():find("Hammer", 1, true), nil, "a healthy new target: no edge on Execute or Hammer of Wrath")
     target = false
     lockdown = false
@@ -1062,11 +1086,27 @@ Equal(S[quiver.texture].desaturated, true, "greyed when you run out")
 B:SetOption("util", "showNames", true)
 Equal(S[B:Get("util").icons[1].label].text, "Rough Arrow", "named by the ammo")
 ammo = nil
-Fire("PLAYER_EQUIPMENT_CHANGED")
+GearChanged()
 Equal(ns.Spells:Find("ammo") and ns.Spells:Find("ammo").name, "Ammo", "kept on the bar with none equipped")
 Equal(S[B:Get("util").icons[1].count].text, 0, "showing none")
 Equal(ns.Spells:IsItem(ns.Spells:Find("ammo")), true, "never offered for the Buffs or Debuffs bar")
 Equal(#printed, 0, "no errors")
+-- A gear set swapped: the game says so once for each slot, all in one frame.
+-- The bars are rebuilt once for them all, on the next frame.
+do
+    local scan, scans, from = ns.Spells.Scan, 0, #timers
+    ns.Spells.Scan = function(...)
+        scans = scans + 1
+        return scan(...)
+    end
+    for _ = 1, 16 do Fire("PLAYER_EQUIPMENT_CHANGED") end
+    local waiting = scans
+    for i = from + 1, #timers do timers[i]() end
+    Equal(waiting .. " " .. scans .. " " .. #timers - from, "0 1 1", "16 slots changed at once: one rebuild, on the next frame")
+    GearChanged()
+    Equal(scans, 2, "and a later change rebuilds again")
+    ns.Spells.Scan = scan
+end
 -- Only hunters, warriors and rogues use ammo. Any other class on a profile
 -- shared with a hunter passes over it, like another class's spell: not
 -- listed, off its bars and its drawings of them, kept in the profile.
@@ -1188,11 +1228,21 @@ end
     Fire("BAG_UPDATE_DELAYED")
     local waiting = icon.itemID .. " " .. S[icon.label].text
     names[19012] = "Major Healthstone"
+    -- Looked up again once the game says it has the name, not on every
+    -- refresh, and not for other items' names.
     B:RefreshAll()
-    Equal(waiting .. " | " .. S[icon.label].text, "19012 Healthstones | Major Healthstone",
-        "a name the game hasn't loaded yet: the family's until it has")
+    local refreshed = S[icon.label].text
+    Fire("GET_ITEM_INFO_RECEIVED", 2589, true)
+    NextFrame()
+    refreshed = refreshed .. " " .. S[icon.label].text
+    Fire("GET_ITEM_INFO_RECEIVED", 19012, true)
+    Equal(S[icon.label].text, "Healthstones", "the name looked up on the next frame")
+    NextFrame()
+    Equal(waiting .. " | " .. refreshed .. " | " .. S[icon.label].text,
+        "19012 Healthstones | Healthstones Healthstones | Major Healthstone",
+        "a name the game hasn't loaded yet: the family's until the game says it has it")
     itemCount[19013], itemCount[19012] = 1, 0
-    B:RefreshAll()
+    Fire("BAG_UPDATE_DELAYED")
 
     -- The best you can use: a Major potion above your level waits.
     unusable[13446] = true
@@ -1201,11 +1251,35 @@ end
     local potion = B:Get("cd").icons[2]
     Equal(potion.itemID .. " " .. S[potion.count].text .. " " .. S[potion.label].text, "1710 3 Greater Healing Potion",
         "the best potion you can use: Greater, while the Major is above your level")
-    unusable[1710], unusable[118] = true, true
+    -- Levelled up, the Major can be used: looked for once the game says you
+    -- levelled, not on every refresh.
+    unusable[13446] = nil
     B:RefreshAll()
+    local before = potion.itemID
+    Fire("PLAYER_LEVEL_UP", 60)
+    NextFrame()
+    Equal(before .. " " .. potion.itemID .. " " .. S[potion.count].text .. " " .. S[potion.label].text,
+        "1710 13446 2 Major Healing Potion", "levelled up: on to the Major on the next frame")
+    -- Your level can still read the old one as PLAYER_LEVEL_UP fires, and on
+    -- the next frame: PLAYER_LEVEL_CHANGED, with the new one, looks again.
+    unusable[13446] = true
+    Fire("BAG_UPDATE_DELAYED")
+    before = potion.itemID
+    Fire("PLAYER_LEVEL_UP", 60)
+    NextFrame()
+    before = before .. " " .. potion.itemID
+    unusable[13446] = nil
+    B:RefreshAll()
+    before = before .. " " .. potion.itemID
+    Fire("PLAYER_LEVEL_CHANGED", 59, 60, true)
+    NextFrame()
+    Equal(before .. " " .. potion.itemID .. " " .. S[potion.label].text, "1710 1710 1710 13446 Major Healing Potion",
+        "the level still the old one as the game says you levelled: on to the Major once it says the level changed")
+    unusable[13446], unusable[1710], unusable[118] = true, true, true
+    Fire("BAG_UPDATE_DELAYED")
     Equal(potion.itemID, 13446, "none you can use: the best you carry")
     unusable[13446], unusable[1710], unusable[118] = nil, nil, nil
-    B:RefreshAll()
+    Fire("BAG_UPDATE_DELAYED")
     Equal(potion.itemID .. " " .. S[potion.count].text, "13446 2", "the Major once you can use it")
     -- Bags or use hidden in a fight: each stays as it is, with no errors.
     local count, use = _G.C_Item.GetItemCount, _G.C_Item.IsUsableItem
@@ -1222,7 +1296,7 @@ end
     _G.C_Item.IsUsableItem = use
     lockdown = false
     Fire("PLAYER_REGEN_ENABLED")
-    B:RefreshAll()
+    NextFrame()
     Equal(potion.itemID, 1710, "and after it, the best you can use again")
 
     -- Any rank dragged in adds its family, never on the Buffs or Debuffs bars.
@@ -1366,6 +1440,8 @@ Equal(Last(charmIcon.cooldown, "SetCooldown", 2), 120, "trinket cooldown shown")
 Equal(S[charmIcon.texture].desaturated, true, "greyed while cooling down")
 trinketCooldown = { 0, 0, 1 }
 S[charmIcon.cooldown].scripts.OnCooldownDone()
+Equal(S[charmIcon.texture].desaturated, true, "a cooldown ending asks for a refresh on the next frame")
+NextFrame()
 Equal(S[charmIcon.texture].desaturated, false, "ungreys when the cooldown finishes")
 Equal(S[potion.count].text, 3, "potion count shown")
 itemCount[118] = 0
@@ -1397,6 +1473,7 @@ B:RefreshAll()
 Equal(S[moonIcon.texture].desaturated, true, "spell greyed on cooldown")
 active = false
 S[moonIcon.cooldown].scripts.OnCooldownDone()
+NextFrame()
 Equal(S[moonIcon.texture].desaturated, false, "and ungreyed right when its cooldown ends")
 
 B:SetOption("cd", "showNames", true)
@@ -2108,12 +2185,22 @@ Equal(S[w.off].shown, true, "warns when Blizzard's Cooldown Manager is off")
 Equal(S[w.eachEmpty].text .. " " .. S[w.eachFix.label].text .. " " .. tostring(S[w.eachFix].shown),
     "Blizzard's Cooldown Manager is off. Turn on true", "and the list says so, with its own Turn on")
 Equal(S[w.turnOnManager].shown, true, "with a way to turn it on")
+Equal(S[w.reload].shown, false, "no reload asked for yet")
+lockdown = true
+w.turnOnManager:Click()
+Equal(tostring(cvarOn) .. " " .. tostring(S[w.reload].shown) .. " " .. S[w.note].text, "false false Finish combat first.",
+    "never switched in a fight, so no reload asked for")
+lockdown = false
 w.eachFix:Click()
 Equal(cvarOn, true, "the list's button switches it on too")
+-- Blizzard's own code runs at once for the setting, inside the click: a
+-- reload finishes it cleanly.
+Equal(tostring(S[w.reload].shown) .. " " .. S[w.note].text, "true Blizzard's Cooldown Manager is on. Reload to finish.",
+    "and asks for a reload to finish, with the Reload button showing")
 cvarOn = false
 w:Refresh()
 w.turnOnManager:Click()
-Equal(cvarOn and S[w.note].text, "Blizzard's Cooldown Manager is on.", "which switches it on")
+Equal(cvarOn and S[w.note].text, "Blizzard's Cooldown Manager is on. Reload to finish.", "which switches it on")
 Equal(S[w.off].shown or S[w.turnOnManager].shown, false, "and the warning goes")
 prdOn = false
 w:Refresh()
@@ -2124,6 +2211,11 @@ Equal(prdOn == false and S[w.note].text, "Finish combat first.", "never switched
 lockdown = false
 w.turnOnPersonal:Click()
 Equal(prdOn and S[w.personalOff].shown, false, "switched on, and the note goes")
+Equal(tostring(S[w.reload].shown) .. " " .. S[w.note].text, "true Your Personal Resource Display is on. Reload to finish.",
+    "a reload asked for too")
+reloads = 0
+w.reload:Click()
+Equal(reloads, 1, "Reload to apply reloads")
 Equal(#printed, 0, "no errors")
 
 -- The profile menu ---------------------------------------------------------------------
@@ -2262,6 +2354,29 @@ character.name = "Tarn"
 Environment(true)
 ns = Load(named)
 Equal(ns.ProfileName(), "Resto", "a profile you named keeps its name")
+-- Forever gives a surname apart from the first name: a new profile's name
+-- has it, so two characters of one first name tell apart. Profiles made
+-- before keep their names, found by the character's GUID as ever.
+do
+    local surname = "Gustbellow"
+    local function Named() _G.UnitName = function(unit) assert(unit == "player"); return character.name, surname end end
+    character = { guid = "Player-1-0005", name = "Zriel", realm = "Zephras" }
+    Environment()
+    Named()
+    ns = Load({ useBars = true })
+    local db = ForeverEnhancedCooldownManagerDB
+    Equal(ns.ProfileName(), "Zriel Gustbellow (Druid) - Zephras", "a new profile has the surname too")
+    surname = "Moonfeather"
+    Environment(true)
+    Named()
+    ns = Load(db)
+    Equal(ns.ProfileName(), "Zriel Gustbellow (Druid) - Zephras", "the same character later: its profile by its GUID, its name kept")
+    character.guid, surname = "Player-1-0006", SECRET
+    Environment(true)
+    Named()
+    ns = Load(db)
+    Equal(ns.ProfileName() .. " " .. #printed, "Zriel (Druid) - Zephras 0", "a surname the game hides: left out, no errors")
+end
 character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
 
 -- A profile other characters use, even ones since deleted, can be deleted:
@@ -3387,6 +3502,8 @@ local function Display()
         local width = self.defaultBarWidth * self.barWidthPercent / 100
         for _, part in ipairs({ self, self.HealthBarsContainer, self.PowerBar }) do part:SetWidth(width) end
     end)
+    -- Blizzard's: the addon only reads its keys, never writes one.
+    getmetatable(prd).__newindex = function(_, key) error("wrote key " .. tostring(key) .. " on Blizzard's display", 2) end
     _G.PersonalResourceDisplayFrame = prd
 end
 Environment()
@@ -3682,13 +3799,17 @@ S[held].scripts.OnDragStop(held)
 S[lp.rows.cd].mouseOver = nil
 Equal(table.concat(ns.BarData("cd").spells, ","), before, "dropped back on its own row, nothing changes")
 -- The display switched off and on from here, or your bars off.
-Equal(lp.shown:GetChecked(), true, "the display shown")
+Equal(tostring(lp.shown:GetChecked()) .. " " .. tostring(ns.NeedsReload()), "true false", "the display shown, no reload needed yet")
 lp.shown:Click()
 Equal(tostring(prdOn) .. " " .. S[lp.status].text, "false Your rows sit together where your resource display would be.",
     "unticked, Blizzard's display goes off and the rows close up")
 Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -90 TOP 0 -90", "where it was")
+Equal(tostring(ns.NeedsReload()) .. " " .. S[w.note].text,
+    "true Your Personal Resource Display is off. Reload to finish (Look page, or /reload).",
+    "a reload asked for to finish, pointing at the Look page's Reload button")
 lp.shown:Click()
 Equal(tostring(prdOn) .. " " .. At(B:Get("util")), "true TOP 0 -100", "and back on")
+Equal(S[w.note].text, "Your Personal Resource Display is on. Reload to finish (Look page, or /reload).", "a reload asked for again")
 -- Switched off in Blizzard's Options instead: the rows close up too.
 prdOn = false
 Fire("CVAR_UPDATE", "nameplateShowSelf", "0")
@@ -3704,6 +3825,43 @@ Equal(At(B:Get("util")), "TOP 0 -90", "the display hiding closes them up too")
 prdOn = true
 prd:Show()
 Equal(At(B:Get("util")), "TOP 0 -100", "and showing again parts them")
+-- Edit Mode's Visibility set to Hidden: no room for it either, with the
+-- Options switch still on. In Combat and Always keep its space.
+do
+    Enum.PersonalResourceDisplayVisibleSetting = { Always = 0, InCombat = 1, Hidden = 2 }
+    rawset(prd, "visibleSetting", 2)
+    prd:Hide()
+    w:Refresh()
+    local display = L:Display()
+    Equal(tostring(display.off) .. " " .. display.height .. " " .. At(B:Get("util")) .. " " .. S[lp.display].alpha .. " "
+        .. S[lp.status].text, "true 0 TOP 0 -90 0.3 Your rows sit together where your resource display would be.",
+        "Hidden in Edit Mode: it takes no room, the rows close up, and the page says so")
+    Equal(rawget(prd, "visibleSetting"), 2, "its Visibility read, never changed")
+    rawset(prd, "visibleSetting", 1)
+    L:Stack()
+    Equal(tostring(L:Display().off) .. " " .. At(B:Get("util")), "nil TOP 0 -100", "In Combat: hidden out of a fight, its space kept")
+    Equal(rawget(prd, "visibleSetting"), 1, "In Combat read, never changed")
+    -- A setting the game hides: never compared (comparing one errors in the
+    -- game, as it does here), its space kept.
+    local Secret = { __eq = function() error("compared a secret value") end }
+    local hidden, secret = setmetatable({}, Secret), setmetatable({}, Secret)
+    _G.issecretvalue = function(value) return rawequal(value, secret) or rawequal(value, SECRET) end
+    Enum.PersonalResourceDisplayVisibleSetting.Hidden = hidden
+    rawset(prd, "visibleSetting", secret)
+    L:Stack()
+    Equal(At(B:Get("util")) .. " " .. #printed, "TOP 0 -100 0", "a setting the game hides: never compared, its space kept, no errors")
+    Equal(rawequal(rawget(prd, "visibleSetting"), secret), true, "a hidden setting left as it was")
+    _G.issecretvalue = function(value) return value == SECRET end
+    Enum.PersonalResourceDisplayVisibleSetting.Hidden = 2
+    rawset(prd, "visibleSetting", 0)
+    prd:Show()
+    w:Refresh()
+    Equal(At(B:Get("util")) .. " " .. S[lp.display].alpha .. " " .. S[lp.status].text,
+        "TOP 0 -100 1 Your bars follow your Personal Resource Display.", "Always: as before")
+    Equal(rawget(prd, "visibleSetting"), 0, "Always read, never changed")
+    rawset(prd, "visibleSetting", nil)
+    Enum.PersonalResourceDisplayVisibleSetting = nil
+end
 lockdown = true
 lp.shown:Click()
 Equal(tostring(prdOn) .. " " .. S[w.note].text, "true Finish combat first.", "never in combat")
@@ -3891,11 +4049,11 @@ Equal(bp.listError, nil, "the bar page drew without errors")
     -- Whether it's worn, hidden by the game: kept off as it was, no errors.
     local isWorn = _G.C_Item.IsEquippedItem
     _G.C_Item.IsEquippedItem = function() return SECRET end
-    Fire("PLAYER_EQUIPMENT_CHANGED")
+    GearChanged()
     Equal(Names(utilBar) .. " " .. #printed, " 0", "whether it's worn hidden: kept off as it was, no errors")
     _G.C_Item.IsEquippedItem = isWorn
     worn[4000] = true
-    Fire("PLAYER_EQUIPMENT_CHANGED")
+    GearChanged()
     Equal(Names(utilBar), "item:4000", "an item you wear counts as carried")
     -- Ammo on the shared bar: a class that never uses it (this druid, or a
     -- warlock) doesn't show it; a hunter out of ammo sees it greyed at 0.
@@ -5735,6 +5893,8 @@ end)()
         if step.version ~= "1.0.0" then longest = math.max(longest, #text) else basics = math.max(basics, #text) end
     end
     Equal(tostring(plain) .. " " .. tostring(longest > 0 and longest <= basics), "true true", "the steps are plain, the new ones short")
+    Equal(Tour:News("0.9.0")[1].text(), "Everything is in this list: your four bars at the top, then Look, Layout, Cast bar and General.",
+        "the menu step without a Raid Timers page (a full restart after updating) doesn't name it")
     local keybinds = ns.Keybinds
     ns.Keybinds = nil
     Equal(Titles(Tour:News("1.0.0")), "Live preview, All bars, " .. NEXT, "the keybinds step waits for its file (a full restart after updating)")
@@ -5770,8 +5930,8 @@ end)()
         "the three buttons leave the left 188 of the 520 for the two lines there")
     S[notes.tour].scripts.OnEnter(notes.tour)
     Equal(S[GameTooltip].text .. "|" .. table.concat(S[GameTooltip].lines, "|") .. "|" .. tostring(S[GameTooltip].shown),
-        "Show me what's new|A quick tour of what's new, a page at a time. (Needs testing)|true",
-        "its tooltip says what it does, and that it needs testing")
+        "Show me what's new|A quick tour of what's new, a page at a time.|true",
+        "its tooltip says what it does, no longer marked as needing testing")
     S[notes.tour].scripts.OnLeave(notes.tour)
     Equal(S[GameTooltip].shown, false, "gone as the mouse leaves")
 
@@ -6289,8 +6449,8 @@ end
     actionSlots[9], keyOf.ACTIONBUTTON9 = { "item", 5512 }, "9"
     K:Update()
     itemCount[5512] = 1
-    B:RefreshAll()
-    Equal(stone.itemID .. " " .. S[stone.key].text, "5512 9", "a Minor one made: its own key, as soon as the bars refresh")
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(stone.itemID .. " " .. S[stone.key].text, "5512 9", "a Minor one made: its own key, as soon as your bags change")
     itemCount[5512], itemCount[19004] = 0, 0
     B:TakeOff("cd", "family:healthstone")
     actionSlots[8], actionSlots[9], actionSlots[10] = nil, nil, nil

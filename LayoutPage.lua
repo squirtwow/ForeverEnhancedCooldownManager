@@ -901,7 +901,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         display.health:SetHeight(math.max(2, math.ceil(displayHeight * .6)))
         display.power:SetHeight(math.max(2, displayHeight - math.ceil(displayHeight * .6) - 1))
         -- Switched off, it's drawn faintly where it would be.
-        display:SetAlpha(ns.PersonalDisplayOn() and 1 or .3)
+        display:SetAlpha(L:DisplayOff() and .3 or 1)
         for side, key in pairs(sides) do Beside(Draws(Row(key)), side, y, Tile(key), lineHeight, displayWidth, gap) end
         castStrip:SetShown(castRoom ~= nil)
         if castRoom then
@@ -953,7 +953,12 @@ function ns.BuildLayoutPage(window, page, width, height)
         "Blizzard's display, as in Options > Combat. Off, your rows close up where it was.", function(self)
             local on, why
             if self:GetChecked() then on, why = ns.TurnOn("nameplateShowSelf") else on, why = ns.TurnOff("nameplateShowSelf") end
-            if not on then window:Say(why or "It couldn't be changed here: Options > Combat > Personal Resource Display.") end
+            if not on then
+                window:Say(why or "It couldn't be changed here: Options > Combat > Personal Resource Display.")
+            else
+                window:Say("Your Personal Resource Display is " .. (self:GetChecked() and "on" or "off")
+                    .. ". Reload to finish (Look page, or /reload).")
+            end
             L:Stack()
             window:Refresh()
         end)
@@ -1019,7 +1024,7 @@ function ns.BuildLayoutPage(window, page, width, height)
             text, colour, barsOff = "Your bars are off.", T.WARN, true
         elseif B:IsUnlocked() then
             text = "Unlocked: drag a bar on screen to move it."
-        elseif active and not ns.PersonalDisplayOn() then
+        elseif active and L:DisplayOff() then
             text = "Your rows sit together where your resource display would be."
         elseif active then
             text = "Your bars follow your Personal Resource Display."

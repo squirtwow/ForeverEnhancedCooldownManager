@@ -119,7 +119,7 @@ local function BuildLook(window, page, width)
     window.off = off
     local function TurnOnManager()
         local on, why = ns.TurnOn("cooldownViewerEnabled")
-        window:Say(on and "Blizzard's Cooldown Manager is on." or why
+        window:Say(on and "Blizzard's Cooldown Manager is on. Reload to finish." or why
             or "It couldn't be switched on here: Options > Gameplay > Advanced Options.")
         window:Refresh()
     end
@@ -368,7 +368,7 @@ local function BuildLook(window, page, width)
     personalOn:SetPoint("TOPRIGHT", options, "BOTTOMRIGHT", 0, -8)
     personalOn:SetScript("OnClick", function()
         local on, why = ns.TurnOn("nameplateShowSelf")
-        window:Say(on and "Your Personal Resource Display is on." or why
+        window:Say(on and "Your Personal Resource Display is on. Reload to finish." or why
             or "It couldn't be switched on here: Options > Combat > Personal Resource Display.")
         window:Refresh()
     end)

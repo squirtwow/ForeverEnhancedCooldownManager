@@ -72,7 +72,10 @@ local STEPS = {
     {
         version = "1.0.0",
         title = "The menu",
-        text = "Everything is in this list: your four bars at the top, then Look, Layout, Cast bar and General.",
+        text = function()
+            return "Everything is in this list: your four bars at the top, then Look, Layout, Cast bar and General"
+                .. (RaidTimersPage() and ", and Raid Timers under More." or ".")
+        end,
         target = function(w) return w.navFrame end,
         side = "right",
     },

@@ -508,12 +508,14 @@ local page = w.pages.raid
 Equal(tostring(S[page].shown) .. " " .. tostring(S[w.pages.look].shown) .. " " .. tostring(S[w.nav.raid.fill].shown),
     "true false true", "clicked: its page, and it's the one highlighted")
 
--- Everything off at first, each part saying it needs testing.
+-- Everything off at first. The countdown, tested in game, isn't labelled; the
+-- other two parts say they need testing.
 Equal(tostring(ns.Get("pullTimer")) .. " " .. tostring(ns.Get("raidWarnings")) .. " " .. tostring(ns.Get("bossCasts")),
     "false false false", "every part off by default")
 for _, tick in ipairs({ page.pullTick, page.warningTick, page.bossTick }) do
-    Equal(tick.checked == false and S[tick.text].text:find("(Needs testing)", 1, true) ~= nil, true,
-        S[tick.text].text .. ": unticked, labelled as needing testing")
+    local untested = tick ~= page.pullTick
+    Equal(tick.checked == false and (S[tick.text].text:find("(Needs testing)", 1, true) ~= nil) == untested, true,
+        S[tick.text].text .. ": unticked, " .. (untested and "labelled as needing testing" or "not labelled as needing testing"))
 end
 Equal(S[page.status].text:find("Tick one", 1, true) ~= nil, true, "the title row says how to start")
 Equal(S[page.pull].alpha .. " " .. S[page.warnings].alpha .. " " .. S[page.boss].alpha, "0.35 0.35 0.35",
@@ -654,7 +656,11 @@ do
         .. tostring(warningSize.hint():find("more lines than Blizzard's usual 5", 1, true) ~= nil) .. " "
         .. tostring(emoteSize.hint():find("more lines than Blizzard's usual 5", 1, true) ~= nil), "true true true true",
         "the notes say what all sizes covers, and what big sizes do")
+    local applied, apply = 0, ns.RaidTimers.Apply
+    ns.RaidTimers.Apply = function(...) applied = applied + 1; return apply(...) end
     barSize:Choose(150)
+    Equal(applied, 1, "a size slider applies to Blizzard's frames at once, not only the preview")
+    ns.RaidTimers.Apply = apply
     numberSize:Choose(200)
     Equal(ns.Get("pullBarSize") .. " " .. ns.Get("pullNumberSize") .. " " .. G(Last(pull.bar, "SetScale")) .. " "
         .. G(Last(pull.digit1, "SetScale")), "150 200 1.5 2", "the countdown's sizes saved, the preview's bar and number at them")
@@ -1293,6 +1299,9 @@ do
         return tostring(same) .. " " .. tostring(newer)
     end
     local RAID = "Raid Timers, Sizes, Edit Mode"
+    local menu = Tour:News("0.9.0")[1]
+    Equal(menu.title .. ": " .. menu.text(), "The menu: Everything is in this list: your four bars at the top, then Look, Layout,"
+        .. " Cast bar and General, and Raid Timers under More.", "the full tour's first step points out Raid Timers under More")
     local added = Tour:News("1.2.0")
     Equal(Titles(added) .. " | " .. Versions(added), RAID .. " | true true",
         "after 1.2.0: three steps for Raid Timers, one version newer than 1.4.0 (Unreleased until the release numbers them)")

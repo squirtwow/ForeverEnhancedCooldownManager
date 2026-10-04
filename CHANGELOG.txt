@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.2
+
+### Changed
+- Switching the Cooldown Manager or resource display from /fecm now asks for a reload.
+- Smoother gear set swaps.
+- Lighter icon updates in combat.
+- New profiles are named with your surname.
+- The tour points to Raid Timers under More.
+- Pull countdown and Show me what's new are no longer marked Needs testing.
+
+### Fixed
+- Your rows close up when the resource display is Hidden in Edit Mode.
+- Potions and healthstones move to the higher rank as soon as you level up.
+
 ## 1.4.1
 
 ### Added

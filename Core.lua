@@ -328,14 +328,18 @@ local function Cut(text, max)
     return (text:sub(1, cut):gsub("%s+$", ""))
 end
 
--- "Name (Class) - Realm", cut to fit a profile name. On a character's very
--- first login the game may not know its name yet: nil then, unless a name is
--- needed now anyway.
+-- "Name Surname (Class) - Realm", cut to fit a profile name: Forever gives
+-- the surname apart, and it tells two characters of one first name apart. On
+-- a character's very first login the game may not know its name yet: nil
+-- then, unless a name is needed now anyway.
 local function OwnName(anyway)
-    local name = UnitName and UnitName("player")
+    local name, surname
+    if UnitName then name, surname = UnitName("player") end
     if type(name) ~= "string" or name == "" or name == UNKNOWN then
         if not anyway then return nil end
         name = UNKNOWN
+    elseif not (issecretvalue and issecretvalue(surname)) and type(surname) == "string" and surname ~= "" then
+        name = name .. " " .. surname
     end
     local class = UnitClass and UnitClass("player") or UNKNOWN
     local realm = GetRealmName and GetRealmName() or ""
@@ -801,7 +805,13 @@ function ns.SetNotesSeen(version)
     db.notesSeen = version
 end
 
+-- One of Blizzard's own settings switched from here (ns.TurnOn, ns.TurnOff):
+-- the game reacts to it straight away, inside the addon's click, so a reload
+-- finishes it cleanly.
+local switched = false
+
 function ns.NeedsReload()
+    if switched then return true end
     for key in pairs(ns.RELOAD) do
         if ns.Get(key) ~= ns.loaded[key] then return true end
     end
@@ -820,12 +830,14 @@ function ns.PersonalDisplayOn()
 end
 
 -- Switches one of Blizzard's own settings on, outside combat: true when it's
--- on afterwards, or false and why not.
+-- on afterwards, or false and why not. Switched, a reload is asked for.
 function ns.TurnOn(cvar)
     if InCombatLockdown() then return false, "Finish combat first." end
     if not (C_CVar and C_CVar.SetCVar and C_CVar.GetCVarBool) then return false end
     pcall(C_CVar.SetCVar, cvar, "1")
-    return C_CVar.GetCVarBool(cvar) == true
+    local on = C_CVar.GetCVarBool(cvar) == true
+    if on then switched = true end
+    return on
 end
 
 -- And off again, when you ask: true when it's off afterwards.
@@ -833,7 +845,9 @@ function ns.TurnOff(cvar)
     if InCombatLockdown() then return false, "Finish combat first." end
     if not (C_CVar and C_CVar.SetCVar and C_CVar.GetCVarBool) then return false end
     pcall(C_CVar.SetCVar, cvar, "0")
-    return C_CVar.GetCVarBool(cvar) == false
+    local off = C_CVar.GetCVarBool(cvar) == false
+    if off then switched = true end
+    return off
 end
 
 -- Escape closes the /ccm window and What's new. The key is borrowed only while

@@ -26,6 +26,9 @@ local REACTIVE = ns.REACTIVE or {}
 
 local bars = {}
 local unlocked, inCombat, editMode = false, false, false
+-- Icons wanting a refresh: done once on the next frame, however many events
+-- (a cast brings several) or cooldowns ending asked for it.
+local dirty = false
 local FADE = .3 -- a faded bar's opacity out of combat
 local DIM = .4 -- a ready icon's opacity on a bar that dims them
 local READY_ALPHA = { show = 1, dim = DIM, hide = 0 }
@@ -102,7 +105,7 @@ local function NewIcon(bar)
     icon.cooldown:SetDrawBling(false)
     -- Events arrive when a cooldown starts, not when it ends; this catches the
     -- end, so the icon ungreys (or dims or hides when ready) on time.
-    icon.cooldown:SetScript("OnCooldownDone", function() B:RefreshAll() end)
+    icon.cooldown:SetScript("OnCooldownDone", function() dirty = true end)
     -- Item counts and the keybind sit above the sweep.
     local top = CreateFrame("Frame", nil, icon)
     top:SetAllPoints()
@@ -130,7 +133,10 @@ end
 
 -- A healthstone or potion family moves on to the best one you carry as your
 -- bags change, which only refreshes the bars: its picture, name and key
--- follow it.
+-- follow it. Looked for at the next refresh after your bags change, the bars
+-- are laid out, you level, a fight ends or the game learns an item's name,
+-- not on every refresh (several a second).
+local follow = true
 local function Follow(icon)
     local entry = ns.Spells:Find(icon.name)
     if not entry then return end
@@ -144,8 +150,8 @@ end
 
 -- Trinkets and bag items. Their cooldowns come back as plain numbers; if the
 -- game ever hides them in combat, the icon simply keeps its last state.
-local function RefreshItem(icon, data)
-    if icon.kind == "family" then Follow(icon) end
+local function RefreshItem(icon, data, follows)
+    if follows and icon.kind == "family" then Follow(icon) end
     local start, duration
     if icon.kind == "slot" then
         start, duration = GetInventoryItemCooldown("player", icon.slot)
@@ -190,9 +196,9 @@ local function RefreshAmmo(icon)
     icon.glow:Hide()
 end
 
-local function RefreshIcon(icon, data, hasTarget)
+local function RefreshIcon(icon, data, hasTarget, follows)
     if icon.kind == "ammo" then return RefreshAmmo(icon) end
-    if icon.kind == "item" or icon.kind == "slot" or icon.kind == "family" then return RefreshItem(icon, data) end
+    if icon.kind == "item" or icon.kind == "slot" or icon.kind == "family" then return RefreshItem(icon, data, follows) end
     local id = icon.spellID
     local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(id, true)
     if duration then
@@ -627,6 +633,8 @@ local function Layout(bar)
     local data = ns.BarData(bar.key)
     bar.data = data
     if bar.kind == "aura" then return LayoutAuras(bar, data) end
+    -- Families laid out from the list follow what you carry at the next refresh.
+    follow = true
     local size, spacing = ns.IconSize(data), data.spacing
     local count = 0
     for _, name in ipairs(data.spells) do
@@ -816,12 +824,15 @@ end
 
 function B:RefreshAll()
     if not (self.started and self:Enabled()) then return end
+    dirty = false
     local hasTarget = UnitExists("target") and true or false
+    local follows = follow
+    follow = false
     for _, key in ipairs(ns.BAR_KEYS) do
         local bar = bars[key]
         if bar and bar.kind == "cooldown" then
             for i = 1, bar.count do
-                local ok, err = pcall(RefreshIcon, bar.icons[i], bar.data, hasTarget)
+                local ok, err = pcall(RefreshIcon, bar.icons[i], bar.data, hasTarget, follows)
                 if not ok and not self.lastError then
                     self.lastError = tostring(err)
                     print("|cffffd100" .. ns.TITLE .. ":|r a bar icon couldn't update. Please report this: " .. self.lastError)
@@ -1499,6 +1510,19 @@ function B:ResetPositions()
     self:Changed()
 end
 
+-- Gear changes come one slot at a time, all of a set's in one frame: the
+-- bars are rebuilt once, on the next frame.
+local rebuildQueued = false
+local function RebuildSoon()
+    if rebuildQueued then return end
+    rebuildQueued = true
+    C_Timer.After(0, function()
+        rebuildQueued = false
+        B:Rebuild()
+        if ns.window and ns.window:IsShown() then ns.window:Refresh() end
+    end)
+end
+
 function B:Start()
     if self.started then return end
     self.started = true
@@ -1506,10 +1530,11 @@ function B:Start()
     local driver = CreateFrame("Frame")
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "SPELL_UPDATE_COOLDOWN",
         "SPELL_UPDATE_USABLE", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
-        "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED" }) do
+        "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
+        "PLAYER_LEVEL_CHANGED", "GET_ITEM_INFO_RECEIVED" }) do
         driver:RegisterEvent(event)
     end
-    driver:SetScript("OnEvent", function(_, event)
+    driver:SetScript("OnEvent", function(_, event, arg)
         if event == "PLAYER_REGEN_DISABLED" then
             inCombat = true
             -- A Buffs or Debuffs bar still being dragged is let go where it
@@ -1531,15 +1556,20 @@ function B:Start()
                 if bar and bar.pendingDecor then GroupDecor(bar) end
                 if bar then bar.pendingShown = nil end
             end
-            -- Items used up or picked up in the fight come off or go on now.
+            -- Items used up or picked up in the fight come off or go on now,
+            -- and families move on to the best one you carry.
+            follow = true
             local recounted = Recount()
             if recounted then Relay() end
             B:UpdateShown()
             if recounted then
                 B:RefreshAll()
                 if ns.Layout then ns.Layout:Stack() end
+            else
+                dirty = true
             end
         elseif event == "BAG_UPDATE_DELAYED" then
+            follow = true
             -- Counts change often; the item list only matters while /ccm is open.
             if ns.window and ns.window:IsShown() then
                 B:Rebuild()
@@ -1554,24 +1584,36 @@ function B:Start()
             else
                 B:RefreshAll()
             end
-        elseif event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_EQUIPMENT_CHANGED" then
+        elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+            -- A gear set swapped changes every slot at once: one rebuild for them all.
+            RebuildSoon()
+        elseif event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
             B:Rebuild()
             if ns.window and ns.window:IsShown() then ns.window:Refresh() end
+        elseif event == "PLAYER_LEVEL_UP" or event == "PLAYER_LEVEL_CHANGED" or event == "GET_ITEM_INFO_RECEIVED" then
+            -- A potion you can use now, or the name of one the game has just
+            -- loaded. Your level may still read the old one as PLAYER_LEVEL_UP
+            -- fires, so PLAYER_LEVEL_CHANGED (with the new one) looks again.
+            if event ~= "GET_ITEM_INFO_RECEIVED" or ns.Spells:Family(arg) then follow, dirty = true, true end
         else
             if event == "PLAYER_TARGET_CHANGED" then
                 ns.BuffBar:UpdateTarget(bars.debuff)
                 B:UpdateShown()
             end
-            B:RefreshAll()
+            dirty = true
         end
     end)
-    -- Range changes as you move, with no event for it.
+    -- Range changes as you move, with no event for it. Refreshes asked for
+    -- since the last frame are done here too, once.
     local elapsedTotal = 0
     driver:SetScript("OnUpdate", function(_, elapsed)
         elapsedTotal = elapsedTotal + elapsed
-        if elapsedTotal < RANGE_INTERVAL then return end
-        elapsedTotal = 0
-        if B:Enabled() and UnitExists("target") then B:RefreshAll() end
+        local due = elapsedTotal >= RANGE_INTERVAL
+        if due then elapsedTotal = 0 end
+        if dirty or (due and B:Enabled() and UnitExists("target")) then
+            dirty = false
+            B:RefreshAll()
+        end
     end)
     self.driver = driver
     -- Bars come back in full while Edit Mode is open.

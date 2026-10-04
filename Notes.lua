@@ -10,6 +10,23 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.4.2",
+        sections = {
+            { "Changed", {
+                "Switching the Cooldown Manager or resource display from /fecm now asks for a reload.",
+                "Smoother gear set swaps.",
+                "Lighter icon updates in combat.",
+                "New profiles are named with your surname.",
+                "The tour points to Raid Timers under More.",
+                "Pull countdown and Show me what's new are no longer marked Needs testing.",
+            } },
+            { "Fixed", {
+                "Your rows close up when the resource display is Hidden in Edit Mode.",
+                "Potions and healthstones move to the higher rank as soon as you level up.",
+            } },
+        },
+    },
+    {
         version = "1.4.1",
         sections = {
             { "Added", {
@@ -299,8 +316,8 @@ local function Build()
     T:Paint(function(accent) done:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
     done:SetScript("OnClick", function() window:Hide() end)
     window.done = done
-    -- Closes this for the tour, which opens the settings. Not tested in the
-    -- game yet, and the label has no room to say so: its tooltip does.
+    -- Closes this for the tour, which opens the settings. Its tooltip says
+    -- what it does, as the label has no room to.
     local tour = T:Button(window, "Show me what's new", 120, 24)
     tour:SetPoint("RIGHT", done, "LEFT", -8, 0)
     tour:SetScript("OnClick", function()
@@ -310,7 +327,7 @@ local function Build()
     tour:HookScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:SetText("Show me what's new")
-        GameTooltip:AddLine("A quick tour of what's new, a page at a time. (Needs testing)", 1, 1, 1, true)
+        GameTooltip:AddLine("A quick tour of what's new, a page at a time.", 1, 1, 1, true)
         GameTooltip:Show()
     end)
     tour:HookScript("OnLeave", function() GameTooltip:Hide() end)

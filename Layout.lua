@@ -142,10 +142,23 @@ function L:Display()
         -- Seen before its edge was kept: measured with the restyle's 1px.
         if type(display.edge) ~= "number" then display.edge = ns.loaded.prdSkin and 1 or 0 end
     end
-    if display and not ns.PersonalDisplayOn() then
+    if display and self:DisplayOff() then
         return { x = display.x, y = display.y, width = display.width, height = 0, edge = display.edge, off = true }
     end
     return display
+end
+
+-- Whether the display takes no room: switched off in Options, or Edit Mode's
+-- Visibility set to Hidden (read from Blizzard's own setting, never changed).
+-- In Combat and Always keep its space.
+function L:DisplayOff()
+    if not ns.PersonalDisplayOn() then return true end
+    local frame = _G.PersonalResourceDisplayFrame
+    local settings = Enum and Enum.PersonalResourceDisplayVisibleSetting
+    if not (frame and settings and settings.Hidden ~= nil) then return false end
+    local setting = frame.visibleSetting
+    if issecretvalue and issecretvalue(setting) then return false end
+    return setting == settings.Hidden
 end
 
 -- Whether a bar is taken out of the layout: it keeps its row and spells, but

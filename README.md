@@ -76,6 +76,20 @@ right at home next to EraUI.
   and keybinds on the icons
 - Grow arrows show which way each bar grows while you move them
 
+## Raid Timers
+- Blizzard's pull and battleground start countdown, raid warnings, boss emotes
+  and boss cast bars, restyled to match your bars. Find it under More in `/ccm`
+- Each part stays off until you tick it, with a live preview on the page
+- Countdown: a bar colour, and its big numbers in gold, white or the bar's
+  colour
+- Raid warnings and boss emotes: your choice of font, outline, shadow and
+  colours
+- Sizes for the countdown bar, its numbers, raid warnings and boss emotes, each
+  on its own or all together
+- An Edit Mode button beside Boss cast bars opens Edit Mode, where ticking Boss
+  Frames shows them
+- Visual only: Blizzard still decides what shows and when
+
 ## Profiles and settings
 - Spell lists live in profiles. Characters can share one, even across classes:
   each only shows its own class's spells and racials. Use on all characters puts one profile
