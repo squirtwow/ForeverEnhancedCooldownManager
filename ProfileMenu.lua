@@ -1,7 +1,8 @@
 -- The profile menu in the /ccm window's header: the profile this character
 -- uses, and a panel under it listing every profile (click one to switch, or
 -- its x to delete it after asking) with a box to type a name for New, Copy
--- or Rename. Profiles hold the spell lists only; the rules live in Core.lua.
+-- or Rename. Profiles hold the spell lists only (the bars', and the Cooldown
+-- pulse's ticks); the rules live in Core.lua.
 local _, ns = ...
 local T = ns.Theme
 
@@ -24,7 +25,7 @@ function ns.BuildProfileMenu(window, header, anchor)
     button:SetPoint("RIGHT", anchor, "LEFT", -8, 0)
     button.label:SetWidth(264)
     button.label:SetWordWrap(false)
-    window:Hint(button, "The profile this character uses: its spell lists. Click for every profile, to switch or make one.")
+    window:Hint(button, "The profile this character uses: its spell lists and Cooldown pulse ticks. Click for every profile, to switch or make one.")
     window.profileButton = button
 
     local panel = CreateFrame("Frame", nil, window, "BackdropTemplate")

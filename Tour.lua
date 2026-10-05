@@ -6,7 +6,9 @@
 -- and the outline takes no clicks. A first install opens the window with a
 -- welcome that offers it; after that it's on the General page and /ccm tour.
 -- Each step has the version it arrived in, and What's new offers a shorter
--- tour of just the steps an update added (Show me what's new).
+-- tour of just the steps an update added (Show me what's new). The ? in
+-- the window's title bar walks through the page showing: every step about
+-- it, from the tour, What's new and the page help (HELP), without leaving it.
 local _, ns = ...
 local T = ns.Theme
 
@@ -20,11 +22,24 @@ local OUTLINE = 4 -- how far outside that part the outline sits
 local CHECK_EVERY = .25 -- how often a Try it step looks to see if it's done
 local TOUR_NOTE = "Take the tour any time from the General page, or with /ccm tour."
 local NEWS_NOTE = "See it again any time from What's new, or with /ccm new."
+local PAGE_NOTE = "Click ? any time to see it again."
 
 local window, box, outline
 local steps, index, started, welcome
 local news -- the tour showing is What's new's
+local here -- the page a page's walkthrough is about, while one shows
 local since = 0
+
+-- Which bars a step on a bar page is for, where it isn't all four: a tick
+-- or choice only some bars' pages show.
+local SPELL_BARS = { cd = true, util = true }
+local AURA_BARS = { buff = true, debuff = true }
+
+-- The bar page showing, or Cooldowns: what a bar page's step talks about.
+local function ShownBar()
+    local key = window and window.selected
+    return ns.BAR_NAMES[key] and key or "cd"
+end
 
 local function Value(value, ...)
     if type(value) == "function" then return value(...) end
@@ -58,13 +73,25 @@ local function RaidTimersPage()
     return ns.BuildRaidTimersPage ~= nil
 end
 
+-- The same for the Cooldown pulse page.
+local function PulsePage()
+    return ns.BuildPulsePage ~= nil
+end
+
+-- How many cooldowns are ticked to pulse, for its Try it.
+local function PulsePicks()
+    local count = 0
+    for _ in pairs(ns.PulsePicks and ns.PulsePicks() or {}) do count = count + 1 end
+    return count
+end
+
 -- The steps of the full tour, the basics. version: the version the step
--- arrived in. page: the page it opens (none keeps the one showing). when:
+-- arrived in. page: the page it opens (none keeps the one showing); a bar
+-- page's step ("cd") is about any bar's page, or only those in bars. when:
 -- whether it can show here, if it can't always. target: the part it
 -- outlines, or the first and last of a row of them. side: where the box
 -- goes, "right", "left", "below" or "above"; align "end" lines the box up
--- with the far end, where the side has one, and "before" (above only) ends it
--- just past the start, reaching back over what's before it. A Try it step
+-- with the far end, where the side has one. A Try it step
 -- moves on by itself when it has watch, a count that goes up once it's done,
 -- unless already says it was done before the step began; without watch it
 -- waits for Next, for a step with more to do after it.
@@ -73,8 +100,12 @@ local STEPS = {
         version = "1.0.0",
         title = "The menu",
         text = function()
+            -- The pages under More, as they're there.
+            local more = {}
+            if RaidTimersPage() then more[#more + 1] = "Raid Timers" end
+            if ns.BuildPulsePage then more[#more + 1] = "Cooldown pulse" end
             return "Everything is in this list: your four bars at the top, then Look, Layout, Cast bar and General"
-                .. (RaidTimersPage() and ", and Raid Timers under More." or ".")
+                .. (#more > 0 and (", and " .. table.concat(more, " and ") .. " under More.") or ".")
         end,
         target = function(w) return w.navFrame end,
         side = "right",
@@ -211,10 +242,8 @@ local NEWS = {
         title = "Live preview",
         text = "Your icons here now have the border, shadow and keybinds from the Look page, as on your bars. Untick Live preview for plain icons.",
         target = function(w) return w.pages.layout.live end,
-        -- Above it, reaching back over the display's tick: All bars is to its
-        -- right.
+        -- Above it, over the drawing's foot: the tick is in its box's corner.
         side = "above",
-        align = "before",
     },
     {
         version = "1.1.0",
@@ -234,6 +263,7 @@ local NEWS = {
         try = "Try it: tick Show items.",
         already = function() return ns.Get("listItems") end,
         alreadyText = "Your items are already listed.",
+        bars = SPELL_BARS, -- the Buffs and Debuffs bars list no items
         target = function(w) return w.pages.bar.showItems end,
         -- Above the tick, clear of the list it fills.
         side = "above",
@@ -245,8 +275,10 @@ local NEWS = {
         text = "Each bar's ready icons can now dim instead of hiding: the ones cooling down stand out, and every icon keeps its place.",
         -- No watch: the step stays so the bar can be seen dimming.
         try = "Try it: pick Dim.",
-        already = function() return ns.BarData("cd").whenReady == "dim" end,
-        alreadyText = "Cooldowns already dims its ready icons.",
+        -- The bar showing: Cooldowns, or Utility from its own page.
+        already = function() return ns.BarData(ShownBar()).whenReady == "dim" end,
+        alreadyText = function() return ns.BAR_NAMES[ShownBar()] .. " already dims its ready icons." end,
+        bars = SPELL_BARS, -- the aura bars show missing ones greyed instead
         -- The label and its three choices as one part, the box under them.
         target = function(w) return w.pages.bar.options.whenReady.part end,
         side = "below",
@@ -329,6 +361,148 @@ local NEWS = {
         target = function(w) return w.pages.raid.editMode end,
         side = "below",
     },
+    {
+        version = "1.5.0",
+        page = "pulse",
+        when = PulsePage,
+        title = "Turn it on",
+        text = "Cooldown pulse, under More: a big icon in the middle of your screen the moment a cooldown is ready,"
+            .. " in a fight too. Off until you tick it.",
+        try = "Try it: tick it.",
+        already = function() return ns.Get("pulse") end,
+        alreadyText = "It's already on.",
+        watch = function() return ns.Get("pulse") and 1 or 0 end,
+        -- The tick; the box under it, over the choices that follow.
+        target = function(w) return w.pages.pulse.master end,
+        side = "below",
+    },
+    {
+        version = "1.5.0",
+        page = "pulse",
+        when = PulsePage,
+        title = "Pick your cooldowns",
+        text = "Every spell you know with a cooldown, and your trinkets and potions. Tick the ones to pulse,"
+            .. " then pick Quick or Long for each.",
+        -- No watch: once one is ticked, Quick or Long is still to pick.
+        try = "Try it: tick one.",
+        already = function() return PulsePicks() > 0 end,
+        alreadyText = "You've ticked some already.",
+        -- The list; the box above it, so its rows stay in sight.
+        target = function(w) return w.pages.pulse.panel end,
+        side = "above",
+    },
+    {
+        version = "1.5.0",
+        page = "pulse",
+        when = PulsePage,
+        title = "Quick and Long",
+        text = "Each has its own size, time and sound. Pick one under Edit: Size, Shows for and Sound follow it,"
+            .. " and Preview plays it.",
+        -- No watch: Long picked, its own size, time and sound are to try.
+        try = "Try it: pick Long, then Preview.",
+        -- Edit and the three it picks for; the box beside them, over the
+        -- look both styles share.
+        target = function(w) return w.pages.pulse.styles end,
+        side = "right",
+    },
+    {
+        version = "1.5.0",
+        page = "pulse",
+        when = PulsePage,
+        title = "Where it shows",
+        text = "Move shows a box as big as the pulse: drag it where you want it, then click Done."
+            .. " Reset puts it back in the middle.",
+        -- No Try it: Move puts the window away while the box shows.
+        target = function(w)
+            local page = w.pages.pulse
+            return page.move, page.reset
+        end,
+        side = "below",
+    },
+    {
+        version = "1.5.0",
+        page = "look",
+        title = "Ready glow",
+        text = "How a ready ability like Overpower, Riposte or Mongoose Bite lights up on your own bars:"
+            .. " Blizzard's proc glow, or a plain gold edge.",
+        -- No watch: the step stays so both can be seen.
+        try = "Try it: pick Gold edge.",
+        -- The label and its choices at the page's foot; the box above them,
+        -- at their right end, inside the page.
+        target = function(w) return w.readyGlow.part end,
+        side = "above",
+        align = "end",
+    },
+}
+
+-- Steps only a page's own walkthrough shows (the ? in the title bar), for
+-- pages with little in the tour or What's new: never in either. The same
+-- fields, with no version.
+local HELP = {
+    {
+        page = "cd",
+        bars = AURA_BARS,
+        title = "Missing ones greyed",
+        text = function()
+            if ShownBar() == "debuff" then
+                return "Ticked, each debuff keeps its spot, greyed while it's missing from your target."
+                    .. " Unticked, only the ones up show, in one row."
+            end
+            return "Ticked, each buff keeps its spot, greyed while it's missing from you. Unticked, only the ones up show, in one row."
+        end,
+        target = function(w) return w.pages.bar.options.showMissing end,
+        side = "below",
+    },
+    {
+        page = "cd",
+        bars = AURA_BARS,
+        title = "Join two into one",
+        text = "With two on the bar, the + between them in the tray joins them into one icon, lit by whichever is up."
+            .. " The - splits them again.",
+        target = function(w) return w.pages.bar.tray end,
+        side = "below",
+    },
+    {
+        page = "cd",
+        bars = { buff = true },
+        title = "Your debuffs on you",
+        text = "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, after your buffs."
+            .. " Not with missing buffs greyed.",
+        target = function(w) return w.pages.bar.options.showSelf end,
+        side = "below",
+    },
+    {
+        page = "cast",
+        when = function() return ns.BuildCastBarPage ~= nil end,
+        title = "Colours",
+        text = "A colour for your cast bar and one for your swing timer. Click the chosen one again for Blizzard's gold, or silver.",
+        -- Below: to the right, the box would cover the chosen colour's name.
+        target = function(w) return w.pages.cast.colours end,
+        side = "below",
+    },
+    {
+        page = "cast",
+        when = function() return ns.BuildCastBarPage ~= nil end,
+        title = "Height and parts",
+        text = "How tall both bars are, and whether the icon, the name and the time left show on them. The preview changes as you pick.",
+        target = function(w) return w.pages.cast.parts end,
+        side = "right",
+    },
+    {
+        page = "general",
+        title = "Minimap button",
+        text = "Click it for these settings, right-click for What's new, and drag it round the minimap."
+            .. " Untick to hide it: /ccm still opens them.",
+        target = function(w) return w.minimap end,
+        side = "right",
+    },
+    {
+        page = "general",
+        title = "Help",
+        text = "Take the tour shows you the basics again. Discord gives you the invite to copy, for help, bugs and ideas.",
+        target = function(w) return w.tour, w.discord end,
+        side = "below",
+    },
 }
 
 -- Where the box goes against what it points at, and its arrow on the box's
@@ -341,10 +515,8 @@ local PLACES = {
     above = { "BOTTOMLEFT", "TOPLEFT", 0, GAP, "TOP", "BOTTOMLEFT", 24, 0, "down" },
     belowEnd = { "TOPRIGHT", "BOTTOMRIGHT", 0, -GAP, "BOTTOM", "TOPRIGHT", -24, 0, "up" },
     aboveEnd = { "BOTTOMRIGHT", "TOPRIGHT", 0, GAP, "TOP", "BOTTOMRIGHT", -24, 0, "down" },
-    -- Ends 20 past the part's start, its arrow over a tick's box (6 in).
-    aboveBefore = { "BOTTOMRIGHT", "TOPLEFT", 20, GAP, "TOP", "BOTTOMRIGHT", -14, 0, "down" },
 }
-local ALIGNS = { ["end"] = "End", before = "Before" }
+local ALIGNS = { ["end"] = "End" }
 
 local function Strip(frame, layer)
     local strip = frame:CreateTexture(nil, layer)
@@ -423,7 +595,7 @@ local function Build()
     end)
     back:SetScript("OnClick", function() Tour:Back() end)
     skip:SetScript("OnClick", function()
-        local note = news and NEWS_NOTE or TOUR_NOTE
+        local note = here and PAGE_NOTE or news and NEWS_NOTE or TOUR_NOTE
         Tour:Stop()
         window:Say(note)
         window:Refresh()
@@ -504,11 +676,17 @@ end
 local function Show(i)
     index, welcome = i, nil
     local step = steps[i]
-    if step.page then window:Select(step.page) end
-    local text = Value(step.text)
+    -- A page's walkthrough stays on its page (any bar's, for a bar page's
+    -- steps), going back to it should another have been picked meanwhile.
+    if here then
+        if window.selected ~= here then window:Select(here) end
+    elseif step.page then
+        window:Select(step.page)
+    end
+    local text = Value(step.text, window)
     local already = step.already and step.already()
     if step.try then
-        text = text .. "\n\n|cff" .. T:Hex(T:Accent()) .. (already and step.alreadyText or step.try) .. "|r"
+        text = text .. "\n\n|cff" .. T:Hex(T:Accent()) .. (already and Value(step.alreadyText, window) or step.try) .. "|r"
     end
     box.title:SetText(step.title:upper())
     box.count:SetText(i .. " of " .. #steps)
@@ -529,7 +707,7 @@ end
 -- The tour from the start, over the window.
 function Tour:Start()
     if not Ready() then return end
-    steps, news = {}, nil
+    steps, news, here = {}, nil, nil
     for _, step in ipairs(STEPS) do
         if not step.when or step.when(window) then steps[#steps + 1] = step end
     end
@@ -582,14 +760,46 @@ end
 function Tour:StartNews(seen)
     local list = self:News(seen)
     if #list == 0 or not Ready() then return end
-    steps, news = list, true
+    steps, news, here = list, true, nil
     Show(1)
+end
+
+-- The steps about a page, for its walkthrough: the full tour's, then What's
+-- new's, then the page help's, each where it can show and its part is
+-- there to point at. Steps about no page (the menu, profiles) aren't any
+-- page's. On a bar page, those for any bar's page, but not one only for
+-- another kind of bar (bars), so the Buffs bar never points at a tick only
+-- Cooldowns and Utility have. Asked once the window is made.
+function Tour:Page(key)
+    local list, bar = {}, ns.BAR_NAMES[key] ~= nil
+    for _, group in ipairs({ STEPS, NEWS, HELP }) do
+        for _, step in ipairs(group) do
+            if step.page and Same(step.page, key) and not (bar and step.bars and not step.bars[key])
+                and (not step.when or step.when(window)) then
+                local part = window and Value(step.target, window)
+                if part and part:IsShown() then list[#list + 1] = step end
+            end
+        end
+    end
+    return list
+end
+
+-- The ? in the title bar: a walkthrough of the page showing, over the
+-- window, never leaving it. False, with nothing started, for a page with no
+-- steps.
+function Tour:StartPage(key)
+    if not Ready() then return false end
+    local list = self:Page(key)
+    if #list == 0 then return false end
+    steps, news, here = list, nil, key
+    Show(1)
+    return true
 end
 
 -- A first install: the window, and an offer of the tour.
 function Tour:Welcome()
     if not Ready() then return end
-    steps, index, started, welcome, news = nil, nil, nil, true, nil
+    steps, index, started, welcome, news, here = nil, nil, nil, true, nil, nil
     box.title:SetText("WELCOME")
     box.count:Hide()
     box.text:SetText("New to " .. ns.TITLE .. "? A quick tour shows you the basics, a page at a time. It takes about a minute.")
@@ -606,7 +816,8 @@ end
 function Tour:Next()
     if not (steps and index) then return end
     if index < #steps then return Show(index + 1) end
-    local done = news and "That's what's new. " .. NEWS_NOTE or "That's the tour. " .. TOUR_NOTE
+    local done = here and "That's this page. " .. PAGE_NOTE or news and "That's what's new. " .. NEWS_NOTE
+        or "That's the tour. " .. TOUR_NOTE
     self:Stop()
     window:Say(done)
     window:Refresh()
@@ -617,7 +828,7 @@ function Tour:Back()
 end
 
 function Tour:Stop()
-    steps, index, started, welcome, news = nil, nil, nil, nil, nil
+    steps, index, started, welcome, news, here = nil, nil, nil, nil, nil, nil
     if box then
         box:Hide()
         outline:Hide()
@@ -633,9 +844,11 @@ end
 function Tour:Sync()
     local step = steps and index and steps[index]
     if not step or not box then return end
-    local here = not step.page or Same(step.page, window.selected)
-    outline:SetShown(here and Value(step.target, window) ~= nil)
-    box.arrow:SetShown(here)
+    -- A page's walkthrough: only its own page, not another bar's.
+    local shown
+    if here then shown = window.selected == here else shown = not step.page or Same(step.page, window.selected) end
+    outline:SetShown(shown and Value(step.target, window) ~= nil)
+    box.arrow:SetShown(shown)
 end
 
 -- Points the step showing at its part again, for a part that moved or

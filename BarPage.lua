@@ -279,10 +279,12 @@ function ns.BuildBarPage(window, page, width)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
     options:SetSize(inner, 134)
     page.optionsArea = options
+    -- Room before each slider's track for the longest label, Icons per row.
+    local sliderLabel = 108
     local size = T:Slider(options, "Icon size", ns.BAR_LIMITS.size, 2, 280, function(value)
         B:SetOption(state.bar, "size", value)
         window:Refresh()
-    end)
+    end, sliderLabel)
     size:SetPoint("TOPLEFT", 0, -2)
     -- All bars (the Layout page) sizes every bar on top of this one: while it
     -- isn't 100, the note says what size this bar's icons are on screen.
@@ -296,14 +298,14 @@ function ns.BuildBarPage(window, page, width)
     local spacing = T:Slider(options, "Spacing", ns.BAR_LIMITS.spacing, 1, 280, function(value)
         B:SetOption(state.bar, "spacing", value)
         window:Refresh()
-    end)
+    end, sliderLabel)
     spacing:SetPoint("TOPLEFT", 0, -30)
     window:Hint(spacing, "The room between this bar's icons.")
     -- More icons than fit across go on another row. (Not the tray's perRow.)
     local across = T:Slider(options, "Icons per row", ns.BAR_LIMITS.perRow, 1, 280, function(value)
         B:SetOption(state.bar, "perRow", value)
         window:Refresh()
-    end)
+    end, sliderLabel)
     across:SetPoint("TOPLEFT", 0, -58)
     window:Hint(across, "How many icons fit across before the next row starts.")
     page.size, page.spacing, page.across = size, spacing, across

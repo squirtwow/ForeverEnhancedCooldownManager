@@ -10,6 +10,22 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.5.0",
+        sections = {
+            { "Added", {
+                "Cooldown pulse, under More: a big icon pops up in the middle of your screen when a cooldown you tick is ready.",
+                "Quick and Long pulse styles, each with its own size, time and sound, plus 15 sounds and a Master volume option.",
+                "A \"?\" button on every page shows you how that page works.",
+            } },
+            { "Changed", {
+                "Reactive abilities like Riposte now show the game's proc glow, or a gold edge if you prefer (Look page).",
+                "Your bars glow whenever the game lights a spell up on your action bars.",
+                "New logo, and the settings window is purple by default.",
+                "Labels on the Layout page no longer run into each other.",
+            } },
+        },
+    },
+    {
         version = "1.4.4",
         sections = {
             { "Changed", {

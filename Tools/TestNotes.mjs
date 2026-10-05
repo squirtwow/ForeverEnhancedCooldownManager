@@ -101,7 +101,7 @@ test('every tour step has the version it arrived in', async () => {
 
 // Releases that added no tour steps. Steps written after one of these wait
 // for the next update's number while its notes are still the newest.
-const ADDED_NO_STEPS = ['1.2.1', '1.3.0', '1.4.0'];
+const ADDED_NO_STEPS = ['1.2.1', '1.3.0', '1.4.0', '1.4.2', '1.4.3', '1.4.4'];
 
 // A release never shows steps still waiting for their number, so it gives
 // them its number when its notes get it. Once the newest notes are a release

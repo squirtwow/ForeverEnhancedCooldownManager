@@ -111,6 +111,12 @@ function ns.BuildCastBarPage(window, page, width)
         "A colour for your swing timer. Click it again for silver.")
     page.swatches, page.chosen = swatches, chosen
     page.swingSwatches, page.swingChosen = swingSwatches, swingChosen
+    -- Both rows of colours, their labels and swatches, as one part for the
+    -- page's walkthrough (the ? in the title bar) to outline.
+    local colours = CreateFrame("Frame", nil, options)
+    colours:SetPoint("TOPLEFT", 0, -54)
+    colours:SetSize(100 + #ns.BAR_COLOUR_KEYS * (SWATCH + SWATCH_GAP) - SWATCH_GAP, 48)
+    page.colours = colours
 
     local height = T:Slider(options, "Height", ns.CAST_HEIGHT, 1, 280, function(value)
         ns.Set("castHeight", value)
@@ -124,6 +130,11 @@ function ns.BuildCastBarPage(window, page, width)
     local name = Tick("Name", "castName", -168, "The spell's name on the bar, or Main hand, Auto Shot or Ranged for the swing timer.")
     local timer = Tick("Time left", "castTime", -190, "Seconds left, at the right end.")
     page.shown, page.swing, page.icon, page.name, page.timer = shown, swings, icon, name, timer
+    -- The height and the three ticks under it as one part, for the walkthrough.
+    local parts = CreateFrame("Frame", nil, options)
+    parts:SetPoint("TOPLEFT", 0, -114)
+    parts:SetSize(280, 190 + 16 - 114)
+    page.parts = parts
 
     local about = T:Text(options, "GameFontHighlightSmall", T.MUTED)
     about:SetPoint("TOPLEFT", 0, -222)

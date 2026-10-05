@@ -79,6 +79,7 @@ function Proto:GetChecked() return S[self].checked end
 function Proto:SetPoint(...) table.insert(S[self].points, table.pack(...)) end
 function Proto:ClearAllPoints() S[self].points = {} end
 function Proto:SetSize(w, h) S[self].width, S[self].height = w, h end
+function Proto:GetSize() return S[self].width, S[self].height end
 function Proto:SetWidth(w) S[self].width = w end
 function Proto:SetHeight(h) S[self].height = h end
 function Proto:GetWidth() return S[self].width end
@@ -334,6 +335,24 @@ local function Environment(keepCVars)
             rawset(f, "SetAuraGroupLayout", function(_, key, layout) Guard(); groups[key].layout = layout end)
             rawset(f, "SetScale", function(_, scale) Guard(); S[f].scale = scale end)
         end
+        if template == "ActionButtonSpellAlertTemplate" then
+            -- Blizzard's proc glow: its burst, then its loop (the burst's
+            -- end starts it), each counting its plays. Hiding never stops the
+            -- loop: Forever's template lists OnHide twice, and the second
+            -- runs its OnShow method, which looks for a key nothing sets
+            -- (ActionButtonSpellAlerts.xml and .lua).
+            S[f].template = template
+            for _, key in ipairs({ "ProcStartAnim", "ProcLoop" }) do
+                local anim = { plays = 0, playing = false }
+                function anim:Play() self.plays = self.plays + 1; self.playing = true end
+                function anim:Stop() self.playing = false end
+                function anim:IsPlaying() return self.playing end
+                rawset(f, key, anim)
+            end
+            S[f].scripts.OnHide = function(self)
+                if self.animationPlaying then self.ProcLoop:Play() end
+            end
+        end
         frames[#frames + 1] = f
         S[f].name = name
         if name then _G[name] = f end
@@ -365,7 +384,7 @@ local function Load(saved, beforeLogin)
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
-        "MinimapButton.lua", "Notes.lua" }) do
+        "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -1273,14 +1292,19 @@ Equal(S[page.boss].alpha .. " " .. S[Boss1TargetFrameSpellBar.Border].alpha .. "
 Equal(S[page.bossNote].text:find("\226\128\148", 1, true), nil, "no em dash in the note")
 Equal(#printed, 0, "no errors")
 
--- What's new's tour: three steps for this page, of the update after 1.4.0
--- (Unreleased until the release numbers them). They open the page and point:
--- at the preview and its switches, at All sizes, then at the Edit Mode
--- button. The box never covers what a step asks you to use. Places are from
--- the page's top left, y down.
+-- What's new's tour: three steps for this page, of 1.4.1, the update after
+-- 1.4.0. They open the page and point: at the preview and its switches, at
+-- All sizes, then at the Edit Mode button. The box never covers what a step
+-- asks you to use. Places are from the page's top left, y down. Run as
+-- 1.4.1, so steps from later updates (those still waiting for their number
+-- too) stay out, as they did in that release.
+local function Released(version)
+    _G.C_AddOns = { GetAddOnMetadata = function() return version end }
+end
 do
     Environment()
     BlizzardFrames()
+    Released("1.4.1")
     ns = LoadAll({ useBars = true, notesSeen = "1.3.0" })
     local Tour = ns.Tour
     local function Titles(list)
@@ -1288,8 +1312,7 @@ do
         for _, step in ipairs(list) do titles[#titles + 1] = step.title end
         return table.concat(titles, ", ")
     end
-    -- One version for all three, newer than 1.4.0: Unreleased now, the
-    -- release's number once it gives them one.
+    -- One version for all three, newer than 1.4.0: 1.4.1's.
     local function Versions(list)
         local same, newer = true, true
         for _, step in ipairs(list) do
@@ -1505,8 +1528,10 @@ do
 end
 
 -- Before a full restart the new files aren't loaded: no More heading, no page.
+-- As 1.4.1 again, the update that brought them.
 Environment()
 BlizzardFrames()
+Released("1.4.1")
 ns = LoadAll(nil, { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua",
     "ProfileMenu.lua", "Window.lua", "Tour.lua", "MinimapButton.lua", "Notes.lua" })

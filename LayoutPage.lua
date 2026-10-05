@@ -15,6 +15,12 @@ local TILE_GAP = 2
 local EDGE = 118 -- room beside a row for its name and buttons
 local CLEAR = 28 -- room kept at the top of the drawing's box for its hint, and at the foot for its buttons
 local UNDER = 86 -- room under the box for the three rows of controls there
+-- Along the box's foot from the left: the Live preview tick, then "Put
+-- back:" and a button for each bar taken out.
+local OUT_LABEL, OUT_LEFT = 136, 204
+-- Under the box: each slider's track starts 482 along the page, after its
+-- label's room, and runs 100 to the value.
+local LABEL_ROOM, ALL_BARS_ROOM, TRACK = 100, 190, 100
 local SCALE = .7 -- the drawing's largest scale
 local HEALTH, POWER = { .1, .8, .1 }, { 0, .5, 1 } -- Blizzard's own colours
 local HINT = "- and + change how many fit across; the arrows swap rows. Drag an icon onto another to swap them, to another row, or off to remove it."
@@ -164,14 +170,15 @@ function ns.BuildLayoutPage(window, page, width, height)
     drag:SetText(DRAG)
     page.dragHint = drag
 
-    -- Bars taken out of the layout, each with a button to put it back.
+    -- Bars taken out of the layout, each with a button to put it back, after
+    -- the Live preview tick in the box's bottom left corner.
     local outLabel = T:Text(box, "GameFontHighlightSmall", T.MUTED)
-    outLabel:SetPoint("BOTTOMLEFT", 12, 12)
+    outLabel:SetPoint("BOTTOMLEFT", OUT_LABEL, 12)
     outLabel:SetText("Put back:")
     local outButtons = {}
     for _, key in ipairs(ns.BAR_KEYS) do
         local button = T:Button(box, "+ " .. ns.BAR_NAMES[key], 84, 18)
-        button:SetPoint("BOTTOMLEFT", 80, 9)
+        button:SetPoint("BOTTOMLEFT", OUT_LEFT, 9)
         button:SetScript("OnClick", function() Done(L:PutBack(key)) end)
         window:Hint(button, "Put " .. ns.BAR_NAMES[key] .. " back in your layout.")
         outButtons[key] = button
@@ -923,12 +930,12 @@ function ns.BuildLayoutPage(window, page, width, height)
         for _, row in pairs(rows) do ShowButtons(row) end
         ShowButtons(display)
         -- Put back: a button for each bar taken out.
-        local x, line, any = 80, 9, false
+        local x, line, any = OUT_LEFT, 9, false
         for _, key in ipairs(ns.BAR_KEYS) do
             local button, out = outButtons[key], layout.hidden[key] == true
             button:SetShown(out)
             if out then
-                if x + 84 > OUT_RIGHT then x, line = 80, line + 22 end
+                if x + 84 > OUT_RIGHT then x, line = OUT_LEFT, line + 22 end
                 button:ClearAllPoints()
                 button:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", x, line)
                 x, any = x + 90, true
@@ -971,22 +978,23 @@ function ns.BuildLayoutPage(window, page, width, height)
             window:Refresh()
         end)
     page.match = match
-    -- The drawing with your icons as your bars show them. Beside the display's
-    -- tick, clear of the spacing sliders.
-    local live = T:Check(page, "Live preview", function(self)
+    -- The drawing with your icons as your bars show them: the drawing's own
+    -- tick, in its box's bottom left corner, level with Unlock bars on the
+    -- right. (Beside the display's tick its label ran into Row spacing.)
+    local live = T:Check(box, "Live preview", function(self)
         ns.Set("layoutPreview", self:GetChecked())
         window:Refresh()
     end)
-    live:SetPoint("LEFT", shown, "RIGHT", 20, 0)
+    live:SetPoint("BOTTOMLEFT", 12, 10)
     window:Hint(live, "Draws your icons with the border, shadow and keybinds from the Look page, as on your bars. Off, just the icons.")
     page.live = live
     -- Rows and icons touch unless you give them room.
     local function Spacing(label, limits, y, note, set)
-        local slider = T:Slider(page, label, limits, 1, 250, function(value)
+        local slider = T:Slider(page, label, limits, 1, LABEL_ROOM + TRACK + 40, function(value)
             local _, message = set(value)
             if message then window:Say(message) end
             window:Refresh()
-        end)
+        end, LABEL_ROOM)
         slider:SetPoint("BOTTOMRIGHT", -16, y)
         window:Hint(slider, note)
         return slider
@@ -997,11 +1005,11 @@ function ns.BuildLayoutPage(window, page, width, height)
         function(value) return L:SetSpacing(value) end)
     page.spacing, page.iconSpacing = spacing, iconSpacing
     -- Every bar bigger or smaller together, above the spacing sliders: a
-    -- longer label, so its track starts 60 further in, lined up with theirs.
-    local allBars = T:Slider(page, "All bars (Needs testing)", ns.BAR_SCALE, 5, 310, function(value)
+    -- longer label, so its track starts 90 further in, lined up with theirs.
+    local allBars = T:Slider(page, "All bars (Needs testing)", ns.BAR_SCALE, 5, ALL_BARS_ROOM + TRACK + 40, function(value)
         B:SetScale(value)
         window:Refresh()
-    end, 160)
+    end, ALL_BARS_ROOM)
     allBars:SetPoint("BOTTOMRIGHT", -16, 56)
     window:Hint(allBars, "Sizes all your bars together, keeping each one's size next to the others. 100 is each bar's own Icon size,"
         .. " which still fine-tunes it. Icons never go under 20.")
@@ -1020,20 +1028,22 @@ function ns.BuildLayoutPage(window, page, width, height)
     local function Refresh()
         local layout, active, on = ns.LayoutData(), L:Active(), B:Enabled()
         local text, colour, barsOff = nil, T.MUTED, false
+        -- Each short enough to stay clear of Undo, or of Reset where Undo
+        -- can't show (no layout picked yet).
         if not on then
             text, colour, barsOff = "Your bars are off.", T.WARN, true
         elseif B:IsUnlocked() then
             text = "Unlocked: drag a bar on screen to move it."
         elseif active and L:DisplayOff() then
-            text = "Your rows sit together where your resource display would be."
+            text = "Your rows close up where the display would be."
         elseif active then
-            text = "Your bars follow your Personal Resource Display."
+            text = "Your bars follow your resource display."
         elseif L.moved then
             text = "You moved a bar, so they're no longer stacked."
         elseif layout.preset or layout.base then -- picked once, even if edited since
             text = "Your bars stay where you put them."
         else
-            text = "Pick a layout to stack your bars around your resource display."
+            text = "Pick a layout to stack your bars around the display."
         end
         status:SetText(text)
         status:SetTextColor(colour[1], colour[2], colour[3])

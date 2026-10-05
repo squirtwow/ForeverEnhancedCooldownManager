@@ -37,7 +37,7 @@ T.ACCENTS = {
 }
 
 function T:Accent()
-    local choice = T.ACCENTS[ns.Get("accent")] or T.ACCENTS.orange
+    local choice = T.ACCENTS[ns.Get("accent")] or T.ACCENTS.purple
     return choice.colour
 end
 
@@ -108,12 +108,16 @@ end
 
 -- A tooltip in the addon's own look, as the Discord box: a dark box edged in
 -- the accent, a heading in the accent and a line of text. One, shared.
+-- Above its owner; placement "below" puts it under it instead, lined up
+-- with its right edge, for a button at the right of a title bar. Either
+-- way it's kept on screen.
 local TIP_WIDTH = 220
-function T:ShowTip(owner, title, text)
+function T:ShowTip(owner, title, text, placement)
     local tip = self.tip
     if not tip then
         tip = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
         tip:SetFrameStrata("TOOLTIP")
+        tip:SetClampedToScreen(true)
         tip:EnableMouse(false)
         self:Flat(tip, T.BG, T.CONTROL_BORDER)
         self:Paint(function(accent) tip:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
@@ -128,13 +132,20 @@ function T:ShowTip(owner, title, text)
     tip.title:SetText(title:upper())
     tip.text:SetText(text)
     tip:SetSize(TIP_WIDTH + 24, 38 + (tip.text:GetStringHeight() or 12))
+    tip.owner = owner
     tip:ClearAllPoints()
-    tip:SetPoint("BOTTOM", owner, "TOP", 0, 6)
+    if placement == "below" then
+        tip:SetPoint("TOPRIGHT", owner, "BOTTOMRIGHT", 0, -6)
+    else
+        tip:SetPoint("BOTTOM", owner, "TOP", 0, 6)
+    end
     tip:Show()
 end
 
-function T:HideTip()
-    if self.tip then self.tip:Hide() end
+-- Hides the tooltip; given an owner, only while it's that owner's.
+function T:HideTip(owner)
+    local tip = self.tip
+    if tip and (owner == nil or tip.owner == owner) then tip:Hide() end
 end
 
 function T:Panel(parent)

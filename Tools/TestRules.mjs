@@ -4,7 +4,10 @@
 // /editmode), and the only sizes set on Blizzard's frames are Raid Timers'
 // (one scale call, for the countdown, and one text height call, for raid
 // warning lines). Tools/TestSkin.lua and Tools/TestRaidTimers.lua check what
-// those calls do; this checks there are no others.
+// those calls do; this checks there are no others. Also: the .toc loads every
+// file once, in order, and the Cooldown pulse only hands cooldowns on (it
+// never reads one's times, only whether it's on hold) and never takes the
+// mouse but for the box that moves it.
 // Run with: node --test Tools/TestRules.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,6 +23,40 @@ const where = pattern => files.filter(name => pattern.test(code[name]));
 
 test('the addon files are all read', () => {
   assert.ok(files.includes('RaidTimers.lua') && files.includes('RaidTimersPage.lua') && files.length >= 20);
+});
+
+test('the .toc loads every file once, each after what it needs', () => {
+  const toc = readFileSync(new URL('ForeverEnhancedCooldownManager.toc', root), 'utf8').split(/\r?\n/)
+    .filter(line => line.endsWith('.lua'));
+  assert.deepEqual([...toc].sort(), [...files].sort(), 'every .lua file in the folder, and no other');
+  assert.equal(new Set(toc).size, toc.length, 'each once');
+  const at = name => toc.indexOf(name);
+  // The pulse watches with the bars' spell list; its page follows Raid Timers' under More, both before the window.
+  assert.ok(at('Spells.lua') < at('Pulse.lua') && at('Bars.lua') < at('Pulse.lua'), 'Pulse.lua after Spells.lua and Bars.lua');
+  assert.ok(at('RaidTimersPage.lua') < at('PulsePage.lua') && at('PulsePage.lua') < at('Window.lua'),
+    'PulsePage.lua after RaidTimersPage.lua, before Window.lua');
+  assert.equal(at('Core.lua'), 0, 'Core.lua first');
+});
+
+test('the Cooldown pulse hands cooldowns on, never reads one, and takes no mouse but to move it', () => {
+  const pulse = code['Pulse.lua'];
+  // A duration object or a cooldown frame is never asked anything.
+  for (const pattern of [/IsActive/, /IsZero/, /GetRemaining/, /GetElapsed/, /GetTotal/, /Evaluate/, /GetCooldownTimes/,
+    /GetCooldownDuration\b/, /cooldown:IsShown/, /cooldown:IsVisible/, /startTime/, /modRate/, /isActive/]) {
+    assert.equal(pattern.test(pulse), false, `${pattern} in Pulse.lua`);
+  }
+  // One plain question, whether a spell's cooldown is on hold: only its field
+  // that's never secret is read, and nothing else of it.
+  assert.equal(count(pulse, /GetSpellCooldown\(/g), 1, 'C_Spell.GetSpellCooldown, once');
+  assert.equal(count(pulse, /C_Spell\.GetSpellCooldown and C_Spell\.GetSpellCooldown\(watch\.spellID\)/g), 1);
+  assert.deepEqual([...new Set(pulse.match(/\binfo\.\w+/g))], ['info.isEnabled'], 'only isEnabled is read');
+  assert.equal(count(pulse, /GetSpellCooldownDuration\(watch\.spellID, true\)/g), 1, 'asked for once, without the global cooldown');
+  assert.equal(count(pulse, /SetCooldownFromDurationObject\(duration\)/g), 1, 'and handed straight on');
+  // The one frame that takes the mouse: the box that moves it.
+  assert.equal(count(pulse, /EnableMouse\(true\)/g), 1);
+  assert.match(pulse, /mover = CreateFrame\("Frame", "FECMPulseMover", UIParent, "BackdropTemplate"\)[\s\S]*?mover:EnableMouse\(true\)/);
+  assert.equal(count(pulse, /EnableMouse\(false\)/g), 4, 'the pulse, its icon, the watchers and their frame');
+  assert.deepEqual(where(/FECMPulse\b/), ['Pulse.lua']);
 });
 
 test('nothing opens Edit Mode, a panel or Cooldown Settings from addon code', () => {

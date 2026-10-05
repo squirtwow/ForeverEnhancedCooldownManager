@@ -772,13 +772,13 @@ cvars.ClassicCooldownManagerBackupBars1 = "cd.size=40;cd.spells=Moonfire|Bash"
 Viewers(0)
 ns = Load(nil)
 Equal(tostring(ns.firstInstall) .. " " .. tostring(ns.Get("skin")) .. " " .. tostring(ns.Get("useBars")) .. " " .. ns.Get("accent"),
-    "true true false orange", "defaults, as a first install")
+    "true true false purple", "defaults, as a first install")
 Equal(#ns.BarData("cd").spells .. " " .. ns.BarData("cd").size, "0 36", "with empty bars")
 Equal(#printed, 0, "and nothing to say")
 
 -- Anything unexpected in the saved settings is ignored.
 ForeverEnhancedCooldownManagerDB.accent = "pink"
-Equal(ns.Get("accent"), "orange", "an invalid saved accent reads as the default")
+Equal(ns.Get("accent"), "purple", "an invalid saved accent reads as the default")
 ForeverEnhancedCooldownManagerDB.barColours = { [467] = "pink", [0] = "blue", foo = "green", [1126] = "green" }
 local kept = 0
 for _ in pairs(ns.BarColours()) do kept = kept + 1 end

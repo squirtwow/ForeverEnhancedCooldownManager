@@ -50,7 +50,7 @@ ns.DEFAULTS = {
     useBars = false, -- the addon's own bars
     listItems = false, -- show trinkets and bag items in the /ccm spell list
     listRanks = false, -- show every rank you know as its own row
-    accent = "orange", -- the /ccm window's accent colour
+    accent = "purple", -- the /ccm window's accent colour (orange until 1.4.4; purple keeps it apart from other addons)
     barStyle = "glass", -- Blizzard's Tracked Bars: glass, split or outline
     barColour = "orange", -- and their colour
     barTexture = "flat", -- the fill of the addon's bars and the restyled ones: flat, or one of the game's (Look page)
@@ -88,8 +88,26 @@ ns.DEFAULTS = {
     warningSize = 100, -- raid warning text
     emoteSize = 100, -- boss emote text
     raidSize = 100, -- all four together
+    -- Cooldown pulse (More): a big icon in the middle of the screen as a cooldown comes back.
+    -- Each cooldown pulses Quick or Long; each style has its own size, time and sound.
+    pulse = false, -- on or off
+    pulseSize = 272, -- Quick: the icon's size, in the game's units (about a third of the screen's height)
+    pulseTime = 10, -- how long each pulse lasts, in tenths of a second
+    pulseSound = "none", -- none, chime or bell
+    pulseLongSize = 400, -- Long: the same three
+    pulseLongTime = 25,
+    pulseLongSound = "none",
+    pulseMaster = false, -- both styles: the sound at your Master volume, heard with Sound Effects down or off
+    pulseSeeThrough = 80, -- both styles: how much of the game shows through it, in percent (see Pulse.lua's Opacity)
+    pulseGrow = 135, -- how big it gets by the end, in percent of its size
+    pulseBorder = "thin", -- a dark edge round it: none, thin or thick
+    pulseShadow = true, -- and a soft shadow
+    pulseItems = true, -- your trinkets, and items on your Cooldowns and Utility bars, are listed too
+    pulseX = 0, -- where it sits: from the middle of the screen
+    pulseY = 0,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
+    readyGlow = "proc", -- a ready reactive ability on your bars: Blizzard's proc glow, or a plain gold edge ("edge")
     keybinds = false, -- each Cooldowns/Utility icon's key, from your action bars (Look page)
     keybindPosition = "BOTTOM", -- where on the icon: BOTTOM, TOPLEFT, TOP or TOPRIGHT
     keybindSize = 100, -- its size, as a share of the automatic size that follows the icon
@@ -101,6 +119,8 @@ ns.DEFAULTS = {
 }
 ns.DECOR_KEYS = { "off", "icon", "bar" }
 ns.DECOR_NAMES = { off = "Off", icon = "Each icon", bar = "Whole bar" }
+ns.READY_GLOW_KEYS = { "proc", "edge" }
+ns.READY_GLOW_NAMES = { proc = "Proc glow", edge = "Gold edge" }
 ns.KEYBIND_POSITIONS = { "BOTTOM", "TOPLEFT", "TOP", "TOPRIGHT" }
 ns.KEYBIND_POSITION_NAMES = { BOTTOM = "Bottom", TOPLEFT = "Top left", TOP = "Top", TOPRIGHT = "Top right" }
 -- Number settings, each within its limits: min, max, default.
@@ -110,9 +130,20 @@ ns.KEYBIND_SIZE = { 50, 150, 100 } -- min, max, default (percent)
 ns.BAR_SCALE = { 50, 150, 100 } -- min, max, default (percent)
 ns.RAID_SIZE = { 50, 200, 100 } -- each Raid Timers size (percent)
 ns.RAID_SIZE_ALL = { 50, 150, 100 } -- all of them together, so the biggest is three times Blizzard's
+-- Cooldown pulse.
+ns.PULSE_SIZE = { 64, 512, 272 }
+ns.PULSE_TIME = { 3, 20, 10 } -- tenths of a second: 0.3 to 2 seconds
+ns.PULSE_LONG_SIZE = { 64, 512, 400 }
+ns.PULSE_LONG_TIME = { 3, 50, 25 } -- 0.3 to 5 seconds
+ns.PULSE_SEE_THROUGH = { 0, 90, 80 }
+ns.PULSE_GROW = { 100, 160, 135 }
+ns.PULSE_PLACE = { -4000, 4000, 0 }
 local NUMBERS = { castHeight = ns.CAST_HEIGHT, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
     barScale = ns.BAR_SCALE, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE, warningSize = ns.RAID_SIZE,
-    emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL }
+    emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
+    pulseLongSize = ns.PULSE_LONG_SIZE, pulseLongTime = ns.PULSE_LONG_TIME,
+    pulseSeeThrough = ns.PULSE_SEE_THROUGH, pulseGrow = ns.PULSE_GROW,
+    pulseX = ns.PULSE_PLACE, pulseY = ns.PULSE_PLACE }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
 ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
@@ -133,10 +164,21 @@ ns.OUTLINE_KEYS = { "none", "outline", "thick" }
 ns.OUTLINE_NAMES = { none = "None", outline = "Outline", thick = "Thick" }
 ns.TEXT_COLOUR_KEYS = { "white", "gold", "orange", "red", "purple", "class" }
 ns.TEXT_COLOUR_NAMES = { white = "White", gold = "Gold", orange = "Orange", red = "Red", purple = "Purple", class = "Class" }
+-- Cooldown pulse: the edge round it, the sound with it, and its two styles.
+ns.PULSE_BORDER_KEYS = { "none", "thin", "thick" }
+ns.PULSE_BORDER_NAMES = { none = "None", thin = "Thin", thick = "Thick" }
+ns.PULSE_SOUND_KEYS = { "none", "chime", "bell", "trill", "shimmerBell", "magicChimes", "shimmer", "zippy", "synth", "pipe", "brass",
+    "warhorn", "fanfare", "gold", "jackpot", "anvil" }
+ns.PULSE_SOUND_NAMES = { none = "None", chime = "Chime", bell = "Bell", trill = "Bell trill", shimmerBell = "Shimmer bell",
+    magicChimes = "Magic chimes", shimmer = "Shimmer", zippy = "Zippy magic", synth = "Synth", pipe = "Pitch pipe", brass = "Brass",
+    warhorn = "War horn", fanfare = "Fanfare", gold = "Gold", jackpot = "Jackpot bell", anvil = "Anvil" }
+ns.PULSE_STYLE_KEYS = { "quick", "long" }
+ns.PULSE_STYLE_NAMES = { quick = "Quick", long = "Long" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
-    keybindPosition = {}, font = {}, barTexture = {} }
+    keybindPosition = {}, font = {}, barTexture = {}, readyGlow = {} }
+for _, key in ipairs(ns.READY_GLOW_KEYS) do CHOICES.readyGlow[key] = true end
 for _, key in ipairs(ns.ACCENT_KEYS) do CHOICES.accent[key] = true end
 for _, key in ipairs(ns.KEYBIND_POSITIONS) do CHOICES.keybindPosition[key] = true end
 for _, key in ipairs(ns.BAR_STYLE_KEYS) do CHOICES.barStyle[key] = true end
@@ -154,6 +196,9 @@ for _, key in ipairs(ns.TEXT_COLOUR_KEYS) do CHOICES.warningColour[key], CHOICES
 for _, key in ipairs(ns.NUMBER_KEYS) do CHOICES.pullNumbers[key] = true end
 for _, key in ipairs(ns.FONT_KEYS) do CHOICES.warningFont[key] = true end
 for _, key in ipairs(ns.OUTLINE_KEYS) do CHOICES.warningOutline[key] = true end
+CHOICES.pulseBorder, CHOICES.pulseSound, CHOICES.pulseLongSound = {}, {}, {}
+for _, key in ipairs(ns.PULSE_BORDER_KEYS) do CHOICES.pulseBorder[key] = true end
+for _, key in ipairs(ns.PULSE_SOUND_KEYS) do CHOICES.pulseSound[key], CHOICES.pulseLongSound[key] = true, true end
 
 function ns.Valid(key, value)
     local default = ns.DEFAULTS[key]
@@ -220,7 +265,8 @@ local function Limit(value, limits)
 end
 
 -- Profiles ---------------------------------------------------------------------
--- The spell lists live in profiles; everything else (look, sizes, places) is
+-- The spell lists live in profiles, the bars' and the Cooldown pulse's
+-- ticks; everything else (look, sizes, places, how the pulse looks) is
 -- shared. Each character, told apart by its GUID since two can share a name,
 -- uses one profile, at first its own "Name (Class) - Realm". Several
 -- characters can share one, and profiles never change in combat.
@@ -247,6 +293,11 @@ local function Repair(spells)
     return spells
 end
 
+-- The Cooldown pulse's two lists in a profile, and the one value each keeps:
+-- what's ticked (spell names and item keys -> true), and what's switched
+-- to Long (-> "long"; the rest are Quick).
+local PULSE_LISTS = { pulsePick = true, pulseStyle = "long" }
+
 -- A profile's lists, repaired in place, with their joins: on the Buffs and
 -- Debuffs bars, the names joined to the entry just before them.
 local function Lists(profile)
@@ -266,6 +317,12 @@ local function Lists(profile)
             for name, on in pairs(joins) do
                 if on ~= true or not listed[name] then joins[name] = nil end
             end
+        end
+    end
+    for field, keep in pairs(PULSE_LISTS) do
+        if type(profile[field]) ~= "table" then profile[field] = {} end
+        for key, value in pairs(profile[field]) do
+            if type(key) ~= "string" or key == "" or value ~= keep then profile[field][key] = nil end
         end
     end
     return profile
@@ -392,6 +449,16 @@ function ns.ResolveProfile(final)
         end
     end
     Lists(profiles[name])
+    -- The Cooldown pulse's test builds kept its ticks for every character:
+    -- the first profile to load takes them.
+    for field, keep in pairs(PULSE_LISTS) do
+        if type(db[field]) == "table" then
+            for key, value in pairs(db[field]) do
+                if type(key) == "string" and key ~= "" and value == keep then profiles[name][field][key] = value end
+            end
+        end
+        db[field] = nil
+    end
     active = name
     return true
 end
@@ -437,6 +504,7 @@ local function Switch(name)
     Chars()[PlayerGUID()] = name
     active = name
     if ns.Bars and ns.Bars.started then ns.Bars:Changed() end
+    if ns.Pulse and ns.Pulse.started then ns.Pulse:Apply() end
 end
 
 function ns.UseProfile(name)
@@ -467,6 +535,10 @@ local function Create(text, copy)
             profile.joins[key] = {}
             for name in pairs(joins) do profile.joins[key][name] = true end
         end
+    end
+    for field in pairs(PULSE_LISTS) do
+        profile[field] = {}
+        for key, value in pairs(copy and from[field] or {}) do profile[field][key] = value end
     end
     Profiles()[name] = profile
     Switch(name)
@@ -733,6 +805,38 @@ function ns.BarColourFor(spellID)
     return colours[spellID]
 end
 
+-- One of the Cooldown pulse's lists in this character's profile (repaired
+-- with the rest of it), or a stand-in until the character is known.
+local function PulseList(field)
+    local store = active and db and Profiles()[active] or scratch
+    if type(store[field]) ~= "table" then store[field] = {} end
+    return store[field]
+end
+
+-- Cooldown pulse: the spells (by name) and items (by key) you ticked ->
+-- true. Every spell you know with a cooldown is listed, and your items;
+-- none pulses until it's ticked (the user: new ones show as you learn
+-- them, and you choose). Kept in the profile, as the bars' lists are.
+function ns.PulsePicks()
+    return PulseList("pulsePick")
+end
+
+function ns.SetPulsePick(key, pick)
+    if not db or type(key) ~= "string" or key == "" then return end
+    ns.PulsePicks()[key] = pick and true or nil
+end
+
+-- Cooldown pulse: the spells and items switched to the Long style, by key
+-- -> "long". Everything else is Quick. Kept in the profile too.
+function ns.PulseStyles()
+    return PulseList("pulseStyle")
+end
+
+function ns.SetPulseStyle(key, style)
+    if not db or type(key) ~= "string" or key == "" then return end
+    ns.PulseStyles()[key] = style == "long" and "long" or nil
+end
+
 -- Spells added by name or ID that aren't in your spellbook: name -> spell IDs.
 function ns.CustomSpells()
     if not db then return {} end
@@ -804,6 +908,17 @@ end
 function ns.SetNotesSeen(version)
     if not db then return end
     db.notesSeen = version
+end
+
+-- The ? in the window's title bar: clicked at least once, on any character.
+-- Until then it pulses and a note points it out (Window.lua).
+function ns.HelpSeen()
+    return db ~= nil and db.helpSeen == true
+end
+
+function ns.SetHelpSeen()
+    if not db then return end
+    db.helpSeen = true
 end
 
 -- One of Blizzard's own settings switched from here (ns.TurnOn, ns.TurnOff):
@@ -933,6 +1048,9 @@ local function Load()
     ns.firstInstall = next(db) == nil
     db.probe = nil -- results of a development check the released addon doesn't have
     db.session = nil -- a login count earlier builds kept
+    db.pulseMin, db.pulseAdd = nil, nil -- the Cooldown pulse's first test build: a shortest cooldown, and spells added by name
+    db.pulseSkip = nil -- and its second: items pulsed unless unticked
+    if db.helpSeen ~= true then db.helpSeen = nil end -- the ? clicked once: true, or not saved at all
     -- Everything saved is checked and repaired now, before anything uses it.
     RepairProfiles()
     for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key) end
@@ -954,6 +1072,8 @@ local function Load()
             ns.Tour:Start()
         elseif msg:match("^%s*discord%s*$") and ns.ShowDiscord then
             ns.ShowDiscord()
+        elseif msg:match("^%s*debug%s*$") and ns.ShowDebug then
+            ns.ShowDebug()
         elseif ns.Toggle then
             ns.Toggle()
         end
@@ -967,6 +1087,7 @@ local function Load()
     if ns.CastBar then ns.CastBar:Start() end
     if ns.RaidTimers then ns.RaidTimers:Start() end
     if ns.Bars then ns.Bars:Start() end
+    if ns.Pulse then ns.Pulse:Start() end
     if ns.Layout then ns.Layout:Start() end
     if ns.MinimapButton then ns.MinimapButton:Start() end
     if ns.Notes then ns.Notes:Start() end

@@ -85,15 +85,113 @@ end
 
 -- Icons ---------------------------------------------------------------------------
 
+-- A reactive ability that is ready glows with Blizzard's own proc glow, as
+-- on its action bars (ActionButtonSpellAlerts.xml): a burst, then a loop,
+-- spreading this far past the icon, as Blizzard sizes it. It sits over the
+-- icon, so the icons beside it and the Look page's border and shadow never
+-- hide it: an edge drawn behind the icon showed only its top (a player's
+-- Riposte). Or, picked on the Look page (Ready glow), a plain gold edge just
+-- inside the icon, GLOW wide: the edge is also what both show without the
+-- template.
+local GLOW_SPREAD = 1.4
+local GLOW = 2
+-- The edge's four sides: the corners each runs between, and whether it runs across.
+local GLOW_SIDES = { { "TOPLEFT", "TOPRIGHT", true }, { "BOTTOMLEFT", "BOTTOMRIGHT", true },
+    { "TOPLEFT", "BOTTOMLEFT" }, { "TOPRIGHT", "BOTTOMRIGHT" } }
+
+local function NewEdge(top)
+    local glow = CreateFrame("Frame", nil, top)
+    glow:SetAllPoints()
+    for _, side in ipairs(GLOW_SIDES) do
+        local strip = glow:CreateTexture(nil, "BORDER")
+        strip:SetColorTexture(1, .82, 0, 1)
+        strip:SetPoint(side[1])
+        strip:SetPoint(side[2])
+        if side[3] then strip:SetHeight(GLOW) else strip:SetWidth(GLOW) end
+    end
+    glow:Hide()
+    return glow
+end
+
+-- Blizzard's proc glow, or nil if the game can't make it.
+local function NewProc(icon, top)
+    local made, glow = pcall(CreateFrame, "Frame", nil, top, "ActionButtonSpellAlertTemplate")
+    if not (made and glow and type(glow.ProcStartAnim) == "table" and type(glow.ProcLoop) == "table") then
+        if made and glow and glow.Hide then glow:Hide() end
+        return nil
+    end
+    glow:SetPoint("CENTER", icon, "CENTER")
+    glow.proc = true
+    -- Forever's template never stops the loop as it hides (its second
+    -- OnHide runs its OnShow method), so SetGlow stops it as it goes out.
+    -- Shown again with its bar while lit, this plays it.
+    glow:HookScript("OnShow", function(self)
+        if self.looping then self.ProcLoop:Play() end
+    end)
+    glow:Hide()
+    return glow
+end
+
+-- Lights an icon's glow, with the burst only as it comes on, or puts it out.
+-- Whether the game has lit a spell up on your action bars just now: a proc,
+-- whatever it is (the user: "copy the game's own glow"). Asked as its own
+-- action buttons ask (ActionButton.lua); a hidden answer never counts.
+local function Overlayed(spellID)
+    local overlay = C_SpellActivationOverlay
+    if not (spellID and overlay and overlay.IsSpellOverlayed) then return false end
+    local lit = overlay.IsSpellOverlayed(spellID)
+    return Open(lit) and lit == true
+end
+
+local function SetGlow(icon, on)
+    local glow = icon.glow
+    if not on then
+        glow.looping = nil
+        if glow.proc then
+            glow.ProcStartAnim:Stop()
+            glow.ProcLoop:Stop()
+        end
+        glow:Hide()
+        return
+    end
+    if glow.proc then
+        local width, height = icon:GetSize()
+        glow:SetSize(width * GLOW_SPREAD, height * GLOW_SPREAD)
+    end
+    if glow:IsShown() then return end
+    glow:Show()
+    if glow.proc then
+        glow.ProcStartAnim:Play() -- the loop follows it (Blizzard's OnLoad)
+        glow.looping = true
+    end
+end
+
+-- The icon's glow in the style picked on the Look page, each style made the
+-- first time it's wanted and kept. Proc glow falls back to the edge for good
+-- if the game can't make it. A glow lit as the style changes goes out (its
+-- burst and loop stopped) and the new one comes on lit, burst and all.
+local function UseGlow(icon)
+    local glows, style = icon.glows, ns.Get("readyGlow") == "edge" and "edge" or "proc"
+    local glow = glows[style]
+    if not glow then
+        if style == "proc" then glow = NewProc(icon, icon.top) end
+        if not glow then
+            glows.edge = glows.edge or NewEdge(icon.top)
+            glow = glows.edge
+        end
+        glows[style] = glow
+    end
+    local old = icon.glow
+    if old == glow then return end
+    local lit = old ~= nil and old:IsShown()
+    if old then SetGlow(icon, false) end
+    icon.glow = glow
+    if lit then SetGlow(icon, true) end
+end
+
 local function NewIcon(bar)
     local icon = CreateFrame("Frame", nil, bar)
     icon:EnableMouse(false)
-    -- A gold edge around the icon marks a reactive ability that is ready.
-    icon.glow = icon:CreateTexture(nil, "BACKGROUND", nil, -8)
-    icon.glow:SetColorTexture(1, .82, 0, 1)
-    icon.glow:SetPoint("TOPLEFT", -2, 2)
-    icon.glow:SetPoint("BOTTOMRIGHT", 2, -2)
-    icon.glow:Hide()
     icon.texture = icon:CreateTexture(nil, "ARTWORK")
     icon.texture:SetAllPoints()
     Style:Zoom(icon.texture)
@@ -111,6 +209,8 @@ local function NewIcon(bar)
     top:SetAllPoints()
     top:SetFrameLevel(icon.cooldown:GetFrameLevel() + 1)
     icon.top = top
+    icon.glows = {}
+    UseGlow(icon)
     icon.count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     icon.count:SetPoint("BOTTOMRIGHT", -1, 1)
     icon.key = Style:KeyText(top)
@@ -178,7 +278,7 @@ local function RefreshItem(icon, data, follows)
         tint = Open(noMana) and noMana and TINT.mana or TINT.unusable
     end
     icon.texture:SetVertexColor(tint[1], tint[2], tint[3])
-    icon.glow:Hide()
+    SetGlow(icon, false)
 end
 
 -- Your ammunition: how many you carry, greyed when you're out.
@@ -193,7 +293,7 @@ local function RefreshAmmo(icon)
     icon.cooldown:Clear()
     icon:SetAlpha(1)
     icon.texture:SetVertexColor(TINT.ready[1], TINT.ready[2], TINT.ready[3])
-    icon.glow:Hide()
+    SetGlow(icon, false)
 end
 
 local function RefreshIcon(icon, data, hasTarget, follows)
@@ -230,7 +330,9 @@ local function RefreshIcon(icon, data, hasTarget, follows)
         tint = Open(noMana) and noMana and TINT.mana or TINT.unusable
     end
     icon.texture:SetVertexColor(tint[1], tint[2], tint[3])
-    icon.glow:SetShown(icon.reactive and Open(usable) and usable == true or false)
+    -- Lit when the game lights it on your action bars, or, for a reactive
+    -- ability the game doesn't light (Overpower after a dodge), once usable.
+    SetGlow(icon, Overlayed(id) or (icon.reactive and Open(usable) and usable == true) or false)
 end
 
 -- Bars ------------------------------------------------------------------------------
@@ -687,6 +789,28 @@ function B:Enabled()
     return ns.Get("useBars") == true
 end
 
+-- For /ccm debug (Debug.lua): each of your bars and the icons on it as they
+-- are now: what each is, whether it's reactive, the game's usable answer,
+-- and its glow. say turns a secret answer into "secret".
+function B:Report(add, say)
+    add("Use my bars: " .. tostring(self:Enabled()))
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = bars[key]
+        if bar then
+            add(("%s bar: shown %s, %d icons"):format(key, tostring(bar:IsShown()), bar.count or 0))
+            for i = 1, bar.count or 0 do
+                local icon, usable, noMana = bar.icons[i], nil, nil
+                if icon.spellID and C_Spell.IsSpellUsable then usable, noMana = C_Spell.IsSpellUsable(icon.spellID) end
+                local glow = icon.glow
+                local loop = glow.proc and (", loop " .. tostring(glow.ProcLoop:IsPlaying())) or ""
+                add(("  %d. %s | %s %s | reactive %s | usable %s, no mana %s | glow %s (%s%s) | size %s"):format(i, say(icon.name),
+                    say(icon.kind), say(icon.spellID or icon.itemID), tostring(icon.reactive), say(usable), say(noMana),
+                    tostring(glow:IsShown()), glow.proc and "proc" or "edge", loop, say(icon:GetWidth())))
+            end
+        end
+    end
+end
+
 -- The border and shadow round a whole bar as set up, for the Layout page's
 -- drawing: as chosen on the Look page, round a bar whose icons stay put.
 function B:BarDecorFor(key)
@@ -703,6 +827,14 @@ function B:ApplyDecor()
         for _, icon in ipairs(bar.icons or {}) do Style:ShowDecor(icon.decor, border, shadow) end
         ns.BuffBar:HolderDecor(bar)
         GroupDecor(bar)
+    end
+end
+
+-- The ready glow picked on the Look page, on every icon at once, those not
+-- in use too: the addon's own frames only, so in a fight too.
+function B:ApplyGlow()
+    for _, bar in pairs(bars) do
+        for _, icon in ipairs(bar.icons or {}) do UseGlow(icon) end
     end
 end
 
@@ -1538,7 +1670,8 @@ function B:Start()
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "SPELL_UPDATE_COOLDOWN",
         "SPELL_UPDATE_USABLE", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
         "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
-        "PLAYER_LEVEL_CHANGED", "GET_ITEM_INFO_RECEIVED" }) do
+        "PLAYER_LEVEL_CHANGED", "GET_ITEM_INFO_RECEIVED", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW",
+        "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" }) do
         driver:RegisterEvent(event)
     end
     driver:SetScript("OnEvent", function(_, event, arg)

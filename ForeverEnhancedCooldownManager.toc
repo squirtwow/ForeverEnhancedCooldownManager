@@ -19,14 +19,17 @@ Keybinds.lua
 Buffs.lua
 IconAuras.lua
 Bars.lua
+Pulse.lua
 Layout.lua
 Theme.lua
 BarPage.lua
 LayoutPage.lua
 CastBarPage.lua
 RaidTimersPage.lua
+PulsePage.lua
 ProfileMenu.lua
 Window.lua
 Tour.lua
 MinimapButton.lua
 Notes.lua
+Debug.lua

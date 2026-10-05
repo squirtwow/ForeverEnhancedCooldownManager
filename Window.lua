@@ -55,6 +55,9 @@ local TEXTURE_NOTES = {
 }
 local TEXTURE_USE = " on your cast bar, swing timer and combo points, and the restyled Tracked Bars and resource display."
 local UNTESTED = " (Needs testing)" -- on every choice but today's look
+-- Ready glow's choices at the foot, and room for its label before them
+-- (about seven units a letter in the game: "Ready glow" needs about 70).
+local GLOW_PILLS, GLOW_LABEL = 160, 80
 
 local function Swatch(parent, size, onClick)
     local swatch = CreateFrame("Button", nil, parent, "BackdropTemplate")
@@ -474,6 +477,35 @@ local function BuildLook(window, page, width)
     local chosen = T:Text(page, "GameFontHighlightSmall", T.MUTED)
     chosen:SetPoint("BOTTOMLEFT", 126 + #ns.ACCENT_KEYS * (SWATCH + SWATCH_GAP) + 2, 18)
 
+    -- How a ready reactive ability (Overpower, Riposte, Mongoose Bite and
+    -- the rest of ns.REACTIVE) shows on your own bars, at the foot's right,
+    -- clear of the accent: Blizzard's proc glow or a plain gold edge. Every
+    -- icon changes at once, one glowing now too.
+    local glowItems = {}
+    for _, key in ipairs(ns.READY_GLOW_KEYS) do glowItems[#glowItems + 1] = { key = key, label = ns.READY_GLOW_NAMES[key] } end
+    local readyGlow = T:Segmented(page, glowItems, GLOW_PILLS, function(key)
+        ns.Set("readyGlow", key)
+        if ns.Bars then ns.Bars:ApplyGlow() end
+        window:Refresh()
+    end)
+    readyGlow:SetPoint("BOTTOMRIGHT", -16, 14)
+    local glowLabel = T:Text(page, "GameFontHighlight")
+    glowLabel:SetPoint("BOTTOMRIGHT", -16 - GLOW_PILLS - 10, 18)
+    glowLabel:SetJustifyH("RIGHT")
+    glowLabel:SetText("Ready glow")
+    readyGlow.label = glowLabel
+    local GLOW_NOTES = {
+        proc = "Blizzard's proc glow, as on your action bars, round a ready ability like Overpower, Riposte or Mongoose Bite on your own bars.",
+        edge = "A plain gold edge just inside the icon of a ready ability like Overpower, Riposte or Mongoose Bite on your own bars.",
+    }
+    for _, button in ipairs(readyGlow.buttons) do window:Hint(button, GLOW_NOTES[button.key]) end
+    -- The label and its choices as one part, for the tour to outline.
+    local glowPart = CreateFrame("Frame", nil, page)
+    glowPart:SetPoint("BOTTOMRIGHT", -16, 14)
+    glowPart:SetSize(GLOW_PILLS + 10 + GLOW_LABEL, 20)
+    readyGlow.part = glowPart
+    window.readyGlow = readyGlow
+
     -- Why the list is empty, if it is, and a button's label, action and note
     -- to fix it where the addon can.
     local function ApplyLook()
@@ -506,6 +538,8 @@ local function BuildLook(window, page, width)
         local personalShown = ns.Get("prdSkin") and not ns.PersonalDisplayOn()
         personalOff:SetShown(personalShown)
         personalOn:SetShown(personalShown)
+        -- The warning takes the heading's row, so the heading's note steps aside.
+        eachAbout:SetShown(not personalShown)
         reload:SetShown(ns.NeedsReload())
         look:SetChecked(ns.Get("skin"))
         personal:SetChecked(ns.Get("prdSkin"))
@@ -550,6 +584,7 @@ local function BuildLook(window, page, width)
             PaintSwatch(swatch, T.ACCENTS[swatch.key].colour, swatch.key == accent)
         end
         chosen:SetText(T.ACCENTS[accent].name)
+        readyGlow:SetSelected(ns.Get("readyGlow"))
 
         -- The Personal Resource Display's bars first, then your Tracked Bars.
         local entries = {}
@@ -714,11 +749,12 @@ local function BuildGeneral(window, page)
     moreName:SetPoint("TOPLEFT", 60, -12)
     moreName:SetText("EraUI")
     local moreAbout = T:Text(more, "GameFontHighlightSmall", T.MUTED)
-    moreAbout:SetPoint("TOPLEFT", 60, -30)
+    -- Two lines, then the line under them at the foot: clear of each other.
+    moreAbout:SetPoint("TOPLEFT", 60, -28)
     moreAbout:SetWidth(330) -- clear of the buttons on the right
     moreAbout:SetText("The Classic look for WoW Forever's whole interface, with quality of life options.")
     local moreState = T:Text(more, "GameFontHighlightSmall", T.MUTED)
-    moreState:SetPoint("BOTTOMLEFT", 60, 10)
+    moreState:SetPoint("BOTTOMLEFT", 60, 8)
     local moreOpen = T:Button(more, "Open", 80, 22)
     moreOpen:SetPoint("RIGHT", -12, 0)
     moreOpen:SetScript("OnClick", function()
@@ -756,11 +792,12 @@ end
 
 -- What each page is for, in the footer on hover.
 local NAV_NOTES = {
-    look = "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds, font, textures and the accent.",
+    look = "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds, font, textures, ready glow and the accent.",
     layout = "One-click layouts that stack your bars around your Personal Resource Display.",
     cast = "Your own cast bar and a swing timer, under your Personal Resource Display.",
     general = "Your bars on or off, the minimap button, the tour, the Discord and EraUI.",
     raid = "Blizzard's pull countdown, raid warnings and boss cast bars, in your look.",
+    pulse = "A big icon in the middle of your screen when a cooldown is ready.",
 }
 
 local function NavItem(window, nav, key, label, y, previews)
@@ -975,6 +1012,143 @@ local function BuildFooter(window)
     T:Paint(function() window:ShowNote() end)
 end
 
+-- The ? beside the X: a walkthrough of the page showing (Tour.lua), or a
+-- word in the footer where there's none, as over the profile menu. Hovered,
+-- a tooltip just under it says what it does. Until it's first clicked (once
+-- for the whole account), it gently pulses in the accent and a note under
+-- it points it out, with an x to put the note away, on the pages it leaves
+-- room on. Neither shows while the welcome, the tour or a walkthrough is
+-- up, nor over the profile menu or What's new: they come back after, and
+-- each time the window opens again.
+local NUDGE_TEXT = "New: click ? for help with any page"
+local NUDGE_PAD = 10
+local NUDGE_TEXT_WIDTH = 240 -- one line, with room to spare
+local NUDGE_GAP = 4 -- between the ? and the tip of the note's arrow
+local NUDGE_ARROW = { 16, 9 }
+local NUDGE_PERIOD = 2.4 -- seconds for one slow pulse, dim to lit and back
+local NUDGE_FILL, NUDGE_EDGE = .3, .8 -- how much accent at its strongest: inside, and the edge
+
+local function BuildHelp(window, header)
+    local help = T:Square(header, "?")
+    help:SetSize(22, 22)
+    help:SetPoint("RIGHT", header.close, "LEFT", -6, 0)
+    window.help = help
+    function window:Help()
+        if self.profilePanel and self.profilePanel:IsShown() then
+            self:Say("Profiles: click one to use it, or x to delete it. Type a name to make, copy or rename one.")
+            return self:Refresh()
+        end
+        if ns.Tour and ns.Tour:StartPage(self.selected) then return end
+        self:Say("Nothing to walk through here yet. Hover over anything and this line says what it does.")
+        self:Refresh()
+    end
+    help:HookScript("OnEnter", function(self)
+        T:ShowTip(self, "Page help", "Walks you through this page, a step at a time.", "below")
+    end)
+    help:HookScript("OnLeave", function(self) T:HideTip(self) end)
+
+    -- The pulse: the accent glowing softly inside the ? and on its edge.
+    local glow = help:CreateTexture(nil, "ARTWORK")
+    glow:SetPoint("TOPLEFT", 1, -1)
+    glow:SetPoint("BOTTOMRIGHT", -1, 1)
+    glow:SetAlpha(0)
+    glow:Hide()
+    help.glow = glow
+    -- The note: under the ? and the X, inside the window (which stays on
+    -- screen), below the title bar, its arrow pointing up at the ?. Under
+    -- the profile menu (60), the tour (70, 80) and Are you sure? (80).
+    local nudge = CreateFrame("Frame", nil, window, "BackdropTemplate")
+    nudge:SetSize(NUDGE_PAD + NUDGE_TEXT_WIDTH + 6 + 16 + 6, 28) -- its height again once the text is in
+    nudge:SetFrameLevel(window:GetFrameLevel() + 50)
+    nudge:SetClampedToScreen(true)
+    nudge:EnableMouse(true) -- what's under it isn't clicked by mistake
+    T:Flat(nudge, T.BG, T.CONTROL_BORDER)
+    nudge.text = T:Text(nudge, "GameFontHighlightSmall")
+    nudge.text:SetWidth(NUDGE_TEXT_WIDTH)
+    nudge.text:SetJustifyH("CENTER")
+    nudge.text:SetWordWrap(true)
+    nudge.text:SetText(NUDGE_TEXT)
+    nudge.text:SetPoint("LEFT", NUDGE_PAD, 0)
+    local away = T:Square(nudge, "x")
+    away:SetSize(16, 16)
+    away:SetPoint("RIGHT", -6, 0)
+    window:Hint(away, "Put this note away. The ? stays, for help with any page.")
+    nudge.close = away
+    nudge:SetHeight(2 * 8 + math.max(12, math.ceil(nudge.text:GetStringHeight() or 12)))
+    nudge:SetPoint("TOPRIGHT", header.close, "BOTTOMRIGHT", 0, -(NUDGE_GAP + NUDGE_ARROW[2]))
+    nudge.arrow = nudge:CreateTexture(nil, "ARTWORK")
+    nudge.arrow:SetTexture(ns.MEDIA .. "TourArrow.tga")
+    nudge.arrow:SetSize(NUDGE_ARROW[1], NUDGE_ARROW[2])
+    nudge.arrow:SetTexCoord(0, 1, 0, 1)
+    nudge.arrow:SetPoint("TOP", help, "BOTTOM", 0, -NUDGE_GAP)
+    nudge:Hide()
+    window.helpNudge = nudge
+
+    -- Runs every frame until the ? is clicked: the note and the pulse, held
+    -- back while something else is up.
+    local driver = CreateFrame("Frame", nil, window)
+    driver:SetSize(1, 1)
+    driver:SetPoint("TOPLEFT")
+    nudge.driver = driver
+    local since = 0
+    local function Edge(share)
+        local accent, from = T:Accent(), T.CONTROL_BORDER
+        local function Mix(i) return from[i] + (accent[i] - from[i]) * share end
+        help:SetBackdropBorderColor(Mix(1), Mix(2), Mix(3), 1)
+    end
+    local function Held()
+        return (ns.Tour ~= nil and ns.Tour:Active()) or (window.profilePanel ~= nil and window.profilePanel:IsShown())
+            or (ns.notes ~= nil and ns.notes:IsShown())
+    end
+    -- The note only where nothing is under it: the bar pages and General.
+    -- Elsewhere buttons or words sit at the right of the page's top row, so
+    -- there only the ? pulses.
+    local function Room()
+        local key = window.selected
+        return ns.BAR_NAMES[key] ~= nil or key == "general"
+    end
+    local function Update(_, elapsed)
+        since = (since + (elapsed or 0)) % NUDGE_PERIOD
+        local held = Held()
+        nudge:SetShown(not held and Room())
+        glow:SetShown(not held)
+        -- Dim to lit and back, smoothly.
+        local share = held and 0 or (1 - math.cos(since / NUDGE_PERIOD * 2 * math.pi)) / 2
+        glow:SetAlpha(NUDGE_FILL * share)
+        Edge(NUDGE_EDGE * share)
+    end
+    driver:SetScript("OnUpdate", Update)
+    -- Clicked once, by the ? or the note's x: gone for good.
+    local function Seen()
+        ns.SetHelpSeen()
+        driver:Hide()
+        nudge:Hide()
+        glow:Hide()
+        Edge(0)
+    end
+    driver:SetShown(not ns.HelpSeen())
+    away:SetScript("OnClick", Seen)
+    help:SetScript("OnClick", function(self)
+        T:HideTip(self)
+        Seen()
+        window:Help()
+    end)
+    -- Each time the window opens the pulse starts dim, the note waiting a
+    -- frame to see what else is up; closed, both go with it.
+    window:HookScript("OnShow", function() since = 0 end)
+    window:HookScript("OnHide", function()
+        T:HideTip(help)
+        nudge:Hide()
+        glow:Hide()
+    end)
+    -- A new accent: the note and the glow at once, the ?'s edge next frame.
+    T:Paint(function(accent)
+        nudge:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+        nudge.arrow:SetVertexColor(accent[1], accent[2], accent[3], 1)
+        glow:SetColorTexture(accent[1], accent[2], accent[3], 1)
+    end)
+end
+
 local function BuildWindow()
     local window = CreateFrame("Frame", "FECMFrame", UIParent, "BackdropTemplate")
     window:SetSize(WIDTH, HEIGHT)
@@ -1012,8 +1186,9 @@ local function BuildWindow()
     window.header = header
     BuildFooter(window)
     window:Hint(header.close, "Close the window. Escape closes it too, and /ccm opens it again.")
+    BuildHelp(window, header)
     BuildConfirm(window)
-    ns.BuildProfileMenu(window, header, header.close)
+    ns.BuildProfileMenu(window, header, window.help)
 
     -- The bar list down the left.
     local nav = CreateFrame("Frame", nil, window, "BackdropTemplate")
@@ -1051,10 +1226,12 @@ local function BuildWindow()
     local castPage = ns.BuildCastBarPage ~= nil
     if castPage then window.nav.cast = NavItem(window, nav, "cast", "Cast bar", y + 64) end
     window.nav.general = NavItem(window, nav, "general", "General", y + (castPage and 96 or 64))
-    -- More: pages for Blizzard's own frames beyond the Cooldown Manager,
-    -- headed like your bars. A new file, so only after a full restart.
+    -- More: pages beyond the Cooldown Manager and your bars, headed like
+    -- your bars: Raid Timers, then Cooldown pulse. New files, so each only
+    -- after a full restart.
     local raidPage = ns.BuildRaidTimersPage ~= nil
-    if raidPage then
+    local pulsePage = ns.BuildPulsePage ~= nil
+    if raidPage or pulsePage then
         local more = y + (castPage and 128 or 96)
         local moreRule = nav:CreateTexture(nil, "BORDER")
         moreRule:SetPoint("TOPLEFT", 12, -(more + 4))
@@ -1065,7 +1242,12 @@ local function BuildWindow()
         moreHeading:SetPoint("TOPLEFT", 14, -(more + 14))
         moreHeading:SetText("MORE")
         window.moreHeading = moreHeading
-        window.nav.raid = NavItem(window, nav, "raid", "Raid Timers", more + 30)
+        local at = more + 30
+        if raidPage then
+            window.nav.raid = NavItem(window, nav, "raid", "Raid Timers", at)
+            at = at + 32
+        end
+        if pulsePage then window.nav.pulse = NavItem(window, nav, "pulse", "Cooldown pulse", at) end
     end
     -- What's new in this version, at the foot of the list.
     local news = T:Button(nav, "What's new", NAV - 24, 22)
@@ -1092,6 +1274,10 @@ local function BuildWindow()
     if raidPage then
         window.pages.raid = Page()
         ns.BuildRaidTimersPage(window, window.pages.raid, WIDTH - NAV - 2)
+    end
+    if pulsePage then
+        window.pages.pulse = Page()
+        ns.BuildPulsePage(window, window.pages.pulse, WIDTH - NAV - 2)
     end
     BuildGeneral(window, window.pages.general)
     ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)

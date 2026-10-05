@@ -75,6 +75,7 @@ function Proto:GetChecked() return S[self].checked end
 function Proto:SetPoint(...) table.insert(S[self].points, table.pack(...)) end
 function Proto:ClearAllPoints() S[self].points = {} end
 function Proto:SetSize(w, h) S[self].width, S[self].height = w, h end
+function Proto:GetSize() return S[self].width, S[self].height end
 function Proto:SetWidth(w) S[self].width = w end
 function Proto:SetHeight(h) S[self].height = h end
 function Proto:GetWidth() return S[self].width end
@@ -330,6 +331,24 @@ local function Environment(keepCVars)
             rawset(f, "SetAuraGroupLayout", function(_, key, layout) Guard(); groups[key].layout = layout end)
             rawset(f, "SetScale", function(_, scale) Guard(); S[f].scale = scale end)
         end
+        if template == "ActionButtonSpellAlertTemplate" then
+            -- Blizzard's proc glow: its burst, then its loop (the burst's
+            -- end starts it), each counting its plays. Hiding never stops the
+            -- loop: Forever's template lists OnHide twice, and the second
+            -- runs its OnShow method, which looks for a key nothing sets
+            -- (ActionButtonSpellAlerts.xml and .lua).
+            S[f].template = template
+            for _, key in ipairs({ "ProcStartAnim", "ProcLoop" }) do
+                local anim = { plays = 0, playing = false }
+                function anim:Play() self.plays = self.plays + 1; self.playing = true end
+                function anim:Stop() self.playing = false end
+                function anim:IsPlaying() return self.playing end
+                rawset(f, key, anim)
+            end
+            S[f].scripts.OnHide = function(self)
+                if self.animationPlaying then self.ProcLoop:Play() end
+            end
+        end
         frames[#frames + 1] = f
         S[f].name = name
         if name then _G[name] = f end
@@ -361,7 +380,7 @@ local function Load(saved, beforeLogin)
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
-        "MinimapButton.lua", "Notes.lua" }) do
+        "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
@@ -528,15 +547,115 @@ target = false
 
 usable[7384] = true
 B:RefreshAll()
-Equal(S[over.glow].shown, true, "reactive ability ready: gold edge")
-Equal(S[moon.glow].shown, false, "normal spells never get the gold edge")
+do
+local glow = over.glow
+Equal(tostring(S[glow].shown) .. " " .. tostring(S[glow].template) .. " " .. glow.ProcStartAnim.plays,
+    "true ActionButtonSpellAlertTemplate 1", "reactive ability ready: Blizzard's proc glow, its burst played")
+Equal(tostring(S[glow].parent == over.top) .. " " .. tostring(S[over.top].parent == over) .. " " .. S[glow].points[1][1] .. " "
+    .. tostring(S[glow].points[1][2] == over), "true true CENTER true",
+    "over the icon and centred on it, so the icons beside it and borders never cover it (a player saw only its top)")
+local width, height = over:GetSize()
+Equal(string.format("%g %g %g", width, S[glow].width / width, S[glow].height / height), width .. " 1.4 1.4",
+    "spreading past the icon as Blizzard sizes it on its action bars")
+B:RefreshAll()
+Equal(glow.ProcStartAnim.plays, 1, "still ready: no second burst")
+glow:Hide()
+glow.ProcLoop:Stop()
+glow:Show()
+Equal(tostring(glow.ProcLoop.playing), "true", "hidden with its bar and shown again: the loop plays again")
+Equal(S[moon.glow].shown, false, "normal spells never glow")
 usable[7384] = false
 B:RefreshAll()
-Equal(S[over.glow].shown, false, "gold edge goes when it isn't usable")
+Equal(tostring(S[glow].shown) .. " " .. tostring(glow.ProcStartAnim.playing) .. " " .. tostring(glow.ProcLoop.playing),
+    "false false false", "the glow goes when it isn't usable, burst and loop stopped (Blizzard's OnHide leaves the loop running)")
+usable[7384] = true
+B:RefreshAll()
+Equal(tostring(S[glow].shown) .. " " .. glow.ProcStartAnim.plays .. " " .. tostring(glow.ProcLoop.playing), "true 2 false",
+    "usable again: a new burst, no old loop playing over it")
+-- /ccm debug: a report to copy, with the reactive icon, the game's answer and its glow.
+SlashCmdList.FECM("debug")
+local report = S[FECMDebugFrame.edit].text or ""
+Equal(tostring(S[FECMDebugFrame].shown) .. " " .. tostring(report:find("Overpower | spell 7384 | reactive true | usable true, no mana", 1, true) ~= nil)
+    .. " " .. tostring(report:find("glow true (proc, loop", 1, true) ~= nil), "true true true",
+    "/ccm debug: the reactive icon, the game's usable answer and its glow, ready to copy")
+Equal(tostring(report:find("ready glow proc", 1, true) ~= nil), "true", "and the ready glow picked on the Look page")
+-- On the /ccm window's layer and raised, so it never opens behind it.
+local debugFrame, debugEdit = FECMDebugFrame, FECMDebugFrame.edit
+Equal(Last(debugFrame, "SetFrameStrata") .. " " .. tostring(Last(debugFrame, "SetToplevel")) .. " " .. tostring(S[debugFrame].last.Raise ~= nil),
+    "FULLSCREEN_DIALOG true true", "the debug box on the /ccm window's layer, raised as it shows")
+-- A click in the text, or coming back to it, selects it all again.
+for _, script in ipairs({ "OnMouseUp", "OnEditFocusGained" }) do
+    S[debugEdit].last.HighlightText = nil
+    S[debugEdit].scripts[script](debugEdit)
+    Equal(script .. " " .. tostring(S[debugEdit].last.HighlightText ~= nil), script .. " true", "the whole report selected again, ready to copy")
+end
+FECMDebugFrame:Hide()
+-- Ready glow (Look page): Gold edge swaps every icon's glow at once, the one
+-- lit now too, Blizzard's put out with its burst and loop stopped; Proc glow
+-- brings Blizzard's back, lit with a new burst. Each is made once and kept.
+Equal(ns.Get("readyGlow"), "proc", "Blizzard's proc glow by default")
+ns.Set("readyGlow", "edge")
+B:ApplyGlow()
+local edge = over.glow
+local strips = {}
+for _, obj in ipairs(objects) do
+    if S[obj].parent == edge and S[obj].kind == "Texture" then strips[#strips + 1] = table.concat(S[obj].last.SetColorTexture, ",") end
+end
+Equal(tostring(edge ~= glow) .. " " .. tostring(edge.proc) .. " " .. tostring(S[edge].template) .. " " .. tostring(S[edge].parent == over.top)
+    .. " " .. tostring(S[edge].shown) .. " " .. table.concat(strips, " "), "true nil nil true true 1,0.82,0,1 1,0.82,0,1 1,0.82,0,1 1,0.82,0,1",
+    "Gold edge: the lit icon's glow swapped for a plain gold edge over it, four strips, lit at once")
+Equal(tostring(S[glow].shown) .. " " .. tostring(glow.ProcStartAnim.playing) .. " " .. tostring(glow.ProcLoop.playing) .. " "
+    .. tostring(glow.looping), "false false false nil", "Blizzard's put out, burst and loop stopped, so it isn't left stuck")
+Equal(tostring(S[moon.glow].shown) .. " " .. tostring(moon.glow == moon.glows.edge) .. " " .. tostring(moon.glows.proc ~= nil),
+    "false true true", "an unlit icon swaps too, and stays out")
+B:RefreshAll()
+Equal(tostring(over.glow == edge) .. " " .. tostring(S[edge].shown) .. " " .. glow.ProcStartAnim.plays, "true true 2",
+    "refreshed while ready: the edge stays lit, Blizzard's not played again")
+usable[7384] = false
+B:RefreshAll()
+Equal(S[edge].shown, false, "the edge goes once it isn't usable")
+usable[7384] = true
+B:RefreshAll()
+Equal(S[edge].shown, true, "and comes back when it is")
+ns.Set("readyGlow", "proc")
+B:ApplyGlow()
+local size = over:GetWidth()
+Equal(tostring(over.glow == glow) .. " " .. tostring(S[glow].shown) .. " " .. glow.ProcStartAnim.plays .. " " .. tostring(glow.looping)
+    .. " " .. tostring(S[edge].shown) .. " " .. string.format("%g", S[glow].width / size), "true true 3 true false 1.4",
+    "Proc glow again: Blizzard's own back, lit with a new burst and sized round the icon; the edge out")
+B:ApplyGlow()
+Equal(glow.ProcStartAnim.plays, 3, "picked again: nothing changes")
+usable[7384] = false
+B:RefreshAll()
+end
 usable[7384] = SECRET
 B:RefreshAll()
 Equal(S[over.glow].shown, false, "a hidden usable answer is never read")
 usable[7384] = nil
+-- Procs: lit whenever the game lights the spell on your action bars, any
+-- spell (Moonfire here), as its own action buttons ask.
+do
+    local lit = {}
+    _G.C_SpellActivationOverlay = { IsSpellOverlayed = function(id) return lit[id] end }
+    usable[7384] = false
+    lit[moon.spellID] = true
+    B:RefreshAll()
+    Equal(tostring(S[moon.glow].shown) .. " " .. tostring(S[over.glow].shown), "true false",
+        "a spell the game lights up on your action bars glows here too, reactive or not")
+    lit[moon.spellID] = SECRET
+    B:RefreshAll()
+    Equal(S[moon.glow].shown, false, "a hidden answer is never read")
+    lit[moon.spellID] = false
+    B:RefreshAll()
+    Equal(S[moon.glow].shown, false, "and it goes when the game puts it out")
+    local listening = 0
+    for _, f in ipairs(frames) do
+        if S[f].events.SPELL_ACTIVATION_OVERLAY_GLOW_SHOW and S[f].events.SPELL_ACTIVATION_OVERLAY_GLOW_HIDE then listening = listening + 1 end
+    end
+    Equal(listening, 1, "told the moment the game lights one or puts it out")
+    _G.C_SpellActivationOverlay = nil
+    usable[7384] = nil
+end
 Equal(#printed, 0, "no errors")
 
 -- Combat-only bars and moving -----------------------------------------------------------
@@ -1727,7 +1846,7 @@ cvars.FECMBackup = "accent=teal;useBars=1"
 cvars.FECMBackupBars0, cvars.FECMBackupBars1 = "1", "cd.size=40;cd.spells=Moonfire"
 cvars.ClassicCooldownManagerBackup = "accent=blue;classicBars=1"
 ns = Load(nil)
-Equal(tostring(ns.firstInstall) .. " " .. ns.Get("accent") .. " " .. tostring(ns.Get("useBars")), "true orange false",
+Equal(tostring(ns.firstInstall) .. " " .. ns.Get("accent") .. " " .. tostring(ns.Get("useBars")), "true purple false",
     "a lost settings file is a first install; old backups aren't read")
 Equal(#ns.BarData("cd").spells .. " " .. ns.BarData("cd").size .. " " .. ns.ProfileName(), "0 36 Zriel (Druid) - Zephras",
     "starting empty, on a profile of your own")
@@ -1749,7 +1868,7 @@ do
         barColours = { [5] = "nope", [6] = "blue" } })
     local db = ForeverEnhancedCooldownManagerDB
     Equal(tostring(ns.firstInstall) .. " " .. tostring(db.session), "false nil", "not a first install, and the login count is gone")
-    Equal(ns.Get("accent") .. " " .. ns.Get("castHeight") .. " " .. tostring(ns.Get("useBars")), "orange 18 true",
+    Equal(ns.Get("accent") .. " " .. ns.Get("castHeight") .. " " .. tostring(ns.Get("useBars")), "purple 18 true",
         "bad settings fall back, good ones stay")
     Equal(db.bars.cd.size .. " " .. tostring(db.bars.cd.x), "64 nil", "bar data put right at load")
     Equal(tostring(db.layout.on) .. " " .. table.concat(db.layout.above, ","), "false cd", "the layout too")
@@ -1782,8 +1901,8 @@ Equal(S[w.yourBars].text, "YOUR BARS", "the bars headed as your own, apart from 
 Equal(S[w.nav.cd.fill].shown and not S[w.nav.util.fill].shown, true, "the chosen one highlighted")
 Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape closes the window")
 Equal(S[w.close.label].text, "X", "a plain X")
-Equal(S[w.note].text, "Made with |TInterface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Heart.tga:0:0:0:0:32:32:0:32:0:32:224:120:41|t"
-    .. " by |cffe07829Squirt|r", "the footer's credit: the heart and Squirt in the accent")
+Equal(S[w.note].text, "Made with |TInterface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Heart.tga:0:0:0:0:32:32:0:32:0:32:176:125:240|t"
+    .. " by |cffb07df0Squirt|r", "the footer's credit: the heart and Squirt in the accent")
 Equal(S[w.versionText].text, "dev   /ccm to open", "the footer shows the version")
 w:Refresh()
 Equal(S[w.versionText].text, "dev   /ccm to open", "and keeps it")
@@ -1812,7 +1931,7 @@ S[page.icons[1]].mouseOver = true
 S[page.ghost].scripts.OnUpdate(page.ghost)
 Equal(tostring(S[page.mark].shown) .. " " .. tostring(S[page.mark].points[1][2] == page.icons[1]) .. " " .. S[w.note].text,
     "true true Let go to swap Overpower and Moonfire.", "held over another icon, it's outlined and the footer says they'll swap")
-Equal(S[page.mark].border[1] .. " " .. tostring(S[page.ghost.texture].desaturated), "0.88 false", "outlined in the accent, the held icon in colour")
+Equal(S[page.mark].border[1] .. " " .. tostring(S[page.ghost.texture].desaturated), "0.69 false", "outlined in the accent, the held icon in colour")
 S[third].scripts.OnDragStop(third)
 S[page.icons[1]].mouseOver = nil
 Equal(table.concat(ns.BarData("cd").spells, ",") .. " " .. S[w.note].text, "Overpower,Wrath,Moonfire Swapped Overpower and Moonfire.",
@@ -1949,7 +2068,7 @@ local function Heading(text)
 end
 local accentHeading = Heading("EACH BAR")
 Equal(accentHeading ~= nil, true, "headings in small capitals")
-Equal(S[accentHeading].colour[1] == .88 and S[accentHeading].colour[2], .47, "headings in orange by default")
+Equal(S[accentHeading].colour[1] == .69 and S[accentHeading].colour[2], .49, "headings in purple by default")
 Equal(#w.swatches, 5, "five window accents")
 Equal(w.swatches[1].key, "orange", "orange first")
 w.swatches[3]:Click()
@@ -3702,12 +3821,12 @@ Equal(w.nav.layout ~= nil, true, "Layout in the window's list")
 w:Select("layout")
 local lp = w.pages.layout
 Equal(S[lp].shown and #lp.cards, 7, "seven layouts to pick from")
-Equal(S[lp.status].text, "Pick a layout to stack your bars around your resource display.", "says what it's for")
+Equal(S[lp.status].text, "Pick a layout to stack your bars around the display.", "says what it's for")
 lp.cards[2]:Click()
 Equal(ns.BarData("cd").perRow .. " " .. S[w.note].text, "12 Wide is set up. Tick spells for each bar, then size them to taste.",
     "clicking one sets it up")
-Equal(S[lp.cards[2]].border[1], .88, "outlined in the accent while it's in use")
-Equal(S[lp.status].text, "Your bars follow your Personal Resource Display.", "and says the bars follow the display")
+Equal(S[lp.cards[2]].border[1], .69, "outlined in the accent while it's in use")
+Equal(S[lp.status].text, "Your bars follow your resource display.", "and says the bars follow the display")
 local row = lp.rows.cd
 local tiles = 0
 for _, tile in ipairs(row.tiles) do if S[tile].shown then tiles = tiles + 1 end end
@@ -3802,7 +3921,7 @@ Equal(ns.BarData("cd").spacing .. " " .. ns.BarData("debuff").spacing .. " " .. 
     "Icon spacing gives every row the same room")
 lp.iconSpacing:Choose(0)
 -- The row buttons are drawn in the accent, so they stand out.
-Equal(S[lp.rows.cd.up.art].tint[1] .. " " .. S[lp.rows.cd.fewer.label].colour[1], "0.88 0.88", "arrows, - and + in the accent")
+Equal(S[lp.rows.cd.up.art].tint[1] .. " " .. S[lp.rows.cd.fewer.label].colour[1], "0.69 0.69", "arrows, - and + in the accent")
 -- Picked up, an icon's spot shows empty until it lands.
 local held = lp.rows.cd.tiles[1]
 local before = table.concat(ns.BarData("cd").spells, ",")
@@ -3815,7 +3934,7 @@ Equal(table.concat(ns.BarData("cd").spells, ","), before, "dropped back on its o
 -- The display switched off and on from here, or your bars off.
 Equal(tostring(lp.shown:GetChecked()) .. " " .. tostring(ns.NeedsReload()), "true false", "the display shown, no reload needed yet")
 lp.shown:Click()
-Equal(tostring(prdOn) .. " " .. S[lp.status].text, "false Your rows sit together where your resource display would be.",
+Equal(tostring(prdOn) .. " " .. S[lp.status].text, "false Your rows close up where the display would be.",
     "unticked, Blizzard's display goes off and the rows close up")
 Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")), "BOTTOM 0 -90 TOP 0 -90", "where it was")
 Equal(tostring(ns.NeedsReload()) .. " " .. S[w.note].text,
@@ -3848,7 +3967,7 @@ do
     w:Refresh()
     local display = L:Display()
     Equal(tostring(display.off) .. " " .. display.height .. " " .. At(B:Get("util")) .. " " .. S[lp.display].alpha .. " "
-        .. S[lp.status].text, "true 0 TOP 0 -90 0.3 Your rows sit together where your resource display would be.",
+        .. S[lp.status].text, "true 0 TOP 0 -90 0.3 Your rows close up where the display would be.",
         "Hidden in Edit Mode: it takes no room, the rows close up, and the page says so")
     Equal(rawget(prd, "visibleSetting"), 2, "its Visibility read, never changed")
     rawset(prd, "visibleSetting", 1)
@@ -3871,7 +3990,7 @@ do
     prd:Show()
     w:Refresh()
     Equal(At(B:Get("util")) .. " " .. S[lp.display].alpha .. " " .. S[lp.status].text,
-        "TOP 0 -100 1 Your bars follow your Personal Resource Display.", "Always: as before")
+        "TOP 0 -100 1 Your bars follow your resource display.", "Always: as before")
     Equal(rawget(prd, "visibleSetting"), 0, "Always read, never changed")
     rawset(prd, "visibleSetting", nil)
     Enum.PersonalResourceDisplayVisibleSetting = nil
@@ -5334,7 +5453,7 @@ do
     -- The reported case: two icons on the same bar, one dropped on the other.
     Equal(Drag(cd.tiles[3], cd.tiles[1], cd), "Let go to swap Moonfire and Overpower. | icon",
         "held over an icon in its own row: that one outlined, and the footer says they'll swap")
-    Equal(S[lp.mark].border[1], .88, "outlined in the accent")
+    Equal(S[lp.mark].border[1], .69, "outlined in the accent")
     Equal(tostring(S[lp.ghost.texture].desaturated), "false", "the held icon in full colour")
     Equal(List("cd") .. " | " .. S[w.note].text, "Moonfire,Wrath,Overpower | Swapped Moonfire and Overpower.",
         "dropped on it, the two swap places in the row")
@@ -5585,11 +5704,15 @@ lp = w.pages.layout
 confirm = w.confirm
 lp.outButtons.debuff:Click()
 Equal(tostring(L:IsHidden("debuff")) .. " " .. tostring(S[B:Get("debuff")].shown), "false true", "put back, it shows again")
--- All four out: the last button wraps clear of Unlock bars and Reset positions.
+-- All four out: after Live preview, two to a line, clear of Unlock bars and Reset positions.
 for _, key in ipairs(ns.BAR_KEYS) do L:TakeOut(key) end
 w:Refresh()
-local wrapped = S[lp.outButtons.debuff].points[1]
-Equal(wrapped[4] .. " " .. wrapped[5] .. " " .. S[lp.outButtons.buff].points[1][5], "80 31 9", "the last one wraps to a second line")
+local wrapped = {}
+for _, key in ipairs(ns.BAR_KEYS) do
+    local q = S[lp.outButtons[key]].points[1]
+    wrapped[#wrapped + 1] = q[4] .. " " .. q[5]
+end
+Equal(table.concat(wrapped, ", "), "204 9, 294 9, 204 31, 294 31", "the last two wrap to a second line")
 for _, key in ipairs(ns.BAR_KEYS) do L:PutBack(key) end
 w:Refresh()
 -- Reset: the preset as first set up, asked first.
@@ -5893,8 +6016,17 @@ end)()
         and nextSteps[1].version == "1.2.0", true,
         "1.2.0's steps, Healthstones and potions and Dim when ready among them")
     Equal(Titles(Tour:News("1.0.0")), NEW .. ", " .. NEXT, "from 1.0.0 to this copy: the three new steps, then the next update's")
-    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")), NEXT .. "|" .. NEXT,
-        "no version seen, or one that isn't: the latest update's, the newest steps there are")
+    -- The newest steps there are: 1.5.0's. Here only Ready glow, on the Look page: the Cooldown pulse's
+    -- page isn't loaded (Tools/TestPulse.lua tours its steps).
+    local latest = {}
+    for _, step in ipairs(nextSteps) do
+        if step.version == "1.5.0" then latest[#latest + 1] = step end
+    end
+    local LATEST = Titles(latest)
+    Equal(LATEST .. " | " .. tostring(NEXT:sub(-#LATEST) == LATEST), "Ready glow | true", "1.5.0's: Ready glow, the last of them")
+    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.4.4")),
+        LATEST .. "|" .. LATEST .. "|" .. LATEST,
+        "no version seen, or one that isn't: the latest update's, the newest steps there are, as after 1.4.4")
     Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW .. ", " .. NEXT,
         "versions skipped come together: the basics from 1.0.0, then the new ones")
     Equal(Titles(Tour:News("dev")) .. "|" .. Titles(Tour:News(U)), "|", "nothing when nothing is newer than what was seen")
@@ -5902,7 +6034,8 @@ end)()
     local plain, basics, longest = true, 0, 0
     for _, step in ipairs(Tour:News("0.9.0")) do
         local text = type(step.text) == "function" and step.text() or step.text
-        local all = text .. " " .. step.title .. " " .. (step.try or "") .. " " .. (step.alreadyText or "")
+        local already = type(step.alreadyText) == "function" and step.alreadyText() or step.alreadyText
+        local all = text .. " " .. step.title .. " " .. (step.try or "") .. " " .. (already or "")
         if all:find("\226\128\148", 1, true) then plain = false end
         if step.version ~= "1.0.0" then longest = math.max(longest, #text) else basics = math.max(basics, #text) end
     end
@@ -5994,18 +6127,16 @@ end)()
     local arrow = S[box.arrow].points[1]
     Equal(tostring(S[box.outline].points[1][2] == lp.live) .. " " .. p[1] .. " " .. tostring(p[2] == lp.live) .. " " .. p[3] .. " "
         .. p[4] .. " " .. p[5] .. " | " .. arrow[1] .. " " .. arrow[3] .. " " .. arrow[4],
-        "true BOTTOMRIGHT true TOPLEFT 20 14 | TOP BOTTOMRIGHT -14",
-        "outlining its tick, the box above it ending 20 past its start, the arrow down at the tick's box")
-    -- In the game the display's tick is about 230 across (its label measured
-    -- at about 212), so Live preview starts near 266 on the 638 page. The box
-    -- (290 across) must end before All bars, which starts at 312 at the same
-    -- height, so it never covers it; its arrow sits over the tick's box.
-    local liveLeft = 16 + 230 + S[lp.live].points[1][4]
-    local anchorX = (p[3]:find("RIGHT") and liveLeft + S[lp.live].width or liveLeft) + p[4]
-    local boxRight = p[1]:find("RIGHT") and anchorX or anchorX + S[box].width
-    local allLeft = 638 - 16 - S[lp.allBars].width
-    Equal(tostring(boxRight <= allLeft - 8) .. " " .. (boxRight + arrow[4] - liveLeft) .. " " .. S[lp.allBars].points[1][3],
-        "true 6 56", "the box clear of All bars (it ends by 304), the arrow 6 into the tick")
+        "true BOTTOMLEFT true TOPLEFT 0 14 | TOP BOTTOMLEFT 24",
+        "outlining its tick, the box above it, the arrow down at it")
+    -- The tick sits in the drawing's box, 12 in from its bottom left corner
+    -- (the box starts 16 into the 638 page, 86 up from its foot): the box
+    -- (290 across) over the drawing's foot, inside the page, and well above
+    -- All bars under the drawing.
+    local liveLeft = 16 + S[lp.live].points[1][2]
+    local liveTop = 86 + S[lp.live].points[1][3] + S[lp.live].height
+    Equal(tostring(S[lp.live].parent == lp.box) .. " " .. tostring(liveLeft + S[box].width <= 638 - 16) .. " "
+        .. tostring(liveTop + 14 > 56 + S[lp.allBars].height), "true true true", "the box inside the page, clear above All bars")
     box.back:Click()
     Equal(tw.selected .. " " .. S[box.title].text, "look KEYBINDS ON ICONS", "Back goes back to the Look page")
     Equal(S[box.text].text:find("They're already on.", 1, true) ~= nil, true, "which now says they're on")
@@ -6098,6 +6229,26 @@ end)()
             lp.unlock:Click()
             tick:Click()
         end
+        -- Ready glow: the Look page's foot, its label and choices as one
+        -- part, the box above them at their right end, inside the page.
+        if S[box.title].text == "READY GLOW" then
+            local glow = tw.readyGlow
+            local o = S[box.outline].points
+            p = S[box].points[1]
+            Equal(tw.selected .. " " .. tostring(o[1][2] == glow.part and o[2][2] == glow.part) .. " " .. p[1] .. " "
+                .. tostring(p[2] == glow.part) .. " " .. p[3] .. " " .. S[box.arrow].points[1][3] .. " "
+                .. tostring(S[box.text].text:find("Try it: pick Gold edge.", 1, true) ~= nil),
+                "look true BOTTOMRIGHT true TOPRIGHT BOTTOMRIGHT true",
+                "Ready glow: outlining its label and choices, the box above them at their right end, asking you to pick Gold edge")
+            local part = S[glow.part].points[1]
+            local right, bottom = 638 + part[2], -part[3]
+            Equal(tostring(right - S[box].width >= 16) .. " " .. tostring(right <= 638 - 16) .. " " .. tostring(bottom + S[glow.part].height
+                + p[5] + S[box].height <= 489), "true true true", "the box inside the page, above the foot")
+            glow.buttons[2]:Click()
+            S[box].scripts.OnUpdate(box, 1)
+            Equal(ns.Get("readyGlow") .. " " .. S[box.title].text, "edge READY GLOW", "picked: the step stays so it can be seen")
+            glow.buttons[1]:Click()
+        end
     end
     Equal(table.concat(ahead, ", ") .. " " .. S[box.next.label].text, NEXT:upper() .. " Done", "then the next update's steps, the last one Done")
     box.next:Click()
@@ -6113,7 +6264,7 @@ end)()
     Equal(tostring(S[notes].shown) .. " " .. tostring(notes.seen) .. " " .. tostring(S[notes.tour].shown), "true nil true",
         "/ccm new offers it too")
     notes.tour:Click()
-    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of " .. #nextSteps .. " " .. nextSteps[1].title:upper(),
+    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of " .. #latest .. " " .. latest[1].title:upper(),
         "the next update's steps, the newest there are")
     tw.news:Click()
     Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown), "true true", "What's new opened over the tour")
@@ -6128,7 +6279,7 @@ end)()
     -- Skip tour ends it too, and says where it is.
     tw.news:Click()
     notes.tour:Click()
-    if #nextSteps > 1 then box.next:Click() end -- a step past the first, where there is one
+    if #latest > 1 then box.next:Click() end -- a step past the first, where there is one
     box.skip:Click()
     Equal(tostring(S[box].shown) .. " " .. S[tw.note].text, "false See it again any time from What's new, or with /ccm new.",
         "Skip tour ends it, saying where to see it again")
@@ -6683,8 +6834,8 @@ end)()
     Equal(S[page.live.text].text .. " " .. tostring(page.live:GetChecked()) .. " " .. tostring(ns.Get("layoutPreview")),
         "Live preview true true", "a Live preview tick on the Layout page, on to start with")
     local p = S[page.live].points[1]
-    Equal(p[1] .. " " .. tostring(p[2] == page.shown) .. " " .. p[3] .. " " .. p[4] .. " " .. p[5], "LEFT true RIGHT 20 0",
-        "beside Show the Personal Resource Display")
+    Equal(p[1] .. " " .. p[2] .. " " .. p[3] .. " " .. tostring(S[page.live].parent == page.box), "BOTTOMLEFT 12 10 true",
+        "in the drawing's bottom left corner, level with Unlock bars (its label ran into Row spacing beside the display's tick)")
     local function Point(region)
         local q = S[region].points[1]
         return table.concat({ table.unpack(q, 1, q.n) }, " ")
@@ -6692,9 +6843,6 @@ end)()
     Equal(Point(page.shown) .. " | " .. Point(page.match) .. " | " .. Point(page.spacing) .. " | " .. Point(page.iconSpacing),
         "BOTTOMLEFT 16 36 | BOTTOMLEFT 16 14 | BOTTOMRIGHT -16 34 | BOTTOMRIGHT -16 12",
         "the page's other controls where they were")
-    -- The page is 638 across: Row spacing starts 16 + 250 in from its right.
-    local liveRight = 16 + S[page.shown].width + 20 + S[page.live].width
-    Equal(tostring(liveRight <= 638 - 16 - S[page.spacing].width - 20), "true", "at least 20 clear of Row spacing")
 
     -- Keys on your Cooldowns and Utility icons, as on your bars; none on an
     -- unbound spell, an empty spot or the Buffs row.
@@ -7041,7 +7189,7 @@ end)()
     local all = page.allBars
     Equal(S[all.label].text .. " " .. all.current, "All bars (Needs testing) 150", "an All bars slider on the Layout page, showing where it is")
     Equal(Point(all) .. " " .. Width(all) .. " | " .. Point(all.track) .. " | " .. Point(page.spacing.track),
-        "BOTTOMRIGHT -16 56 310 | LEFT 160 0 | LEFT 100 0", "above Row spacing, with room for its longer label")
+        "BOTTOMRIGHT -16 56 330 | LEFT 190 0 | LEFT 100 0", "above Row spacing, with room for its longer label")
     -- The page is 638 across.
     Equal(638 - 16 - S[all].width + S[all.track].points[1][2], 638 - 16 - S[page.spacing].width + S[page.spacing.track].points[1][2],
         "its track lined up with the spacing sliders'")
@@ -7370,7 +7518,7 @@ end)()
     end
 
     -- Made with a heart by Squirt, the heart and name in the accent.
-    Equal(Text(), ORANGE, "at rest the footer says who made the addon, the heart and Squirt in orange")
+    Equal(Text(), CREDIT:format(176, 125, 240, "b07df0"), "at rest the footer says who made the addon, the heart and Squirt in purple, the default accent")
     Equal(table.concat(S[note].colour, " "), table.concat(T.MUTED, " "), "the rest of the line in the footer's muted grey")
     Equal(Text():find("highest rank", 1, true), nil, "the rank line is no longer the footer's")
     w:Select("look")
@@ -7415,7 +7563,7 @@ end)()
     Enter(look)
     Leave(layout)
     Equal(next .. " | " .. Text(), "One-click layouts that stack your bars around your Personal Resource Display. | "
-        .. "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds, font, textures and the accent.",
+        .. "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds, font, textures, ready glow and the accent.",
         "entered before the last one is left, each keeps its note")
     Over(nil, look)
     Leave(look)
@@ -7785,11 +7933,13 @@ end)()
     -- Every button, text box, slider and anything else that takes the mouse
     -- in the window has a note (the "Are you sure?" dialog and the tour's box
     -- say everything themselves; the window, the profile menu and the
-    -- dialog's shade are only the ground under the rest), and on every page
-    -- each one showing shows its note on hover and gives the footer back after.
+    -- dialog's shade are only the ground under the rest, as is the ?'s
+    -- first-time note under its x; the ? has a tooltip of its own instead,
+    -- Tools/TestHelp.lua), and on every page each one showing shows its note
+    -- on hover and gives the footer back after.
     S[lp.search].scripts.OnEditFocusGained(lp.search) -- its results, made as they show
     S[lp.search].scripts.OnEditFocusLost(lp.search)
-    local ground = { [w.profilePanel] = true, [w.confirm.shade] = true }
+    local ground = { [w.profilePanel] = true, [w.confirm.shade] = true, [w.help] = true, [w.helpNudge] = true }
     if _G.FECMTour then ground[FECMTour] = true end
     local function Control(region)
         local s = S[region]

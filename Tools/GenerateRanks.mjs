@@ -5,10 +5,11 @@
 // Also notes which classes and races each spell belongs to, so a profile
 // shared across characters only shows each one what it can have, and which
 // spells are passive, so the bars pass over what has nothing to track, and
-// which are reactive, for the gold edge when one becomes usable.
+// which are reactive, for the gold edge when one becomes usable, and each
+// spell's base cooldown, for the Cooldown pulse page.
 // Reads Blizzard's own game tables for build 1.60.1.70170 (wago.tools db2
 // exports of SpellName, Spell, SpellEffect, SpellMisc, SkillLineAbility,
-// ChrRaces, SpellAuraRestrictions and SpellPower).
+// ChrRaces, SpellAuraRestrictions, SpellPower and SpellCooldowns).
 // Pass a cache directory; missing tables are downloaded into it. No addon
 // code or data is an input.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -248,6 +249,13 @@ for (const [name, ranks] of groups) {
     }
 }
 assert.deepEqual([...timed].sort(), ['Reincarnation'], 'only Reincarnation is a passive with a cooldown');
+// Base cooldowns, for the Cooldown pulse page: every spell ID in ns.RANKS
+// with a cooldown of its own, in seconds (SpellCooldowns at difficulty 0:
+// the longer of its own RecoveryTime and its category's). The page picks
+// the spells it watches by these, so it never has to ask the game, which
+// keeps cooldowns secret in a fight.
+const cooldownLines = [...new Set([...groups.values()].flatMap(ranks => [...ranks.keys()]))].sort((a, b) => a - b)
+    .filter(id => (cooldowns.get(id) || 0) > 0).map(id => ` [${id}]=${cooldowns.get(id) / 1000},`);
 const passiveLines = [...listed.keys()].sort()
     .map(name => ` [${JSON.stringify(name)}]={${[...listed.get(name)].sort((a, b) => a - b).join(',')}},`);
 
@@ -384,7 +392,8 @@ const out = [
     '-- to track (its passive IDs), the buffs and debuffs of their own some',
     '-- passives give or are (a totem\'s buff), by the passive\'s ID, and the',
     '-- reactive abilities, usable only once something happens in the fight',
-    '-- (Overpower, Execute), by name. Do not edit.',
+    '-- (Overpower, Execute), by name, and the base cooldown in seconds of',
+    '-- every spell ID above that has one. Do not edit.',
     'local _, ns = ...',
     'ns.RANKS = {',
     ...lines,
@@ -410,8 +419,11 @@ const out = [
     'ns.REACTIVE = {',
     ...reactiveLines,
     '}',
+    'ns.COOLDOWNS = {',
+    ...cooldownLines,
+    '}',
     '',
 ].join('\n');
 await writeFile(join(root, 'Ranks.lua'), out);
 const debuffCount = [...debuffs.values()].reduce((sum, set) => sum + set.size, 0);
-console.log(`Ranks.lua: ${groups.size} spells, ${abilities.length} class ability rows, ${racials} racial spells, ${debuffCount} class debuffs, ${ownerLines.length} spells with their classes, ${raceLines.length} with their races, ${passiveLines.length} passive, ${auraLinks.buff.size} passives with a buff and ${auraLinks.debuff.size} with a debuff of their own, ${reactive.size} reactive.`);
+console.log(`Ranks.lua: ${groups.size} spells, ${abilities.length} class ability rows, ${racials} racial spells, ${debuffCount} class debuffs, ${ownerLines.length} spells with their classes, ${raceLines.length} with their races, ${passiveLines.length} passive, ${auraLinks.buff.size} passives with a buff and ${auraLinks.debuff.size} with a debuff of their own, ${reactive.size} reactive, ${cooldownLines.length} with a cooldown.`);
