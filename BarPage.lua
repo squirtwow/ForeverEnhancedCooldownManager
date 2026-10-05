@@ -262,8 +262,13 @@ function ns.BuildBarPage(window, page, width)
         icon:SetScript("OnClick", function() B:Dropped(state.bar) end)
         icon.drop = Bar
         -- The footer names the icon under the mouse; its x says what it does.
+        -- One added before the add box turned it away (Weakened Soul) says why it never shows.
         window:Hint(icon, function(self)
-            return self.name and (self.name .. ". Drag it onto another icon to swap them, or off the bar to take it off.")
+            if not self.name then return nil end
+            if ns.Spells:SelfDebuffNote(self.name) then
+                return self.name .. " can't show here. Tick \"Show your debuffs on you\" and drag it off the bar."
+            end
+            return self.name .. ". Drag it onto another icon to swap them, or off the bar to take it off."
         end)
         page.icons[i] = icon
         return icon
@@ -390,7 +395,11 @@ function ns.BuildBarPage(window, page, width)
         state.search = (self:GetText() or ""):lower():match("^%s*(.-)%s*$")
         window:Refresh()
     end)
-    window:Hint(search, "Find a spell by name or ID. Three letters or more also finds spells outside your spellbook.")
+    -- With a debuff on you typed in it (Weakened Soul), hovering it keeps that tip.
+    window:Hint(search, function()
+        return ns.Spells:SelfDebuffMatch(state.search)
+            or "Find a spell by name or ID. Three letters or more also finds spells outside your spellbook."
+    end)
     page.search = search
     -- Trinkets and bag items only join the list when asked.
     local showItems = T:Check(listPanel, "Show items", function(self)
@@ -614,7 +623,11 @@ function ns.BuildBarPage(window, page, width)
                 end
             end
         end
-        if n == 0 then Header(text == "" and "Nothing to list" or "No matches") end
+        -- Typing a debuff on you (Weakened Soul): the footer says where it's
+        -- shown, on every refresh, as a message lasts until the next one.
+        local selfNote = ns.Spells:SelfDebuffMatch(text)
+        if selfNote then window:Say(selfNote) end
+        if n == 0 then Header(selfNote and "A debuff on you: see below" or text == "" and "Nothing to list" or "No matches") end
         for i = n + 1, #rows do rows[i]:Hide() end
         scroll.content:SetHeight(math.max(1, y))
         scroll:ScrollTo(scroll:GetVerticalScroll() or 0)

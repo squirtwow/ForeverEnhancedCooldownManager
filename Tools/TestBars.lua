@@ -1564,6 +1564,18 @@ Search("minor heal")
 Equal(Row("item:118") == nil and Other("Minor Healing Potion") == nil, true, "items never offered on the Buffs bar")
 Search("zzzz")
 Equal(Row("Moonfire") == nil, true, "nothing listed when nothing matches")
+-- Typing a debuff on you: the footer points to the tick, letter after letter.
+Search("weak")
+Equal(S[w.note].text, ns.Spells:SelfDebuffNote("Weakened Soul"), "typing Weakened Soul: the footer points to the tick")
+Search("weake")
+Equal(S[w.note].text, ns.Spells:SelfDebuffNote("Weakened Soul"), "and still does on the next letter")
+S[page.search].scripts.OnEnter(page.search)
+Equal(S[w.note].text, ns.Spells:SelfDebuffNote("Weakened Soul"), "hovering the box keeps the tip")
+S[page.search].scripts.OnLeave(page.search)
+Search("thor")
+S[page.search].scripts.OnEnter(page.search)
+Equal(S[w.note].text:find("^Find a spell") ~= nil, true, "other text: the box's own note")
+S[page.search].scripts.OnLeave(page.search)
 Search("")
 Equal(Row("Thorns") ~= nil, true, "clearing the search lists everything again")
 Equal(#printed, 0, "no errors")
@@ -5929,11 +5941,13 @@ end)()
     Equal(16 + S[notes.done].width + 8 + S[notes.tour].width + 8 + S[notes.discord].width, 332,
         "the three buttons leave the left 188 of the 520 for the two lines there")
     S[notes.tour].scripts.OnEnter(notes.tour)
-    Equal(S[GameTooltip].text .. "|" .. table.concat(S[GameTooltip].lines, "|") .. "|" .. tostring(S[GameTooltip].shown),
-        "Show me what's new|A quick tour of what's new, a page at a time.|true",
-        "its tooltip says what it does, no longer marked as needing testing")
+    local tip = ns.Theme.tip
+    Equal(tip and (S[tip.title].text .. "|" .. S[tip.text].text .. "|" .. tostring(S[tip].shown)),
+        "SHOW ME WHAT'S NEW|A quick tour of what's new, a page at a time.|true",
+        "its tooltip says what it does, in the window's own look")
+    Equal(tostring(S[GameTooltip].shown), "false", "not Blizzard's tooltip")
     S[notes.tour].scripts.OnLeave(notes.tour)
-    Equal(S[GameTooltip].shown, false, "gone as the mouse leaves")
+    Equal(S[tip].shown, false, "gone as the mouse leaves")
 
     -- The tour: What's new closes, and the window opens on the first step.
     notes.tour:Click()
@@ -8251,6 +8265,23 @@ end)()
     lockdown = false
     Fire("PLAYER_REGEN_ENABLED")
     Equal(groups.self.enabled, false, "and goes once it's over")
+    -- Added by name or ID (a player added Weakened Soul and it never showed):
+    -- turned away, pointing to the tick.
+    local note = ns.Spells:SelfDebuffNote("Weakened Soul")
+    Equal(note ~= nil and note:find("Show your debuffs on you", 1, true) ~= nil, true, "Weakened Soul points to the tick")
+    Equal(ns.Spells:SelfDebuffNote(" weakened soul ") == note and ns.Spells:SelfDebuffNote("6788") == note
+        and ns.Spells:SelfDebuffNote(6788) == note, true, "by any case, by ID, as a number")
+    Equal(ns.Spells:SelfDebuffNote("Recently Bandaged") ~= nil and ns.Spells:SelfDebuffNote("25771") ~= nil, true,
+        "Recently Bandaged and Forbearance too")
+    Equal(ns.Spells:SelfDebuffNote("Power Word: Shield") == nil and ns.Spells:SelfDebuffNote("Thorns") == nil, true,
+        "a buff is no debuff on you")
+    for _, bar in ipairs({ "buff", "debuff", "cd" }) do
+        local ok, said = B:Add(bar, "Weakened Soul")
+        Equal(tostring(ok) .. " " .. tostring(said == note), "false true", "not added to " .. bar .. ": told where it shows")
+    end
+    Equal(B:CanAdd("buff", "6788"), false, "held over a bar: the same")
+    Equal(ns.Spells:SelfDebuffMatch("weak") == note and ns.Spells:SelfDebuffMatch("we") == nil
+        and ns.Spells:SelfDebuffMatch("moon") == nil, true, "typing: from three letters")
     Equal(#printed, 0, "no errors from debuffs on you")
 end)()
 

@@ -106,6 +106,37 @@ function T:Box(frame)
     self:Paint(function(accent) frame:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
 end
 
+-- A tooltip in the addon's own look, as the Discord box: a dark box edged in
+-- the accent, a heading in the accent and a line of text. One, shared.
+local TIP_WIDTH = 220
+function T:ShowTip(owner, title, text)
+    local tip = self.tip
+    if not tip then
+        tip = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+        tip:SetFrameStrata("TOOLTIP")
+        tip:EnableMouse(false)
+        self:Flat(tip, T.BG, T.CONTROL_BORDER)
+        self:Paint(function(accent) tip:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
+        tip.title = self:Heading(tip, "")
+        tip.title:SetPoint("TOPLEFT", 12, -10)
+        tip.text = self:Text(tip, "GameFontHighlightSmall")
+        tip.text:SetPoint("TOPLEFT", 12, -28)
+        tip.text:SetWidth(TIP_WIDTH)
+        tip.text:SetWordWrap(true)
+        self.tip = tip
+    end
+    tip.title:SetText(title:upper())
+    tip.text:SetText(text)
+    tip:SetSize(TIP_WIDTH + 24, 38 + (tip.text:GetStringHeight() or 12))
+    tip:ClearAllPoints()
+    tip:SetPoint("BOTTOM", owner, "TOP", 0, 6)
+    tip:Show()
+end
+
+function T:HideTip()
+    if self.tip then self.tip:Hide() end
+end
+
 function T:Panel(parent)
     local panel = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     self:Flat(panel, T.PANEL)

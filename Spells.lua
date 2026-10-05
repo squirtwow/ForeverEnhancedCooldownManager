@@ -515,6 +515,42 @@ function S:AddNote(text, bar)
     return Untracked(entry and entry.name or found, (id and { id }) or ids or Judged(found), bar)
 end
 
+-- Debuffs your own spells put on you. Neither aura bar can show one added by
+-- name: the Buffs bar reads your buffs, the Debuffs bar your target's debuffs,
+-- and the game hides a debuff on you from a spell ID lookup. The Buffs bar's
+-- "Show your debuffs on you" shows them instead (Buffs.lua, F:ApplySelf).
+local SELF_DEBUFFS = { [6788] = "Weakened Soul", [11196] = "Recently Bandaged", [25771] = "Forbearance" }
+
+-- One line in the footer (two spilled out of the window in game).
+local function SelfNote(name)
+    return name .. " can't go on a bar by name. Tick \"Show your debuffs on you\" on the Buffs bar."
+end
+
+-- Why typed text (a name or spell ID) or a bar entry's key can't go on a bar
+-- because it's one of those debuffs, pointing to the tick that shows it, or nil.
+function S:SelfDebuffNote(text)
+    if type(text) == "number" then text = tostring(text) end
+    if type(text) ~= "string" then return nil end
+    local trimmed = (text:match("^%s*(.-)%s*$"):gsub("@%d+$", ""))
+    local id, lower = tonumber(trimmed), trimmed:lower()
+    for spellID, name in pairs(SELF_DEBUFFS) do
+        if spellID == id or name:lower() == lower then return SelfNote(name) end
+    end
+    return nil
+end
+
+-- The same while typing in the add box: from three letters, any of those
+-- debuffs whose name holds the text, or nil.
+function S:SelfDebuffMatch(text)
+    if type(text) ~= "string" then return nil end
+    local lower = text:lower():match("^%s*(.-)%s*$")
+    if #lower < 3 then return self:SelfDebuffNote(text) end
+    for _, name in pairs(SELF_DEBUFFS) do
+        if name:lower():find(lower, 1, true) then return SelfNote(name) end
+    end
+    return self:SelfDebuffNote(text)
+end
+
 -- Whether an entry on a bar is for you. One profile can serve every class and
 -- race: each character passes over what only other characters can have, which
 -- stays in the profile for them. Anything in your own spellbook, procs or bags

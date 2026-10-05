@@ -1081,6 +1081,10 @@ end
 -- go by it, so what the footer says while a spell is held over a bar is
 -- what dropping it does.
 local function Vet(key, text)
+    -- A debuff on you (Weakened Soul): no bar shows it by name, the Buffs
+    -- bar's tick does.
+    local selfNote = ns.Spells:SelfDebuffNote(text)
+    if selfNote then return false, selfNote end
     local found, ids, given = ns.Spells:Resolve(text)
     if not found then return false, ids end
     local entry = ns.Spells:Find(found)
