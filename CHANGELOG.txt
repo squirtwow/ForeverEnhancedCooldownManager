@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.4
+
+### Changed
+- The "Show me what's new" tooltip now matches the addon's look.
+- Trying to add a debuff you put on yourself now points you to "Show your debuffs on you".
+
 ## 1.4.3
 
 ### Added

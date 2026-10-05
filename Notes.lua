@@ -10,6 +10,15 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.4.4",
+        sections = {
+            { "Changed", {
+                "The \"Show me what's new\" tooltip now matches the addon's look.",
+                "Trying to add a debuff you put on yourself now points you to \"Show your debuffs on you\".",
+            } },
+        },
+    },
+    {
         version = "1.4.3",
         sections = {
             { "Added", {

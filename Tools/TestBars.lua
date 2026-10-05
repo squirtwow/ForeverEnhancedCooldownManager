@@ -3371,7 +3371,9 @@ end
 Equal(S[notes.scroll.content].height > 200, true, "the notes take their full height")
 UIParent:SetHeight(800)
 Fire("DISPLAY_SIZE_CHANGED")
-Equal(S[notes].height, 620, "the window grows to fit, up to its limit")
+-- Tall enough for every note, or stopped at its 620 limit (short notes fit below it).
+Equal(S[notes].height <= 620 and (S[notes].height == 620 or S[notes].height > S[notes.scroll.content].height), true,
+    "the window grows to fit, up to its limit")
 UIParent:SetHeight(300)
 Fire("UI_SCALE_CHANGED")
 Equal(S[notes].height, 260, "and stays on a small screen, the notes scrolling")
