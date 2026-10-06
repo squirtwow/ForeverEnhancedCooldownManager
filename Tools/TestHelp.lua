@@ -296,16 +296,36 @@ local function Environment(keepCVars)
             local slots = {}
             S[f].slots = slots
             containers[#containers + 1] = f
+            -- How many icons a group makes at once (the game's ten), icons
+            -- made, icons made mid-update, and calls into the addon's own
+            -- files while the container updates (S[f].Update below).
+            S[f].batch, S[f].made, S[f].late, S[f].addonCalls = 10, 0, 0, 0
             local function Guard() if lockdown then containerCallsInCombat = containerCallsInCombat + 1 end end
-            rawset(f, "AddAuraSlot", function(self, key, filter, options)
-                Guard()
-                local button = New("Button", self)
-                local slot = { filter = filter, button = button, enabled = true, supplied = {} }
-                for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
-                    rawset(button, method, function(_, object) slot.supplied[method] = object end)
+            -- Like the game: every icon made runs the slot's or group's look
+            -- (initializeFrame) on it, the only addon code the container
+            -- ever runs. One as a slot is added, a batch as a group is added,
+            -- and another batch in the middle of an update when a group shows
+            -- more auras than it has icons (Blizzard_AuraContainerFrameProviders.lua
+            -- AcquireFrame). Each icon keeps what its look supplied.
+            local function Make(options)
+                for name, value in pairs(options) do
+                    assert(name == "initializeFrame" or type(value) ~= "function", "addon code handed to the container: " .. name)
                 end
-                options.initializeFrame(button)
-                slots[key] = slot
+                local button = New("Button", f)
+                local supplied = {}
+                S[button].supplied = supplied
+                for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
+                    rawset(button, method, function(_, object) supplied[method] = object end)
+                end
+                S[f].made = S[f].made + 1
+                if S[f].updating then S[f].late = S[f].late + 1 end
+                if options.initializeFrame then options.initializeFrame(button) end
+                return button
+            end
+            rawset(f, "AddAuraSlot", function(_, key, filter, options)
+                Guard()
+                local button = Make(options)
+                slots[key] = { filter = filter, button = button, enabled = true, supplied = S[button].supplied }
                 return button
             end)
             rawset(f, "SetAuraSlotEnabled", function(_, key, enabled)
@@ -318,17 +338,28 @@ local function Environment(keepCVars)
             rawset(f, "UpdateAllAuras", function() S[f].refreshes = (S[f].refreshes or 0) + 1 end)
             local groups = {}
             S[f].groups = groups
-            rawset(f, "AddAuraGroup", function(self, key, filter, options)
+            rawset(f, "AddAuraGroup", function(_, key, filter, options)
                 Guard()
                 assert(not groups[key], "group added twice")
-                local button = New("Button", self)
-                local group = { filter = filter, button = button, enabled = true, supplied = {},
-                    filters = options.candidateFilters, layout = options.layout, max = options.maxFrameCount }
-                for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
-                    rawset(button, method, function(_, object) group.supplied[method] = object end)
+                local group = { filter = filter, enabled = true, frames = {}, pool = {}, active = {},
+                    filters = options.candidateFilters, layout = options.layout, max = options.maxFrameCount or math.huge }
+                function group.Batch()
+                    for _ = 1, S[f].batch do
+                        local button = Make(options)
+                        group.frames[#group.frames + 1] = button
+                        group.pool[#group.pool + 1] = button
+                    end
                 end
-                options.initializeFrame(button)
+                group.Batch()
+                group.button, group.supplied = group.frames[1], S[group.frames[1]].supplied
                 groups[key] = group
+            end)
+            rawset(f, "GetAuraGroupFrameCount", function(_, key) return groups[key] and #groups[key].frames or 0 end)
+            rawset(f, "GetAuraGroupFrame", function(_, key, i) return groups[key] and groups[key].frames[i] end)
+            rawset(f, "SetAuraGroupMaxFrameCount", function(_, key, count)
+                Guard()
+                assert(type(count) == "number" and count >= 0 and count == math.floor(count), "a whole number of icons")
+                groups[key].max = count
             end)
             rawset(f, "SetAuraGroupEnabled", function(_, key, enabled)
                 Guard(); assert(type(enabled) == "boolean"); groups[key].enabled = enabled
@@ -336,6 +367,43 @@ local function Environment(keepCVars)
             rawset(f, "SetAuraGroupCandidateFilters", function(_, key, filters) Guard(); groups[key].filters = filters end)
             rawset(f, "SetAuraGroupLayout", function(_, key, layout) Guard(); groups[key].layout = layout end)
             rawset(f, "SetScale", function(_, scale) Guard(); S[f].scale = scale end)
+            -- The container's own update, from its OnUpdate after UNIT_AURA or
+            -- a refresh: each switched-on group takes the auras it matches, up
+            -- to its most, with icons from its pool, making a batch more when
+            -- the pool runs dry (Blizzard_AuraContainerGroups.lua
+            -- RefreshAuraGroup). Auras are { id =, harmful =, mine = }. Any
+            -- call into the addon's own files while it runs is counted.
+            local function Matches(group, aura)
+                if (group.filter == "HARMFUL") ~= (aura.harmful == true) then return false end
+                local filters = group.filters or {}
+                if filters.includeSpellIDs and not filters.includeSpellIDs[aura.id] then return false end
+                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= (aura.mine == true) then return false end
+                return true
+            end
+            S[f].Update = function(auras)
+                S[f].updating = true
+                debug.sethook(function()
+                    local info = debug.getinfo(2, "S")
+                    local source = info and info.source or ""
+                    if source:sub(1, 1) == "@" and not source:find("Tools", 1, true) then S[f].addonCalls = S[f].addonCalls + 1 end
+                end, "c")
+                local ok, err = pcall(function()
+                    for _, group in pairs(groups) do
+                        for _, button in ipairs(group.active) do group.pool[#group.pool + 1] = button end
+                        group.active = {}
+                        for _, aura in ipairs(group.enabled and auras or {}) do
+                            if #group.active >= group.max then break end
+                            if Matches(group, aura) then
+                                if #group.pool == 0 then group.Batch() end
+                                group.active[#group.active + 1] = table.remove(group.pool)
+                            end
+                        end
+                    end
+                end)
+                debug.sethook()
+                S[f].updating = false
+                assert(ok, err)
+            end
         end
         if template == "ActionButtonSpellAlertTemplate" then
             -- Blizzard's proc glow: its burst, then its loop (the burst's
@@ -369,8 +437,29 @@ local function Environment(keepCVars)
     _G.SlashCmdList = {}
     _G.StaticPopupDialogs = {}
     _G.Settings = nil
-    _G.ClearOverrideBindings = function(owner) assert(not lockdown, "binding change in combat"); bindings[owner] = nil end
-    _G.SetOverrideBindingClick = function(owner, _, key, button) assert(not lockdown, "binding change in combat"); bindings[owner] = key .. ":" .. button end
+    -- Key bindings are never changed from addon code: the game then rebuilds
+    -- your action bars and state inside the addon's code, which breaks on
+    -- your hidden health (thousands of errors, 2026-10-06). A call is kept
+    -- and stops the test.
+    for _, name in ipairs({ "SetBinding", "SetBindingClick", "SetBindingItem", "SetBindingMacro", "SetBindingSpell",
+        "SetOverrideBinding", "SetOverrideBindingClick", "SetOverrideBindingItem", "SetOverrideBindingMacro",
+        "SetOverrideBindingSpell", "ClearOverrideBinding", "ClearOverrideBindings", "SaveBindings", "LoadBindings" }) do
+        _G[name] = function() bindings[#bindings + 1] = name; error(name .. " called from addon code") end
+    end
+    -- The windows Escape closes: the game's own list, and its Escape hiding
+    -- every one on it that's shown (UIParentPanelManager.lua CloseSpecialWindows).
+    _G.UISpecialFrames = {}
+    _G.CloseSpecialWindows = function()
+        local found
+        for _, name in pairs(UISpecialFrames) do
+            local frame = _G[name]
+            if frame and frame:IsShown() then
+                frame:Hide()
+                found = 1
+            end
+        end
+        return found
+    end
     -- The minimap: 140 across, its centre at 900, 700.
     _G.Minimap = New("Frame")
     S[Minimap].width, S[Minimap].height, S[Minimap].cx, S[Minimap].cy = 140, 140, 900, 700

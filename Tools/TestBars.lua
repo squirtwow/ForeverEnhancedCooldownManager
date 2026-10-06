@@ -290,16 +290,36 @@ local function Environment(keepCVars)
             local slots = {}
             S[f].slots = slots
             containers[#containers + 1] = f
+            -- How many icons a group makes at once (the game's ten), icons
+            -- made, icons made mid-update, and calls into the addon's own
+            -- files while the container updates (S[f].Update below).
+            S[f].batch, S[f].made, S[f].late, S[f].addonCalls = 10, 0, 0, 0
             local function Guard() if lockdown then containerCallsInCombat = containerCallsInCombat + 1 end end
-            rawset(f, "AddAuraSlot", function(self, key, filter, options)
-                Guard()
-                local button = New("Button", self)
-                local slot = { filter = filter, button = button, enabled = true, supplied = {} }
-                for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
-                    rawset(button, method, function(_, object) slot.supplied[method] = object end)
+            -- Like the game: every icon made runs the slot's or group's look
+            -- (initializeFrame) on it, the only addon code the container
+            -- ever runs. One as a slot is added, a batch as a group is added,
+            -- and another batch in the middle of an update when a group shows
+            -- more auras than it has icons (Blizzard_AuraContainerFrameProviders.lua
+            -- AcquireFrame). Each icon keeps what its look supplied.
+            local function Make(options)
+                for name, value in pairs(options) do
+                    assert(name == "initializeFrame" or type(value) ~= "function", "addon code handed to the container: " .. name)
                 end
-                options.initializeFrame(button)
-                slots[key] = slot
+                local button = New("Button", f)
+                local supplied = {}
+                S[button].supplied = supplied
+                for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
+                    rawset(button, method, function(_, object) supplied[method] = object end)
+                end
+                S[f].made = S[f].made + 1
+                if S[f].updating then S[f].late = S[f].late + 1 end
+                if options.initializeFrame then options.initializeFrame(button) end
+                return button
+            end
+            rawset(f, "AddAuraSlot", function(_, key, filter, options)
+                Guard()
+                local button = Make(options)
+                slots[key] = { filter = filter, button = button, enabled = true, supplied = S[button].supplied }
                 return button
             end)
             rawset(f, "SetAuraSlotEnabled", function(_, key, enabled)
@@ -312,17 +332,28 @@ local function Environment(keepCVars)
             rawset(f, "UpdateAllAuras", function() S[f].refreshes = (S[f].refreshes or 0) + 1 end)
             local groups = {}
             S[f].groups = groups
-            rawset(f, "AddAuraGroup", function(self, key, filter, options)
+            rawset(f, "AddAuraGroup", function(_, key, filter, options)
                 Guard()
                 assert(not groups[key], "group added twice")
-                local button = New("Button", self)
-                local group = { filter = filter, button = button, enabled = true, supplied = {},
-                    filters = options.candidateFilters, layout = options.layout, max = options.maxFrameCount }
-                for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
-                    rawset(button, method, function(_, object) group.supplied[method] = object end)
+                local group = { filter = filter, enabled = true, frames = {}, pool = {}, active = {},
+                    filters = options.candidateFilters, layout = options.layout, max = options.maxFrameCount or math.huge }
+                function group.Batch()
+                    for _ = 1, S[f].batch do
+                        local button = Make(options)
+                        group.frames[#group.frames + 1] = button
+                        group.pool[#group.pool + 1] = button
+                    end
                 end
-                options.initializeFrame(button)
+                group.Batch()
+                group.button, group.supplied = group.frames[1], S[group.frames[1]].supplied
                 groups[key] = group
+            end)
+            rawset(f, "GetAuraGroupFrameCount", function(_, key) return groups[key] and #groups[key].frames or 0 end)
+            rawset(f, "GetAuraGroupFrame", function(_, key, i) return groups[key] and groups[key].frames[i] end)
+            rawset(f, "SetAuraGroupMaxFrameCount", function(_, key, count)
+                Guard()
+                assert(type(count) == "number" and count >= 0 and count == math.floor(count), "a whole number of icons")
+                groups[key].max = count
             end)
             rawset(f, "SetAuraGroupEnabled", function(_, key, enabled)
                 Guard(); assert(type(enabled) == "boolean"); groups[key].enabled = enabled
@@ -330,6 +361,43 @@ local function Environment(keepCVars)
             rawset(f, "SetAuraGroupCandidateFilters", function(_, key, filters) Guard(); groups[key].filters = filters end)
             rawset(f, "SetAuraGroupLayout", function(_, key, layout) Guard(); groups[key].layout = layout end)
             rawset(f, "SetScale", function(_, scale) Guard(); S[f].scale = scale end)
+            -- The container's own update, from its OnUpdate after UNIT_AURA or
+            -- a refresh: each switched-on group takes the auras it matches, up
+            -- to its most, with icons from its pool, making a batch more when
+            -- the pool runs dry (Blizzard_AuraContainerGroups.lua
+            -- RefreshAuraGroup). Auras are { id =, harmful =, mine = }. Any
+            -- call into the addon's own files while it runs is counted.
+            local function Matches(group, aura)
+                if (group.filter == "HARMFUL") ~= (aura.harmful == true) then return false end
+                local filters = group.filters or {}
+                if filters.includeSpellIDs and not filters.includeSpellIDs[aura.id] then return false end
+                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= (aura.mine == true) then return false end
+                return true
+            end
+            S[f].Update = function(auras)
+                S[f].updating = true
+                debug.sethook(function()
+                    local info = debug.getinfo(2, "S")
+                    local source = info and info.source or ""
+                    if source:sub(1, 1) == "@" and not source:find("Tools", 1, true) then S[f].addonCalls = S[f].addonCalls + 1 end
+                end, "c")
+                local ok, err = pcall(function()
+                    for _, group in pairs(groups) do
+                        for _, button in ipairs(group.active) do group.pool[#group.pool + 1] = button end
+                        group.active = {}
+                        for _, aura in ipairs(group.enabled and auras or {}) do
+                            if #group.active >= group.max then break end
+                            if Matches(group, aura) then
+                                if #group.pool == 0 then group.Batch() end
+                                group.active[#group.active + 1] = table.remove(group.pool)
+                            end
+                        end
+                    end
+                end)
+                debug.sethook()
+                S[f].updating = false
+                assert(ok, err)
+            end
         end
         if template == "ActionButtonSpellAlertTemplate" then
             -- Blizzard's proc glow: its burst, then its loop (the burst's
@@ -363,8 +431,29 @@ local function Environment(keepCVars)
     _G.SlashCmdList = {}
     _G.StaticPopupDialogs = {}
     _G.Settings = nil
-    _G.ClearOverrideBindings = function(owner) assert(not lockdown, "binding change in combat"); bindings[owner] = nil end
-    _G.SetOverrideBindingClick = function(owner, _, key, button) assert(not lockdown, "binding change in combat"); bindings[owner] = key .. ":" .. button end
+    -- Key bindings are never changed from addon code: the game then rebuilds
+    -- your action bars and state inside the addon's code, which breaks on
+    -- your hidden health (thousands of errors, 2026-10-06). A call is kept
+    -- and stops the test.
+    for _, name in ipairs({ "SetBinding", "SetBindingClick", "SetBindingItem", "SetBindingMacro", "SetBindingSpell",
+        "SetOverrideBinding", "SetOverrideBindingClick", "SetOverrideBindingItem", "SetOverrideBindingMacro",
+        "SetOverrideBindingSpell", "ClearOverrideBinding", "ClearOverrideBindings", "SaveBindings", "LoadBindings" }) do
+        _G[name] = function() bindings[#bindings + 1] = name; error(name .. " called from addon code") end
+    end
+    -- The windows Escape closes: the game's own list, and its Escape hiding
+    -- every one on it that's shown (UIParentPanelManager.lua CloseSpecialWindows).
+    _G.UISpecialFrames = {}
+    _G.CloseSpecialWindows = function()
+        local found
+        for _, name in pairs(UISpecialFrames) do
+            local frame = _G[name]
+            if frame and frame:IsShown() then
+                frame:Hide()
+                found = 1
+            end
+        end
+        return found
+    end
     -- The minimap: 140 across, its centre at 900, 700.
     _G.Minimap = New("Frame")
     S[Minimap].width, S[Minimap].height, S[Minimap].cx, S[Minimap].cy = 140, 140, 900, 700
@@ -409,6 +498,14 @@ function GearChanged()
     local from = #timers
     Fire("PLAYER_EQUIPMENT_CHANGED")
     for i = from + 1, #timers do timers[i]() end
+end
+-- How often a window is on the game's list of windows Escape closes.
+function EscapeListed(name)
+    local count = 0
+    for _, listed in ipairs(UISpecialFrames) do
+        if listed == name then count = count + 1 end
+    end
+    return count
 end
 local list = ns.Spells:List()
 Equal(#list, 11, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower, two druid procs, then the healthstone and"
@@ -1899,7 +1996,7 @@ Equal(w.nav.cd ~= nil and w.nav.util ~= nil and w.nav.buff ~= nil and w.nav.look
     true, "bars, Look and General listed down the left")
 Equal(S[w.yourBars].text, "YOUR BARS", "the bars headed as your own, apart from Blizzard's")
 Equal(S[w.nav.cd.fill].shown and not S[w.nav.util.fill].shown, true, "the chosen one highlighted")
-Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape closes the window")
+Equal(EscapeListed("FECMFrame"), 1, "Escape closes the window: it's on the game's own list, once")
 Equal(S[w.close.label].text, "X", "a plain X")
 Equal(S[w.note].text, "Made with |TInterface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Heart.tga:0:0:0:0:32:32:0:32:0:32:176:125:240|t"
     .. " by |cffb07df0Squirt|r", "the footer's credit: the heart and Squirt in the accent")
@@ -2256,37 +2353,33 @@ w:Hide()
 Equal(B:IsUnlocked(), false, "closing the window locks them")
 ns.ShowWindow()
 
+-- Escape: the game hides every window on its list, in a fight too, and the
+-- addon never touches a key binding, before, during or after the fight.
 Fire("PLAYER_REGEN_DISABLED")
-Equal(bindings[FECMEscButton], nil, "Escape handed back as combat starts")
 lockdown = true
-Fire("PLAYER_REGEN_ENABLED")
+Equal(tostring(CloseSpecialWindows()) .. " " .. tostring(S[w].shown), "1 false", "Escape in a fight closes it")
 lockdown = false
 Fire("PLAYER_REGEN_ENABLED")
-Equal(bindings[FECMEscButton] ~= nil, true, "and taken again after combat while the window is open")
-FECMEscButton:Click()
-Equal(S[w].shown, false, "Escape closes it")
-Equal(bindings[FECMEscButton], nil, "and releases the key")
+ns.ShowWindow()
+Equal(tostring(CloseSpecialWindows()) .. " " .. tostring(S[w].shown), "1 false", "and out of one")
+Equal(tostring(CloseSpecialWindows()), "nil", "nothing of the addon's open: Escape goes on to the game's menu")
+Equal(#bindings .. " " .. EscapeListed("FECMFrame"), "0 1", "no key binding changed, the window listed once however often it opens")
 
 -- Alt+Z hides the interface, running the window's OnHide though it's still
--- shown: Escape goes back to the game, which brings the interface back.
+-- shown. Bringing it back (Alt+Z again, or Escape, which brings it back
+-- first) runs its OnShow, and the game then closes every window on its
+-- list, as it does its own (UIParent.lua OnShow, Game.lua
+-- UI.TopLevelParentShown, CloseAllWindows). No key binding is touched.
 do
     ns.ShowWindow()
-    Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "open again, Escape is borrowed")
     S[UIParent].shown = false
     S[w].scripts.OnHide(w)
-    Equal(bindings[FECMEscButton], nil, "the interface hidden: Escape handed back")
+    Equal(tostring(S[w].shown) .. " " .. #bindings, "true 0", "the interface hidden: still open, no key binding changed")
     S[UIParent].shown = true
     S[w].scripts.OnShow(w)
-    Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "and borrowed again as it comes back")
-    -- Closing a window that's already off screen runs no OnHide: the key is
-    -- still handed back.
-    local onHide = S[w].scripts.OnHide
-    S[w].scripts.OnHide = nil
-    S[UIParent].shown = false
-    FECMEscButton:Click()
-    S[w].scripts.OnHide = onHide
-    S[UIParent].shown = true
-    Equal(tostring(S[w].shown) .. " " .. tostring(bindings[FECMEscButton]), "false nil", "Escape closes it and doesn't keep the key")
+    CloseSpecialWindows() -- the game's CloseAllWindows as the interface comes back
+    Equal(tostring(S[w].shown) .. " " .. #bindings, "false 0", "the interface back: the game closes it, no key binding changed")
+    Equal(CloseSpecialWindows(), nil, "then Escape goes on to the game's menu")
 
     -- Closed mid-drag, nothing keeps following the cursor: the window, a
     -- slider or a list's scroll thumb.
@@ -3458,7 +3551,7 @@ lockdown = false
 Fire("PLAYER_REGEN_ENABLED")
 local notes = FECMNotes
 Equal(notes ~= nil and S[notes].shown, true, "but once the fight is over")
-Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "Escape is taken while it's open")
+Equal(EscapeListed("FECMNotes"), 1, "Escape closes it: it's on the game's own list")
 Equal(S[notes.version].text, "Version " .. ns.NOTES[1].version, "headed with the newest notes' version")
 Equal(S[notes.close.label].text, "X", "under the window's title bar")
 -- Every heading and bullet, top to bottom, none overlapping.
@@ -3497,10 +3590,10 @@ UIParent:SetHeight(300)
 Fire("UI_SCALE_CHANGED")
 Equal(S[notes].height, 260, "and stays on a small screen, the notes scrolling")
 S[notes].last.StopMovingOrSizing = nil
-FECMEscButton:Click()
+CloseSpecialWindows()
 Equal(S[notes].shown, false, "Escape closes What's new")
 Equal(S[notes].last.StopMovingOrSizing ~= nil, true, "stopping it moving, if it was dragged")
-Equal(bindings[FECMEscButton], nil, "and hands the key back")
+Equal(#bindings, 0, "no key binding changed")
 
 -- Once per version.
 local saved = ForeverEnhancedCooldownManagerDB
@@ -3520,11 +3613,9 @@ w = FECMFrame
 Equal(S[w.news.label].text, "What's new", "What's new at the foot of the window's list")
 w.news:Click()
 Equal(S[notes].shown and S[w].shown, true, "opens it over the window")
-FECMEscButton:Click()
-Equal(not S[notes].shown and S[w].shown, true, "Escape closes What's new first")
-Equal(bindings[FECMEscButton], "ESCAPE:FECMEscButton", "keeping the key for the window")
-FECMEscButton:Click()
-Equal(S[w].shown, false, "then the window")
+CloseSpecialWindows()
+Equal(tostring(S[notes].shown) .. " " .. tostring(S[w].shown), "false false", "Escape closes What's new and the window at once")
+Equal(EscapeListed("FECMNotes") .. " " .. EscapeListed("FECMFrame"), "1 1", "each listed once, however often they open")
 
 -- A released version: its own notes, then the ones before it.
 _G.C_AddOns = { GetAddOnMetadata = function(_, field) assert(field == "Version"); return "@project-version@" end }
@@ -5316,7 +5407,8 @@ do
     B:Assign("Moonfire", "cd")
     B:SetAura("buff", "Thorns", true)
     local packed = B:Get("buff").groupParts
-    Equal(#packed .. " " .. Shown(packed[1].decor.border), "1 false", "a packed icon, no border yet")
+    -- One packed entry: the ten icons Blizzard makes for its group as it's added.
+    Equal(#packed .. " " .. Shown(packed[1].decor.border), "10 false", "a packed entry's icons, no border yet")
     Fire("PLAYER_REGEN_DISABLED")
     lockdown = true
     ns.Set("iconBorder", "icon")
@@ -5927,14 +6019,13 @@ end
         "leaving the window open")
     Equal(ns.Get("useBars") and #ns.BarData("cd").spells, 1, "the tour only changed what you did yourself")
 
-    -- Escape ends the tour first, then closes the window.
+    -- Escape closes the window, ending the tour with it.
     tw:Select("general")
     tw.tour:Click()
     Equal(S[box].shown and S[box.title].text, "THE MENU", "Take the tour on the General page starts it again")
-    FECMEscButton:Click()
-    Equal(S[box].shown == false and S[tw].shown, true, "Escape ends the tour, the window stays")
-    FECMEscButton:Click()
-    Equal(S[tw].shown, false, "then Escape closes the window")
+    CloseSpecialWindows()
+    Equal(tostring(S[box].shown) .. " " .. tostring(S[tw].shown) .. " " .. tostring(ns.Tour:Active()), "false false false",
+        "Escape closes the window and ends the tour")
     -- Closing the window ends it too.
     SlashCmdList.FECM("tour")
     tw.close:Click()
@@ -6258,8 +6349,8 @@ end)()
     Equal(ns.Get("barScale") .. " " .. tostring(ns.Get("layoutPreview")) .. " " .. tostring(ns.Get("keybinds")), "100 true true",
         "the tour only changed what you did yourself")
 
-    -- Opened by hand: the latest update's steps. Escape closes What's new,
-    -- then ends the tour, then closes the window.
+    -- Opened by hand: the latest update's steps. Escape closes What's new
+    -- and the window at once, ending the tour.
     SlashCmdList.FECM("new")
     Equal(tostring(S[notes].shown) .. " " .. tostring(notes.seen) .. " " .. tostring(S[notes.tour].shown), "true nil true",
         "/ccm new offers it too")
@@ -6268,14 +6359,9 @@ end)()
         "the next update's steps, the newest there are")
     tw.news:Click()
     Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown), "true true", "What's new opened over the tour")
-    FECMEscButton:Click()
-    Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown) .. " " .. tostring(S[tw].shown), "false true true",
-        "Escape closes What's new first")
-    FECMEscButton:Click()
-    Equal(tostring(S[box].shown) .. " " .. tostring(S[tw].shown) .. " " .. tostring(bindings[FECMEscButton]), "false true ESCAPE:FECMEscButton",
-        "then ends the tour, the window staying")
-    FECMEscButton:Click()
-    Equal(tostring(S[tw].shown) .. " " .. tostring(bindings[FECMEscButton]), "false nil", "then closes the window")
+    CloseSpecialWindows()
+    Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown) .. " " .. tostring(S[tw].shown) .. " " .. tostring(ns.Tour:Active()),
+        "false false false false", "Escape closes What's new and the window, ending the tour")
     -- Skip tour ends it too, and says where it is.
     tw.news:Click()
     notes.tour:Click()
@@ -6348,9 +6434,19 @@ do
     local function At() local p = S[mm].points[1]; return string.format("%s %.1f %.1f", p[1], p[4], p[5]) end
     Equal(S[mm].shown and S[mm].parent == Minimap, true, "a minimap button, on by default")
     Equal(At(), "CENTER -52.3 -52.3", "at the minimap's bottom left, just outside its edge")
+    S[GameTooltip].lines = nil
     S[mm].scripts.OnEnter(mm)
-    Equal(S[GameTooltip].text .. "|" .. table.concat(S[GameTooltip].lines, "|"),
-        ns.TITLE .. "|Click: settings|Right-click: What's new|Drag: move it round the minimap", "its tooltip says what it does")
+    local tip = ns.Theme.tip
+    Equal(S[tip.title].text .. "|" .. S[tip.text].text .. "|" .. tostring(S[tip].shown) .. "|" .. S[tip].points[1][1] .. " "
+        .. tostring(S[tip].points[1][2] == mm) .. " " .. S[tip].points[1][3],
+        ns.TITLE:upper() .. "|Click: settings\nRight-click: What's new\nDrag: move it round the minimap|true|TOPRIGHT true BOTTOMRIGHT",
+        "its tooltip says what it does, the addon's own, under the button")
+    -- Never the game's tooltip: an addon writing into it taints it, and in
+    -- Forever it then breaks on your hidden health every frame (thousands
+    -- of errors, 2026-10-06).
+    Equal(tostring(S[GameTooltip].lines) .. " " .. tostring(S[GameTooltip].shown), "nil false", "Blizzard's tooltip untouched")
+    S[mm].scripts.OnLeave(mm)
+    Equal(S[tip].shown, false, "gone as the mouse leaves")
     S[mm].scripts.OnClick(mm, "LeftButton")
     Equal(FECMFrame ~= nil and S[FECMFrame].shown, true, "click: the settings")
     S[mm].scripts.OnClick(mm, "LeftButton")
@@ -6393,6 +6489,57 @@ do
     ns = Load(saved)
     local p = S[FECMMinimapButton].points[1]
     Equal(string.format("%.1f %.1f", p[4], p[5]), "0.0 74.0", "where you left it after a reload")
+end
+
+-- Free-floating (the General page): anywhere on the screen, held by the
+-- screen itself so it shows with the minimap hidden, kept where it's dropped.
+do
+    Environment()
+    _G.FECMFrame = nil
+    ns = Load({ useBars = true })
+    local mm = FECMMinimapButton
+    local function At()
+        local p = S[mm].points[1]
+        local to = p[2] == UIParent and "screen" or p[2] == Minimap and "minimap" or "?"
+        return string.format("%s %s %.1f %.1f", p[1], to, p[4], p[5])
+    end
+    Equal(tostring(ns.Get("minimapFree")) .. " " .. tostring(Last(mm, "SetParent") == Minimap), "false true",
+        "on the minimap by default")
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("general")
+    Equal(w.minimapFree:GetChecked(), false, "the General tick, off by default")
+    S[mm].cx, S[mm].cy = 847.7, 647.7 -- where it is on the minimap now
+    w.minimapFree:Click()
+    Equal(tostring(ns.Get("minimapFree")) .. " " .. tostring(Last(mm, "SetParent") == UIParent) .. " " .. At(),
+        "true true CENTER screen 348.0 248.0", "ticked: held by the screen, just where it was")
+    Equal(w.minimapFree:GetChecked(), true, "the tick shows it")
+    S[mm].scripts.OnEnter(mm)
+    Equal(S[ns.Theme.tip.text].text, "Click: settings\nRight-click: What's new\nDrag: move it anywhere", "its tooltip says so")
+    S[mm].scripts.OnLeave(mm)
+    S[mm].scripts.OnDragStart(mm)
+    _G.GetCursorPosition = function() return 600, 450 end
+    S[mm].scripts.OnUpdate(mm, .01)
+    Equal(At(), "CENTER screen 100.0 50.0", "dragged anywhere, following the cursor")
+    S[mm].scripts.OnDragStop(mm)
+    local db = ForeverEnhancedCooldownManagerDB
+    Equal(db.minimapX .. " " .. db.minimapY .. " " .. ns.Get("minimapAngle"), "100 50 225",
+        "saved where it's dropped, its minimap spot kept")
+    S[Minimap].scripts.OnSizeChanged(Minimap)
+    Equal(At(), "CENTER screen 100.0 50.0", "a minimap resize leaves it be")
+    Equal(tostring(ns.Valid("minimapX", 5000)) .. " " .. tostring(ns.Valid("minimapY", -12)), "false true", "places stay sensible")
+    -- Unticked: back on the minimap's edge, where it was before; ticked again,
+    -- it stays where it is.
+    w.minimapFree:Click()
+    Equal(tostring(ns.Get("minimapFree")) .. " " .. tostring(Last(mm, "SetParent") == Minimap) .. " " .. At(),
+        "false true CENTER minimap -52.3 -52.3", "unticked: back on the minimap, where it was")
+    S[mm].cx, S[mm].cy = 447.7, 347.7
+    w.minimapFree:Click()
+    Equal(At(), "CENTER screen -52.0 -52.0", "ticked again: from where it sits now")
+    -- As it loads with the choice saved: held by the screen, where it was left.
+    S[mm].last.SetParent = nil
+    ns.MinimapButton:Apply()
+    Equal(tostring(Last(mm, "SetParent") == UIParent) .. " " .. At(), "true CENTER screen -52.0 -52.0", "loaded free-floating")
 end
 
 -- The Discord: found a bug or have an idea ---------------------------------------------
@@ -8435,6 +8582,105 @@ end)()
     Equal(ns.Spells:SelfDebuffMatch("weak") == note and ns.Spells:SelfDebuffMatch("we") == nil
         and ns.Spells:SelfDebuffMatch("moon") == nil, true, "typing: from three letters")
     Equal(#printed, 0, "no errors from debuffs on you")
+end)()
+
+-- Blizzard's aura containers never run the addon's code while they update
+-- (thousands of errors, 2026-10-06; a look run in the middle of an update was
+-- suspected). The only addon code a container runs is a look
+-- (initializeFrame), on each icon it makes: here they're all made as their
+-- slot or group is added, a group never shows more than were made then, and a
+-- look called at any other time does nothing. ----------------------------------
+;(function()
+    local function Count(field)
+        local total = 0
+        for _, container in ipairs(containers) do total = total + S[container][field] end
+        return total
+    end
+    -- The mock game makes icons mid-update like the game: a group shown more
+    -- auras than its ten makes ten more then, running its look, here a
+    -- guarded one of the addon's. Called outside an add, it does nothing.
+    Environment()
+    ns = Load({ useBars = true })
+    local box = CreateFrame("AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+    local looks = 0
+    box:AddAuraGroup("x", "HELPFUL", { maxFrameCount = 12, initializeFrame = ns.BuffBar.Guard(function() looks = looks + 1 end) })
+    local twelve = {}
+    for i = 1, 12 do twelve[i] = { id = i } end
+    S[box].Update(twelve)
+    Equal(S[box].late .. " " .. tostring(S[box].addonCalls > 0) .. " " .. looks, "10 true 0",
+        "a group past its ten makes more mid-update, and the addon's code runs then; a guarded look does nothing")
+
+    -- Every aura feature on: the Buffs bar packed, with your debuffs on you,
+    -- the Debuffs bar, and buff and debuff times on the Cooldowns bar.
+    Environment()
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("buff", "Clearcasting", true)
+    B:SetOption("buff", "selfDebuffs", true)
+    B:SetAura("debuff", "Moonfire", true)
+    B:Assign("Moonfire", "cd")
+    B:SetOption("cd", "showAuras", true)
+    local buff = B:Get("buff")
+    local groups = S[buff.container].groups
+    Equal(groups.g1.max .. " " .. groups.g2.max .. " " .. groups.self.max .. " " .. #groups.self.frames, "1 1 4 10",
+        "each group shows at most what was made as it was added")
+    local bare = 0
+    for _, container in ipairs(containers) do
+        for _, slot in pairs(S[container].slots) do if not slot.supplied.SetIcon then bare = bare + 1 end end
+        for _, group in pairs(S[container].groups) do
+            for _, button in ipairs(group.frames) do if not S[button].supplied.SetIcon then bare = bare + 1 end end
+        end
+    end
+    Equal(Count("made") > 40 and bare, 0, "every icon made has its look, given as its slot or group was added")
+    -- Lots of auras, changing each time, in and out of a fight and across
+    -- target changes: your buffs, Moonfire on the target, and twenty debuffs
+    -- of yours on you.
+    local made = Count("made")
+    local auras = { { id = 467 }, { id = 16870 }, { id = 8921, harmful = true, mine = true } }
+    for i = 1, 20 do auras[#auras + 1] = { id = 90000 + i, harmful = true, mine = true } end
+    for round = 1, 6 do
+        if round == 3 then Fire("PLAYER_REGEN_DISABLED"); lockdown = true end
+        if round == 5 then lockdown = false; Fire("PLAYER_REGEN_ENABLED") end
+        target, hostile = round % 2 == 0, true
+        Fire("PLAYER_TARGET_CHANGED")
+        for _, container in ipairs(containers) do S[container].Update(auras) end
+        table.remove(auras)
+    end
+    Equal(#groups.self.active .. " " .. #groups.g1.active .. " " .. #S[B:Get("debuff").container].groups.g1.active, "4 1 1",
+        "the groups show what they match")
+    Equal(Count("late") .. " " .. Count("addonCalls") .. " " .. (Count("made") - made), "0 0 0",
+        "no icon made, and none of the addon's code run, while the containers update")
+
+    -- A game making fewer icons up front: a group is held to the ones made.
+    Environment()
+    ns = Load({ useBars = true })
+    B = ns.Bars
+    buff = B:Get("buff")
+    local container = buff.container
+    S[container].batch = 2
+    B:SetAura("buff", "Thorns", true)
+    B:SetOption("buff", "selfDebuffs", true)
+    local own = S[container].groups.self
+    Equal(own.max .. " " .. #own.frames .. " " .. S[container].groups.g1.max .. " " .. #buff.groupParts, "2 2 1 4",
+        "held to the two made, each with its look")
+    local mine = {}
+    for i = 1, 6 do mine[i] = { id = 90000 + i, harmful = true, mine = true } end
+    S[container].Update(mine)
+    Equal(S[container].late .. " " .. S[container].addonCalls .. " " .. #own.active, "0 0 2", "nothing made or run mid-update")
+    -- Unheld, the game would make more mid-update and call the look then: it
+    -- does nothing, so those icons go without it.
+    local parts = #buff.groupParts
+    container:SetAuraGroupMaxFrameCount("self", 4)
+    S[container].Update(mine)
+    Equal(S[container].late .. " " .. tostring(S[container].addonCalls > 0) .. " " .. (#buff.groupParts - parts) .. " "
+        .. tostring(next(S[own.frames[#own.frames]].supplied)), "2 true 0 nil", "a look called mid-update does nothing")
+    -- An add that fails still shuts the looks off after it.
+    local ok = pcall(ns.BuffBar.Add, container, "AddAuraGroup", "self", "HARMFUL", { maxFrameCount = 1 })
+    local ran = false
+    ns.BuffBar.Guard(function() ran = true end)(UIParent)
+    Equal(tostring(ok) .. " " .. tostring(ran), "false false", "a failed add leaves looks shut off")
+    Equal(#printed, 0, "no errors from the aura containers")
 end)()
 
 print = _G.print

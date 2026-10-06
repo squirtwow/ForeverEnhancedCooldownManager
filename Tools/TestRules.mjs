@@ -154,3 +154,53 @@ test('the pulse link is the same code as Forever Enhanced Cooldown Pulse\'s Link
     assert.equal(Number(theirs.match(/L\.MANAGER_RANK = (\d+)/)[1]), rank, 'this one\'s rank as that one expects it');
     assert.ok(Number(theirs.match(/L\.RANK = (\d+)/)[1]) < rank, 'that one\'s rank lower, so this one wins with both on');
   });
+
+// Never the game's tooltip: an addon writing into it taints it, and in
+// Forever it then breaks on your hidden health every frame it shows a player
+// (thousands of errors, 2026-10-06). The addon's own (Theme.lua T:ShowTip).
+test("never the game's tooltip", () => {
+  assert.deepEqual(where(/\bGameTooltip\b/), [], 'files using GameTooltip');
+});
+
+// Escape closes the addon's windows through the game's own list of windows
+// it closes (UISpecialFrames), never by changing key bindings: a binding
+// changed from addon code has the game rebuild your action bars and state
+// inside the addon's code, which then breaks on your hidden health
+// (thousands of errors, 2026-10-06). Tools/TestBars.lua checks Escape closes
+// them, and its mock game stops on any binding call.
+test('no key binding is ever changed from addon code', () => {
+  assert.deepEqual(where(/\b(SetOverrideBinding\w*|ClearOverrideBindings?|SetBinding\w*|SaveBindings|LoadBindings)\b/), [],
+    'files changing key bindings');
+  assert.deepEqual(where(/EscUpdate|EscButton/), [], 'nothing left of the old Escape button');
+});
+
+test("Escape closes the windows through the game's own list", () => {
+  assert.equal(count(code['Core.lua'], /table\.insert\(UISpecialFrames, name\)/g), 1, 'ns.CloseOnEscape lists a window by name');
+  assert.equal(count(code['Window.lua'], /ns\.CloseOnEscape\(window\)/g), 1, 'the /ccm window');
+  assert.equal(count(code['Notes.lua'], /ns\.CloseOnEscape\(window\)/g), 1, "What's new");
+  assert.equal(count(code['Debug.lua'], /table\.insert\(UISpecialFrames, "FECMDebugFrame"\)/g), 1, 'the debug report');
+});
+
+// Blizzard's aura containers never run the addon's code while they update.
+// The only addon code a container runs is a slot's or group's look
+// (initializeFrame), on each icon it makes: one as a slot is added, ten as a
+// group is added, and more mid-update only for a group showing more than it
+// has. So slots and groups are only added through Buffs.lua's F.Add, every
+// look goes through F.Guard (it only works during that add), no group asks
+// for more than ten, and AddGroup holds a group to the icons made.
+// Tools/TestBars.lua checks it runs that way.
+test("Blizzard's aura containers never run the addon's code while they update", () => {
+  assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua'], 'the only containers');
+  assert.deepEqual(where(/:AddAura(Slot|Group)\(/), [], 'no slot or group added but through F.Add');
+  const looks = files.flatMap(name => (code[name].match(/initializeFrame\s*=\s*[^,}]+/g) || []).map(look => `${name}: ${look.trim()}`));
+  assert.equal(looks.length, 4, 'four looks: Buffs bar spots, packed entries, your debuffs, buff and debuff times');
+  assert.deepEqual(looks.filter(look => !/: initializeFrame = (F|ns\.BuffBar)\.Guard\(/.test(look)), [], 'every look guarded');
+  const buffs = code['Buffs.lua'];
+  assert.match(buffs, /function F\.Add\(container, method, \.\.\.\)\r?\n\s+adding = true\r?\n\s+local ok, result = pcall\(container\[method\], container, \.\.\.\)\r?\n\s+adding = false\r?\n/);
+  assert.match(buffs, /function F\.Guard\(look\)\r?\n\s+return function\(button\)\r?\n\s+if adding then look\(button\) end/);
+  assert.equal(count(buffs, /\badding = true/g), 1, 'looks opened in F.Add only');
+  assert.deepEqual([...buffs.matchAll(/maxFrameCount = (\w+)/g)].map(match => match[1]).sort(), ['1', 'SELF_MAX']);
+  assert.ok(Number(buffs.match(/local SELF_MAX = (\d+)/)[1]) <= 10, 'your debuffs: no more than the ten made up front');
+  assert.match(buffs, /local function AddGroup\(container, key, filter, options\)\r?\n\s+F\.Add\(container, "AddAuraGroup", key, filter, options\)[\s\S]*?container:SetAuraGroupMaxFrameCount\(key, made\)/);
+  assert.equal(count(buffs, /AddGroup\(container, "/g), 2, 'both kinds of group added through AddGroup');
+});

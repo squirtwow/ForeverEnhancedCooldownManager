@@ -80,6 +80,33 @@ local function Look(button, size, showTimer, decorate)
     return parts
 end
 
+-- Blizzard runs a slot's or group's look (initializeFrame) on every icon it
+-- makes for it, and makes them as the addon adds the slot or group: one for a
+-- slot, a batch of ten for a group (Blizzard_CustomAuraContainer.lua). It
+-- would only make more in the middle of its own update, for a group showing
+-- more auras than it has icons. So a group never shows more than were made
+-- (AddGroup), and a look does nothing unless the addon is adding right then:
+-- the container never runs the addon's code while it updates. IconAuras.lua
+-- adds its slots the same way.
+local adding = false
+
+-- Adds a slot or group ("AddAuraSlot" or "AddAuraGroup"), its look allowed
+-- for just this call.
+function F.Add(container, method, ...)
+    adding = true
+    local ok, result = pcall(container[method], container, ...)
+    adding = false
+    if not ok then error(result, 0) end
+    return result
+end
+
+-- A look that only works while the addon is adding its slot or group.
+function F.Guard(look)
+    return function(button)
+        if adding then look(button) end
+    end
+end
+
 -- A slot's numbers take its holder's size; a later size change refits them.
 local function SlotLook(holder)
     return function(button)
@@ -92,6 +119,15 @@ local function GroupLook(bar)
     return function(button)
         button:SetSize(BASE, BASE)
         bar.groupParts[#bar.groupParts + 1] = Look(button, BASE, bar.data.showTimer, true)
+    end
+end
+
+-- A group, never showing more icons than Blizzard made as it was added.
+local function AddGroup(container, key, filter, options)
+    F.Add(container, "AddAuraGroup", key, filter, options)
+    local made = container:GetAuraGroupFrameCount(key)
+    if Open(made) and type(made) == "number" and made < options.maxFrameCount then
+        container:SetAuraGroupMaxFrameCount(key, made)
     end
 end
 
@@ -128,7 +164,7 @@ function F:Create(bar)
         container:SetEditModePreviewEnabled(false)
         container:SetUnit(aura.unit)
         for i = 1, ns.BUFF_SLOTS do
-            container:AddAuraSlot("b" .. i, aura.filter, { initializeFrame = SlotLook(bar.holders[i]) })
+            F.Add(container, "AddAuraSlot", "b" .. i, aura.filter, { initializeFrame = F.Guard(SlotLook(bar.holders[i])) })
             container:SetAuraSlotEnabled("b" .. i, false)
         end
         bar.container = container
@@ -226,7 +262,7 @@ end
 -- Bandaged), after your buffs on the Buffs bar, when ticked. The game won't
 -- let an addon pick out a debuff on you by spell ID, only by who cast it, so
 -- this is one group for all of yours. Packed only: fixed spots belong to
--- entries.
+-- entries. Up to four, well under the ten Blizzard makes for a group.
 local SELF_MAX = 4
 function F:SelfOn(bar)
     return bar ~= nil and ns.AURA_BARS[bar.key].unit == "player" and bar.data ~= nil and bar.data.selfDebuffs == true
@@ -243,7 +279,7 @@ function F:ApplySelf(bar, packed, spacing)
     if bar.appliedSelf == signature then return end
     bar.appliedSelf = signature
     if on and not bar.selfGroup then
-        container:AddAuraGroup("self", "HARMFUL", { initializeFrame = GroupLook(bar), maxFrameCount = SELF_MAX,
+        AddGroup(container, "self", "HARMFUL", { initializeFrame = F.Guard(GroupLook(bar)), maxFrameCount = SELF_MAX,
             candidateFilters = { isFromPlayerOrPlayerPet = true }, layout = layout })
         bar.selfGroup = true
     elseif bar.selfGroup then
@@ -288,7 +324,7 @@ function F:Apply(bar)
     end
     if on and packed then
         for i = bar.groups + 1, bar.count do
-            container:AddAuraGroup("g" .. i, ns.AURA_BARS[bar.key].filter, { initializeFrame = GroupLook(bar), maxFrameCount = 1,
+            AddGroup(container, "g" .. i, ns.AURA_BARS[bar.key].filter, { initializeFrame = F.Guard(GroupLook(bar)), maxFrameCount = 1,
                 candidateFilters = Filters(bar, bar.slotIDs[i]), layout = { layoutIndex = Index(i), groupSpacing = spacing } })
             bar.groups = i
             bar.appliedGroups[i] = Signature(bar.slotIDs[i]) .. "|" .. spacing .. "|" .. Index(i)

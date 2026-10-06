@@ -34,7 +34,8 @@ local function Fit(parts, size, showTimer)
     parts.count:SetFontObject(Style:Count(size))
 end
 
--- Runs once per slot, before the client restricts it in combat. Everything
+-- Runs once per slot, as the slot is added (and never later: Buffs.lua's
+-- F.Add and F.Guard), before the client restricts it in combat. Everything
 -- given to the slot is a descendant of its button.
 local function Look(anchor)
     return function(button)
@@ -108,7 +109,7 @@ local function Anchor(bar, i)
     for _, side in ipairs(SIDES) do
         local container = bar.auraContainers[side.key]
         local key = side.key .. i
-        container:AddAuraSlot(key, side.filter, { initializeFrame = Look(anchor) })
+        ns.BuffBar.Add(container, "AddAuraSlot", key, side.filter, { initializeFrame = ns.BuffBar.Guard(Look(anchor)) })
         container:SetAuraSlotEnabled(key, false)
     end
     return anchor

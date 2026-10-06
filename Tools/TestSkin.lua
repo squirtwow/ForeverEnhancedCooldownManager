@@ -387,8 +387,13 @@ local function Environment(keepCVars)
         _G[name] = font
         return font
     end
-    _G.ClearOverrideBindings = function(owner) assert(not combat, "binding change in combat"); bindings[owner] = nil end
-    _G.SetOverrideBindingClick = function(owner, _, key, button) assert(not combat, "binding change in combat"); bindings[owner] = key .. ":" .. button end
+    -- Key bindings are never changed from addon code (Tools/TestBars.lua):
+    -- a call is kept and stops the test.
+    for _, name in ipairs({ "SetBinding", "SetBindingClick", "SetOverrideBinding", "SetOverrideBindingClick",
+        "ClearOverrideBinding", "ClearOverrideBindings", "SaveBindings", "LoadBindings" }) do
+        _G[name] = function() bindings[#bindings + 1] = name; error(name .. " called from addon code") end
+    end
+    _G.UISpecialFrames = {}
     _G.SlashCmdList = {}
     _G.GameFontHighlight = { GetFont = function() return "font", 12, "" end, name = "GameFontHighlight" }
     _G.GameFontHighlightSmall = { name = "GameFontHighlightSmall" }

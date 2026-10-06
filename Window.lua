@@ -716,7 +716,14 @@ local function BuildGeneral(window, page)
     minimap:SetPoint("TOPLEFT", 16, -116)
     window:Hint(minimap, "A button on the minimap for these settings. Off, /ccm still opens them.")
     window.minimap = minimap
-    Detail(page, "Click it for these settings, right-click for What's new, and drag it round the minimap.", 34, -136)
+    local free = T:Check(page, "Free-floating", function(self)
+        if ns.MinimapButton then ns.MinimapButton:SetFree(self:GetChecked()) end
+    end)
+    free:SetPoint("TOPLEFT", 260, -116)
+    window:Hint(free, "Drag the button anywhere on the screen, not just round the minimap. It shows even with the minimap hidden.")
+    window.minimapFree = free
+    Detail(page, "Click it for these settings, right-click for What's new, and drag it round the minimap, or anywhere while it's free-floating.",
+        34, -136)
 
     -- Help: the tour of the basics, as a first install offers it, and the
     -- Discord for bugs and ideas.
@@ -783,6 +790,7 @@ local function BuildGeneral(window, page)
             or "Get it on CurseForge or GitHub: click one for its link.")
         bars:SetChecked(B:Enabled())
         minimap:SetChecked(ns.Get("minimap"))
+        free:SetChecked(ns.Get("minimapFree"))
         -- New files only load after a full restart: until then, no tour.
         tour:SetShown(ns.Tour ~= nil)
     end
@@ -1167,14 +1175,13 @@ local function BuildWindow()
     -- hooks the pages and the profile menu add.
     window:SetScript("OnShow", function(self)
         self:Refresh()
-        ns.EscUpdate()
     end)
     window:SetScript("OnHide", function(self)
         -- Closed mid-drag, it never hears the mouse let go: stop moving now.
         self:StopMovingOrSizing()
-        ns.EscUpdate()
         if ns.Bars then ns.Bars:SetUnlocked(false) end
     end)
+    ns.CloseOnEscape(window)
 
     -- Header: the addon's icon, and "Enhanced" in the accent.
     local header = T:TitleBar(window, HEADER)
