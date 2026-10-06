@@ -78,6 +78,12 @@ local function PulsePage()
     return ns.BuildPulsePage ~= nil
 end
 
+-- The addon whose own pulse runs instead, Forever Enhanced Cooldown Pulse,
+-- while it does; else nil (Pulse.lua).
+local function PulseElsewhere()
+    return ns.Pulse and ns.Pulse.Elsewhere and ns.Pulse:Elsewhere() or nil
+end
+
 -- How many cooldowns are ticked to pulse, for its Try it.
 local function PulsePicks()
     local count = 0
@@ -366,11 +372,22 @@ local NEWS = {
         page = "pulse",
         when = PulsePage,
         title = "Turn it on",
-        text = "Cooldown pulse, under More: a big icon in the middle of your screen the moment a cooldown is ready,"
-            .. " in a fight too. Off until you tick it.",
+        -- With Forever Enhanced Cooldown Pulse's own pulse on, it runs
+        -- there, and this tick is greyed out.
+        text = function()
+            local elsewhere = PulseElsewhere()
+            if elsewhere then
+                return "Cooldown pulse is on in " .. elsewhere .. ", so it runs there and this tick waits."
+                    .. " Turn it off there to use this one."
+            end
+            return "Cooldown pulse, under More: a big icon in the middle of your screen the moment a cooldown is ready,"
+                .. " in a fight too. Off until you tick it."
+        end,
         try = "Try it: tick it.",
-        already = function() return ns.Get("pulse") end,
-        alreadyText = "It's already on.",
+        already = function() return ns.Get("pulse") or PulseElsewhere() ~= nil end,
+        alreadyText = function()
+            return PulseElsewhere() and "Nothing to do here while it runs there." or "It's already on."
+        end,
         watch = function() return ns.Get("pulse") and 1 or 0 end,
         -- The tick; the box under it, over the choices that follow.
         target = function(w) return w.pages.pulse.master end,

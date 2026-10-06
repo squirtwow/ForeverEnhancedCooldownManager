@@ -26,10 +26,100 @@
 -- done. Nor for an item you carry none of now. The pulse is the addon's own plain frame: it never takes the mouse,
 -- and shows in a fight like anything that isn't secure. Nothing of
 -- Blizzard's is touched.
-local _, ns = ...
+--
+-- Forever Enhanced Cooldown Pulse is this same pulse as an addon of its
+-- own: with both installed, only one of them pulses, so a cooldown never
+-- pops up twice. Whichever pulse is on keeps it; the other's on/off tick
+-- greys out, its hover note saying where the pulse runs and how to swap.
+-- With both saved as on, this one wins. No popups, and no reload: a change
+-- in one greys or frees the other at once (the link, below).
+local ADDON, ns = ...
 
 local P = {}
 ns.Pulse = P
+
+-- The link with Forever Enhanced Cooldown Pulse: one small table in the
+-- game's global space, ForeverPulseLink, made by whichever addon loads
+-- first. Each addon registers itself in it by its folder name: its title, a
+-- rank (the higher wins when both are on), a function saying whether its
+-- own tick is on, and one to call when the other's changes. Its functions
+-- come from the newest version of this code loaded, so an older copy in the
+-- other addon never holds back a newer one. The same code as that addon's
+-- Link.lua (Tools/TestRules.mjs checks the two match).
+local LINK_VERSION = 1
+local LINK_RANK = 2 -- this addon's; Forever Enhanced Cooldown Pulse's is 1
+local link = _G.ForeverPulseLink
+if type(link) ~= "table" then
+    link = {}
+    _G.ForeverPulseLink = link
+end
+if type(link.owners) ~= "table" then link.owners = {} end
+if type(link.version) ~= "number" or link.version < LINK_VERSION then
+    link.version = LINK_VERSION
+
+    -- An addon joins (or joins again) under its folder name, and the others
+    -- hear of it.
+    function link:Register(key, owner)
+        if type(key) ~= "string" or type(owner) ~= "table" then return end
+        self.owners[key] = owner
+        self:Notify(key)
+    end
+
+    -- Every other addon hears that something changed. A call that fails is
+    -- passed over, so one addon's error never stops the other; one that
+    -- calls back in while this runs is ignored, so it can't go round.
+    function link:Notify(from)
+        if self.notifying then return end
+        self.notifying = true
+        for key, owner in pairs(self.owners) do
+            if key ~= from and type(owner) == "table" and type(owner.Refresh) == "function" then pcall(owner.Refresh) end
+        end
+        self.notifying = nil
+    end
+
+    -- The addon that pulses now: of those whose tick is on, the highest
+    -- rank (then the first by name). Its key and entry, or nil for none.
+    function link:Runner()
+        local bestKey, best, bestRank
+        for key, owner in pairs(self.owners) do
+            if type(key) == "string" and type(owner) == "table" and type(owner.IsOn) == "function" then
+                local ok, on = pcall(owner.IsOn)
+                local rank = tonumber(owner.rank) or 0
+                if ok and on == true and (not best or rank > bestRank or (rank == bestRank and key < bestKey)) then
+                    bestKey, best, bestRank = key, owner, rank
+                end
+            end
+        end
+        return bestKey, best
+    end
+end
+
+-- The addon whose pulse runs now, by folder name, and its title; nil when
+-- neither pulse is on. Asked safely, whichever copy of the link's code won.
+local function Runner()
+    local ok, key, owner = pcall(link.Runner, link)
+    if not ok or type(key) ~= "string" then return nil end
+    return key, type(owner) == "table" and type(owner.name) == "string" and owner.name or key
+end
+
+-- The title of the other addon while the pulse runs there, else nil.
+function P:Elsewhere()
+    local key, name = Runner()
+    if key and key ~= ADDON then return name end
+    return nil
+end
+
+-- The on/off tick's hover note while it's greyed out, else nil.
+function P:Note()
+    local name = self:Elsewhere()
+    if name then return "Cooldown pulse is on in " .. name .. ". Turn it off there to use this one." end
+    return nil
+end
+
+-- This addon's tick changed (ns.Set): the other hears of it.
+function P:Notify()
+    pcall(link.Notify, link, ADDON)
+end
 
 local Style = ns.Style
 local FLAT = "Interface\\Buttons\\WHITE8X8"
@@ -76,8 +166,12 @@ local function Report(err)
     print("|cffffd100" .. ns.TITLE .. ":|r the cooldown pulse couldn't follow a cooldown. Please report this: " .. P.lastError)
 end
 
+-- Whether the pulse runs: ticked on, and not running in Forever Enhanced
+-- Cooldown Pulse instead (with both on, this one runs).
 function P:On()
-    return ns.Get("pulse") == true
+    if ns.Get("pulse") ~= true then return false end
+    local key = Runner()
+    return key == nil or key == ADDON
 end
 
 -- The two styles, and the settings of each one's own. The rest of the look
@@ -460,6 +554,17 @@ function P:Watched()
     return watched
 end
 
+-- A watcher's cooldown cleared: one on hold, or only the global cooldown.
+-- The game can answer a Clear with OnCooldownDone, and that's no cooldown
+-- coming back, so the watcher is let go of meanwhile (a cooldown that ends
+-- by itself still says so as it ends). From Forever Enhanced Cooldown Pulse.
+local function Clear(watch)
+    local cooldown = watch.cooldown
+    cooldown.watch = nil
+    cooldown:Clear()
+    cooldown.watch = watch
+end
+
 local function Feed(watch)
     local cooldown = watch.cooldown
     if watch.spellID then
@@ -467,12 +572,12 @@ local function Feed(watch)
         -- (SpellSharedDocumentation.lua), so it's asked plainly.
         local info = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(watch.spellID)
         if type(info) == "table" and Open(info.isEnabled) and info.isEnabled == false then
-            cooldown:Clear()
+            Clear(watch)
             return
         end
         -- Without the global cooldown. Secret in a fight: handed on as it is.
         local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(watch.spellID, true)
-        if duration then cooldown:SetCooldownFromDurationObject(duration) else cooldown:Clear() end
+        if duration then cooldown:SetCooldownFromDurationObject(duration) else Clear(watch) end
         return
     end
     local start, length, enable
@@ -491,7 +596,7 @@ local function Feed(watch)
         -- run their own cooldowns, each with its own pulse.
         if not watch.slot then watch.shared = start .. ":" .. length end
     else
-        cooldown:Clear()
+        Clear(watch)
     end
 end
 
@@ -780,4 +885,16 @@ function P:Start()
     self.driver = driver
     quietUntil = GetTime() + self.QUIET
     Soon("rebuild")
+    -- On the link: Forever Enhanced Cooldown Pulse hears this addon joined,
+    -- and whenever its tick changes; this one hears of that one's the same
+    -- way, so the pulse starts or stops here and the tick greys or frees.
+    pcall(link.Register, link, ADDON, {
+        name = ns.TITLE,
+        rank = LINK_RANK,
+        IsOn = function() return ns.Get("pulse") == true end,
+        Refresh = function()
+            if P.started then P:Apply() end
+            if ns.window and ns.window:IsShown() then ns.window:Refresh() end
+        end,
+    })
 end

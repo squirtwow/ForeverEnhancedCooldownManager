@@ -1,5 +1,6 @@
 -- The Cooldown pulse page in the /ccm window, under More: one tick to turn
--- it on, a live preview of a pulse on a small screen and up close, where it
+-- it on (greyed out while Forever Enhanced Cooldown Pulse's own pulse runs,
+-- Pulse.lua), a live preview of a pulse on a small screen and up close, where it
 -- sits, how it looks and sounds in each of its two styles (Quick and Long),
 -- and every cooldown you have that can pulse, spells and items, to tick,
 -- each one Quick or Long. Pulse.lua does the work.
@@ -162,8 +163,12 @@ local function BuildOptions(window, page, inner)
         Changed()
     end)
     master:SetPoint("TOPLEFT", 0, 0)
-    window:Hint(master, "A big icon in the middle of your screen the moment a cooldown is ready, in a fight too."
-        .. " It never takes the mouse.")
+    -- Greyed out while Forever Enhanced Cooldown Pulse's own pulse runs:
+    -- then it says where, and how to swap.
+    window:Hint(master, function()
+        return P:Note() or ("A big icon in the middle of your screen the moment a cooldown is ready, in a fight too."
+            .. " It never takes the mouse.")
+    end)
     page.master = master
 
     -- A label, then its buttons LABEL along.
@@ -438,7 +443,11 @@ function ns.BuildPulsePage(window, page, width)
     function page:Refresh()
         if not P.STYLES[P.editing] then P.editing = "quick" end
         local on, editing = ns.Get("pulse"), P.editing
+        -- Your own choice, greyed out while the pulse runs in Forever
+        -- Enhanced Cooldown Pulse: it waits until that one's turned off.
+        local elsewhere = P:Elsewhere()
         self.master:SetChecked(on)
+        self.master:SetUsable(not elsewhere)
         self.edit:SetSelected(editing)
         for _, slider in ipairs(self.sliders) do
             slider:SetShown(slider.style == nil or slider.style == editing)
@@ -460,7 +469,12 @@ function ns.BuildPulsePage(window, page, width)
         end
         local said = count == 1 and "1 cooldown pulses when it's ready." or (count .. " cooldowns pulse when they're ready.")
         if count == 0 then said = "Nothing to pulse yet: tick some below." end
-        self.status:SetText(on and said or "Off. Tick the box below to start.")
+        if elsewhere then
+            said = "Running in " .. elsewhere .. " instead."
+        elseif not on then
+            said = "Off. Tick the box below to start."
+        end
+        self.status:SetText(said)
         self:FillList(spells, items)
 
         -- Where it shows, in words and on the small screen, to scale, as big

@@ -444,11 +444,13 @@ local sealed = setmetatable({}, {
 -- Sounds played, the spells whose cooldowns were asked for, and spells
 -- whose cooldown is on hold (it starts once their effect is used up).
 local sounds, asked, held = {}, {}, {}
--- Like the game: clearing a cooldown is counted, as well as noted.
+-- Like the game: clearing a cooldown is counted, as well as noted, and
+-- the game may answer it with the done script.
 function Proto:Clear()
     local s = S[self]
     s.clears = (s.clears or 0) + 1
     s.last.Clear = table.pack()
+    if s.scripts.OnCooldownDone then s.scripts.OnCooldownDone(self) end
 end
 
 local function PulseGame()
@@ -580,10 +582,19 @@ end
 Environment()
 BlizzardFrames()
 PulseGame()
+-- Every name the addon puts in the game's global space as it first loads
+-- and its window opens, for the check beside Forever Enhanced Cooldown
+-- Pulse near the end. A global: the main chunk is near Lua's limit of 200 locals.
+ADDED_GLOBALS = {}
+setmetatable(_G, { __newindex = function(globals, name, value)
+    if value ~= nil then ADDED_GLOBALS[#ADDED_GLOBALS + 1] = tostring(name) end
+    rawset(globals, name, value)
+end })
 local ns = LoadAll(nil)
 local P = ns.Pulse
 Tick(P)
 ns.ShowWindow()
+setmetatable(_G, nil)
 local w = FECMFrame
 local page = w.pages.pulse
 do
@@ -717,8 +728,8 @@ do
     Tick(P)
     table.sort(asked)
     Equal(table.concat(asked, ",") .. " " .. ((S[bark].clears or 0) - clears) .. " "
-        .. tostring(Last(bark, "SetCooldownFromDurationObject")), "5211,1259416 1 nil",
-        "Barkskin's cooldown on hold, in a fight: cleared, never counted from the cast")
+        .. tostring(Last(bark, "SetCooldownFromDurationObject")) .. " " .. tostring(P:Showing()), "5211,1259416 1 nil nil",
+        "Barkskin's cooldown on hold, in a fight: cleared, never counted from the cast, and no pulse for the clear")
     held[22812] = nil
     Fire("SPELL_UPDATE_COOLDOWN")
     Tick(P)
@@ -994,8 +1005,8 @@ do
     local trinketCd, potionCd = watchers["slot:13"].cooldown, watchers["family:healing"].cooldown
     Equal(tostring(Last(trinketCd, "SetCooldown", 1)) .. " " .. tostring(Last(trinketCd, "SetCooldown", 2)), "50 120",
         "the trinket's cooldown handed on")
-    Equal(tostring(Last(potionCd, "SetCooldown")) .. " " .. tostring((S[potionCd].clears or 0) > 0), "nil true",
-        "the global cooldown alone: cleared")
+    Equal(tostring(Last(potionCd, "SetCooldown")) .. " " .. tostring((S[potionCd].clears or 0) > 0) .. " " .. tostring(P:Showing()),
+        "nil true nil", "the global cooldown alone: cleared, and no pulse for it")
     -- Hidden in a fight: the watcher keeps what it had.
     lockdown = true
     trinketCooldown = { SECRET, SECRET, 1 }
@@ -1377,7 +1388,7 @@ do
     local from = 16 + Wide(title.text, title.template) + 10
     local longest = 0
     for _, said in ipairs({ "Off. Tick the box below to start.", "Nothing to pulse yet: tick some below.",
-        "12 cooldowns pulse when they're ready." }) do
+        "12 cooldowns pulse when they're ready.", "Running in Forever Enhanced Cooldown Pulse instead." }) do
         longest = math.max(longest, Wide(said, S[page.status].template))
     end
     local previewLeft = 638 - 16 - S[page.previewButton].width
@@ -1818,8 +1829,10 @@ end
         if step.version == "1.0.0" then basics = math.max(basics, #text) end
     end
     for _, step in ipairs(Tour:News("1.4.4")) do
-        local all = step.text .. " " .. step.title .. " " .. (step.try or "") .. " " .. (step.alreadyText or "")
-        if #step.text > basics or all:find("\226\128\148", 1, true) or all:find("/fecm", 1, true) then long[#long + 1] = step.title end
+        local text = type(step.text) == "function" and step.text() or step.text
+        local already = type(step.alreadyText) == "function" and step.alreadyText() or step.alreadyText
+        local all = text .. " " .. step.title .. " " .. (step.try or "") .. " " .. (already or "")
+        if #text > basics or all:find("\226\128\148", 1, true) or all:find("/fecm", 1, true) then long[#long + 1] = step.title end
     end
     Equal(table.concat(long, ", "), "", "each plain, no longer than the basics' steps, and never /fecm")
     -- The page help's steps are in no What's new, nor the full tour.
@@ -2167,6 +2180,222 @@ end)()
         "either choice: the same edge, still lit, the template not tried again")
     usable[7384] = nil
     Equal(#printed, 0, "no errors from the ready glow")
+end)()
+
+-- Forever Enhanced Cooldown Pulse beside it: one pulse at a time --------------------------------------
+-- That addon is this pulse on its own. With both installed only one pulses:
+-- whichever is on keeps it, the other's tick greyed out with a note saying
+-- where it runs and how to swap; with both saved as on, this one wins. Both
+-- join one shared table, ForeverPulseLink, and tell each other when their
+-- ticks change, so nothing needs a reload. That addon is stood in for here
+-- (on the link at rank 1, its tick settable), and run as its own Link.lua
+-- when it's beside this one.
+
+;(function()
+    local MANAGER, PULSE = "ForeverEnhancedCooldownManager", "ForeverEnhancedCooldownPulse"
+    local NOTE = "Cooldown pulse is on in Forever Enhanced Cooldown Pulse. Turn it off there to use this one."
+    local RUNNING = "Running in Forever Enhanced Cooldown Pulse instead."
+    local ABOUT = "A big icon in the middle of your screen the moment a cooldown is ready, in a fight too. It never takes the mouse."
+    local OFF = "Off. Tick the box below to start."
+    local ON = "2 cooldowns pulse when they're ready."
+    -- Forever Enhanced Cooldown Pulse, stood in for: its tick, and how often it's told something changed.
+    local function Other(on)
+        local other = { on = on, told = 0 }
+        other.owner = { name = "Forever Enhanced Cooldown Pulse", rank = 1,
+            IsOn = function() return other.on end,
+            Refresh = function() other.told = other.told + 1 end }
+        return other
+    end
+    local function Join(other) ForeverPulseLink:Register(PULSE, other.owner) end
+    -- Its tick clicked: saved, then the others told.
+    local function Flip(other, on)
+        other.on = on
+        ForeverPulseLink:Notify(PULSE)
+    end
+    -- A login with these settings and the link as left (nil: none yet),
+    -- Barkskin and Bash ticked, the window open on the page.
+    local function Start(saved, link)
+        Environment()
+        BlizzardFrames()
+        PulseGame()
+        _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
+        _G.ForeverPulseLink = link
+        local lns = LoadAll(saved)
+        Tick(lns.Pulse)
+        lns.SetPulsePick("Barkskin", true)
+        lns.SetPulsePick("Bash", true)
+        lns.Pulse:Apply()
+        lns.ShowWindow()
+        FECMFrame:Select("pulse")
+        return lns, FECMFrame.pages.pulse
+    end
+    -- The tick (ticked, usable, alpha), the title row, and how many cooldowns are watched.
+    local function State(lns, page)
+        return tostring(page.master.checked) .. " " .. tostring(page.master.usable) .. " " .. S[page.master].alpha .. " | "
+            .. S[page.status].text .. " | " .. (lns.Pulse:Watchers())
+    end
+    local function Runner() return tostring((ForeverPulseLink:Runner())) end
+    -- A watched cooldown done, past the quiet after logging in: what pulses.
+    local function Ready(lns, key)
+        clock = clock + 5
+        local _, list = lns.Pulse:Watchers()
+        if list[key] then Done(list[key].cooldown) end
+        local showing = tostring((lns.Pulse:Showing()))
+        Finish(lns.Pulse)
+        return showing
+    end
+
+    -- Absent: the pulse runs here, as ever.
+    local lns, page = Start({ pulse = true }, nil)
+    local link = ForeverPulseLink
+    local entry, joined = link.owners[MANAGER], 0
+    for _ in pairs(link.owners) do joined = joined + 1 end
+    Equal(State(lns, page), "true true 1 | " .. ON .. " | 2", "no Forever Enhanced Cooldown Pulse: the pulse runs here, its tick free")
+    Equal(link.version .. " " .. joined .. " " .. entry.name .. " " .. entry.rank .. " " .. tostring(entry.IsOn()) .. " " .. Runner(),
+        "1 1 Forever Enhanced Cooldown Manager 2 true " .. MANAGER, "on the link by its folder name, with its title, rank 2 and its tick")
+    Equal(tostring(lns.Pulse:Elsewhere()) .. " " .. tostring(lns.Pulse:Note()) .. " | " .. Note(page.master), "nil nil | " .. ABOUT,
+        "its tick says what it does")
+    Equal(Ready(lns, "Barkskin"), "Barkskin", "a cooldown done pulses")
+    local added = {}
+    for _, name in ipairs(ADDED_GLOBALS) do
+        -- Its saved settings, and its API for other addons (ForeverEnhancedCooldownManagerAPI, RaidTimers.lua).
+        if not (name:match("^FECM") or name:match("^SLASH_FECM%d$") or name:match("^ForeverEnhancedCooldownManager%u%u")) then
+            added[#added + 1] = name
+        end
+    end
+    Equal(#ADDED_GLOBALS > 5 and table.concat(added, ","), "ForeverPulseLink",
+        "in the game's global space, only the addon's own names and the link: none to clash with Forever Enhanced Cooldown Pulse's")
+
+    -- Present and on, this one off: it joins while the window is open, and this tick greys out at once.
+    lns, page = Start({ pulse = false }, nil)
+    Equal(State(lns, page), "false true 1 | " .. OFF .. " | 0", "off on its own: its tick free")
+    local other = Other(true)
+    Join(other)
+    Equal(State(lns, page) .. " | " .. Runner(), "false false 0.35 | " .. RUNNING .. " | 0 | " .. PULSE,
+        "Forever Enhanced Cooldown Pulse joins with its pulse on: it runs there, this tick greys out at once, the title row says so")
+    Equal(Note(page.master) .. " | " .. tostring(Last(page.master, "SetEnabled")) .. " " .. tostring(Last(page.master, "SetMotionScriptsWhileDisabled")),
+        NOTE .. " | false true", "unclickable, its hover note saying where the pulse runs and how to swap")
+    local told = other.told
+    page.master:Click()
+    Equal(tostring(lns.Get("pulse")) .. " " .. tostring(page.master.checked) .. " " .. (other.told - told) .. " " .. (lns.Pulse:Watchers()),
+        "false false 0 0", "clicked anyway: nothing changes, nothing is told, nothing watched")
+    local footer = S[FECMFrame.note]
+    Equal(tostring(Wide(NOTE, footer.template) <= 2 * footer.width), "true", "the note fits two lines of the footer")
+    -- The ? walks the page: its first step says where the pulse runs, and that there's nothing to do here.
+    local basics = 0
+    for _, step in ipairs(lns.Tour:News("0.9.0")) do
+        local text = type(step.text) == "function" and step.text() or step.text
+        if step.version == "1.0.0" then basics = math.max(basics, #text) end
+    end
+    FECMFrame.help:Click()
+    local box = FECMTour
+    local said = S[box.text].text
+    local step = "Cooldown pulse is on in Forever Enhanced Cooldown Pulse, so it runs there and this tick waits."
+        .. " Turn it off there to use this one."
+    Equal(S[box.title].text .. " | " .. tostring(said:find(step, 1, true) == 1) .. " "
+        .. tostring(said:find("Nothing to do here while it runs there.", 1, true) ~= nil) .. " " .. tostring(#step <= basics) .. " "
+        .. tostring(step:find("\226\128\148", 1, true)) .. " | " .. BoxFits(page), "TURN IT ON | true true true nil | ",
+        "the ? on the page: Turn it on says it runs there, nothing to do here, plain and short, its box on the page")
+    box.skip:Click()
+
+    -- Toggled there, live: greyed and freed at once, no reload.
+    Flip(other, false)
+    Equal(State(lns, page) .. " | " .. Runner(), "false true 1 | " .. OFF .. " | 0 | nil", "turned off there: this tick free again at once")
+    Flip(other, true)
+    Equal(State(lns, page), "false false 0.35 | " .. RUNNING .. " | 0", "and on again: greyed again at once")
+    Flip(other, false)
+
+    -- Present and off: this tick is free, and clicking it tells that addon at once.
+    told = other.told
+    page.master:Click()
+    Equal((other.told - told) .. " | " .. State(lns, page) .. " | " .. Runner(), "1 | true true 1 | " .. ON .. " | 2 | " .. MANAGER,
+        "ticked on here: Forever Enhanced Cooldown Pulse is told at once, and the pulse runs here")
+    Equal(Ready(lns, "Bash"), "Bash", "and pulses here")
+    -- On here, then on there too: this one keeps it.
+    Flip(other, true)
+    Equal(State(lns, page) .. " | " .. Runner(), "true true 1 | " .. ON .. " | 2 | " .. MANAGER,
+        "turned on there while this one is on: this one keeps it, its tick free")
+    Equal(Ready(lns, "Barkskin"), "Barkskin", "and still pulses here")
+    page.master:Click()
+    Equal(State(lns, page) .. " | " .. Runner() .. " " .. tostring(lns.Get("pulse")), "false false 0.35 | " .. RUNNING .. " | 0 | " .. PULSE .. " false",
+        "turned off here: it runs there, and this tick greys out")
+    Equal(Ready(lns, "Barkskin"), "nil", "a cooldown done now pulses only there, never here too")
+
+    -- Both saved as on (a player with both, or one updating from 1.5.0): this one wins, whichever loads first.
+    other = Other(true)
+    lns, page = Start({ pulse = true }, { owners = { [PULSE] = other.owner } })
+    Equal(other.told .. " | " .. State(lns, page) .. " | " .. Runner(), "1 | true true 1 | " .. ON .. " | 2 | " .. MANAGER,
+        "that addon's link made first: this one joins it and is heard; both on, this one wins, its tick free")
+    Equal(Ready(lns, "Barkskin"), "Barkskin", "and it pulses here")
+    other = Other(true)
+    lns, page = Start({ pulse = true }, nil)
+    Join(other)
+    Equal(State(lns, page) .. " | " .. Runner(), "true true 1 | " .. ON .. " | 2 | " .. MANAGER, "that one joining after: this one still wins")
+    told = other.told
+    page.master:Click()
+    Equal((other.told - told) .. " | " .. State(lns, page) .. " | " .. Runner(), "1 | false false 0.35 | " .. RUNNING .. " | 0 | " .. PULSE,
+        "turned off here: that one is told and takes over, and this tick greys out")
+    Flip(other, false)
+    Equal(State(lns, page) .. " | " .. tostring(lns.Get("pulse")), "false true 1 | " .. OFF .. " | 0 | false",
+        "turned off there too: this tick free again, still off")
+
+    -- One whose calls fail breaks nothing here; a link a newer version left keeps its own code.
+    lns, page = Start({ pulse = false }, nil)
+    ForeverPulseLink:Register(PULSE, { name = "Broken", rank = 5, IsOn = function() error("broken") end,
+        Refresh = function() error("broken") end })
+    Equal(State(lns, page), "false true 1 | " .. OFF .. " | 0", "an addon whose calls fail counts as off: this tick free")
+    page.master:Click()
+    Equal(State(lns, page) .. " | " .. #printed, "true true 1 | " .. ON .. " | 2 | 0", "ticked: the pulse runs here, the failing call passed over")
+    local calls = {}
+    local newer = { version = 2, owners = {} }
+    function newer:Register(key, owner)
+        calls[#calls + 1] = "Register " .. key
+        self.owners[key] = owner
+    end
+    function newer:Notify(from) calls[#calls + 1] = "Notify " .. from end
+    function newer:Runner() return nil end
+    local functions = { newer.Register, newer.Notify, newer.Runner }
+    lns, page = Start({ pulse = false }, newer)
+    page.master:Click()
+    Equal(tostring(ForeverPulseLink == newer) .. " " .. newer.version .. " "
+        .. tostring(newer.Register == functions[1] and newer.Notify == functions[2] and newer.Runner == functions[3]) .. " | "
+        .. table.concat(calls, ", "), "true 2 true | Register " .. MANAGER .. ", Notify " .. MANAGER,
+        "a link from a newer version: kept, its own code used to join and to tell")
+    Equal(State(lns, page), "true true 1 | " .. ON .. " | 2", "its Runner naming none: ticked on, the pulse runs here")
+    lns, page = Start({ pulse = true }, "left over")
+    Equal(type(ForeverPulseLink) .. " " .. tostring(ForeverPulseLink.owners[MANAGER] ~= nil) .. " | " .. State(lns, page),
+        "table true | true true 1 | " .. ON .. " | 2", "something else under its name: a link made in its place")
+
+    -- The real thing, when it's beside this addon: its Link.lua, run as its own.
+    local chunk = loadfile("../ForeverEnhancedCooldownPulse/Link.lua")
+    if chunk then
+        lns, page = Start({ pulse = true }, nil)
+        local theirs = { TITLE = "Forever Enhanced Cooldown Pulse", on = true }
+        function theirs.Get(key) if key == "pulse" then return theirs.on end end
+        chunk(PULSE, theirs)
+        theirs.Link:Start()
+        local L = theirs.Link
+        local function Theirs() return tostring(L:Runs()) .. " " .. tostring(L:Note()) .. " " .. tostring(S[L.watcher].shown) end
+        Equal(State(lns, page) .. " | " .. Theirs(), "true true 1 | " .. ON .. " | 2 | false Cooldown pulse is on in Forever Enhanced"
+            .. " Cooldown Manager. Turn it off there to use this one. false",
+            "its own Link.lua, both on: this one runs; there, it waits with the note, never reading this one's settings")
+        page.master:Click()
+        Equal(State(lns, page) .. " | " .. Theirs(), "false false 0.35 | " .. RUNNING .. " | 0 | true nil false",
+            "turned off here: it runs there at once, this tick greyed")
+        theirs.on = false
+        L:Changed()
+        Equal(State(lns, page) .. " | " .. Theirs(), "false true 1 | " .. OFF .. " | 0 | false nil false", "turned off there: this tick free")
+        page.master:Click()
+        theirs.on = true
+        L:Changed()
+        Equal(State(lns, page) .. " | " .. Theirs(), "true true 1 | " .. ON .. " | 2 | false Cooldown pulse is on in Forever Enhanced"
+            .. " Cooldown Manager. Turn it off there to use this one. false", "both on again: this one keeps it")
+        Equal(Ready(lns, "Bash"), "Bash", "and pulses here")
+    else
+        io.write("Forever Enhanced Cooldown Pulse isn't beside this addon: its own Link.lua not run.\n")
+    end
+    _G.ForeverPulseLink = nil
+    Equal(#printed, 0, "no errors beside Forever Enhanced Cooldown Pulse")
 end)()
 
 Equal(#printed, 0, "no errors")

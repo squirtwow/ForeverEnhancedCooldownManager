@@ -230,7 +230,15 @@ function T:Check(parent, label, onClick)
     function check:GetChecked()
         return self.checked == true
     end
+    -- Greyed out and unclickable while it doesn't apply; still says why on hover.
+    function check:SetUsable(usable)
+        self.usable = usable and true or false
+        self:SetEnabled(self.usable)
+        if self.SetMotionScriptsWhileDisabled then self:SetMotionScriptsWhileDisabled(true) end
+        self:SetAlpha(self.usable and 1 or .35)
+    end
     check:SetScript("OnClick", function(self)
+        if self.usable == false then return end
         self:SetChecked(not self.checked)
         if onClick then onClick(self) end
     end)

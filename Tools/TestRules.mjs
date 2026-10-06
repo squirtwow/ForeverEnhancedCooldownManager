@@ -7,17 +7,19 @@
 // those calls do; this checks there are no others. Also: the .toc loads every
 // file once, in order, and the Cooldown pulse only hands cooldowns on (it
 // never reads one's times, only whether it's on hold) and never takes the
-// mouse but for the box that moves it.
+// mouse but for the box that moves it. And the pulse's link with Forever
+// Enhanced Cooldown Pulse: one shared global, made only when missing, its
+// code the same as that addon's Link.lua when it's beside this one.
 // Run with: node --test Tools/TestRules.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 const root = new URL('../', import.meta.url);
 const files = readdirSync(root).filter(name => name.endsWith('.lua'));
-// Each file's code without its comments, so notes about these calls don't count.
-const code = Object.fromEntries(files.map(name => [name, readFileSync(new URL(name, root), 'utf8')
-  .replace(/--\[\[[\s\S]*?\]\]/g, '').replace(/--[^\n]*/g, '')]));
+// Code without its comments, so notes about these calls don't count.
+const bare = text => text.replace(/--\[\[[\s\S]*?\]\]/g, '').replace(/--[^\n]*/g, '');
+const code = Object.fromEntries(files.map(name => [name, bare(readFileSync(new URL(name, root), 'utf8'))]));
 const count = (text, pattern) => (text.match(pattern) || []).length;
 const where = pattern => files.filter(name => pattern.test(code[name]));
 
@@ -107,3 +109,48 @@ test('the only sizes set on Blizzard\'s frames are Raid Timers\' own two calls',
   // container (B:SetScale is the addon's own All bars size, in Bars.lua).
   assert.deepEqual(where(/(?<!\bB):SetScale\(/).sort(), ['Buffs.lua', 'RaidTimers.lua']);
 });
+
+// The pulse link's shared part, from "local link = _G.ForeverPulseLink" to
+// the end of the block that puts its functions in: each line trimmed, blank
+// ones left out, and each copy's name for its version number made the same.
+function linkBlock(text, version) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex(line => line.startsWith('local link = _G.ForeverPulseLink'));
+  const open = lines.findIndex((line, i) => i > start && line.startsWith('if type(link.version)'));
+  const end = lines.findIndex((line, i) => i > open && line.trimEnd() === 'end');
+  assert.ok(start >= 0 && open > start && end > open, 'the link\'s shared part found');
+  return lines.slice(start, end + 1).map(line => line.trim().split(version).join('VERSION')).filter(Boolean);
+}
+const pulseLink = new URL('../../ForeverEnhancedCooldownPulse/Link.lua', import.meta.url);
+
+test('the pulse link: one shared global, made only when missing, its functions only from a newer version', () => {
+  const pulse = code['Pulse.lua'];
+  assert.deepEqual(where(/ForeverPulseLink/), ['Pulse.lua'], 'only the pulse uses it');
+  assert.match(pulse, /local link = _G\.ForeverPulseLink\r?\nif type\(link\) ~= "table" then\r?\n\s+link = \{\}\r?\n\s+_G\.ForeverPulseLink = link\r?\nend/,
+    'made only when missing, never replaced');
+  assert.equal(count(pulse, /_G\.ForeverPulseLink\s*=/g), 1, 'set in one place');
+  assert.match(pulse, /local LINK_VERSION = 1\b/);
+  assert.match(pulse, /local LINK_RANK = 2\b/, 'rank 2: with both on, this one wins');
+  const block = linkBlock(pulse, 'LINK_VERSION');
+  assert.equal(block[3 + block.indexOf('if type(link) ~= "table" then')], 'end');
+  assert.ok(block.includes('if type(link.version) ~= "number" or link.version < VERSION then'), 'its functions only from a newer version');
+  for (const name of ['Register(key, owner)', 'Notify(from)', 'Runner()']) {
+    assert.ok(block.includes(`function link:${name}`), `link:${name} in the shared part`);
+  }
+  // Registered once, by its folder name, as the contract has it.
+  assert.equal(count(pulse, /pcall\(link\.Register, link, ADDON, \{/g), 1);
+  assert.match(pulse, /local ADDON, ns = \.\.\./);
+});
+
+test('the pulse link is the same code as Forever Enhanced Cooldown Pulse\'s Link.lua, when it\'s there',
+  { skip: !existsSync(pulseLink) && 'not beside this addon' }, () => {
+    const theirs = bare(readFileSync(pulseLink, 'utf8'));
+    const ours = code['Pulse.lua'];
+    assert.deepEqual(linkBlock(ours, 'LINK_VERSION'), linkBlock(theirs, 'L.VERSION'), 'the shared part matches, line for line');
+    assert.equal(theirs.match(/L\.VERSION = (\d+)/)[1], ours.match(/local LINK_VERSION = (\d+)/)[1], 'the same version');
+    // That addon knows this one by its folder name and rank, and ranks itself lower.
+    assert.match(theirs, /L\.MANAGER = "ForeverEnhancedCooldownManager"/);
+    const rank = Number(ours.match(/local LINK_RANK = (\d+)/)[1]);
+    assert.equal(Number(theirs.match(/L\.MANAGER_RANK = (\d+)/)[1]), rank, 'this one\'s rank as that one expects it');
+    assert.ok(Number(theirs.match(/L\.RANK = (\d+)/)[1]) < rank, 'that one\'s rank lower, so this one wins with both on');
+  });

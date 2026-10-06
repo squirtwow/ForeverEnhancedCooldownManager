@@ -880,11 +880,13 @@ end
 
 -- Changes ---------------------------------------------------------------------------
 -- Everything lives in the saved settings, which the game writes at logout and
--- on a reload; a change only needs the window redrawn.
+-- on a reload; a change only needs the window redrawn. The Cooldown pulse
+-- switched on or off is told to Forever Enhanced Cooldown Pulse too (Pulse.lua).
 
 function ns.Set(key, value)
     if not db then return end
     db[key] = value
+    if key == "pulse" and ns.Pulse and ns.Pulse.Notify then ns.Pulse:Notify() end
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 

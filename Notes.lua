@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.5.1",
+        sections = {
+            { "Changed", {
+                "If Forever Enhanced Cooldown Pulse is installed, only one of the two pulses runs at a time.",
+            } },
+        },
+    },
+    {
         version = "1.5.0",
         sections = {
             { "Added", {
