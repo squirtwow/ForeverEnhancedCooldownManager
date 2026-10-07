@@ -133,16 +133,23 @@ local function Room(item)
     Style:KeyRoom(item.ChargeCount and item.ChargeCount.Current, item.ChargeCount, 2, numbers, cooldown, lift, parts.keyed)
 end
 
--- A key showing up or going (a new spell, a binding changed) moves the count with it.
-local function ShowKey(item)
+-- A key showing up or going (a new spell, a binding changed) moves the count
+-- with it. Nothing is looked up while keybinds are off, or with none (an
+-- item handed out again before it has a spell), and nothing is set again
+-- while the key stays the same: Blizzard hands its icons out again on every
+-- relayout.
+local function ShowKey(item, none)
     local parts = keys[item]
-    parts.keyed = Style:SetKey(parts.text, KeyFor(item))
+    local key = not none and ns.Get("keybinds") and KeyFor(item) or nil
+    if parts.keyed ~= nil and parts.key == key then return end
+    parts.key = key
+    parts.keyed = Style:SetKey(parts.text, key)
     Room(item)
 end
 
 -- A failure is reported once per session, never thrown into Blizzard's code.
-local function SafeShowKey(item)
-    local ok, err = pcall(ShowKey, item)
+local function SafeShowKey(item, none)
+    local ok, err = pcall(ShowKey, item, none)
     if not ok and not M.lastError then
         M.lastError = tostring(err)
         print("|cffffd100" .. ns.TITLE .. ":|r couldn't show a keybind on a cooldown icon. Please report this: " .. M.lastError)
@@ -206,33 +213,38 @@ end
 -- bar; Look shows the ones the chosen design needs and colours them, at the
 -- start and whenever the choice changes.
 
--- A bar's own colour, when one is chosen for its spell (at any rank), or the
--- colour for all.
-local function BarColour(item)
-    local id = SpellOf(item)
-    return Style:BarColour(id and ns.BarColourFor(id) or ns.Get("barColour"))
-end
+local BLACK = { 0, 0, 0 }
 
 local function Solid(texture, colour, alpha)
     texture:SetColorTexture(colour[1], colour[2], colour[3], alpha or 1)
 end
 
 -- The bar's fill in the texture chosen on the Look page, set only when it
--- changes: this runs whenever Blizzard gives a pooled bar a new spell.
+-- changes: this runs whenever Blizzard gives a pooled bar a new spell. True
+-- when it changed.
 local function Fill(bar, parts)
     local texture = Style:BarTexture()
-    if parts.texture == texture then return end
+    if parts.texture == texture then return false end
     parts.texture = texture
     bar:SetStatusBarTexture(texture)
+    return true
 end
 
-local function Look(item, parts)
-    local bar, design, colour = item.Bar, ns.Get("barStyle"), BarColour(item)
+-- The bar in the design and colour chosen: its own colour when one is chosen
+-- for its spell (at any rank), or the colour for all. As Blizzard gives a
+-- pooled bar a spell (after every relayout), a bar with the same spell,
+-- design and colour for all as last time is left as it is; force (a Look
+-- page choice, which may be its own colour) draws it again.
+local function Look(item, parts, force)
+    local bar, design, all, id = item.Bar, ns.Get("barStyle"), ns.Get("barColour"), SpellOf(item)
+    local filled = Fill(bar, parts)
+    if not (force or filled) and parts.drawn and parts.spell == id and parts.design == design and parts.all == all then return end
+    parts.drawn, parts.spell, parts.design, parts.all = true, id, design, all
+    local colour = Style:BarColour(id and ns.BarColourFor(id) or all)
     local glass, split, outline = design == "glass", design == "split", design == "outline"
-    Fill(bar, parts)
     bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
     -- A 1px edge round the bar and the icon: black, or the colour for Outline.
-    local edge = outline and colour or { 0, 0, 0 }
+    local edge = outline and colour or BLACK
     Solid(parts.edge, edge)
     if parts.iconEdge then Solid(parts.iconEdge, edge) end
     parts.sheen:SetShown(glass)
@@ -305,12 +317,12 @@ local function Bar(item, spec)
     Font(bar.Name, Style:Font(13))
     Font(bar.Duration, Style:Font(15))
     bars[item] = parts
-    Look(item, parts)
+    Look(item, parts, true)
 end
 
 -- A failure is reported once per session, never thrown into Blizzard's code.
-local function Redraw(item, parts)
-    local ok, err = pcall(Look, item, parts)
+local function Redraw(item, parts, force)
+    local ok, err = pcall(Look, item, parts, force)
     if not ok and not M.lastError then
         M.lastError = tostring(err)
         print("|cffffd100" .. ns.TITLE .. ":|r couldn't restyle a Tracked Bar. Please report this: " .. M.lastError)
@@ -329,7 +341,7 @@ end
 
 -- Redraws every restyled bar in the current design, colours and texture.
 function M:ApplyBarLook()
-    for item, parts in pairs(bars) do Redraw(item, parts) end
+    for item, parts in pairs(bars) do Redraw(item, parts, true) end
 end
 
 -- The spells of Blizzard's Tracked Bars, in their order, for the window's
@@ -482,13 +494,16 @@ local function Watch(spec)
         -- Blizzard's pool empties an item it takes back without clearing its
         -- cooldown the usual way, so nothing else would hide the old key when
         -- the item comes back as one of Edit Mode's empty placeholders. Its
-        -- key is read again here (none, until Blizzard gives it a spell).
-        if keys[item] then SafeShowKey(item) end
+        -- old key goes here: it has no spell until Blizzard gives it one
+        -- (OnCooldownIDSet), so there's nothing to look up yet.
+        if keys[item] then SafeShowKey(item, true) end
     end)
     -- The row's icons sit INSET inside its edge, like each icon in its item.
     -- Checked whenever Blizzard lays the row out or refreshes its cooldowns:
     -- going between none, one and two cooldowns in Cooldown Settings keeps
     -- two items, so Blizzard only refreshes them and never lays the row out.
+    -- Laying a shown row out refreshes it too, so it's checked twice; the
+    -- second time sets nothing, as nothing changed (Style:ShowDecor).
     if spec.row then
         rows[spec.name] = Style:Decor(viewer, viewer, INSET)
         for _, method in ipairs({ "RefreshLayout", "RefreshData" }) do
@@ -527,6 +542,7 @@ function M:Start()
     end)
 end
 
+-- Whether an item has the addon's look on it. For the tests.
 function M:IsSkinned(item)
     return skinned[item] == true
 end

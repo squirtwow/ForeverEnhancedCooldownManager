@@ -21,9 +21,67 @@
 -- their text height set, as Blizzard's times yours. Nothing is scaled or
 -- sized at 100%, and the boss frames and their cast bars never are.
 local checks = 0
+-- Also fails on a secret the addon misused since the last check (below),
+-- even one its own pcall kept quiet, and on a widget method Forever lacks
+-- that the addon looked for.
 local function Equal(actual, expected, label)
     checks = checks + 1
-    assert(actual == expected, label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+    if SecretMisuse[1] then error(label .. ": the addon misused a secret before this check: " .. SecretMisuse[1], 2) end
+    if WidgetMisses[1] then error(label .. ": the addon looked for a method Forever lacks before this check: " .. WidgetMisses[1], 2) end
+    assert(rawequal(actual, expected) or actual == expected, label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+end
+
+-- Secrets, as the game keeps them in a fight (the same as Tools/TestBars.lua's
+-- mock game): when the addon's own code compares one, does sums with it,
+-- indexes, calls, measures or iterates it, joins it into text or turns it
+-- into text, it errors, and is noted (SecretMisuse) so a pcall can't hide
+-- it; type() says "number", so only an issecretvalue check gets past one.
+-- The mock and the tests are the game's own code here, so they may look.
+do
+    local rawtype, kinds = type, setmetatable({}, { __mode = "k" })
+    local function Addon()
+        for level = 3, 40 do
+            local info = debug.getinfo(level, "Sl")
+            if not info then return nil end
+            if info.what ~= "C" and info.what ~= "J" then
+                local source = info.source or ""
+                if source:sub(1, 1) == "@" and not source:find("Tools", 1, true) then
+                    return source:sub(2) .. ":" .. tostring(info.currentline)
+                end
+                return nil
+            end
+        end
+    end
+    local function Boom(verb, plain)
+        return function(a, b)
+            local at = Addon()
+            if not at then return plain(a, b) end
+            local message = "attempt to " .. verb .. " a secret " .. (kinds[a] or kinds[b]) .. " value"
+            SecretMisuse[#SecretMisuse + 1] = at .. ": " .. message
+            error(message, 2)
+        end
+    end
+    local META = { __metatable = false,
+        __index = Boom("index", function() return nil end), __newindex = Boom("index", function() end),
+        __call = Boom("call", function() error("the tests called a secret") end),
+        __eq = Boom("compare", rawequal), __lt = Boom("compare", function() return false end),
+        __le = Boom("compare", function() return false end),
+        __concat = Boom("concatenate", function() return "secret" end), __len = Boom("get the length of", function() return 0 end),
+        __tostring = Boom("turn into text", function() return "secret" end),
+        __pairs = Boom("iterate", function() return next, {}, nil end) }
+    for _, op in ipairs({ "add", "sub", "mul", "div", "mod", "pow", "unm", "idiv", "band", "bor", "bxor", "shl", "shr", "bnot" }) do
+        META["__" .. op] = Boom("perform arithmetic on", function(a, b) return kinds[a] and a or b end)
+    end
+    SECRETS = {}
+    for _, kind in ipairs({ "number", "boolean", "string" }) do
+        SECRETS[kind] = setmetatable({}, META)
+        kinds[SECRETS[kind]] = kind
+    end
+    SecretMisuse = {}
+    _G.type = function(v)
+        if rawtype(v) == "table" and kinds[v] then return kinds[v] end
+        return rawtype(v)
+    end
 end
 
 -- Mock objects ---------------------------------------------------------------------
@@ -47,6 +105,59 @@ local FORBIDDEN = {
 }
 -- True while Blizzard's own code runs in the test: it may do what the addon may not.
 local blizzardCalling = false
+
+-- Like the game (and Tools/TestBars.lua's mock): each kind of widget has
+-- only the methods Forever gives it, and its template's
+-- (Tools/WidgetMethods.lua). On the addon's own frames any other capitalised
+-- name is nil, and one an addon file looks for is noted in WidgetMisses (its
+-- file and line), so a call to a method Forever lacks fails the next check.
+-- Blizzard's frames also have Lua methods of their own, which the seal above
+-- keeps to them; on those, only a widget method of another kind (a status
+-- bar's on a plain frame, say) is a miss.
+local WidgetHas
+do
+    local list = dofile("Tools/WidgetMethods.lua")
+    local function Into(set, names) for name in names:gmatch("%S+") do set[name] = true end return set end
+    local kinds, templates, any = {}, {}, {}
+    for kind, apis in pairs(list.kinds) do
+        kinds[kind] = {}
+        for api in apis:gmatch("%S+") do
+            Into(kinds[kind], assert(list.apis[api], api))
+            Into(any, list.apis[api])
+        end
+    end
+    for name, names in pairs(list.templates) do templates[name] = Into({}, names) end
+    WidgetMisses = {}
+    -- The first Lua code up the stack past WidgetHas and the widget's
+    -- __index, if it's an addon file's: its file and line. Skin.lua's Read
+    -- looks for Blizzard's item getters on purpose, and does without them on
+    -- the window's sample Tracked Bar.
+    local LOOKS = { ["Skin.lua GetBaseSpellID"] = true, ["Skin.lua GetEquipSlot"] = true }
+    local function Addon(key)
+        for level = 4, 40 do
+            local info = debug.getinfo(level, "Sl")
+            if not info then return nil end
+            if info.what ~= "C" and info.what ~= "J" then
+                local source = info.source or ""
+                if source:sub(1, 1) == "@" and not source:find("Tools", 1, true)
+                    and not LOOKS[source:sub(2) .. " " .. key] then
+                    return source:sub(2) .. ":" .. tostring(info.currentline)
+                end
+                return nil
+            end
+        end
+    end
+    function WidgetHas(s, key)
+        local own = assert(kinds[s.kind], "the mock game has no " .. tostring(s.kind) .. " widgets")
+        if own[key] or (s.blizzard and (blizzardCalling or not any[key])) then return true end
+        for name in (s.frameTemplate or ""):gmatch("[^,%s]+") do
+            if assert(templates[name], "the mock game has no " .. name)[key] then return true end
+        end
+        local at = Addon(key)
+        if at then WidgetMisses[#WidgetMisses + 1] = at .. ": Forever has no " .. s.kind .. ":" .. key end
+        return false
+    end
+end
 
 -- Blizzard's own code writing a key on its frames (this test, as the game):
 -- kept with a sealed frame's fields, off the frame itself, so a write by the
@@ -90,6 +201,7 @@ New = function(kind, parent, blizzard)
             -- A sealed frame's own keys, as they were on the frame.
             local fields = s.fields
             if fields and fields[key] ~= nil then return fields[key] end
+            if type(key) == "string" and key:match("^[A-Z]") and not WidgetHas(s, key) then return nil end
             -- On Blizzard's frames: nothing forbidden unless the part allows it
             -- (allow), and nothing a part keeps to itself (deny; ALL for all).
             if s.blizzard and not blizzardCalling and type(key) == "string" and key:match("^[A-Z]") then
@@ -320,7 +432,13 @@ local function Viewer(name, make, preexisting)
         acquired[item] = (acquired[item] or 0) + 1
     end
     viewer.make = make
-    viewer.RefreshLayout = function() assert(blizzardCalling, "called RefreshLayout on a Blizzard viewer") end
+    -- Like Blizzard's (CooldownViewer.lua RefreshLayout): a shown viewer
+    -- refreshes its items (RefreshData) as it lays them out; a hidden one
+    -- waits to be shown, which lays it out again.
+    viewer.RefreshLayout = function(self)
+        assert(blizzardCalling, "called RefreshLayout on a Blizzard viewer")
+        if S[self].shown then self:RefreshData() end
+    end
     viewer.RefreshData = function() assert(blizzardCalling, "called RefreshData on a Blizzard viewer") end
     Seal(viewer)
     KeepsPlace(viewer)
@@ -345,8 +463,9 @@ local function Environment(keepCVars)
     if not keepCVars then cvars = {} end
     bindings = {}
     acquired = {}
-    _G.CreateFrame = function(_, name, parent)
-        local f = New("Frame", parent)
+    _G.CreateFrame = function(kind, name, parent, template)
+        local f = New(kind, parent)
+        S[f].frameTemplate = template
         S[f].name = name
         S[f].shown = true
         table.insert(frames, f)
@@ -591,6 +710,24 @@ ns.Set("barTexture", "flat")
 ns.Skin:ApplyBarLook()
 Equal(S[bar.Bar].barTexture, FLAT, "flat again")
 Proto.SetStatusBarTexture = SetTexture
+-- Blizzard gives its bars their spells again after every relayout: a bar
+-- with the same spell, design and colour as last time is left as it is.
+do
+    local colours, SetColour = 0, Proto.SetStatusBarColor
+    function Proto:SetStatusBarColor(...)
+        colours = colours + 1
+        SetColour(self, ...)
+    end
+    Blizzard(bar, "OnCooldownIDSet")
+    Equal(colours, 0, "given the same spell again, in the same design and colour: nothing set again")
+    ns.Set("barColour", "blue")
+    Blizzard(bar, "OnCooldownIDSet")
+    Equal(colours .. " " .. S[bar.Bar].barColour[3], "1 0.88", "the colour for all changed meanwhile: drawn again in it")
+    ns.Set("barColour", "orange")
+    ns.Skin:ApplyBarLook()
+    Equal(colours, 2, "a Look page choice always draws every bar again")
+    Proto.SetStatusBarColor = SetColour
+end
 Equal(S[_G.FECMFont25].face .. " | " .. S[_G.FECMFont13].face, "Fonts\\FRIZQT__.TTF 25 THICKOUTLINE | Fonts\\FRIZQT__.TTF 13 OUTLINE",
     "Friz Quadrata to start with")
 ns.Set("font", "skurri")
@@ -611,6 +748,12 @@ v.barsActive[other] = true
 rawset(other, "layoutIndex", 1) -- Blizzard's own order
 rawset(bar, "layoutIndex", 2)
 Equal(table.concat(ns.Skin:TrackedBars(), ","), "1126,467", "the window lists your Tracked Bars in Blizzard's order")
+-- An order the game keeps secret is never compared: that bar goes last.
+_G.issecretvalue = function(value) return rawequal(value, SECRETS.number) end
+rawset(other, "layoutIndex", SECRETS.number)
+Equal(table.concat(ns.Skin:TrackedBars(), ","), "467,1126", "an order the game keeps secret: never compared, that bar listed last")
+rawset(other, "layoutIndex", 1)
+_G.issecretvalue = nil
 ns.SetBarColour(467, "purple")
 ns.Skin:ApplyBarLook()
 fill = S[bar.Bar].barColour
@@ -625,11 +768,14 @@ Equal(S[other.Bar].barColour[2], .74, "which the others follow")
 S[other].baseSpell = 467
 Blizzard(other, "OnCooldownIDSet")
 Equal(S[other.Bar].barColour[3], .91, "a bar given Thorns turns purple straight away")
-local SECRET = {}
-_G.issecretvalue = function(value) return value == SECRET end
+local SECRET = SECRETS.number -- an ID, a height: secret numbers
+_G.issecretvalue = function(value) return rawequal(value, SECRET) end
 S[other].baseSpell = SECRET
 Blizzard(other, "OnCooldownIDSet")
 Equal(S[other.Bar].barColour[2], .74, "a spell that can't be read uses the colour for all")
+-- (Its spell taken off before the game stops calling it secret: a secret left
+-- there would read as a plain number then.)
+S[other].baseSpell = nil
 _G.issecretvalue = nil
 ns.SetBarColour(467, nil)
 ns.Skin:ApplyBarLook()
@@ -1057,8 +1203,8 @@ ns = Load({ iconBorder = "icon", iconShadow = "bar" })
 item = First(v.essentialActive)
 local decor, row = ns.Skin.decors[item], ns.Skin.rows.EssentialCooldownViewer
 local utilityRow = ns.Skin.rows.UtilityCooldownViewer
-Equal(tostring(S[row.shadow[1][1]].shown) .. " " .. tostring(S[utilityRow.shadow[1][1]].shown), "false false",
-    "no box round an empty row")
+Equal(tostring(row.border) .. " " .. tostring(row.shadow) .. " " .. tostring(utilityRow.border), "nil nil nil",
+    "no box round an empty row: its rings aren't even made until one shows")
 rawset(item, "cooldownID", 7)
 ns.Skin:ApplyDecor()
 Equal(tostring(S[decor.border[1]].shown) .. " " .. tostring(S[decor.shadow[1][1]].shown), "true false", "a border round each icon")
@@ -1098,7 +1244,7 @@ local top = S[row.border[1]].points[1]
 Equal(tostring(top[2] == item.Icon) .. " " .. top[4] .. " " .. top[5], "true -1 0", "one cooldown: the border round its icon art")
 Equal(tostring(S[row.shadow[1][1]].points[1][2] == item.Icon) .. " " .. tostring(S[row.shadow[1][1]].shown), "true true", "and the shadow")
 -- A cooldown the game keeps secret still counts as one.
-_G.issecretvalue = function(value) return value == SECRET end
+_G.issecretvalue = function(value) return rawequal(value, SECRET) end
 rawset(spare, "cooldownID", SECRET)
 Blizzard(v.essential, "RefreshLayout")
 top = S[row.border[1]].points[1]
@@ -1118,6 +1264,64 @@ ns.Skin:ApplyDecor()
 Equal(tostring(S[decor.border[1]].shown) .. " " .. tostring(S[decor.shadow[1][1]].shown), "false false", "and off again")
 Equal(#printed, 0, "no errors from borders and shadows")
 
+-- Border and shadow off (the default): their rings (20 textures an icon)
+-- are never made on Blizzard's icons or rows, until one is chosen.
+Environment()
+v = Viewers(1)
+ns = Load({})
+item = First(v.essentialActive)
+rawset(item, "cooldownID", 7)
+Blizzard(v.essential, "RefreshLayout")
+decor, row = ns.Skin.decors[item], ns.Skin.rows.EssentialCooldownViewer
+Equal(tostring(decor ~= nil) .. " " .. tostring(decor.border) .. " " .. tostring(decor.shadow) .. " " .. tostring(row.border),
+    "true nil nil nil", "off: no rings made round Blizzard's icons or rows")
+ns.Set("iconBorder", "icon")
+ns.Skin:ApplyDecor()
+Equal(tostring(S[decor.border[1]].shown) .. " " .. tostring(S[decor.shadow[1][1]].shown) .. " " .. tostring(row.border),
+    "true false nil", "chosen: made then, round each icon only")
+Equal(#printed, 0, "no errors from rings made late")
+
+-- Blizzard lays its rows out again and again (a full aura update on you or
+-- your target): a box round the row is only placed, shown or hidden when
+-- something about it changed, never again for the same.
+do
+    ns.Set("iconBorder", "bar")
+    ns.Set("iconShadow", "bar")
+    ns.Skin:ApplyDecor()
+    local strips = {}
+    for _, strip in ipairs(row.border) do strips[strip] = true end
+    for _, ring in ipairs(row.shadow) do
+        for _, strip in ipairs(ring) do strips[strip] = true end
+    end
+    -- Calls on the box's strips while fn runs.
+    local function Touched(fn)
+        local count, saved = 0, {}
+        for name, method in pairs(Proto) do
+            saved[name] = method
+            Proto[name] = function(self, ...)
+                if strips[self] then count = count + 1 end
+                return method(self, ...)
+            end
+        end
+        fn()
+        for name, method in pairs(saved) do Proto[name] = method end
+        return count
+    end
+    Equal(tostring(S[row.border[1]].shown) .. " " .. tostring(S[row.shadow[1][1]].shown), "true true", "a border and shadow round the row")
+    local laid = Touched(function() Blizzard(v.essential, "RefreshLayout") end)
+    local refreshed = Touched(function() Blizzard(v.essential, "RefreshData") end)
+    Equal(laid .. " " .. refreshed, "0 0", "laid out or refreshed again, nothing changed: none of its 20 strips touched (was each placed and shown, twice)")
+    rawset(item, "cooldownID", nil)
+    Blizzard(v.essential, "RefreshLayout")
+    Equal(tostring(S[row.border[1]].shown) .. " " .. tostring(S[row.shadow[1][1]].shown), "false false", "emptied: the box goes")
+    local hidden = Touched(function() Blizzard(v.essential, "RefreshLayout") end)
+    Equal(hidden, 0, "and while it's gone, nothing touched either")
+    rawset(item, "cooldownID", 7)
+    Blizzard(v.essential, "RefreshData")
+    Equal(tostring(S[row.border[1]].shown) .. " " .. tostring(S[row.shadow[1][1]].shown), "true true", "a cooldown back: so is the box")
+    Equal(#printed, 0, "no errors from rows laid out again")
+end
+
 -- Keybinds on Blizzard's Essential and Utility icons: the addon's own text on
 -- its own frame, Blizzard's charge count and countdown only moved while a key
 -- needs them moved, and nothing written on Blizzard's frames.
@@ -1131,7 +1335,7 @@ do
         _G.GetBindingKey = function(binding) return keyOf[binding] end
         _G.C_Spell = { GetSpellName = function(id) return ({ [8921] = "Moonfire", [8924] = "Moonfire", [5176] = "Wrath" })[id] end }
         _G.GetInventoryItemID = function(_, slot) if slot == 13 then return 5079 end end
-        _G.issecretvalue = function(value) return value == SECRET end
+        _G.issecretvalue = function(value) return rawequal(value, SECRET) end
     end
     local function At(region, anchor)
         local p = S[region].points[1]
@@ -1181,6 +1385,32 @@ do
     S[essential].baseSpell = 8924
     Blizzard(essential, "OnCooldownIDSet")
     Equal(S[text].text .. " " .. tostring(S[text].shown), "S1 true", "and comes back when Blizzard gives it a spell")
+    -- Handed out again it has no spell yet (Blizzard emptied it): nothing
+    -- is looked up for it then, only once it gets its spell.
+    do
+        local reads, GetBase = 0, Proto.GetBaseSpellID
+        function Proto:GetBaseSpellID()
+            if self == essential then reads = reads + 1 end
+            return GetBase(self)
+        end
+        S[essential].baseSpell = nil
+        Blizzard(views.essential, "OnAcquireItemFrame", essential)
+        Equal(tostring(S[text].shown) .. " " .. reads, "false 0", "handed out again: the old key goes, nothing looked up")
+        S[essential].baseSpell = 8924
+        Blizzard(essential, "OnCooldownIDSet")
+        Equal(S[text].text .. " " .. tostring(S[text].shown) .. " " .. reads, "S1 true 1", "looked up once as it gets its spell")
+        Proto.GetBaseSpellID = GetBase
+        -- The keys again with none changed (a form change that moves no key
+        -- here): nothing set again.
+        local sets, SetText = 0, Proto.SetText
+        function Proto:SetText(value)
+            if self == text then sets = sets + 1 end
+            return SetText(self, value)
+        end
+        kns.Skin:ShowKeys()
+        Proto.SetText = SetText
+        Equal(sets .. " " .. S[text].text, "0 S1", "the keys again with none changed: nothing set again")
+    end
     S[utility].equipSlot = nil
     Blizzard(views.utility, "OnAcquireItemFrame", utility)
     Equal(tostring(S[small.text].shown) .. " " .. Count(utility), "false BOTTOMRIGHT true BOTTOMRIGHT -2 2",
@@ -1258,6 +1488,19 @@ do
     essential = First(views.essentialActive)
     Equal(#S[essential.ChargeCount.Current].points .. " " .. tostring(S[essential.Cooldown].numbers) .. " "
         .. tostring(S[kns.Skin.keys[essential].text].shown), "0 nil false", "off from login: nothing moved, no key")
+    -- Off, nothing is looked up as Blizzard hands its icons out and gives them spells.
+    do
+        local reads, GetBase = 0, Proto.GetBaseSpellID
+        function Proto:GetBaseSpellID()
+            if self == essential then reads = reads + 1 end
+            return GetBase(self)
+        end
+        Blizzard(views.essential, "OnAcquireItemFrame", essential)
+        S[essential].baseSpell = 8924
+        Blizzard(essential, "OnCooldownIDSet")
+        Proto.GetBaseSpellID = GetBase
+        Equal(reads .. " " .. tostring(S[kns.Skin.keys[essential].text].shown), "0 false", "off: no key looked up for Blizzard's icons")
+    end
 
     -- Without the look, Blizzard's icons get no keys, and nothing breaks.
     Environment()
@@ -1541,7 +1784,7 @@ do
         _G.C_AddOns = { IsAddOnLoaded = function(name) return era ~= nil and name == "EraUI" end }
         _G.EraUI = era
         -- A secret can be a string too: one that would read as broken off.
-        _G.issecretvalue = function(value) return value == SECRET or value == SECRET_ATLAS end
+        _G.issecretvalue = function(value) return rawequal(value, SECRET) or value == SECRET_ATLAS end
     end
     -- The keys a frame holds: a sealed one's kept with its seal, and any left
     -- on the frame itself.
@@ -2264,4 +2507,5 @@ do
 end
 
 print = _G.print
+Equal(SecretMisuse[1], nil, "no secret misused anywhere")
 io.write("Forever Enhanced Cooldown Manager checks passed: " .. checks .. " assertions.\n")

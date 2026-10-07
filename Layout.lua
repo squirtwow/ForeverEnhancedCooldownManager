@@ -162,10 +162,11 @@ function L:DisplayOff()
 end
 
 -- Whether a bar is taken out of the layout: it keeps its row and spells, but
--- doesn't show.
+-- doesn't show. Read as saved: asked for each bar on every target change
+-- and fight.
 function L:IsHidden(key)
-    local layout = ns.LayoutData()
-    return layout ~= nil and layout.hidden[key] == true
+    local hidden = (ns.SavedLayout() or {}).hidden
+    return type(hidden) == "table" and hidden[key] == true
 end
 
 -- The bars in a place (above or below the display) that are in the layout.
@@ -200,10 +201,13 @@ end
 -- downwards, and the ones beside it level with its middle, touching unless
 -- you've asked for space between them. A bar with nothing on it takes no
 -- room, unless the bars are unlocked. The Buffs and Debuffs bars catch up
--- after a fight. Without a layout, only the cast bar is put under the display.
+-- after a fight. Without a layout, only the cast bar is put under the display,
+-- and the display gets Blizzard's width back if it was matched to your rows
+-- (Use my bars unticked, say).
 function L:Stack()
     if not self:Active() then
         if ns.CastBar then ns.CastBar:Place() end
+        if ns.Resource then ns.Resource:Match() end
         return false
     end
     if InCombatLockdown() then self.pending = true end

@@ -2,8 +2,9 @@
 
 A cleaner look for Blizzard's **Cooldown Manager** and **Personal Resource
 Display** on **World of Warcraft: Forever**, plus cooldown, buff and cast bars
-of your own that stack around your resource display. Works on its own, and sits
-right at home next to EraUI.
+of your own that stack around your resource display, and a big pulse on screen
+when a cooldown is ready. Works on its own, and sits right at home next to
+EraUI.
 
 ![Your bars, resource display and swing timer in game](Screenshots/in-game-auto-shot.png)
 ![Blizzard's Tracked Bars in the new look](Screenshots/tracked-bars.png)
@@ -46,10 +47,15 @@ right at home next to EraUI.
 - Each spell shows once, at your highest rank, and switches when you train a new
   one
 - In combat: the cooldown sweep and countdown, grey while cooling down, red out
-  of range, blue without enough mana, and a gold edge when a reactive ability
-  like Overpower is ready
+  of range and blue without enough mana
+- Ready glow: the game's proc glow, or a gold edge if you prefer (Look page),
+  when a reactive ability like Overpower or Riposte is ready, and whenever the
+  game lights a spell up on your action bars
+- Cooldowns and Utility bars can show a spell's buff or debuff time, like
+  Shadow Word: Pain on your target (off by default)
 - Buffs bar: your buffs and class procs with time left and stacks; buffs from
-  other players count at any rank
+  other players count at any rank. It can also show your debuffs on you, like
+  Weakened Soul (off by default)
 - Debuffs bar: your own debuffs on your target, with a search that lists your
   class's debuffs
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag
@@ -76,9 +82,23 @@ right at home next to EraUI.
   and keybinds on the icons
 - Grow arrows show which way each bar grows while you move them
 
+## Cooldown pulse
+- A big icon pops up in the middle of your screen when a cooldown you tick is
+  ready. Find it under More in the settings (off by default)
+- Every spell you know with a cooldown of its own is listed to tick, and new
+  ones join as you learn them. Trinkets, potions and items with a use in your
+  bags can pulse too
+- Each one pulses Quick or Long, each style with its own size, time and sound:
+  15 sounds to pick from, played at your Master volume if you like
+- How see-through it is, how big it grows, a border and shadow, and where on
+  your screen it shows
+- If Forever Enhanced Cooldown Pulse is installed too, only one of the two
+  pulses runs at a time
+
 ## Raid Timers
 - Blizzard's pull and battleground start countdown, raid warnings, boss emotes
-  and boss cast bars, restyled to match your bars. Find it under More in `/ccm`
+  and boss cast bars, restyled to match your bars. Find it under More in the
+  settings
 - Each part stays off until you tick it, with a live preview on the page
 - Countdown: a bar colour, and its big numbers in gold, white or the bar's
   colour
@@ -91,25 +111,33 @@ right at home next to EraUI.
 - Visual only: Blizzard still decides what shows and when
 
 ## Profiles and settings
-- Spell lists live in profiles. Characters can share one, even across classes:
-  each only shows its own class's spells and racials. Use on all characters puts one profile
-  on every character
+- Spell lists and Cooldown pulse ticks live in profiles. Characters can share
+  one, even across classes: each only shows its own class's spells and racials.
+  Use on all characters puts one profile on every character
 - An accent colour for the window, and What's new after each update, with a
   short tour of just the new features
-- Hover anything in /ccm and the footer tells you what it does
+- Hover anything in the settings and the footer tells you what it does
 
 ## Getting around
 - The first time you log in, the settings open with a quick tour of the basics.
   Each step opens the right page and points at what it's about
+- The ? in the window's title bar walks you through the page you're on, a step
+  at a time
 - A minimap button: click it for the settings, right-click for What's new, drag
-  it round the minimap, or turn it off on the General page
-- `/ccm` opens the settings; they're also under Options > AddOns
-- `/ccm reset` resets your layout, after asking first
-- `/ccm tour` takes the tour again, and `/ccm new` shows What's new again
+  it round the minimap, set it free-floating to drag it anywhere, or turn it off
+  on the General page
+- The settings are also under Options > AddOns
+- Take the tour again from the General page, and see What's new again from the
+  foot of the settings' list
 - Found a bug or have an idea? The Discord button on the General page and in
-  What's new gives you the invite, or type `/ccm discord`
+  What's new gives you the invite
+
+If you'd rather type: `/ccm` opens the settings, `/ccm reset` resets your layout
+after asking first, `/ccm tour` takes the tour, `/ccm new` shows What's new and
+`/ccm discord` gives you the Discord invite.
 
 Blizzard's Cooldown Manager must be on for its new look: Options > Gameplay >
-Advanced Options > Enable Cooldown Manager, or the Turn on button in `/ccm`.
+Advanced Options > Enable Cooldown Manager, or the Turn on button in the
+settings.
 
 Created by Squirt. Built for World of Warcraft: Forever. All rights reserved.

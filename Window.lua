@@ -714,7 +714,7 @@ local function BuildGeneral(window, page)
         if ns.MinimapButton then ns.MinimapButton:Apply() end
     end)
     minimap:SetPoint("TOPLEFT", 16, -116)
-    window:Hint(minimap, "A button on the minimap for these settings. Off, /ccm still opens them.")
+    window:Hint(minimap, "A button on the minimap for these settings. Off, Options > AddOns and /ccm still open them.")
     window.minimap = minimap
     local free = T:Check(page, "Free-floating", function(self)
         if ns.MinimapButton then ns.MinimapButton:SetFree(self:GetChecked()) end
@@ -919,7 +919,7 @@ end
 local function BuildFooter(window)
     local version = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     version:SetPoint("BOTTOMLEFT", 12, 9)
-    version:SetText(Version() .. "   /ccm to open")
+    version:SetText(Version() .. "   Options > AddOns or /ccm to open")
     window.versionText = version
     local note = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     note:SetPoint("BOTTOMRIGHT", -12, 9)
@@ -1098,11 +1098,14 @@ local function BuildHelp(window, header)
     driver:SetSize(1, 1)
     driver:SetPoint("TOPLEFT")
     nudge.driver = driver
-    local since = 0
+    local since, accent = 0, nil
+    -- The accent picked, kept here (this runs every frame), and its share of
+    -- the edge's colour worked out in place, with nothing made each frame.
+    T:Paint(function(colour) accent = colour end)
     local function Edge(share)
-        local accent, from = T:Accent(), T.CONTROL_BORDER
-        local function Mix(i) return from[i] + (accent[i] - from[i]) * share end
-        help:SetBackdropBorderColor(Mix(1), Mix(2), Mix(3), 1)
+        local from = T.CONTROL_BORDER
+        help:SetBackdropBorderColor(from[1] + (accent[1] - from[1]) * share, from[2] + (accent[2] - from[2]) * share,
+            from[3] + (accent[3] - from[3]) * share, 1)
     end
     local function Held()
         return (ns.Tour ~= nil and ns.Tour:Active()) or (window.profilePanel ~= nil and window.profilePanel:IsShown())
@@ -1192,7 +1195,7 @@ local function BuildWindow()
     window.close = header.close
     window.header = header
     BuildFooter(window)
-    window:Hint(header.close, "Close the window. Escape closes it too, and /ccm opens it again.")
+    window:Hint(header.close, "Close the window. Escape closes it too. The minimap button, Options > AddOns or /ccm opens it again.")
     BuildHelp(window, header)
     BuildConfirm(window)
     ns.BuildProfileMenu(window, header, window.help)

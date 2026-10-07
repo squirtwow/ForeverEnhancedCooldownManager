@@ -336,10 +336,11 @@ local function BuildList(window, page, inner)
         row.check:SetPoint("LEFT", 4, 0)
         -- The whole row clicks its tick, as on the bar pages, up to its switch.
         row.check:SetHitRectInsets(-4, -(listWidth - 20 - SWITCH - 12), -(ROW - 16) / 2, -(ROW - 16) / 2)
+        -- Items listed from your bags aren't seen pulsing in game yet.
         window:Hint(row.check, function()
             local name = row.name:GetText() or ""
             return row.check:GetChecked() and ("Untick to leave " .. name .. " out.")
-                or ("Tick to pulse when " .. name .. " is ready.")
+                or ("Tick to pulse when " .. name .. " is ready." .. (row.bags and " (Needs testing)" or ""))
         end)
         -- Quick or Long, on the right; its cooldown just before it.
         row.style = T:Segmented(row, Choices(ns.PULSE_STYLE_KEYS, ns.PULSE_STYLE_NAMES), SWITCH, function(key)
@@ -388,7 +389,7 @@ local function BuildList(window, page, inner)
             row.header:SetText(text:upper())
             row.header:Show()
             for _, part in ipairs({ row.check, row.icon, row.name, row.long, row.style }) do part:Hide() end
-            row.key, row.item = nil, nil
+            row.key, row.item, row.bags = nil, nil, nil
             row:Show()
             y = y + HEADER_ROW
         end
@@ -400,6 +401,7 @@ local function BuildList(window, page, inner)
             row:SetPoint("TOPLEFT", 0, -y)
             row.header:Hide()
             row.key, row.item = entry.key, item
+            row.bags = item and not (entry.slot or entry.bar) or nil
             row.icon:SetTexture(entry.icon or 134400)
             row.name:SetText(entry.name)
             row.long:SetText(long)

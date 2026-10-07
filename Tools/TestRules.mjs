@@ -158,8 +158,156 @@ test('the pulse link is the same code as Forever Enhanced Cooldown Pulse\'s Link
 // Never the game's tooltip: an addon writing into it taints it, and in
 // Forever it then breaks on your hidden health every frame it shows a player
 // (thousands of errors, 2026-10-06). The addon's own (Theme.lua T:ShowTip).
+// Every way in: GameTooltip and its helpers (GameTooltip_SetDefaultAnchor),
+// the one the game picks (GetAppropriateTooltip), and the item, comparison,
+// embedded and shared ones.
 test("never the game's tooltip", () => {
-  assert.deepEqual(where(/\bGameTooltip\b/), [], 'files using GameTooltip');
+  const ways = [/\bGameTooltip/, /GetAppropriateTooltip/, /ItemRefTooltip/, /ShoppingTooltip/, /EmbeddedItemTooltip/,
+    /SharedTooltip/, /TooltipDataProcessor/, /\bTooltipUtil\b/, /NamePlateTooltip/, /\b\w*Tooltip_\w+\s*\(/];
+  for (const pattern of ways) assert.deepEqual(where(pattern), [], `${pattern} in addon code`);
+  // What the old rule (\bGameTooltip\b) let through is caught now.
+  for (const sample of ['GameTooltip_SetDefaultAnchor(tip, UIParent)', 'GetAppropriateTooltip():SetOwner(self)', 'ItemRefTooltip:Hide()']) {
+    assert.ok(ways.some(pattern => pattern.test(sample)), sample);
+  }
+});
+
+// The game's settings (CVars) are only ever changed by a click of yours: the
+// Turn on buttons for Blizzard's Cooldown Manager and Personal Resource
+// Display (Window.lua) and the Layout page's display tick, through
+// ns.TurnOn and ns.TurnOff (Core.lua), which only ever set those two.
+// Tools/TestBars.lua checks nothing is written as the addon loads.
+test("the game's settings change only through ns.TurnOn and ns.TurnOff, from your clicks", () => {
+  const writers = /\b(SetCVar\w*|ConsoleExec|RegisterCVar|SetCVarToDefault|ResetTestCVars)\b/;
+  assert.deepEqual(where(writers), ['Core.lua'], 'files writing CVars');
+  const core = code['Core.lua'];
+  const body = name => core.match(new RegExp(`\\nfunction ns\\.${name}\\(cvar\\)\\r?\\n([\\s\\S]*?)\\r?\\nend\\r?\\n`))?.[1] ?? '';
+  const on = body('TurnOn'), off = body('TurnOff');
+  assert.equal(count(on, /pcall\(C_CVar\.SetCVar, cvar, "1"\)/g), 1, 'TurnOn sets the one it is given to 1');
+  assert.equal(count(off, /pcall\(C_CVar\.SetCVar, cvar, "0"\)/g), 1, 'TurnOff sets it to 0');
+  assert.ok(/InCombatLockdown\(\)/.test(on) && /InCombatLockdown\(\)/.test(off), 'never in a fight');
+  const outside = core.replace(on, '').replace(off, '');
+  assert.equal(count(outside, new RegExp(`${writers.source}\\s*[,(]`, 'g')), 0, 'no CVar written anywhere else in Core.lua');
+  // Who asks, and for what: the three switches, each a click of yours.
+  const calls = files.flatMap(name => [...code[name].matchAll(/(?<!function )ns\.(TurnOn|TurnOff)\(([^)]*)\)/g)]
+    .map(match => `${name} ${match[1]}(${match[2]})`)).sort();
+  assert.deepEqual(calls, ['LayoutPage.lua TurnOff("nameplateShowSelf")', 'LayoutPage.lua TurnOn("nameplateShowSelf")',
+    'Window.lua TurnOn("cooldownViewerEnabled")', 'Window.lua TurnOn("nameplateShowSelf")']);
+  const window = code['Window.lua'], layout = code['LayoutPage.lua'];
+  assert.match(window, /local function TurnOnManager\(\)\r?\n\s+local on, why = ns\.TurnOn\("cooldownViewerEnabled"\)/);
+  assert.match(window, /managerOn:SetScript\("OnClick", TurnOnManager\)/, "the Cooldown Manager's Turn on button");
+  assert.match(window, /personalOn:SetScript\("OnClick", function\(\)\r?\n\s+local on, why = ns\.TurnOn\("nameplateShowSelf"\)/,
+    "the display's Turn on button");
+  assert.match(layout, /local shown = Tick\("Show the Personal Resource Display", \d+,\r?\n[^\n]*function\(self\)\r?\n\s+local on, why\r?\n\s+if self:GetChecked\(\) then on, why = ns\.TurnOn/,
+    "the Layout page's tick");
+});
+
+// Answers the game may keep secret in a fight are never compared, tested or
+// used in sums until Open() (or issecretvalue) says they can be read: a
+// secret compared errors in the game ("attempt to compare ... a secret
+// number value, while execution tainted by ..."). The mock game's secrets
+// catch most of this as the tests run, but Lua can't make `secret == true`
+// or `if secret then` error, so this reads it from the source: after each
+// answer is taken, every comparison, test or sum with it within its
+// function needs an Open() of it first: on the same line, in the `if` it
+// sits in, or in an `if not Open(...) then return` before it.
+// Keybinds.lua's Call(fn, ...) runs one of these for it (GetActionInfo,
+// GetMacroItem, C_ActionBar's questions).
+const SECRET_ANSWERS = ['GetInventoryItemCooldown', 'C_Item.GetItemCooldown', 'C_Item.GetItemCount', 'C_Item.IsUsableItem',
+  'C_Item.IsEquippedItem', 'C_Spell.IsSpellUsable', 'C_Spell.IsSpellInRange', 'C_Spell.SpellHasRange', 'UnitCanAttack',
+  'IsSpellOverlayed', 'UnitCastingInfo', 'UnitChannelInfo', 'GetInventoryItemCount', 'UnitPower', 'Call'];
+// Answers the game's events hand on, which can be secret too: the cast bar's
+// cast ID and who broke the channel (UNIT_SPELLCAST_*, secret when the
+// unit's casts are), and the swing's time and hand (PLAYER_SWING).
+const SECRET_PARAMETERS = { 'CastBar.lua': { 'C:Event': ['id', 'interruptedBy'], 'C:Swing': ['duration', 'kind'] } };
+const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const indent = line => line.match(/^\s*/)[0].length;
+// From line i to the end of its function, each compare, test or sum with
+// `name` needs an Open() of it first.
+function follow(lines, i, name, found) {
+  const v = escape(name);
+  // Compared, in a sum or joined, or tested (if x, not x, x and, x or).
+  const use = new RegExp(`(?<![\\w.:])${v}\\s*(==|~=|<=|>=|<|>|\\.\\.|[-+*/%^])|(==|~=|<=|>=|<|>|\\.\\.|[-+*/%^])\\s*${v}(?![\\w(])`
+    + `|\\bnot\\s+${v}\\b|(?<![\\w.:])${v}\\s+(and|or)\\b|\\b(if|elseif|while)\\s+${v}\\s+(then|do)\\b`);
+  const check = new RegExp(`(Open|issecretvalue|Secret)\\(${v}\\)`);
+  // Made safe in place: x = Word(x) or Number(x) (Keybinds.lua, both Open() first).
+  const cleaned = new RegExp(`^\\s*${v}\\s*=\\s*(Word|Number)\\(${v}\\)\\s*$`);
+  let always = false, block = -1; // guarded from here on; guarded while deeper than this
+  for (let j = i + 1; j < lines.length && !/^(end|function|local function)\b/.test(lines[j]); j++) {
+    const text = lines[j];
+    if (block >= 0 && text.trim() && indent(text) <= block) block = -1;
+    const at = text.search(use);
+    if (at >= 0 && !always && block < 0 && !check.test(text.slice(0, at + 1))) {
+      found.push(`line ${j + 1}: ${name} (${text.trim()})`);
+    }
+    if (cleaned.test(text)) always = true;
+    if (check.test(text) && !/\bor\b/.test(text)) {
+      // Leaves early unless it's open, or puts a plain value in its place:
+      // `if not Open(x) then return`, `if not (Open(x) and ...) then` with a
+      // return in its block, `if not Open(x) then x = true end`. Not
+      // `if not other and Open(x) and x == y then`: that tests other.
+      let exits = /\bthen\s+return\b/.test(text) || new RegExp(`\\bthen\\s+${v}\\s*=(?!=)`).test(text);
+      if (!exits && /\bthen\s*$/.test(text)) {
+        const body = [];
+        for (let k = j + 1; k < lines.length && (!lines[k].trim() || indent(lines[k]) > indent(text)); k++) body.push(lines[k]);
+        const depth = body.find(line => line.trim()) ? indent(body.find(line => line.trim())) : -1;
+        exits = body.some(line => line.trim() && indent(line) === depth && /^\s*return\b/.test(line));
+      }
+      if (/^\s*if not\s*(\(|(Open|issecretvalue|Secret)\()/.test(text) && exits) always = true;
+      else if (/^\s*if\b.*\bthen\s*$/.test(text)) block = indent(text);
+    }
+  }
+}
+function unguarded(source, parameters = {}) {
+  // Each line with its strings emptied, so "usable %s" in a report isn't a sum.
+  const lines = source.split(/\r?\n/).map(line => line.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""')), found = [];
+  let taken = 0;
+  lines.forEach((line, i) => {
+    for (const api of SECRET_ANSWERS) {
+      const left = line.match(new RegExp(`((?:\\b\\w+\\s*,\\s*)*\\b\\w+)\\s*=(?!=)\\s*(?:[\\w.()" ,]+?\\s+and\\s+)?(?:\\w+\\.)?${escape(api)}\\(`));
+      if (!left) continue;
+      taken++;
+      for (const name of left[1].split(',').map(part => part.trim()).filter(part => part && part !== '_')) {
+        follow(lines, i, name, found);
+      }
+    }
+  });
+  for (const [fn, names] of Object.entries(parameters)) {
+    const i = lines.findIndex(line => new RegExp(`^function ${escape(fn)}\\(`).test(line));
+    if (i < 0) {
+      found.push(`function ${fn} not found`);
+      continue;
+    }
+    taken++;
+    for (const name of names) {
+      if (!new RegExp(`\\b${escape(name)}\\b`).test(lines[i])) found.push(`${fn} has no ${name}`);
+      follow(lines, i, name, found);
+    }
+  }
+  return { found, taken };
+}
+
+test('answers the game may keep secret are read with Open() first', () => {
+  let taken = 0;
+  const found = files.flatMap(name => {
+    const result = unguarded(code[name], SECRET_PARAMETERS[name]);
+    taken += result.taken;
+    return result.found.map(problem => `${name} ${problem}`);
+  });
+  assert.ok(taken >= 20, `the answers found (${taken})`);
+  assert.deepEqual(found, [], 'compared or summed before Open()');
+  // Word and Number only ever give back an answer Open() passed.
+  assert.match(code['Keybinds.lua'], /local function Number\(v\) if Open\(v\) and /);
+  assert.match(code['Keybinds.lua'], /local function Word\(v\) if Open\(v\) and /);
+  // The check finds what the mock game can't.
+  const sample = 'local function Lit(id)\n    local usable = C_Spell.IsSpellUsable(id)\n    return usable == true\nend\n';
+  assert.equal(unguarded(sample).found.length, 1, 'usable == true with no Open() first');
+  assert.equal(unguarded(sample.replace('return usable', 'return Open(usable) and usable')).found.length, 0, 'and fine with one');
+  const event = 'function C:Event(event, id)\n    if id == cast.id then Done() end\nend\n';
+  assert.equal(unguarded(event, { 'C:Event': ['id'] }).found.length, 1, "an event's cast ID compared with no Open() first");
+  assert.equal(unguarded(event.replace('if id', 'if Open(id) and id'), { 'C:Event': ['id'] }).found.length, 0, 'and fine with one');
+  const kept = 'local function Read()\n    local _, link = Call(GetMacroItem, 1)\n    link = Word(link)\n    return link and link:match("x")\nend\n';
+  assert.equal(unguarded(kept).found.length, 0, 'made safe in place by Word()');
+  assert.equal(unguarded(kept.replace('    link = Word(link)\n', '')).found.length, 1, 'and caught without it');
 });
 
 // Escape closes the addon's windows through the game's own list of windows
@@ -203,4 +351,33 @@ test("Blizzard's aura containers never run the addon's code while they update", 
   assert.ok(Number(buffs.match(/local SELF_MAX = (\d+)/)[1]) <= 10, 'your debuffs: no more than the ten made up front');
   assert.match(buffs, /local function AddGroup\(container, key, filter, options\)\r?\n\s+F\.Add\(container, "AddAuraGroup", key, filter, options\)[\s\S]*?container:SetAuraGroupMaxFrameCount\(key, made\)/);
   assert.equal(count(buffs, /AddGroup\(container, "/g), 2, 'both kinds of group added through AddGroup');
+});
+
+// Nothing left behind: every function the shipped files define is used by
+// them (T:Panel was left over until 2026-10-07). A few read the addon's own
+// state for the tests and say "For the tests" in the note just above them;
+// the public API (ForeverEnhancedCooldownManagerAPI, which EraUI calls)
+// counts as used.
+test('every function the addon defines is used, or says it is for the tests', () => {
+  const unused = [];
+  const all = files.map(name => code[name]).join('\n');
+  for (const name of files) {
+    const lines = readFileSync(new URL(name, root), 'utf8').split(/\r?\n/);
+    lines.forEach((line, i) => {
+      const method = line.match(/^\s*function\s+([\w.]+)[:.](\w+)\s*\(/);
+      const local = line.match(/^\s*local\s+function\s+(\w+)\s*\(/);
+      if (!method && !local) return;
+      let uses;
+      if (method) {
+        if (method[1] === 'api') return;
+        uses = count(all, new RegExp(`[:.]${method[2]}\\b|["']${method[2]}["']`, 'g')) - 1;
+      } else uses = count(code[name], new RegExp(`\\b${local[1]}\\b`, 'g')) - 1;
+      if (uses > 0) return;
+      let note = '';
+      for (let j = i - 1; j >= 0 && /^\s*--/.test(lines[j]); j--) note = lines[j] + note;
+      if (!/for the tests/i.test(note)) unused.push(`${name}:${i + 1} ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(unused, [], 'defined but never used');
+  assert.match(code['RaidTimers.lua'], /ForeverEnhancedCooldownManagerAPI = setmetatable\(\{\}, \{\s*__index = api,/, 'api is the public API');
 });

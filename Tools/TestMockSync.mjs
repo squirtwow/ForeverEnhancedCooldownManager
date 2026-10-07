@@ -1,5 +1,6 @@
-// Tools/TestRaidTimers.lua, Tools/TestPulse.lua and Tools/TestHelp.lua run on
-// the same mock game as Tools/TestBars.lua: a copy of everything TestBars.lua
+// Tools/TestRaidTimers.lua, Tools/TestPulse.lua, Tools/TestHelp.lua, Tools/TestLifecycle.lua,
+// Tools/TestAuraContainers.lua, Tools/TestCost.lua, Tools/TestHotPath.lua and
+// Tools/TestWidgets.lua run on the same mock game as Tools/TestBars.lua: a copy of everything TestBars.lua
 // builds before its first test, so each file runs on its own. This checks
 // each copy still matches. After changing TestBars' mocks, copy them across with:
 // node Tools/TestMockSync.mjs --write
@@ -15,6 +16,11 @@ const COPIES = [
   ['TestRaidTimers.lua', "-- Blizzard's raid timer frames"],
   ['TestPulse.lua', '-- Cooldown pulse: the game around it'],
   ['TestHelp.lua', '-- The page help: the game around it'],
+  ['TestLifecycle.lua', '-- Lifecycle: the game around it'],
+  ['TestAuraContainers.lua', '-- Aura containers: the game around it'],
+  ['TestCost.lua', '-- What it costs: the game around it'],
+  ['TestHotPath.lua', '-- Hot path: the game around it'],
+  ['TestWidgets.lua', '-- Widgets: the game around it'],
 ];
 
 // A test file in three: its opening comment, the mock game, then its tests.

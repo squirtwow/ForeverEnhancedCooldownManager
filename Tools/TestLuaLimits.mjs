@@ -7,16 +7,19 @@
 // Run with: node --test Tools/TestLuaLimits.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-// fengari from the local Lua check kit (FENGARI to point elsewhere).
+// fengari from the local Lua check kit: FENGARI, else C:\AddonDev\_Toolchain
+// (beside the addons), else the old copy in %TEMP% (Tools/RunTests.mjs).
 const require = createRequire(import.meta.url);
-const { lua, lauxlib, to_luastring } = require(process.env.FENGARI || join(tmpdir(), 'opencode', 'lua-check', 'node_modules', 'fengari'));
 const root = fileURLToPath(new URL('../', import.meta.url));
+const kits = [process.env.FENGARI, join(root, '..', '_Toolchain', 'lua-check', 'node_modules', 'fengari'),
+  join(tmpdir(), 'opencode', 'lua-check', 'node_modules', 'fengari')].filter(Boolean);
+const { lua, lauxlib, to_luastring } = require(kits.find(kit => existsSync(kit)) ?? kits.at(-1));
 const MAX_UPVALUES = 60, MAX_LOCALS = 200;
 
 function luaFiles(dir, out = []) {

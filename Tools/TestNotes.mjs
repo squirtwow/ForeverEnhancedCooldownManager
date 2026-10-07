@@ -139,6 +139,226 @@ test('every section has bullets, and none use em dashes', async () => {
   }
 });
 
+// A Lua file's strings, comments skipped: [{ text, line }] (text as written,
+// escapes and all). Quoted strings and [[long]] or [==[long]==] ones.
+function luaStrings(lua) {
+  const found = [];
+  const open = /\[(=*)\[/y;
+  let i = 0, line = 1;
+  const lines = (from, to) => (lua.slice(from, to).match(/\n/g) || []).length;
+  // A long string or comment opening at `at`: where its text starts and ends, and where it all stops.
+  const long = at => {
+    open.lastIndex = at;
+    const match = open.exec(lua);
+    if (!match) return null;
+    const close = `]${match[1]}]`, end = lua.indexOf(close, at + match[0].length);
+    return { start: at + match[0].length, end: end < 0 ? lua.length : end, stop: end < 0 ? lua.length : end + close.length };
+  };
+  while (i < lua.length) {
+    const c = lua[i];
+    if (c === '\n') { line++; i++; continue; }
+    if (c === '-' && lua[i + 1] === '-') {
+      const block = long(i + 2);
+      const end = lua.indexOf('\n', i);
+      const stop = block ? block.stop : end < 0 ? lua.length : end;
+      line += lines(i, stop);
+      i = stop;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < lua.length && lua[j] !== c && lua[j] !== '\n') j += lua[j] === '\\' ? 2 : 1;
+      found.push({ text: lua.slice(i + 1, j), line });
+      line += lines(i, j);
+      i = j + 1;
+      continue;
+    }
+    const block = c === '[' && long(i);
+    if (block) {
+      found.push({ text: lua.slice(block.start, block.end), line });
+      line += lines(i, block.stop);
+      i = block.stop;
+      continue;
+    }
+    i++;
+  }
+  return found;
+}
+
+test('the string reader finds strings and skips comments', () => {
+  const sample = 'local a = "one" -- "not this"\n--[[ "nor\nthis" ]]\nb = \'two\\\'s\' .. [==[three\n]]four]==] --[=[x]=] c = "five"';
+  assert.deepEqual(luaStrings(sample).map(s => `${s.line}:${s.text}`), ['1:one', "4:two\\'s", '4:three\n]]four', '5:five']);
+});
+
+// The .toc lines players read in the game's AddOns list: its Title and Notes
+// (any language). Its file list isn't text for players.
+const TOC = 'ForeverEnhancedCooldownManager.toc';
+const tocText = async () => (await read(TOC)).split(/\r?\n/)
+  .map((text, i) => ({ name: TOC, where: `${TOC}:${i + 1}`, text }))
+  .filter(({ text }) => /^##\s*(Title|Notes)\b/i.test(text));
+
+// Players are only ever told /ccm. /fecm still works (an old habit), but
+// nothing they read says it: the changelog and What's new, the README, the
+// CurseForge description, the .toc's Title and Notes, and every string in
+// the addon's code. Comments can say either.
+test('players are told /ccm, never /fecm', async () => {
+  for (const name of ['CHANGELOG.txt', 'README.md', 'Tools/CurseForgeDescription.html']) {
+    assert.doesNotMatch(await read(name), /\/fecm\b/i, name);
+  }
+  const toc = await tocText();
+  assert.ok(toc.length >= 2, "the .toc's Title and Notes found");
+  for (const { where, text } of toc) assert.doesNotMatch(text, /\/fecm\b/i, where);
+  const files = (await readdir(new URL('../', import.meta.url))).filter(name => /\.lua$/i.test(name));
+  assert.ok(files.length > 20, "the addon's Lua files found");
+  const told = [];
+  let registered = 0;
+  for (const name of files) {
+    const lua = await read(name);
+    const lines = lua.split(/\r?\n/);
+    for (const { text, line } of luaStrings(lua)) {
+      if (!/\/fecm\b/i.test(text)) continue;
+      // The command itself, kept working.
+      if (/^SLASH_FECM\d+ = "\/fecm"$/.test(lines[line - 1].trim())) registered++;
+      else told.push(`${name}:${line}: ${text}`);
+    }
+  }
+  assert.deepEqual(told, [], 'strings that tell players /fecm');
+  assert.equal(registered, 1, '/fecm still registered, once');
+});
+
+// Everything players read, line by line: the changelog, the README, the
+// CurseForge description, the .toc's Title and Notes, and every string in
+// the addon's code.
+const PLAYER_FILES = ['CHANGELOG.txt', 'README.md', 'Tools/CurseForgeDescription.html'];
+async function playerText() {
+  const out = [];
+  for (const name of PLAYER_FILES) {
+    (await read(name)).split(/\r?\n/).forEach((text, i) => out.push({ name, where: `${name}:${i + 1}`, text }));
+  }
+  out.push(...await tocText());
+  const files = (await readdir(new URL('../', import.meta.url))).filter(name => /\.lua$/i.test(name));
+  assert.ok(files.length > 20, "the addon's Lua files found");
+  for (const name of files) {
+    for (const { text, line } of luaStrings(await read(name))) out.push({ name, where: `${name}:${line}`, text });
+  }
+  return out;
+}
+
+// An em dash however it's written: the character, an HTML entity (the
+// CurseForge description is HTML), or a Lua escape (strings are read as
+// written).
+const EM_DASH = new RegExp([String.fromCharCode(0x2014), '&mdash;', '&#0*8212;', '&#x0*2014;', '\\\\226\\\\128\\\\148',
+  '\\\\u\\{0*2014\\}', '\\\\x[eE]2\\\\x80\\\\x94'].join('|'), 'i');
+
+test('nothing players read has an em dash', async () => {
+  for (const sample of [`a ${String.fromCharCode(0x2014)} b`, 'a &mdash; b', 'a &#8212; b', 'a &#x2014; b',
+    'a \\226\\128\\148 b', 'a \\u{2014} b', 'a \\xE2\\x80\\x94 b']) {
+    assert.match(sample, EM_DASH, `the check sees ${sample}`);
+  }
+  assert.doesNotMatch('a - b, a &ndash; b, 1:2', EM_DASH);
+  const found = (await playerText()).filter(({ text }) => EM_DASH.test(text)).map(({ where, text }) => `${where}: ${text}`);
+  assert.deepEqual(found, []);
+});
+
+// Ideas can come from anywhere, but the words are our own: no other addon is
+// ever named (Forever Enhanced Cooldown Pulse and EraUI are the same
+// author's). The two this addon was once compared with first.
+const OTHER_ADDONS = [/Forever Cooldown Manager/i, /Doom ?Cooldown ?Pulse/i, /\bWeakAuras\b/i, /\bElvUI\b/i, /\bBartender\d*\b/i,
+  /\bDominos\b/i, /\bOmniCC\b/i, /\bTellMeWhen\b/i, /\bPlater\b/i, /\bQuestie\b/i, /\bMasque\b/i, /\bDetails!/i, /\bBigWigs\b/i,
+  /Deadly Boss Mods/i, /\bDBM\b/, /\bLeatrix\b/i, /\bBagnon\b/i, /\bHealBot\b/i, /\bVuhDo\b/i, /\bGrid2\b/i,
+  /Shadowed Unit Frames/i, /\bAuctionator\b/i, /\bSexyMap\b/i, /\bCooldown ?Manager ?Centered\b/i, /\bNeedToKnow\b/i];
+
+test('nothing players read names another addon', async () => {
+  const found = (await playerText()).filter(({ text }) => OTHER_ADDONS.some(name => name.test(text)))
+    .map(({ where, text }) => `${where}: ${text}`);
+  assert.deepEqual(found, []);
+  assert.ok(OTHER_ADDONS.some(name => name.test('Like Forever Cooldown Manager does')), 'the check works');
+});
+
+// The /ccm debug report is a hidden support tool: nothing players read
+// mentions it. Only its own file's strings and the slash command's match
+// for it say "debug".
+test('the hidden /ccm debug report is never mentioned', async () => {
+  const found = (await playerText()).filter(({ name, text }) => /debug/i.test(text) && name !== 'Debug.lua')
+    .map(({ where, text }) => `${where}: ${text}`);
+  assert.equal(found.length, 1, found.join('\n'));
+  assert.match(found[0], /^Core\.lua:\d+: \^%s\*debug%s\*\$$/, "only /ccm's own match for it");
+});
+
+// A button first, /ccm second: typing a command was tied to the hidden-code
+// errors of 2026-10-06, and clicking never was. Each sentence players read
+// that mentions /ccm names a way to click before it (the minimap button,
+// Options > AddOns, or a button or page in the settings), or is the note of
+// a button that does the same ("... too."). The README's list of typed
+// commands comes after its buttons. The release history shipped before this
+// rule (CHANGELOG.txt and What's new's entries up to 1.5.2) is left as it
+// was; What's new's entries for later versions follow it, and CHANGELOG.txt
+// says the same word for word (checked above).
+const CLICKS = /minimap|Options (>|&gt;) AddOns|\bbutton\b|General page|What's new|click below|in the settings/i;
+const SHIPPED_BEFORE_RULE = '1.5.2';
+const TYPED = "If you'd rather type:";
+const sentences = text => text.split(/(?<=[.!?])\s+/);
+const clickFirst = text => sentences(text).every(sentence => {
+  const at = sentence.search(/\/ccm\b/);
+  return at < 0 || CLICKS.test(sentence.slice(0, at)) || /\btoo\.$/.test(sentence.trim());
+});
+
+test('players are pointed to a button first, and to /ccm second', async () => {
+  assert.equal(clickFirst('Type /ccm, click the minimap button, or click below, for the settings.'), false, 'the check works');
+  assert.equal(clickFirst('Close the window. Escape closes it too, and /ccm opens it again.'), false, 'sentence by sentence');
+  assert.equal(clickFirst('A short tour. /ccm tour starts it too.'), true, "a button's own note");
+  const told = [];
+  // The addon's strings, but for What's new's entries shipped before this rule, the command itself and the hidden debug report.
+  const entries = gameNotes(await read('Notes.lua'));
+  // (Notes still "Unreleased" are new, so they follow it too.)
+  const history = new Set(entries.filter(entry => /^\d+(\.\d+)*$/.test(entry.version)
+    && compareVersions(entry.version, SHIPPED_BEFORE_RULE) <= 0).flatMap(entry => entry.sections.flatMap(section => section.items)));
+  assert.ok(history.size > 50, "What's new's entries found");
+  assert.ok(entries.some(entry => entry.version === SHIPPED_BEFORE_RULE), `${SHIPPED_BEFORE_RULE}'s entry found`);
+  const files = (await readdir(new URL('../', import.meta.url))).filter(name => /\.lua$/i.test(name) && name !== 'Debug.lua');
+  for (const name of files) {
+    for (const { text, line } of luaStrings(await read(name))) {
+      if (text === '/ccm' || history.has(unquote(text)) || clickFirst(unquote(text))) continue;
+      told.push(`${name}:${line}: ${text}`);
+    }
+  }
+  // The README and the CurseForge page, a bullet or paragraph at a time.
+  const readme = (await read('README.md')).split(/\r?\n(?:\s*\r?\n|(?=- ))/).map(unit => unit.replace(/\s+/g, ' ').trim());
+  const typed = readme.findIndex(unit => unit.startsWith(TYPED));
+  assert.ok(typed > readme.findIndex(unit => /minimap button/.test(unit)) && readme.some(unit => /Options > AddOns/.test(unit)),
+    'the README: the minimap button and Options > AddOns, then the typed commands');
+  readme.forEach((unit, i) => { if (i !== typed && !clickFirst(unit)) told.push(`README.md: ${unit}`); });
+  const html = (await read('Tools/CurseForgeDescription.html')).split(/<\/(?:li|p|h\d)>/)
+    .map(unit => unit.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim());
+  html.forEach(unit => { if (!clickFirst(unit)) told.push(`Tools/CurseForgeDescription.html: ${unit}`); });
+  assert.deepEqual(told, [], 'sentences that send players to /ccm before a button');
+});
+
+// The README (in the download and on GitHub) keeps up with the CurseForge
+// page: every bold name in its Highlights is in the README, in the README's
+// own words where they differ.
+const README_WORDS = {
+  "A new look for Blizzard's Cooldown Manager": "## Blizzard's Cooldown Manager",
+  'Procs and reactive abilities glow': "the game's proc glow",
+  'Debuff search': "a search that lists your class's debuffs",
+  'Borders and shadows': 'borders and soft shadows',
+  'Keybinds on icons': 'keybinds on the icons',
+  'Healthstones and potions': 'healthstones, healing potions and mana potions',
+  "Show me what's new": 'a short tour of just the new features',
+  '?': "the ? in the window's title bar",
+};
+
+test('the README covers every highlight on the CurseForge page', async () => {
+  const html = await read('Tools/CurseForgeDescription.html');
+  const start = html.indexOf('Highlights');
+  const list = html.slice(start, html.indexOf('</ul>', start));
+  const readme = (await read('README.md')).replace(/\s+/g, ' ').toLowerCase();
+  const names = [...list.matchAll(/<strong>(.*?)<\/strong>/g)].map(match => match[1].replace(/&amp;/g, '&'));
+  assert.ok(names.length > 20, 'the highlights found');
+  const missing = names.filter(name => !readme.includes((README_WORDS[name] ?? name).toLowerCase()));
+  assert.deepEqual(missing, [], 'highlights the README leaves out (add them, or their README words to README_WORDS)');
+});
+
 // The swing timer shows the main hand for everyone, hunters too, and ranged
 // swings for any class: Auto Shot for hunters, Ranged for the rest.
 test('the swing timer is described as it works wherever players read about it', async () => {

@@ -10,6 +10,26 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.5.3",
+        sections = {
+            { "Fixed", {
+                "Unticking Use my bars gives your resource display its own width back at once.",
+                "A bar you're dragging is let go when the settings close mid-drag.",
+                "What's new and the first-time welcome still show if you reload before they appear.",
+            } },
+            { "Improved", {
+                "Lighter on your game, most of all with Use my bars off.",
+                "Lighter in a fight: bars, cast bar, swing timer, keybinds and Cooldown pulse only redo what changed.",
+            } },
+            { "Changed", {
+                "Your bars turn red out of range the moment the game says so.",
+                "The settings, the tour and What's new point you to buttons rather than /ccm (it still works).",
+                "Bars with buffs, debuffs or buff and debuff times fade right out instead of hiding (it looks the same).",
+                "All bars, Show grow arrows, Dim when ready and Best you carry are no longer marked Needs testing.",
+            } },
+        },
+    },
+    {
         version = "1.5.2",
         sections = {
             { "Added", {
@@ -68,7 +88,7 @@ ns.NOTES = {
         version = "1.4.2",
         sections = {
             { "Changed", {
-                "Switching the Cooldown Manager or resource display from /fecm now asks for a reload.",
+                "Switching the Cooldown Manager or resource display from /ccm now asks for a reload.",
                 "Smoother gear set swaps.",
                 "Lighter icon updates in combat.",
                 "New profiles are named with your surname.",
@@ -117,7 +137,7 @@ ns.NOTES = {
             { "Added", {
                 "Swap icons: drop one icon onto another to swap them.",
                 "The footer tells you what dropping a spell will do, or why it can't go there.",
-                "/fecm reset asks before resetting your layout.",
+                "/ccm reset asks before resetting your layout.",
                 "Gold edge on Victory Rush, Hammer of Wrath and Divine Grace when they're ready.",
             } },
             { "Changed", {
@@ -364,7 +384,8 @@ local function Build()
     ask:SetText("Found a bug or have an idea?")
     local hint = T:Text(window, "GameFontHighlightSmall", T.MUTED)
     hint:SetPoint("BOTTOMLEFT", 20, 13)
-    hint:SetText("/ccm new shows this again.")
+    hint:SetText("See it again in the settings.")
+    window.hint = hint
     local done = T:Button(window, "Got it", 100, 24)
     done:SetPoint("BOTTOMRIGHT", -16, 14)
     T:Paint(function(accent) done:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
@@ -411,20 +432,25 @@ end
 
 -- Once per version: a moment after the first login with it, and never in
 -- combat. A first install has nothing new to show: the window opens instead,
--- with the offer of a tour.
+-- with the offer of a tour. Each is marked seen only as it shows, so a
+-- reload or logout before then (or during a fight) keeps it due.
 function N:Start()
     local version, seen = ns.Version(), ns.NotesSeen()
-    if seen == version then return end
-    ns.SetNotesSeen(version)
-    local welcome = ns.firstInstall
-    if not welcome and #ns.NOTES == 0 then return end
+    local welcome = ns.firstInstall or ns.WelcomeDue()
+    if seen == version and not welcome then return end
+    if not welcome and #ns.NOTES == 0 then
+        ns.SetNotesSeen(version)
+        return
+    end
     local events = CreateFrame("Frame")
     local due, waiting = false, false
     local function ShowWhenFree()
         if not due or InCombatLockdown() then return end
         due = false
         events:UnregisterAllEvents()
+        ns.SetNotesSeen(version)
         if not welcome then return ns.ShowNotes(seen) end
+        ns.SetWelcomeDue(false)
         if ns.Tour then ns.Tour:Welcome() else ns.ShowWindow() end
     end
     events:RegisterEvent("PLAYER_ENTERING_WORLD")

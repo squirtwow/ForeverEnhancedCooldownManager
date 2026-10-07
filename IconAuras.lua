@@ -73,6 +73,8 @@ end
 -- fight, as the game needs the slots' looks before it restricts them.
 local function Create(bar)
     if bar.auraContainers or InCombatLockdown() then return bar.auraContainers ~= nil end
+    -- From now on the bar goes right out rather than hiding (Bars.lua B:Hold).
+    ns.Bars:Hold(bar)
     local ok, err = pcall(function()
         local made = {}
         for _, side in ipairs(SIDES) do

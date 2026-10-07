@@ -367,7 +367,7 @@ function ns.BuildBarPage(window, page, width)
     -- ready. Dim is new, so its note says it needs testing.
     local whenReady = Pills("When ready", 320, 0, 156, ns.WHEN_READY, ns.WHEN_READY_NAMES, "whenReady", {
         show = "Every icon shows in full, ready or cooling down.",
-        dim = "Each icon dims while it's ready, so the ones cooling down stand out. (Needs testing)",
+        dim = "Each icon dims while it's ready, so the ones cooling down stand out.",
         hide = "Each icon hides while it's ready, so only the ones cooling down show.",
     })
     -- The label and its choices as one part, for the tour to outline: the
@@ -571,8 +571,7 @@ function ns.BuildBarPage(window, page, width)
 
     local function RefreshList()
         y, n = 0, 0
-        local list = ns.Spells:List()
-        if #list == 0 then list = ns.Spells:Scan() end
+        local list = ns.Spells:Fresh()
         local text, listRanks = state.search, ns.Get("listRanks") and not ns.AURA_BARS[state.bar]
         local id = tonumber(text)
         local line

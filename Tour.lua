@@ -211,7 +211,7 @@ local STEPS = {
         title = "That's the basics",
         text = function()
             return (MinimapButton() and "Open these settings any time with this button or /ccm."
-                or "Open these settings any time with /ccm.")
+                or "Open these settings any time from Options > AddOns, or with /ccm.")
                 .. " What's new shows after each update, and this tour is on the General page."
         end,
         target = function(w) return MinimapButton() or w.versionText end,
@@ -509,7 +509,7 @@ local HELP = {
         page = "general",
         title = "Minimap button",
         text = "Click it for these settings, right-click for What's new, and drag it round the minimap."
-            .. " Untick to hide it: /ccm still opens them.",
+            .. " Untick to hide it: Options > AddOns and /ccm still open them.",
         target = function(w) return w.minimap end,
         side = "right",
     },

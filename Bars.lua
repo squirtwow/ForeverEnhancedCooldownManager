@@ -11,7 +11,6 @@ ns.Bars = B
 
 local Style = ns.Style
 local DEFAULT_Y = { debuff = 278, buff = 234, cd = 190, util = 146 } -- just above the action bar
-local RANGE_INTERVAL = .25
 -- Blizzard's own Cooldown Manager tints.
 local TINT = {
     ready = { 1, 1, 1 },
@@ -27,8 +26,10 @@ local REACTIVE = ns.REACTIVE or {}
 local bars = {}
 local unlocked, inCombat, editMode = false, false, false
 -- Icons wanting a refresh: done once on the next frame, however many events
--- (a cast brings several) or cooldowns ending asked for it.
-local dirty = false
+-- (a cast brings several) or cooldowns ending asked for it. Only what the
+-- game said changed: everything (dirty), the cooldowns (cooling), or the
+-- colour and glow (tinting: usable, in range, lit by the game).
+local dirty, cooling, tinting = false, false, false
 local FADE = .3 -- a faded bar's opacity out of combat
 local DIM = .4 -- a ready icon's opacity on a bar that dims them
 local READY_ALPHA = { show = 1, dim = DIM, hide = 0 }
@@ -147,6 +148,8 @@ local function SetGlow(icon, on)
     local glow = icon.glow
     if not on then
         glow.looping = nil
+        -- Out already: its burst and loop were stopped as it went out.
+        if not glow:IsShown() then return end
         if glow.proc then
             glow.ProcStartAnim:Stop()
             glow.ProcLoop:Stop()
@@ -203,7 +206,7 @@ local function NewIcon(bar)
     icon.cooldown:SetDrawBling(false)
     -- Events arrive when a cooldown starts, not when it ends; this catches the
     -- end, so the icon ungreys (or dims or hides when ready) on time.
-    icon.cooldown:SetScript("OnCooldownDone", function() dirty = true end)
+    icon.cooldown:SetScript("OnCooldownDone", function() cooling = true end)
     -- Item counts and the keybind sit above the sweep.
     local top = CreateFrame("Frame", nil, icon)
     top:SetAllPoints()
@@ -248,6 +251,28 @@ local function Follow(icon)
     ShowKey(icon)
 end
 
+-- The icon's colour: white, blue (low on mana), grey (can't be used now) or
+-- red (out of range). Only set when it changes.
+local function Tint(icon, tint)
+    if icon.tint == tint then return end
+    icon.tint = tint
+    icon.texture:SetVertexColor(tint[1], tint[2], tint[3])
+end
+
+-- The icon's opacity when it's a plain number, only set when it changes.
+-- Dim or Hide when ready hands the game a secret answer instead (Fade), and
+-- the next plain one is set again after it.
+local function Alpha(icon, alpha)
+    if icon.alpha == alpha then return end
+    icon.alpha = alpha
+    icon:SetAlpha(alpha)
+end
+
+local function Fade(icon, active, dim)
+    icon.alpha = nil
+    if dim then icon:SetAlphaFromBoolean(active, 1, DIM) else icon:SetAlphaFromBoolean(active) end
+end
+
 -- Trinkets and bag items. Their cooldowns come back as plain numbers; if the
 -- game ever hides them in combat, the icon simply keeps its last state.
 local function RefreshItem(icon, data, follows)
@@ -262,7 +287,7 @@ local function RefreshItem(icon, data, follows)
         local active = start > 0 and duration > 1.5
         if active then icon.cooldown:SetCooldown(start, duration) else icon.cooldown:Clear() end
         icon.texture:SetDesaturated(active)
-        icon:SetAlpha(active and 1 or READY_ALPHA[WhenReady(data)])
+        Alpha(icon, active and 1 or READY_ALPHA[WhenReady(data)])
     end
     local count
     if icon.kind == "item" or icon.kind == "family" then
@@ -277,7 +302,7 @@ local function RefreshItem(icon, data, follows)
     if Open(usable) and usable == false then
         tint = Open(noMana) and noMana and TINT.mana or TINT.unusable
     end
-    icon.texture:SetVertexColor(tint[1], tint[2], tint[3])
+    Tint(icon, tint)
     SetGlow(icon, false)
 end
 
@@ -291,14 +316,17 @@ local function RefreshAmmo(icon)
         icon.texture:SetDesaturated(count == 0)
     end
     icon.cooldown:Clear()
-    icon:SetAlpha(1)
-    icon.texture:SetVertexColor(TINT.ready[1], TINT.ready[2], TINT.ready[3])
+    Alpha(icon, 1)
+    Tint(icon, TINT.ready)
     SetGlow(icon, false)
 end
 
-local function RefreshIcon(icon, data, hasTarget, follows)
-    if icon.kind == "ammo" then return RefreshAmmo(icon) end
-    if icon.kind == "item" or icon.kind == "slot" or icon.kind == "family" then return RefreshItem(icon, data, follows) end
+-- Whether an icon shows an item (or your ammunition) rather than a spell.
+local ITEM_KINDS = { item = true, slot = true, family = true, ammo = true }
+
+-- A spell's cooldown: on the sweep, grey while it cools down, and in full,
+-- dimmed or hidden while it's ready. Redone as cooldowns start or end.
+local function SpellCooldown(icon, data)
     local id = icon.spellID
     local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(id, true)
     if duration then
@@ -309,17 +337,22 @@ local function RefreshIcon(icon, data, hasTarget, follows)
         -- In full while it cools down; dimmed or hidden while it's ready.
         local ready = WhenReady(data)
         if ready == "show" or not icon.SetAlphaFromBoolean then
-            icon:SetAlpha(1)
-        elseif ready == "dim" then
-            icon:SetAlphaFromBoolean(active, 1, DIM)
+            Alpha(icon, 1)
         else
-            icon:SetAlphaFromBoolean(active)
+            Fade(icon, active, ready == "dim")
         end
     else
         icon.cooldown:Clear()
         icon.texture:SetDesaturated(false)
-        icon:SetAlpha(1)
+        Alpha(icon, 1)
     end
+end
+
+-- A spell's colour and glow: whether it can be used, has the mana, reaches
+-- your target, and is lit by the game. Redone as the game says one of these
+-- changed (usable, in or out of range, a glow, a new target).
+local function SpellState(icon, hasTarget)
+    local id = icon.spellID
     local usable, noMana = C_Spell.IsSpellUsable(id)
     local inRange
     if hasTarget and C_Spell.IsSpellInRange then inRange = C_Spell.IsSpellInRange(id, "target") end
@@ -329,10 +362,36 @@ local function RefreshIcon(icon, data, hasTarget, follows)
     elseif Open(usable) and not usable then
         tint = Open(noMana) and noMana and TINT.mana or TINT.unusable
     end
-    icon.texture:SetVertexColor(tint[1], tint[2], tint[3])
+    Tint(icon, tint)
     -- Lit when the game lights it on your action bars, or, for a reactive
     -- ability the game doesn't light (Overpower after a dodge), once usable.
     SetGlow(icon, Overlayed(id) or (icon.reactive and Open(usable) and usable == true) or false)
+end
+
+-- One icon: all of it, or just its cooldown ("cooldown") or its colour and
+-- glow ("state"). Items and ammo are few, so read in full either way.
+local function RefreshIcon(icon, data, hasTarget, follows, part)
+    if icon.kind == "ammo" then return RefreshAmmo(icon) end
+    if ITEM_KINDS[icon.kind] then return RefreshItem(icon, data, follows) end
+    if part ~= "state" then SpellCooldown(icon, data) end
+    if part ~= "cooldown" then SpellState(icon, hasTarget) end
+end
+
+-- Range: the game says when a spell on your bars goes in or out of range of
+-- your target (SPELL_RANGE_CHECK_UPDATE) once asked to watch it, as for
+-- Blizzard's own Cooldown Manager, so nothing has to ask again and again as
+-- you move. Each spell icon asks for its own spell while the bars are on,
+-- and lets it go as it changes spell or the bars go off: one ask and one
+-- let-go per icon, as Blizzard's action buttons do for theirs.
+local function WatchRange(icon, id)
+    if icon.watching == id then return end
+    local enable = C_Spell.EnableSpellRangeCheck
+    if icon.ranged then pcall(enable, icon.watching, false) end
+    icon.watching, icon.ranged = id, false
+    if not (id and enable) then return end
+    -- A spell with no range (one on yourself) has nothing to watch.
+    local has = C_Spell.SpellHasRange and C_Spell.SpellHasRange(id)
+    if not Open(has) or has ~= false then icon.ranged = pcall(enable, id, true) end
 end
 
 -- Bars ------------------------------------------------------------------------------
@@ -473,6 +532,17 @@ local function Locked(bar)
     return bar.kind == "aura" and InCombatLockdown()
 end
 
+-- A bar holding Blizzard's aura containers (B:Hold) is never shown or hidden
+-- again: it goes right out instead (gone), which looks the same. Whether a
+-- bar is there as you see it, and putting it there or taking it away.
+local function Showing(bar)
+    return bar:IsShown() and not bar.gone
+end
+
+local function SetShowing(bar, show)
+    if bar.holds then bar.gone = not show else bar:SetShown(show) end
+end
+
 -- Lets go of a bar being dragged, where it is now.
 local function Drop(bar)
     if not bar.dragging then return end
@@ -593,13 +663,13 @@ local function NewArrows(bar)
     return arrows
 end
 
--- A bar's arrows shown while the bars are being arranged, if asked for, and
--- pointed the way it grows now. A Buffs or Debuffs bar waiting for the fight
--- to end still has its old shape, so its arrows wait with it. Packed buffs
--- stay in one row: no new rows to point to.
+-- A bar's arrows shown while the bars are being arranged, if asked for and
+-- the bar is there (not gone), and pointed the way it grows now. A Buffs or
+-- Debuffs bar waiting for the fight to end still has its old shape, so its
+-- arrows wait with it. Packed buffs stay in one row: no new rows to point to.
 local function Arrows(bar)
     local arrows = bar.arrows
-    arrows:SetShown((unlocked or editMode) and ns.Get("growArrows") and B:Enabled() or false)
+    arrows:SetShown((unlocked or editMode) and not bar.gone and ns.Get("growArrows") and B:Enabled() or false)
     if bar.pendingLayout then return end
     local data = bar.data
     local rows = not (bar.kind == "aura" and ns.BuffBar:Packed(data))
@@ -625,6 +695,8 @@ local function NewBar(key)
     bar:SetFrameStrata("MEDIUM")
     bar:SetMovable(true)
     bar:SetClampedToScreen(true)
+    -- Never takes the mouse itself, there or gone: only its mover does.
+    bar:EnableMouse(false)
     bar:Hide()
 
     local mover = CreateFrame("Frame", nil, bar)
@@ -647,6 +719,11 @@ local function NewBar(key)
         end
     end)
     mover:SetScript("OnDragStop", function() Drop(bar) end)
+    -- Hidden mid-drag, it never hears the mouse let go: let go there, so the
+    -- bar doesn't follow the cursor and its spot is kept. Locking the bars
+    -- (/ccm closed by Escape, a loading screen, death) lets go first anyway
+    -- (B:SetUnlocked); this catches any other way it hides.
+    mover:SetScript("OnHide", function() Drop(bar) end)
     -- A spell or item dragged from anywhere onto an unlocked bar joins it.
     mover:SetScript("OnReceiveDrag", function() B:Dropped(key) end)
     mover:SetScript("OnMouseUp", function() B:Dropped(key) end)
@@ -725,9 +802,14 @@ function B:KeyFor(name)
 end
 
 -- A key showing up or going moves the count with it: the addon's own
--- frames only, so in combat too.
+-- frames only, so in combat too. Nothing is looked up while keybinds are
+-- off, and nothing is set again while the key stays the same (a form
+-- change asks every icon again).
 ShowKey = function(icon)
-    icon.keyed = Style:SetKey(icon.key, B:KeyFor(icon.name))
+    local key = ns.Get("keybinds") and B:KeyFor(icon.name) or nil
+    if icon.keyed ~= nil and icon.keyText == key then return end
+    icon.keyText = key
+    icon.keyed = Style:SetKey(icon.key, key)
     Room(icon)
 end
 
@@ -738,7 +820,7 @@ local function Layout(bar)
     -- Families laid out from the list follow what you carry at the next refresh.
     follow = true
     local size, spacing = ns.IconSize(data), data.spacing
-    local count = 0
+    local count, on = 0, B:Enabled()
     for _, name in ipairs(data.spells) do
         local entry = ns.Spells:Find(name)
         if entry and ns.Spells:ForMe(name, bar.key) and not Absent(name) then
@@ -751,6 +833,7 @@ local function Layout(bar)
             icon.count:SetFontObject(Style:Count(size))
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
             icon.kind, icon.itemID, icon.slot, icon.current = entry.kind, entry.itemID, entry.slot, entry.current
+            WatchRange(icon, on and not ITEM_KINDS[entry.kind] and entry.spellID or nil)
             KeyLook(icon, size)
             ShowKey(icon)
             icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
@@ -764,6 +847,7 @@ local function Layout(bar)
     for i = count + 1, #bar.icons do
         bar.icons[i]:Hide()
         bar.icons[i].spellID = nil
+        WatchRange(bar.icons[i], nil)
     end
     bar.count = count
     bar:SetSize(B:Arrange(bar, bar.icons, count, data))
@@ -789,23 +873,39 @@ function B:Enabled()
     return ns.Get("useBars") == true
 end
 
+-- One Buffs or Debuffs bar entry for the report: its name and the spell IDs
+-- its icon shows. These bars keep their entries in holders, not icons.
+local function ReportEntry(bar, i, say)
+    local holder, ids = bar.holders and bar.holders[i], {}
+    for id in pairs(bar.slotIDs and bar.slotIDs[i] or {}) do ids[#ids + 1] = id end
+    table.sort(ids)
+    return ("  %d. %s | spells %s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","))
+end
+
 -- For /ccm debug (Debug.lua): each of your bars and the icons on it as they
 -- are now: what each is, whether it's reactive, the game's usable answer,
--- and its glow. say turns a secret answer into "secret".
+-- and its glow; on the Buffs and Debuffs bars, each entry's spells. say
+-- turns a secret answer into "secret".
 function B:Report(add, say)
     add("Use my bars: " .. tostring(self:Enabled()))
     for _, key in ipairs(ns.BAR_KEYS) do
         local bar = bars[key]
         if bar then
-            add(("%s bar: shown %s, %d icons"):format(key, tostring(bar:IsShown()), bar.count or 0))
+            local aura = bar.kind == "aura"
+            add(("%s bar: shown %s%s, %d %s"):format(key, tostring(Showing(bar)), bar.holds and " (holds aura containers)" or "",
+                bar.count or 0, aura and "entries" or "icons"))
             for i = 1, bar.count or 0 do
-                local icon, usable, noMana = bar.icons[i], nil, nil
-                if icon.spellID and C_Spell.IsSpellUsable then usable, noMana = C_Spell.IsSpellUsable(icon.spellID) end
-                local glow = icon.glow
-                local loop = glow.proc and (", loop " .. tostring(glow.ProcLoop:IsPlaying())) or ""
-                add(("  %d. %s | %s %s | reactive %s | usable %s, no mana %s | glow %s (%s%s) | size %s"):format(i, say(icon.name),
-                    say(icon.kind), say(icon.spellID or icon.itemID), tostring(icon.reactive), say(usable), say(noMana),
-                    tostring(glow:IsShown()), glow.proc and "proc" or "edge", loop, say(icon:GetWidth())))
+                if aura then
+                    add(ReportEntry(bar, i, say))
+                else
+                    local icon, usable, noMana = bar.icons[i], nil, nil
+                    if icon.spellID and C_Spell.IsSpellUsable then usable, noMana = C_Spell.IsSpellUsable(icon.spellID) end
+                    local glow = icon.glow
+                    local loop = glow.proc and (", loop " .. tostring(glow.ProcLoop:IsPlaying())) or ""
+                    add(("  %d. %s | %s %s | reactive %s | usable %s, no mana %s | glow %s (%s%s) | size %s | range watched %s"):format(i,
+                        say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID), tostring(icon.reactive), say(usable), say(noMana),
+                        tostring(glow:IsShown()), glow.proc and "proc" or "edge", loop, say(icon:GetWidth()), tostring(icon.ranged == true)))
+                end
             end
         end
     end
@@ -896,6 +996,29 @@ local function Awake()
     return hostile and true or false
 end
 
+-- Bars holding Blizzard's aura containers: the Buffs and Debuffs bars, and
+-- Cooldowns or Utility with Show buff and debuff time. A container's own
+-- OnShow and OnHide run inside whatever code shows or hides a frame it sits
+-- in, so once a bar holds one the addon never shows or hides it again: it
+-- stays shown and goes right out instead (gone): fully see-through, with its
+-- mover and grow arrows hidden, so nothing on it can be seen, hovered or
+-- clicked, as when it was hidden. Everything that places or stacks the bars
+-- goes by the same choices either way. Called just before a bar's first
+-- container is made (Buffs.lua, IconAuras.lua), never in a fight: a hidden
+-- bar is shown now, gone, while it holds nothing yet, so the container is
+-- made in sight and signs up for its events as its unit is set. Bars that
+-- never hold one are shown and hidden as before.
+function B:Hold(bar)
+    if bar.holds then return end
+    bar.holds = true
+    if bar:IsShown() then return end
+    bar.gone = true
+    bar:SetAlpha(0)
+    bar.mover:Hide()
+    bar.arrows:Hide()
+    bar:Show()
+end
+
 function B:UpdateShown()
     local on = self:Enabled()
     if not on then unlocked = false end
@@ -907,21 +1030,20 @@ function B:UpdateShown()
             -- A bar taken out of your layout doesn't show at all.
             local out = ns.Layout ~= nil and ns.Layout:IsHidden(key)
             if bar.kind == "aura" then
-                -- Shown whenever it has entries; hiding out of combat fades it
-                -- right out instead, since the secure slots can't be hidden in
-                -- a fight.
+                -- Shown whenever it has entries, never in a fight; hiding
+                -- out of combat fades it right out instead.
                 local has = bar.count > 0 or ns.BuffBar:SelfOn(bar)
                 local show = on and not out and (unlocked or has) or false
-                if bar:IsShown() ~= show then
-                    if InCombatLockdown() then bar.pendingShown = true else bar:SetShown(show) end
+                if Showing(bar) ~= show then
+                    if InCombatLockdown() then bar.pendingShown = true else SetShowing(bar, show) end
                 end
-                bar:SetAlpha(mode == "hide" and 0 or mode == "fade" and FADE or 1)
+                bar:SetAlpha(bar.gone and 0 or mode == "hide" and 0 or mode == "fade" and FADE or 1)
             else
                 local show = on and not out and (unlocked or (bar.count > 0 and mode ~= "hide"))
-                bar:SetShown(show and true or false)
-                bar:SetAlpha(mode == "fade" and FADE or 1)
+                SetShowing(bar, show and true or false)
+                bar:SetAlpha(bar.gone and 0 or mode == "fade" and FADE or 1)
             end
-            bar.mover:SetShown(on and unlocked)
+            bar.mover:SetShown(on and unlocked and not bar.gone)
             Arrows(bar)
             BarDecor(bar)
         end
@@ -934,7 +1056,7 @@ function B:ApplyArrows()
 end
 
 -- Whether an entry is left off your bars because you carry none of it (it
--- still shows on the window's drawings of them).
+-- still shows on the window's drawings of them). For the tests.
 function B:Absent(name)
     return absent[name] == true
 end
@@ -949,6 +1071,11 @@ end
 function B:SetUnlocked(value)
     local was = unlocked
     unlocked = value and self:Enabled() or false
+    -- A bar still being dragged as they lock is let go where it is first,
+    -- before the bars are laid out again (that puts each in its spot).
+    if not unlocked then
+        for _, bar in pairs(bars) do Drop(bar) end
+    end
     -- Items you carry none of show while unlocked, so they can be placed.
     if self.started and was ~= unlocked then Relay() end
     self:UpdateShown()
@@ -957,9 +1084,9 @@ function B:SetUnlocked(value)
     if ns.Layout then ns.Layout:Stack() end
 end
 
-function B:RefreshAll()
-    if not (self.started and self:Enabled()) then return end
-    dirty = false
+-- Every icon on the Cooldowns and Utility bars: in full, or one part of each
+-- (RefreshIcon). A failure is reported once.
+local function Each(part)
     local hasTarget = UnitExists("target") and true or false
     local follows = follow
     follow = false
@@ -967,24 +1094,55 @@ function B:RefreshAll()
         local bar = bars[key]
         if bar and bar.kind == "cooldown" then
             for i = 1, bar.count do
-                local ok, err = pcall(RefreshIcon, bar.icons[i], bar.data, hasTarget, follows)
-                if not ok and not self.lastError then
-                    self.lastError = tostring(err)
-                    print("|cffffd100" .. ns.TITLE .. ":|r a bar icon couldn't update. Please report this: " .. self.lastError)
+                local ok, err = pcall(RefreshIcon, bar.icons[i], bar.data, hasTarget, follows, part)
+                if not ok and not B.lastError then
+                    B.lastError = tostring(err)
+                    print("|cffffd100" .. ns.TITLE .. ":|r a bar icon couldn't update. Please report this: " .. B.lastError)
                 end
             end
         end
     end
 end
 
+function B:RefreshAll()
+    if not (self.started and self:Enabled()) then return end
+    dirty, cooling, tinting = false, false, false
+    Each(nil)
+end
+
+-- With Use my bars off (the default) the bars are never made: no bars, icons,
+-- aura containers or event driver, and your spells and bags aren't read for
+-- them. They're made the first time the bars are turned on, and kept (hidden)
+-- if they're turned off again.
+local Listen -- the driver's events, with the driver below
+
+-- Lays the bars out again with your spells and items as they are now. Off,
+-- bars made earlier are laid out with nothing watched and hidden, and none
+-- are made.
+local function Rebuild()
+    Listen()
+    if B:Enabled() or next(bars) then
+        ns.Spells:Fresh()
+        Recount()
+        for _, key in ipairs(ns.BAR_KEYS) do
+            local bar = bars[key] or NewBar(key)
+            Layout(bar)
+            -- A Look page change made in a fight while the bars were off:
+            -- the driver didn't hear that fight end, so it's done now.
+            if bar.pendingDecor then GroupDecor(bar) end
+        end
+    end
+    B:UpdateShown()
+    B:RefreshAll()
+    if ns.Layout then ns.Layout:Stack() end
+end
+
+-- After a change of yours (a bar's entries, a profile, the bars turned on or
+-- off, a layout): your spells and items are read again when next wanted.
 function B:Rebuild()
     if not self.started then return end
-    ns.Spells:Scan()
-    Recount()
-    for _, key in ipairs(ns.BAR_KEYS) do Layout(bars[key] or NewBar(key)) end
-    self:UpdateShown()
-    self:RefreshAll()
-    if ns.Layout then ns.Layout:Stack() end
+    ns.Spells:Stale()
+    Rebuild()
 end
 
 -- Setup changes. Each redraws the bars.
@@ -1030,10 +1188,6 @@ function B:Mine(key)
         end
     end
     return names, places
-end
-
-function B:HasBuff(name)
-    return self:HasAura("buff", name)
 end
 
 -- Joins -------------------------------------------------------------------------------
@@ -1156,10 +1310,6 @@ function B:SetAura(key, name, on)
     end
     self:Changed()
     return true
-end
-
-function B:SetBuff(name, on)
-    return self:SetAura("buff", name, on)
 end
 
 local function Added(key, name)
@@ -1588,7 +1738,8 @@ end
 function B:SetOption(key, field, value)
     ns.BarData(key)[field] = value
     if not self.started then return end
-    Layout(bars[key] or NewBar(key))
+    -- None are made while off: that waits for them to be turned on.
+    if bars[key] or self:Enabled() then Layout(bars[key] or NewBar(key)) end
     self:UpdateShown()
     self:RefreshAll()
     -- A bar in a layout may now be taller or shorter.
@@ -1603,7 +1754,9 @@ function B:SetScale(percent)
     local limits = ns.BAR_SCALE
     ns.Set("barScale", math.max(limits[1], math.min(limits[2], math.floor(percent + .5))))
     if not self.started then return end
-    for _, key in ipairs(ns.BAR_KEYS) do Layout(bars[key] or NewBar(key)) end
+    if self:Enabled() or next(bars) then
+        for _, key in ipairs(ns.BAR_KEYS) do Layout(bars[key] or NewBar(key)) end
+    end
     self:UpdateShown()
     self:RefreshAll()
     if ns.Layout then ns.Layout:Stack() end
@@ -1625,9 +1778,8 @@ end
 
 -- Lays one bar out again after a layout changes which way it grows.
 function B:Relayout(key)
-    if not self.started then return end
-    local bar = bars[key] or NewBar(key)
-    Layout(bar)
+    if not (self.started and (bars[key] or self:Enabled())) then return end
+    Layout(bars[key] or NewBar(key))
 end
 
 -- Empties a bar.
@@ -1649,119 +1801,181 @@ function B:ResetPositions()
     self:Changed()
 end
 
--- Gear changes come one slot at a time, all of a set's in one frame: the
--- bars are rebuilt once, on the next frame.
-local rebuildQueued = false
+-- Your spellbook, gear and bags changing ------------------------------------------------
+-- Each change only notes that the list of your spells and items wants
+-- reading again. The bars (when on) and an open /ccm window are redrawn once
+-- on the next frame, however many changes came at once (several
+-- SPELLS_CHANGED as you shift form, a gear set's every slot, a loading
+-- screen). With your bars off and /ccm closed, that's all.
+local rebuildWanted = false
+local function RebuildNow()
+    if not rebuildWanted then return end
+    rebuildWanted = false
+    Rebuild()
+    if ns.window and ns.window:IsShown() then ns.window:Refresh() end
+end
 local function RebuildSoon()
-    if rebuildQueued then return end
-    rebuildQueued = true
-    C_Timer.After(0, function()
-        rebuildQueued = false
-        B:Rebuild()
+    rebuildWanted = true
+    C_Timer.After(0, RebuildNow)
+end
+
+-- With /ccm open its spell list shows what's in your bags: redrawn a moment
+-- after the last bag change (looting, a potion, ammo on a dummy), not on
+-- every one.
+local BAG_WAIT = .2
+local bagChanges = 0
+local function BagsChanged()
+    ns.Spells:Stale()
+    bagChanges = bagChanges + 1
+    local mine = bagChanges
+    C_Timer.After(BAG_WAIT, function()
+        if mine ~= bagChanges then return end
+        Rebuild()
         if ns.window and ns.window:IsShown() then ns.window:Refresh() end
     end)
+end
+
+local function Listing(_, event)
+    local open = ns.window ~= nil and ns.window:IsShown()
+    if event == "BAG_UPDATE_DELAYED" then
+        if open then BagsChanged() end
+    else
+        ns.Spells:Stale()
+        if open or B:Enabled() then RebuildSoon() end
+    end
+end
+
+-- The driver: everything your bars follow while they're on. Made the first
+-- time they're on; while they're off it hears nothing.
+local driver
+local listening = false
+local DRIVER_EVENTS = { "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_DISABLED",
+    "PLAYER_REGEN_ENABLED", "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "PLAYER_LEVEL_UP", "PLAYER_LEVEL_CHANGED",
+    "GET_ITEM_INFO_RECEIVED", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" }
+
+local function OnEvent(_, event, arg)
+    if event == "PLAYER_REGEN_DISABLED" then
+        inCombat = true
+        -- A Buffs or Debuffs bar still being dragged is let go where it
+        -- is, just before the fight locks it in place.
+        for key in pairs(ns.AURA_BARS) do
+            if bars[key] then Drop(bars[key]) end
+        end
+        B:UpdateShown()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        inCombat = false
+        -- Anything the aura bars had to wait for during the fight.
+        for key in pairs(ns.AURA_BARS) do
+            local bar = bars[key]
+            if bar and bar.pendingLayout then
+                Layout(bar)
+            elseif bar and bar.pending then
+                ns.BuffBar:Apply(bar)
+            end
+            if bar and bar.pendingDecor then GroupDecor(bar) end
+            if bar then bar.pendingShown = nil end
+        end
+        -- And the buff and debuff times on the cooldown icons.
+        for _, key in ipairs(ns.BAR_KEYS) do
+            if bars[key] then ns.IconAuras:CombatEnded(bars[key]) end
+        end
+        -- Items used up or picked up in the fight come off or go on now,
+        -- and families move on to the best one you carry.
+        follow = true
+        local recounted = Recount()
+        if recounted then Relay() end
+        B:UpdateShown()
+        if recounted then
+            B:RefreshAll()
+            if ns.Layout then ns.Layout:Stack() end
+        else
+            dirty = true
+        end
+        -- Turned off during the fight: done now, so the driver rests.
+        Listen()
+    elseif event == "BAG_UPDATE_DELAYED" then
+        follow = true
+        if ns.window and ns.window:IsShown() then
+            -- Counts now; the bars and the window are laid out again a
+            -- moment after the last bag change (BagsChanged).
+            dirty = true
+        elseif Recount() then
+            -- Out of an item, or carrying one again: the bars close up
+            -- or make room for it.
+            Relay()
+            B:UpdateShown()
+            B:RefreshAll()
+            if ns.Layout then ns.Layout:Stack() end
+        else
+            B:RefreshAll()
+        end
+    elseif event == "PLAYER_LEVEL_UP" or event == "PLAYER_LEVEL_CHANGED" or event == "GET_ITEM_INFO_RECEIVED" then
+        -- A potion you can use now, or the name of one the game has just
+        -- loaded. Your level may still read the old one as PLAYER_LEVEL_UP
+        -- fires, so PLAYER_LEVEL_CHANGED (with the new one) looks again.
+        if event ~= "GET_ITEM_INFO_RECEIVED" or ns.Spells:Family(arg) then follow, dirty = true, true end
+    elseif event == "SPELL_UPDATE_COOLDOWN" or event == "BAG_UPDATE_COOLDOWN" then
+        -- A cooldown started (or the global cooldown, with every cast).
+        cooling = true
+    else
+        if event == "PLAYER_TARGET_CHANGED" then
+            ns.BuffBar:UpdateTarget(bars.debuff)
+            ns.IconAuras:UpdateTarget(bars.cd)
+            ns.IconAuras:UpdateTarget(bars.util)
+            B:UpdateShown()
+        end
+        -- Usable, in or out of range, lit or put out by the game, or a new
+        -- target to be in range of: colours and glows.
+        tinting = true
+    end
+end
+
+-- Refreshes asked for since the last frame, done here once: in full, or
+-- just the part that changed. Nothing is asked of the game while nothing
+-- changes; range has its own event (WatchRange).
+local function Tick()
+    if not (dirty or cooling or tinting) then return end
+    local part
+    if not dirty and not (cooling and tinting) then part = cooling and "cooldown" or "state" end
+    dirty, cooling, tinting = false, false, false
+    if B.started and B:Enabled() then Each(part) end
+end
+
+-- The driver listens while your bars are on, made the first time they are.
+-- Turned off in a fight, it still hears the fight end, when the Buffs and
+-- Debuffs bars can hide.
+Listen = function()
+    local on = B:Enabled()
+    if on == listening or not on and InCombatLockdown() then return end
+    if on and not driver then
+        driver = CreateFrame("Frame")
+        driver:SetScript("OnEvent", OnEvent)
+        B.driver = driver
+    end
+    if not driver then return end
+    listening = on
+    if on then
+        inCombat = UnitAffectingCombat("player") and true or false
+        for _, event in ipairs(DRIVER_EVENTS) do driver:RegisterEvent(event) end
+        -- A client without range events still checks range on a new target
+        -- and as spells become usable or not.
+        pcall(driver.RegisterEvent, driver, "SPELL_RANGE_CHECK_UPDATE")
+        driver:SetScript("OnUpdate", Tick)
+    else
+        driver:UnregisterAllEvents()
+        driver:SetScript("OnUpdate", nil)
+    end
 end
 
 function B:Start()
     if self.started then return end
     self.started = true
-    inCombat = UnitAffectingCombat("player") and true or false
-    local driver = CreateFrame("Frame")
-    for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "SPELL_UPDATE_COOLDOWN",
-        "SPELL_UPDATE_USABLE", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
-        "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
-        "PLAYER_LEVEL_CHANGED", "GET_ITEM_INFO_RECEIVED", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW",
-        "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" }) do
-        driver:RegisterEvent(event)
+    local watch = CreateFrame("Frame")
+    for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "PLAYER_EQUIPMENT_CHANGED", "BAG_UPDATE_DELAYED" }) do
+        watch:RegisterEvent(event)
     end
-    driver:SetScript("OnEvent", function(_, event, arg)
-        if event == "PLAYER_REGEN_DISABLED" then
-            inCombat = true
-            -- A Buffs or Debuffs bar still being dragged is let go where it
-            -- is, just before the fight locks it in place.
-            for key in pairs(ns.AURA_BARS) do
-                if bars[key] then Drop(bars[key]) end
-            end
-            B:UpdateShown()
-        elseif event == "PLAYER_REGEN_ENABLED" then
-            inCombat = false
-            -- Anything the aura bars had to wait for during the fight.
-            for key in pairs(ns.AURA_BARS) do
-                local bar = bars[key]
-                if bar and bar.pendingLayout then
-                    Layout(bar)
-                elseif bar and bar.pending then
-                    ns.BuffBar:Apply(bar)
-                end
-                if bar and bar.pendingDecor then GroupDecor(bar) end
-                if bar then bar.pendingShown = nil end
-            end
-            -- And the buff and debuff times on the cooldown icons.
-            for _, key in ipairs(ns.BAR_KEYS) do
-                if bars[key] then ns.IconAuras:CombatEnded(bars[key]) end
-            end
-            -- Items used up or picked up in the fight come off or go on now,
-            -- and families move on to the best one you carry.
-            follow = true
-            local recounted = Recount()
-            if recounted then Relay() end
-            B:UpdateShown()
-            if recounted then
-                B:RefreshAll()
-                if ns.Layout then ns.Layout:Stack() end
-            else
-                dirty = true
-            end
-        elseif event == "BAG_UPDATE_DELAYED" then
-            follow = true
-            -- Counts change often; the item list only matters while /ccm is open.
-            if ns.window and ns.window:IsShown() then
-                B:Rebuild()
-                ns.window:Refresh()
-            elseif Recount() then
-                -- Out of an item, or carrying one again: the bars close up
-                -- or make room for it.
-                Relay()
-                B:UpdateShown()
-                B:RefreshAll()
-                if ns.Layout then ns.Layout:Stack() end
-            else
-                B:RefreshAll()
-            end
-        elseif event == "PLAYER_EQUIPMENT_CHANGED" then
-            -- A gear set swapped changes every slot at once: one rebuild for them all.
-            RebuildSoon()
-        elseif event == "SPELLS_CHANGED" or event == "PLAYER_ENTERING_WORLD" then
-            B:Rebuild()
-            if ns.window and ns.window:IsShown() then ns.window:Refresh() end
-        elseif event == "PLAYER_LEVEL_UP" or event == "PLAYER_LEVEL_CHANGED" or event == "GET_ITEM_INFO_RECEIVED" then
-            -- A potion you can use now, or the name of one the game has just
-            -- loaded. Your level may still read the old one as PLAYER_LEVEL_UP
-            -- fires, so PLAYER_LEVEL_CHANGED (with the new one) looks again.
-            if event ~= "GET_ITEM_INFO_RECEIVED" or ns.Spells:Family(arg) then follow, dirty = true, true end
-        else
-            if event == "PLAYER_TARGET_CHANGED" then
-                ns.BuffBar:UpdateTarget(bars.debuff)
-                ns.IconAuras:UpdateTarget(bars.cd)
-                ns.IconAuras:UpdateTarget(bars.util)
-                B:UpdateShown()
-            end
-            dirty = true
-        end
-    end)
-    -- Range changes as you move, with no event for it. Refreshes asked for
-    -- since the last frame are done here too, once.
-    local elapsedTotal = 0
-    driver:SetScript("OnUpdate", function(_, elapsed)
-        elapsedTotal = elapsedTotal + elapsed
-        local due = elapsedTotal >= RANGE_INTERVAL
-        if due then elapsedTotal = 0 end
-        if dirty or (due and B:Enabled() and UnitExists("target")) then
-            dirty = false
-            B:RefreshAll()
-        end
-    end)
-    self.driver = driver
+    watch:SetScript("OnEvent", Listing)
+    self.watch = watch
     -- Bars come back in full while Edit Mode is open.
     local editor = EditModeManagerFrame
     if editor and editor.HookScript then
@@ -1784,5 +1998,5 @@ function B:Start()
         end)
         editMode = editor:IsShown() and true or false
     end
-    self:Rebuild()
+    Rebuild()
 end

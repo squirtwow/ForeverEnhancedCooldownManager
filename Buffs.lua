@@ -73,7 +73,8 @@ local function Look(button, size, showTimer, decorate)
     button:SetApplicationCount(count)
     local parts = { cooldown = cooldown, count = count }
     if decorate then
-        parts.decor = Style:Decor(button, button)
+        -- Made now: the container's icons only take art as they're made.
+        parts.decor = Style:Decor(button, button, 0, true)
         Style:ShowDecor(parts.decor, Style:DecorFor("icon"))
     end
     Fit(parts, size, showTimer)
@@ -151,6 +152,8 @@ function F:Create(bar)
         bar.holders[i] = holder
     end
     if not self:Available() then return end
+    -- From now on the bar goes right out rather than hiding (Bars.lua B:Hold).
+    ns.Bars:Hold(bar)
     local aura = ns.AURA_BARS[bar.key]
     local ok, err = pcall(function()
         local container = CreateFrame("AuraContainer", nil, bar, "CustomAuraContainerTemplate")

@@ -1,12 +1,10 @@
--- Run the actual addon files against a mock game for the ? in the /ccm
--- window's title bar and how things fit: its tooltip (just under it, in the
--- addon's own look, never the footer), its first-time pulse and note (until
--- it's first clicked, saved for the whole account, never over the welcome,
--- a tour or a walkthrough), and every label on the window's pages clear of
--- the next control (the Layout page's foot most of all). The mock game is a
--- copy of Tools/TestBars.lua's: Tools/TestMockSync.mjs checks the two match,
--- and with --write copies it across. Tools/TestBars.lua is near the mock
--- game's memory limit, so these run here.
+-- What of Blizzard's own code runs inside the addon's: the secure aura
+-- containers' own OnShow and OnHide (the open taint lead of 2026-10-07: the
+-- addon showing or hiding the bars that hold them), and the secrets the
+-- game keeps in a fight. The mock game is a copy of Tools/TestBars.lua's:
+-- Tools/TestMockSync.mjs checks the two match, and with --write copies it
+-- across. Tools/TestBars.lua is near the mock game's memory limit, so these
+-- run here.
 local checks = 0
 local SECRET -- the tests' own secret, made with the mock game's below
 -- Also fails on a secret the addon misused since the last check (below), even
@@ -749,700 +747,587 @@ local function Load(saved, beforeLogin)
     return ns
 end
 
--- The page help: the game around it ------------------------------------------------------------
--- Stand-ins for what the window's other pages need (Raid Timers' previews
--- run none of Blizzard's code, the Cooldown pulse plays no sound), as in
--- Tools/TestPulse.lua.
+-- Aura containers: the game around it --------------------------------------------------------------
 
-local blizzardCalling = false
-_G.hooksecurefunc = function(t, key, hook)
-    if type(t) == "string" then t, key, hook = _G, t, key end
-    local original = t[key]
-    rawset(t, key, function(...)
-        original(...)
-        local was = blizzardCalling
-        blizzardCalling = false
-        hook(...)
-        blizzardCalling = was
-    end)
-end
-local function BlizzardFrames()
-    _G.TimerTracker = Blizzard(New("Frame"), "TimerTracker")
-    rawset(TimerTracker, "timerList", {})
-    _G.TimerTracker_StartTimerOfType = function() assert(blizzardCalling, "the addon ran Blizzard's countdown") end
-    _G.RaidWarningFrame = Blizzard(New("Frame"), "RaidWarningFrame")
-    rawset(RaidWarningFrame, "fontStringPool", { EnumerateActive = function() return pairs({}) end })
-    rawset(RaidWarningFrame, "AddMessage", function() assert(blizzardCalling, "the addon added a raid warning") end)
-    for i = 1, 5 do
-        local bar = New("StatusBar")
-        for _, key in ipairs({ "TextBorder", "Background", "Border", "Spark", "Icon", "Flash", "BorderShield" }) do
-            rawset(bar, key, New("Texture", bar))
-        end
-        rawset(bar, "Text", New("FontString", bar))
-        rawset(bar, "UpdateBarFillTexture", function() assert(blizzardCalling, "the addon ran a boss bar's fill") end)
-        _G["Boss" .. i .. "TargetFrameSpellBar"] = bar
-    end
-    _G.C_AddOns, _G.EraUI = nil, nil
-    _G.PlaySound = function() end
-    _G.C_Spell.GetSpellCooldown = function() return { isEnabled = true } end
-    _G.GetSpellBaseCooldown = nil
-    S[UIParent].width, S[UIParent].height = 1366, 768
-end
-
--- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
-local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Spells.lua",
-    "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
-    "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
-    "MinimapButton.lua", "Notes.lua", "Debug.lua" }
--- A fresh game, logged in with these saved settings (nil: a first install).
-local function Start(saved)
+local function Fresh()
     Environment()
-    BlizzardFrames()
-    _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
-    local ns = {}
-    _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs(FILES) do assert(loadfile(file))("ForeverEnhancedCooldownManager", ns) end
-    Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
-    Fire("PLAYER_LOGIN")
-    Fire("PLAYER_ENTERING_WORLD")
-    return ns
-end
--- A frame of the game going by: the ?'s pulse and note run while the
--- window is on screen and the ? has never been clicked.
-local function Step(w, elapsed)
-    local driver = w.helpNudge.driver
-    if driver:IsVisible() then S[driver].scripts.OnUpdate(driver, elapsed or 0) end
-end
--- The note under the ?, and the ?'s glow: each on screen or not.
-local function Nudge(w)
-    return tostring(w.helpNudge:IsVisible()) .. " " .. tostring(w.help.glow:IsVisible())
-end
--- Two places as text, rounded.
-local function Num(v) return ("%.2f"):format(v) end
-
--- How things fit ---------------------------------------------------------------------------------
--- Text in the game runs about seven units a letter in the window's usual
--- font (on a screenshot of the game "Live preview" took about 76 and ran
--- into Row spacing). Counted at 7.5 here, 6.5 in the small font, and more for
--- capitals, as Tools/TestPulse.lua does, to be sure. Places are worked out
--- from each frame's anchors as the game would: left, top, right and bottom,
--- y down from the window's top left.
-local Fit = {}
-function Fit.Wide(text, font)
-    text = tostring(text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "XX")
-    local small = type(font) == "string" and font:find("Small") ~= nil
-    local capitals = text:find("%a") ~= nil and text == text:upper()
-    local each = small and (capitals and 7.5 or 6.5) or (capitals and 9 or 7.5)
-    return #text * each
-end
--- Text is as wide as Wide says (in its room, where it's justified), and as
--- many lines tall as it wraps to; a tick is its box and label.
-function Fit.Rect(obj, depth)
-    depth = depth or 0
-    assert(depth < 40, "anchors that go round in a circle")
-    if obj == FECMFrame then return 0, 0, 820, 560 end
-    local s = S[obj]
-    if obj == UIParent or not s then return -10000, -10000, 10000, 10000 end
-    local width, height, wide = s.width, s.height, nil
-    if s.kind == "FontString" then
-        wide = Fit.Wide(s.text, Last(obj, "SetFontObject") or s.template)
-        if width == 0 then
-            width = wide
-        elseif wide > width and height == 0 then
-            height = math.ceil(wide / width) * 12
-        end
-        if height == 0 then height = 12 end
+    _G.hooksecurefunc = function(t, key, hook)
+        local original = t[key]
+        rawset(t, key, function(...)
+            if original then original(...) end
+            hook(...)
+        end)
     end
-    if rawget(obj, "box") and rawget(obj, "text") then width, height = 18 + Fit.Wide(S[obj.text].text, S[obj.text].template), 16 end
-    if #s.points == 0 then return Fit.Rect(s.parent, depth + 1) end
-    local left, top, right, bottom, cx, cy
-    for _, p in ipairs(s.points) do
-        local point, relative, relativePoint, x, y = p[1], s.parent, p[1], p[2] or 0, p[3] or 0
-        if type(p[2]) == "table" then point, relative, relativePoint, x, y = p[1], p[2], p[3] or p[1], p[4] or 0, p[5] or 0 end
-        local rl, rt, rr, rb = Fit.Rect(relative, depth + 1)
-        local ax = relativePoint:find("LEFT") and rl or relativePoint:find("RIGHT") and rr or (rl + rr) / 2
-        local ay = relativePoint:find("TOP") and rt or relativePoint:find("BOTTOM") and rb or (rt + rb) / 2
-        ax, ay = ax + x, ay - y
-        if point:find("LEFT") then left = ax elseif point:find("RIGHT") then right = ax else cx = ax end
-        if point:find("TOP") then top = ay elseif point:find("BOTTOM") then bottom = ay else cy = ay end
-    end
-    if not left and not right then left = cx - width / 2 end
-    left = left or right - width
-    right = right or left + width
-    if not top and not bottom then top = cy - height / 2 end
-    top = top or bottom - height
-    bottom = bottom or top + height
-    if wide and s.width > 0 and wide < right - left then
-        local justify = Last(obj, "SetJustifyH") or "LEFT"
-        if justify == "RIGHT" then
-            left = right - wide
-        elseif justify == "CENTER" then
-            left, right = (left + right - wide) / 2, (left + right + wide) / 2
-        else
-            right = left + wide
-        end
-    end
-    return left, top, right, bottom
+    _G.FECMFrame, _G.FECMTour, _G.FECMNotes, _G.FECMDebugFrame = nil, nil, nil, nil
 end
-function Fit.Inside(obj, root)
-    local at = obj
-    while at do
-        if at == root then return true end
-        at = S[at] and S[at].parent
-    end
-    return false
-end
--- In a list that scrolls: cut off at its edge.
-function Fit.Scrolled(obj)
-    local at = S[obj].parent
-    while at and S[at] do
-        if S[at].kind == "ScrollFrame" then return true end
-        at = S[at].parent
-    end
-    return false
-end
-function Fit.Name(obj)
-    local s = S[obj]
-    if s.kind == "FontString" then return '"' .. tostring(s.text) .. '"' end
-    if rawget(obj, "box") and rawget(obj, "text") then return "tick " .. tostring(S[obj.text].text) end
-    if rawget(obj, "buttons") then return "choice " .. tostring(S[obj.buttons[1].label].text) .. "..." end
-    if rawget(obj, "label") then return s.kind .. " " .. tostring(S[obj.label].text) end
-    return s.kind
-end
--- What can run into something else, where each shows: text (not a
--- button's or tick's own), ticks with their labels, buttons, choices, text
--- boxes and slider tracks, the thumb reaching 5 past each end.
-function Fit.Pieces(root)
-    local list = {}
-    for _, obj in ipairs(objects) do
-        local s = S[obj]
-        local parent = s.parent
-        if obj ~= root and Fit.Inside(obj, root) and obj:IsVisible() and not Fit.Scrolled(obj) then
-            local piece
-            if s.kind == "FontString" then
-                local own = parent and S[parent] and ((S[parent].kind == "Button" and rawget(parent, "label") == obj)
-                    or (rawget(parent, "box") ~= nil and rawget(parent, "text") == obj))
-                local inChoice = parent and S[parent] and S[parent].parent and rawget(S[parent].parent, "buttons") ~= nil
-                piece = (s.text or "") ~= "" and not own and not inChoice
-            elseif rawget(obj, "box") and rawget(obj, "text") then
-                piece = true
-            elseif rawget(obj, "buttons") and rawget(obj, "SetSelected") then
-                piece = true
-            elseif s.kind == "Button" and rawget(obj, "label") then
-                piece = not (parent and rawget(parent, "buttons"))
-            elseif s.kind == "EditBox" then
-                piece = true
-            elseif parent and rawget(parent, "track") == obj then
-                piece = "track"
-            end
-            if piece then
-                local l, t, r, b = Fit.Rect(obj)
-                if piece == "track" then l, r = l - 5, r + 5 end
-                list[#list + 1] = { l, t, r, b, obj = obj, name = Fit.Name(obj) }
-            end
-        end
-    end
-    return list
-end
-function Fit.Below(a, b)
-    local at = S[b].parent
-    while at do
-        if at == a then return true end
-        at = S[at] and S[at].parent
-    end
-    return false
-end
--- Every piece on a page inside it and none on another: "" when all fit.
-function Fit.Problems(root)
-    local list, found = Fit.Pieces(root), {}
-    local rl, rt, rr, rb = Fit.Rect(root)
-    for i, a in ipairs(list) do
-        if a[1] < rl or a[3] > rr or a[2] < rt or a[4] > rb then found[#found + 1] = a.name .. " off the page" end
-        for j = i + 1, #list do
-            local b = list[j]
-            if a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4] and not Fit.Below(a.obj, b.obj) and not Fit.Below(b.obj, a.obj) then
-                found[#found + 1] = a.name .. " on " .. b.name
-            end
-        end
-    end
-    return table.concat(found, "; ")
-end
-function Fit.Clear(a, b)
-    local al, at, ar, ab = Fit.Rect(a)
-    local bl, bt, br, bb = Fit.Rect(b)
-    return not (al < br and bl < ar and at < bb and bt < ab)
+-- Blizzard's container code run inside the addon's since the last ask, in
+-- order, then forgotten.
+local function Runs()
+    local text = table.concat(ContainerRuns, " | ")
+    for i = #ContainerRuns, 1, -1 do ContainerRuns[i] = nil end
+    return text
 end
 
--- The ?'s tooltip: just under it, in the addon's own look ------------------------------------------
--- Hovering the ? shows a small tooltip under it, as Show me what's new's
--- does above that button: not the footer. Leaving it, clicking it or
--- closing the window puts it away. Show me what's new's stays above.
 
-;(function()
-    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
-    for _, timer in ipairs(timers) do timer() end
-    SlashCmdList.FECM("")
-    local w, T = FECMFrame, ns.Theme
-    local help = w.help
-    local resting = S[w.note].text
-    S[help].scripts.OnEnter(help)
-    local tip = T.tip
-    local p = S[tip].points[1]
-    Equal(S[tip.title].text .. " | " .. S[tip.text].text .. " | " .. tostring(S[tip].shown) .. " | " .. p[1] .. " " .. tostring(p[2] == help)
-        .. " " .. p[3] .. " " .. p[4] .. " " .. p[5] .. " | " .. tostring(Last(tip, "SetClampedToScreen")) .. " " .. Last(tip, "SetFrameStrata"),
-        "PAGE HELP | Walks you through this page, a step at a time. | true | TOPRIGHT true BOTTOMRIGHT 0 -6 | true TOOLTIP",
-        "hovered: Page help, just under the ?, lined up with its right edge, kept on screen")
-    Equal(tostring(help.hint) .. " | " .. tostring(S[w.note].text == resting), "nil | true", "the footer stays as it was: no note there for the ?")
-    local l, t, r, b = Fit.Rect(tip)
-    local _, _, _, helpBottom = Fit.Rect(help)
-    Equal(tostring(l >= 0 and r <= 820 and b <= 560) .. " " .. Num(t - helpBottom) .. " " .. tostring(Fit.Clear(tip, w.close)) .. " "
-        .. tostring(Fit.Clear(tip, w.profileButton)), "true 6.00 true true",
-        "inside the window, which stays on screen, 6 under the ?, clear of the X and the profile menu's button")
-    Equal(S[tip].border[1] .. " " .. S[tip.title].colour[1], "0.69 0.69", "edged and headed in the accent, as Show me what's new's")
-    S[help].scripts.OnLeave(help)
-    Equal(tostring(S[tip].shown), "false", "gone as the mouse leaves")
-    S[help].scripts.OnEnter(help)
-    help:Click()
-    Equal(tostring(S[tip].shown) .. " " .. tostring(S[FECMTour].shown), "false true", "clicked: gone, and the page's walkthrough starts")
-    FECMTour.skip:Click()
-    S[help].scripts.OnEnter(help)
-    w:Hide()
-    Equal(tostring(S[tip].shown), "false", "gone with the window")
-    -- Another button's tooltip: the ? never takes it away, and it still
-    -- shows above its button.
-    w:Show()
-    T:ShowTip(w.news, "What's new", "What changed.")
-    p = S[tip].points[1]
-    T:HideTip(help)
-    Equal(tostring(S[tip].shown) .. " " .. p[1] .. " " .. tostring(p[2] == w.news) .. " " .. p[3] .. " " .. p[4] .. " " .. p[5],
-        "true BOTTOM true TOP 0 6", "another's tooltip stays above its button, and the ? leaves it be")
-    T:HideTip()
-    Equal(tostring(S[tip].shown), "false", "and goes when it's put away")
-    Equal(#printed, 0, "no errors from the tooltip")
-end)()
+-- The mock game shows and hides as the game does ----------------------------------------------------
 
--- A first install: the ? pulses and a note points it out, after the welcome -------------------------
--- Until the ? is first clicked, it glows softly in the accent, slow, dim to
--- lit and back, and a note under it, its arrow pointing up at it, says
--- what it's for, with an x to put it away. Neither shows while the welcome,
--- the tour or a walkthrough is up, nor over the profile menu or What's new:
--- they come back after, and each time the window opens. The note sits under
--- the title bar, inside the window, over the page, under the profile menu,
--- the tour and Are you sure?, and only on a page with room for it (below).
-
-;(function()
-    local ns = Start(nil)
-    local db = ForeverEnhancedCooldownManagerDB
-    Equal(tostring(ns.firstInstall) .. " " .. tostring(db.helpSeen) .. " " .. tostring(ns.HelpSeen()), "true nil false",
-        "a first install: the ? not clicked yet")
-    for _, timer in ipairs(timers) do timer() end
-    local w, box, T = FECMFrame, FECMTour, ns.Theme
-    local nudge, help = w.helpNudge, w.help
-    Step(w, .5)
-    Equal(S[box.title].text .. " " .. tostring(S[box].shown) .. " | " .. Nudge(w), "WELCOME true | false false",
-        "the welcome: no note, no pulse")
-    box.skip:Click()
-    Step(w, 0)
-    Equal(Nudge(w) .. " " .. S[nudge.text].text, "true true New: click ? for help with any page", "skipped: the note and the pulse")
-    -- Take the tour instead: hidden for every step, back after.
-    ns.Tour:Welcome()
-    Step(w, 0)
-    Equal(Nudge(w), "false false", "the welcome again: hidden")
-    box.next:Click()
-    Step(w, 0)
-    local steps = 0
-    local hidden = true
-    repeat
-        steps = steps + 1
-        Step(w, .3)
-        if w.helpNudge:IsVisible() or help.glow:IsVisible() then hidden = false end
-        box.next:Click()
-    until not S[box].shown or steps > 20
-    Step(w, 0)
-    Equal(tostring(steps) .. " " .. tostring(hidden) .. " | " .. w.selected .. " " .. Nudge(w), "9 true | cast false true",
-        "taken: hidden on all nine steps of the tour; done on Cast bar, the pulse is back, the note waits for a page with room")
-    w:Select("cd")
-    Step(w, 0)
-    Equal(Nudge(w), "true true", "and the note shows on Cooldowns")
-    -- A page's walkthrough started any other way: hidden too.
-    ns.Tour:StartPage("general")
-    Step(w, 0)
-    Equal(Nudge(w), "false false", "a walkthrough showing: hidden")
-    box.skip:Click()
-    Step(w, 0)
-    Equal(Nudge(w), "true true", "back after it")
-    -- Over the profile menu and What's new: hidden while they're open.
-    w.profileButton:Click()
-    Step(w, 0)
-    local menu = Nudge(w)
-    w.profileButton:Click()
-    Step(w, 0)
-    ns.ShowNotes()
-    Step(w, 0)
-    local news = Nudge(w)
-    ns.notes:Hide()
-    Step(w, 0)
-    Equal(menu .. " | " .. news .. " | " .. Nudge(w), "false false | false false | true true", "not over the profile menu or What's new")
-
-    -- The pulse: slow and light, dim to lit and back, in the accent.
-    w:Hide()
-    Equal(tostring(S[nudge].shown) .. " " .. tostring(S[help.glow].shown) .. " " .. tostring(nudge.driver:IsVisible()), "false false false",
-        "closed: the note and the glow go with the window")
-    w:Show()
-    Equal(tostring(S[nudge].shown), "false", "opened again: not before the game's next frame, which knows what else is up")
-    Step(w, 0)
-    local glow = help.glow
-    local accent, edge = T:Accent(), T.CONTROL_BORDER
-    local function Pulse() return Num(S[glow].alpha) .. " " .. Num(S[help].border[1]) end
-    local dim = Pulse()
-    Step(w, .6)
-    local quarter = Pulse()
-    Step(w, .6)
-    local lit = Pulse()
-    Step(w, 1.2)
-    local back = Pulse()
-    Equal(dim .. " | " .. quarter .. " | " .. lit .. " | " .. back,
-        Num(0) .. " " .. Num(edge[1]) .. " | " .. Num(.15) .. " " .. Num(edge[1] + (accent[1] - edge[1]) * .4) .. " | " .. Num(.3) .. " "
-            .. Num(edge[1] + (accent[1] - edge[1]) * .8) .. " | " .. Num(0) .. " " .. Num(edge[1]),
-        "dim as it opens, lit after 1.2 seconds (a third of the accent inside, most of it on the edge), dim again at 2.4")
-    Equal(tostring(S[glow].shown) .. " " .. Last(glow, "SetColorTexture") .. " " .. tostring(S[glow].parent == help) .. " "
-        .. S[glow].points[1][1] .. " " .. S[glow].points[2][1], "true " .. accent[1] .. " true TOPLEFT BOTTOMRIGHT",
-        "the ?'s own glow, in the accent, inside it")
-    -- A new accent: the note, its arrow and the glow follow.
-    ns.Set("accent", "teal")
-    T:Repaint()
-    Step(w, 1.2)
-    local teal = T.ACCENTS.teal.colour
-    Equal(S[nudge].border[1] .. " " .. S[nudge.arrow].tint[1] .. " " .. Last(glow, "SetColorTexture") .. " " .. Num(S[help].border[1]),
-        teal[1] .. " " .. teal[1] .. " " .. teal[1] .. " " .. Num(edge[1] + (teal[1] - edge[1]) * .8), "a new accent: all of it follows")
-    ns.Set("accent", "purple")
-    T:Repaint()
-
-    -- Where the note sits: under the title bar, inside the window, its
-    -- arrow pointing up at the ?, clear of the title bar's buttons.
-    local l, t, r, b = Fit.Rect(nudge)
-    local _, _, _, headerBottom = Fit.Rect(w.header)
-    local al, at, ar, ab = Fit.Rect(nudge.arrow)
-    local hl, _, hr, hb = Fit.Rect(help)
-    Equal(tostring(l >= 0 and r <= 820 and b <= 560) .. " " .. tostring(t >= headerBottom) .. " " .. tostring(Last(w, "SetClampedToScreen"))
-        .. " " .. tostring(Last(nudge, "SetClampedToScreen")), "true true true true",
-        "inside the window, which stays on screen, and under the title bar")
-    Equal(Num((al + ar) / 2 - (hl + hr) / 2) .. " " .. Num(at - hb) .. " " .. Num(ab - t) .. " " .. S[nudge.arrow].texture
-        .. " " .. table.concat({ Last(nudge.arrow, "SetTexCoord", 1), Last(nudge.arrow, "SetTexCoord", 3) }, ","),
-        "0.00 4.00 0.00 " .. ns.MEDIA .. "TourArrow.tga 0,0", "its arrow on its top edge, under the middle of the ?, pointing up, 4 below it")
-    local clear = {}
-    for _, part in ipairs({ help, w.close, w.profileButton }) do
-        clear[#clear + 1] = tostring(Fit.Clear(nudge, part) and Fit.Clear(nudge.arrow, part))
+do
+    Fresh()
+    local seen = {}
+    local function Watch(frame, name)
+        frame:SetScript("OnShow", function() seen[#seen + 1] = name .. " shown" end)
+        frame:SetScript("OnHide", function() seen[#seen + 1] = name .. " hidden" end)
     end
-    Equal(table.concat(clear, " "), "true true true", "clear of the ?, the X and the profile menu's button")
-    -- Its text on one line with room to spare, clear of its x.
-    local text = S[nudge.text]
-    local xl = Fit.Rect(nudge.close)
-    local tl, _, tr = Fit.Rect(nudge.text)
-    Equal(tostring(Fit.Wide(text.text, text.template) <= text.width) .. " " .. tostring(l + 10 + text.width + 4 <= xl) .. " "
-        .. tostring(tl >= l + 10 and tr <= xl - 4) .. " " .. S[nudge].height .. " " .. tostring(r - (xl + 16) >= 4),
-        "true true true 28 true", "its words on one line, clear of its x, which sits inside it")
-    -- Under the profile menu, the tour and Are you sure?.
-    local level = Last(nudge, "SetFrameLevel")
-    Equal(tostring(level < Last(w.profilePanel, "SetFrameLevel")) .. " " .. tostring(level < Last(box, "SetFrameLevel")) .. " "
-        .. tostring(level < Last(box.outline, "SetFrameLevel")) .. " " .. tostring(level < Last(w.confirm.shade, "SetFrameLevel")),
-        "true true true true", "under the profile menu, the tour's outline and box, and Are you sure?")
-    Equal(tostring(Last(nudge, "EnableMouse")) .. " | " .. nudge.close.hint,
-        "true | Put this note away. The ? stays, for help with any page.",
-        "it takes the clicks over it, and its x says what it does")
-
-    -- Its x: gone for good, saved.
-    nudge.close:Click()
-    Step(w, 1)
-    Equal(tostring(db.helpSeen) .. " " .. tostring(ns.HelpSeen()) .. " | " .. Nudge(w) .. " " .. tostring(nudge.driver:IsVisible()) .. " "
-        .. Num(S[help].border[1]), "true true | false false false " .. Num(edge[1]), "x clicked: saved, the note and pulse gone, the ?'s edge as it was")
-    w:Hide()
-    w:Show()
-    Step(w, 1)
-    Equal(Nudge(w), "false false", "and they stay gone when the window opens again")
-    Equal(#printed, 0, "no errors from the note")
-end)()
-
--- The note never over a page's buttons or words ----------------------------------------------------
--- It takes the clicks over it, so it shows only where nothing is under it:
--- the four bar pages and General. Elsewhere (Layout's Undo, Reset and Turn
--- off, the Preview button, Look's Turn on, a long status line) only the ?
--- pulses, so every button there stays clickable. Checked in the states that
--- change what a page's top row shows.
-
-;(function()
-    local ns = Start({ useBars = true, notesSeen = "dev" })
-    for _, timer in ipairs(timers) do timer() end
-    SlashCmdList.FECM("")
-    local w = FECMFrame
-    local nudge, glow = w.helpNudge, w.help.glow
-    local shownOn, problems = {}, {}
-    local function Check(key, label)
-        label = label or key
-        w:Select(key)
-        Step(w, 0)
-        if not glow:IsVisible() then problems[#problems + 1] = label .. ": no pulse" end
-        if not nudge:IsVisible() then return end
-        shownOn[#shownOn + 1] = label
-        -- Anything on the page that takes the mouse, any words, any slider.
-        local root = w.pages[key] or w.pages.bar
-        for _, obj in ipairs(objects) do
-            local s = S[obj]
-            local kind = s.kind
-            local counts = Last(obj, "EnableMouse") or kind == "Button" or kind == "EditBox" or kind == "Slider"
-                or (kind == "FontString" and (s.text or "") ~= "")
-            if counts and obj ~= root and Fit.Inside(obj, root) and obj:IsVisible()
-                and not (Fit.Clear(nudge, obj) and Fit.Clear(nudge.arrow, obj)) then
-                problems[#problems + 1] = label .. ": " .. Fit.Name(obj)
-            end
-        end
+    local function Seen()
+        local text = table.concat(seen, ", ")
+        seen = {}
+        return text
     end
-    for _, key in ipairs({ "cd", "util", "buff", "debuff", "look", "layout", "cast", "general", "raid", "pulse" }) do Check(key) end
-    -- Layout with a layout picked: Undo, Reset and Turn off along its top row.
-    local layout = w.pages.layout
-    layout.cards[1]:Click()
-    Check("layout", "layout picked")
-    Equal(tostring(S[layout.undo].shown) .. " " .. S[layout.toggle.label].text .. " | " .. Nudge(w), "true Turn off | false true",
-        "Layout with Undo, Reset and Turn off showing: only the pulse, nothing over them")
-    -- Look with the display off: its Turn on button.
-    cvarOn, prdOn = false, false
-    ns.Set("prdSkin", true)
-    Check("look", "look with warnings")
-    cvarOn, prdOn = true, true
-    -- General with EraUI there, a bar page with your bars off, one taken out.
-    _G.C_AddOns = { IsAddOnLoaded = function(name) return name == "EraUI" end }
-    Check("general", "general with EraUI")
-    _G.C_AddOns = nil
-    ns.Set("useBars", false)
-    Check("cd", "cd bars off")
-    Check("general", "general bars off")
-    ns.Set("useBars", true)
-    ns.Layout:TakeOut("util")
-    Check("util", "util taken out")
-    Equal(table.concat(shownOn, ", "), "cd, util, buff, debuff, general, general with EraUI, cd bars off, general bars off, util taken out",
-        "the note shows on the bar pages and General only")
-    Equal(table.concat(problems, "; "), "", "where it shows, nothing on the page is under it; the ? pulses on every page")
+    local outer = CreateFrame("Frame", nil, UIParent)
+    local inner = CreateFrame("Frame", nil, outer)
+    local deep = CreateFrame("Frame", nil, inner)
+    Watch(outer, "outer")
+    Watch(inner, "inner")
+    Watch(deep, "deep")
+    outer:Hide()
+    Equal(Seen(), "outer hidden, inner hidden, deep hidden", "hiding a frame runs OnHide on it and every shown frame inside it")
+    outer:Show()
+    Equal(Seen(), "outer shown, inner shown, deep shown", "and showing it runs their OnShow")
+    outer:Hide()
+    Seen()
+    inner:Hide()
+    Equal(Seen(), "", "a frame hidden inside a hidden one: nothing runs")
+    deep:Hide()
+    deep:Show()
+    outer:Show()
+    Equal(Seen(), "outer shown", "a frame still hidden inside it gets no OnShow, nor anything inside that")
+    inner:Show()
+    Equal(Seen(), "inner shown, deep shown", "until it shows itself")
+    inner:Show()
+    Equal(Seen(), "", "showing a shown frame runs nothing")
+    -- Moved into a hidden frame, it goes with that one.
+    local holder = CreateFrame("Frame", nil, UIParent)
+    holder:Hide()
+    inner:SetParent(holder)
+    holder:Show()
+    Equal(Seen() .. " " .. tostring(Last(inner, "SetParent") == holder), "inner shown, deep shown true",
+        "a frame moved into another follows that one")
+    outer:Hide()
+    Equal(Seen(), "outer hidden", "and no longer the one it left")
+
+    -- A container's own OnShow and OnHide are Blizzard's, run inside
+    -- whatever code showed or hid it. The tests' own code isn't the addon's.
+    local bar = CreateFrame("Frame", nil, UIParent)
+    local container = CreateFrame("AuraContainer", nil, bar, "CustomAuraContainerTemplate")
+    bar:Hide()
+    bar:Show()
+    Equal(S[container].intrinsic .. " [" .. Runs() .. "]", "2 []", "its OnHide and OnShow ran, with no addon code on the stack")
+    -- Code loaded from an addon file showing it: noted, with the function
+    -- that did it and whether it was in a fight.
+    local addon = assert(load("local bar = ... local function ShowBars() bar:Hide() bar:Show() end ShowBars()", "@Fake.lua"))
+    addon(bar)
+    lockdown = true
+    addon(bar)
+    lockdown = false
+    Equal(Runs(), "OnHide Fake.lua ShowBars | OnShow Fake.lua ShowBars | OnHide Fake.lua ShowBars in a fight"
+        .. " | OnShow Fake.lua ShowBars in a fight", "inside an addon's code: each run noted, with the function and the fight")
     Equal(#printed, 0, "no errors")
-end)()
+end
 
--- Clicking the ?: its walkthrough, and the pulse and note gone for good ---------------------------
--- An upgrade (saved settings without it) starts as a first install does.
--- Kept over a reload; anything but true saved for it reads as not clicked.
+-- The mock game's secrets act like the game's ----------------------------------------------------------
 
-;(function()
-    local ns = Start({ useBars = true, notesSeen = "dev" })
-    for _, timer in ipairs(timers) do timer() end
-    local db = ForeverEnhancedCooldownManagerDB
+do
+    Fresh()
+    local number, boolean, text = SECRETS.number, SECRETS.boolean, SECRETS.string
+    Equal(type(number) .. " " .. type(boolean) .. " " .. type(text) .. " " .. type(SECRET) .. " " .. type(4) .. " " .. type({}),
+        "number boolean string table number table", "type() says what a secret stands for, as the game's does")
+    Equal(tostring(issecretvalue(number)) .. " " .. tostring(issecretvalue(SECRET)) .. " " .. tostring(issecretvalue(4))
+        .. " " .. tostring(issecretvalue({})), "true true false false", "issecretvalue knows them all, and only them")
+    trinketCooldown, range[8924] = { SECRET, SECRET, 1 }, SECRET
+    local start, length, enable = GetInventoryItemCooldown("player", 13)
+    Equal(tostring(rawequal(start, number)) .. " " .. tostring(rawequal(length, number)) .. " " .. enable .. " "
+        .. tostring(rawequal(C_Spell.IsSpellInRange(8924, "target"), boolean)), "true true 1 true",
+        "the mock game hands back a secret of the kind each API returns")
+    -- Every way the addon's code could use one errors, and is noted.
+    local uses = {
+        "return s > 0", "return 0 <= s", "return s + 1", "return -s", "return s .. ''", "return #s", "return s.x",
+        "s.x = 1", "local r = s() return r", "return tostring(s)", "return string.format('%s', s)", "for _ in pairs(s) do end",
+        "return s == SECRETS.string",
+    }
+    local errors = {}
+    for _, use in ipairs(uses) do
+        local before = #SecretMisuse
+        if pcall(assert(load("local s = ... " .. use, "@Fake.lua")), number) then
+            errors[#errors + 1] = "no error: " .. use
+        elseif #SecretMisuse ~= before + 1 then
+            errors[#errors + 1] = "noted " .. (#SecretMisuse - before) .. " times: " .. use
+        end
+    end
+    -- Taken off the list first, or the next check would fail on them.
+    local noted, first = #SecretMisuse, SecretMisuse[1]
+    for i = #SecretMisuse, 1, -1 do SecretMisuse[i] = nil end
+    Equal(table.concat(errors, "; ") .. " " .. noted, " " .. #uses, "comparing, sums, joining, measuring, indexing,"
+        .. " writing, calling, text and iterating all error in the addon's code, and each is noted")
+    Equal(first, "Fake.lua:1: attempt to compare a secret number value", "noted with the addon's file and line")
+    -- What Lua has no hook for: a plain test or == against a plain value.
+    local quiet = assert(load("local s = ... return (s and 1 or 2) .. ' ' .. tostring(s == true) .. ' ' .. type(s)", "@Fake.lua"))
+    Equal(quiet(boolean) .. " " .. #SecretMisuse, "1 false boolean 0", "`if secret` and `secret == true` can't be caught here")
+    -- A misuse the addon's own pcall hides still fails the next check.
+    pcall(assert(load("local s = ... return s < 1", "@Fake.lua")), number)
+    local ok, err = pcall(Equal, 1, 1, "the next check")
+    for i = #SecretMisuse, 1, -1 do SecretMisuse[i] = nil end
+    Equal(tostring(ok) .. " " .. tostring(err):match("misused a secret before this check: Fake%.lua:1"), "false misused a secret before"
+        .. " this check: Fake.lua:1", "the next check fails")
+    for i = #SecretMisuse, 1, -1 do SecretMisuse[i] = nil end
+    -- The mock game and the tests are the game's own code: they may look.
+    Equal(tostring(number) .. " " .. tostring(number < 1) .. " " .. #text .. " " .. tostring(number.x), "secret false 0 nil",
+        "the tests may look at a secret without an error")
+    Equal(#SecretMisuse, 0, "and nothing is noted for them")
+end
+
+-- Blizzard's container code run inside the addon's: the 2026-10-07 lead ----------------------------------
+-- A container's own OnShow and OnHide (OnShow_Intrinsic, OnHide_Intrinsic)
+-- sign it up for its events again and mark it for a full update; the update
+-- itself runs later, in its own OnUpdate. Up to audit batch 5 the addon
+-- showed and hid the bars that hold containers (the Buffs and Debuffs bars'
+-- own, and the Cooldowns and Utility bars' buff and debuff times), so those
+-- ran inside its B:UpdateShown: on a fight starting, a target gained or lost
+-- out of a fight, Use my bars ticked or unticked (in a fight too), a Buffs or
+-- Debuffs bar's first or last entry, Hide out of combat, Edit Mode, Unlock
+-- bars (batch 2 proved each). Since batch 6 a bar is shown before its first
+-- container is made and never shown or hidden after that: it goes right out
+-- instead (Bars.lua B:Hold). The checks below go everywhere those did and
+-- prove none of it runs inside the addon's code now, and that a bar gone
+-- right out is seen, takes the mouse and is laid out as a hidden one was.
+-- Whether the game counted the container's later update as the addon's
+-- (taint) can't be seen here. With Use my bars off (the default) no container
+-- is ever made (audit batch 3).
+
+-- Every container's own code run so far, by anyone: its OnShow and OnHide,
+-- and its refreshes (UpdateAllAuras).
+local function ContainerWork()
+    local runs = 0
+    for _, container in ipairs(containers) do
+        runs = runs + (S[container].intrinsic or 0) + (S[container].refreshes or 0)
+    end
+    return runs
+end
+
+-- Whether each container made so far hears its auras change (signed up for
+-- its events, as the game's would be), in the order they were made.
+local function Heard()
+    local heard = {}
+    for i, container in ipairs(containers) do heard[i] = tostring(S[container].listening) end
+    return table.concat(heard, " ")
+end
+
+-- The bars a player can see now, then Blizzard's container code run inside
+-- the addon's since the last ask.
+local function Now(B)
+    local seen = {}
+    for _, key in ipairs({ "cd", "util", "buff", "debuff" }) do
+        local bar = B:Get(key)
+        if bar and InSight(bar) then seen[#seen + 1] = key end
+    end
+    return "seen: " .. table.concat(seen, " ") .. "; runs: " .. Runs()
+end
+
+do
+    -- Default settings (Use my bars off): never, as there are none.
+    Fresh()
+    Load(nil)
+    Fire("PLAYER_TARGET_CHANGED")
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Runs(), "", "bars off (the default): the addon never runs a container's own code, logging in, fighting or targeting")
+    -- Everything else a player with the bars off does: spells, gear, bags
+    -- and loading screens, Edit Mode, /ccm and every page of it, the Look
+    -- page's border and shadow, and the bars set up while off.
+    EditModeManagerFrame:Show()
+    EditModeManagerFrame:Hide()
     SlashCmdList.FECM("")
-    local w = FECMFrame
-    Step(w, 0)
-    Equal(tostring(db.helpSeen) .. " " .. Nudge(w), "nil true true", "an upgrade: the note and the pulse on opening")
-    w:Select("look")
-    w.help:Click()
-    local box = FECMTour
-    Step(w, 0)
-    Equal(tostring(db.helpSeen) .. " " .. S[box.title].text .. " " .. S[box.count].text .. " | " .. Nudge(w),
-        "true THE LOOK 1 of 4 | false false", "? clicked: the Look page's walkthrough, the pulse and note gone, saved")
-    box.skip:Click()
-    Step(w, 0)
-    Equal(Nudge(w) .. " " .. tostring(w.helpNudge.driver:IsVisible()), "false false false", "gone for good after it")
+    for _, page in ipairs({ "general", "layout", "look", "cd", "buff", "debuff" }) do FECMFrame:Select(page) end
+    FECMFrame.iconBorder.buttons[2]:Click()
+    FECMFrame.iconShadow.buttons[3]:Click()
+    local from = #timers
+    for _, event in ipairs({ "SPELLS_CHANGED", "PLAYER_EQUIPMENT_CHANGED", "BAG_UPDATE_DELAYED", "PLAYER_ENTERING_WORLD",
+        "SPELL_UPDATE_COOLDOWN", "BAG_UPDATE_COOLDOWN", "PLAYER_LEVEL_UP" }) do
+        Fire(event)
+    end
+    for i = from + 1, #timers do timers[i]() end
+    Equal(#containers .. " " .. ContainerWork() .. " [" .. Runs() .. "]", "0 0 []",
+        "bars off: no aura container is ever made, so none of Blizzard's container code runs, whatever the player does")
+    FECMFrame:Hide()
+    Equal(#printed, 0, "no errors")
+end
 
-    -- Kept over a reload.
-    local saved = ForeverEnhancedCooldownManagerDB
-    ns = Start(saved)
-    for _, timer in ipairs(timers) do timer() end
+do
+    -- Set up while off (entries, buff and debuff times): still none, until
+    -- the bars are turned on.
+    Fresh()
+    local ns = Load({ notesSeen = "dev" })
+    local B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    B:Assign("Moonfire", "cd")
+    B:SetOption("cd", "showAuras", true)
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(#containers .. " " .. ContainerWork() .. " [" .. Runs() .. "]", "0 0 []",
+        "bars off with entries and buff and debuff times set up: still no container")
     SlashCmdList.FECM("")
-    w = FECMFrame
-    Step(w, 1)
-    Equal(tostring(ns.HelpSeen()) .. " " .. Nudge(w) .. " " .. tostring(S[w.helpNudge.driver].shown), "true false false false",
-        "after a reload: still gone, nothing running for it")
+    FECMFrame:Select("general")
+    FECMFrame.useBars:Click()
+    Equal(#containers .. " " .. Now(B) .. " | " .. Heard(), "4 seen: cd buff debuff; runs:  | true true true true",
+        "Use my bars ticked: the containers made then (the Cooldowns bar's two, the Buffs and Debuffs bars'), each in sight"
+        .. " and signed up for its auras, with none of their own code run inside the addon's")
+    FECMFrame.useBars:Click()
+    local held = 0
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if S[B:Get(key)].shown then held = held + 1 end
+    end
+    Equal(held .. " " .. Now(B) .. " | " .. Heard(), "3 seen: ; runs:  | true true true true",
+        "unticked: the three bars holding containers gone right out, not hidden, none of the containers' own code run")
+    -- Off again: the driver rests, so targets and fights reach none of them.
+    local work = ContainerWork()
+    for _ = 1, 2 do
+        target = false
+        Fire("PLAYER_TARGET_CHANGED")
+        Fire("PLAYER_REGEN_DISABLED")
+        lockdown = true
+        target = true
+        Fire("PLAYER_TARGET_CHANGED")
+        lockdown = false
+        Fire("PLAYER_REGEN_ENABLED")
+    end
+    Equal(ContainerWork() - work .. " [" .. Runs() .. "]", "0 []", "turned off again: targets and fights never reach the containers")
+    FECMFrame:Hide()
+    Equal(#printed, 0, "no errors")
+end
 
-    -- Anything else saved: repaired to not clicked, so it shows.
-    local repaired = {}
-    for _, bad in ipairs({ "yes", 1, false, {} }) do
-        ns = Start({ useBars = true, notesSeen = "dev", helpSeen = bad })
-        for _, timer in ipairs(timers) do timer() end
+do
+    -- Use my bars on.
+    Fresh()
+    local ns = Load({ useBars = true })
+    local B = ns.Bars
+    Equal(Runs(), "", "logging in with bars on and nothing on them: none")
+    -- Each step: the bars seen are as they were before batch 6, and none of
+    -- the containers' own code runs inside the addon's (batch 2 found it in
+    -- every one of these).
+    B:SetAura("buff", "Thorns", true)
+    Equal(Now(B), "seen: buff; runs: ", "the Buffs bar's first entry: it comes into sight, none run")
+    B:SetAura("buff", "Thorns", false)
+    Equal(tostring(S[B:Get("buff")].shown) .. " " .. Now(B), "true seen: ; runs: ",
+        "its last taken off: gone right out, still shown, none run")
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(Now(B), "seen: debuff; runs: ", "the Debuffs bar's first entry: none run")
+    B:SetAura("debuff", "Moonfire", false)
+    Equal(Now(B), "seen: ; runs: ", "and its last taken off: none run")
+    B:SetAura("buff", "Thorns", true)
+    B:Assign("Moonfire", "cd")
+    B:SetOption("cd", "showAuras", true)
+    Equal(Now(B), "seen: cd buff; runs: ", "buff and debuff times ticked on a shown Cooldowns bar: made, none run")
+    B:SetOption("cd", "outOfCombat", "hide")
+    Equal(tostring(S[B:Get("cd")].shown) .. " " .. Now(B), "true seen: buff; runs: ",
+        "Hide out of combat with no target: the Cooldowns bar goes right out, still shown, none run")
+    -- A fight starts: PLAYER_REGEN_DISABLED comes just before the lockdown.
+    Fire("PLAYER_REGEN_DISABLED")
+    Equal(Now(B), "seen: cd buff; runs: ", "a fight starts: back in sight, none run")
+    lockdown = true
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Now(B), "seen: cd buff; runs: ", "a target in the fight: none run")
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Now(B), "seen: cd buff; runs: ", "the target lost in the fight: none run")
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Now(B), "seen: cd buff; runs: ", "the fight ends with an enemy targeted: still up, none run")
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Now(B), "seen: buff; runs: ", "no target out of a fight: gone right out, none run")
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Now(B), "seen: cd buff; runs: ", "an enemy targeted out of a fight: back, none run")
+    -- Out of a fight with no target the Cooldowns bar is gone again; Edit
+    -- Mode and Unlock bars bring it back (the addon's own Edit Mode hook).
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    EditModeManagerFrame:Show()
+    Equal(Now(B), "seen: cd buff; runs: ", "Edit Mode opening: back, none run")
+    EditModeManagerFrame:Hide()
+    Equal(Now(B), "seen: buff; runs: ", "and closing: gone, none run")
+    B:SetUnlocked(true)
+    Equal(Now(B), "seen: cd util buff debuff; runs: ", "Unlock bars: every bar, the empty Debuffs bar too, none run")
+    B:SetUnlocked(false)
+    Equal(Now(B), "seen: buff; runs: ", "Lock: none run")
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Runs()
+    SlashCmdList.FECM("")
+    FECMFrame:Select("general")
+    FECMFrame.useBars:Click()
+    Equal(Now(B), "seen: ; runs: ", "Use my bars unticked: none run")
+    FECMFrame.useBars:Click()
+    Equal(Now(B), "seen: cd buff; runs: ", "ticked again: none run")
+    FECMFrame:Hide()
+    Equal(Now(B) .. " | " .. Heard(), "seen: cd buff; runs:  | true true true true",
+        "the window closing: none run, and every container still hears its auras")
+    Equal(#printed, 0, "no errors")
+end
+
+do
+    -- Buff and debuff times first ticked on a Cooldowns bar hidden just then
+    -- (Hide out of combat, no target): the bar is shown, gone right out,
+    -- before they're made, so they're made in sight and hear their auras
+    -- from the start, as they never get an OnShow from the addon after.
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev" })
+    local B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:SetOption("cd", "outOfCombat", "hide")
+    local cd = B:Get("cd")
+    Equal(tostring(S[cd].shown) .. " " .. tostring(cd.holds), "false nil", "no containers yet: hidden as before")
+    B:SetOption("cd", "showAuras", true)
+    local made = cd.auraContainers or { p = UIParent, t = UIParent }
+    Equal(tostring(S[cd].shown) .. " " .. Now(B) .. " | " .. S[cd].alpha .. " " .. tostring(S[made.p].listening) .. " "
+        .. tostring(S[made.t].listening), "true seen: ; runs:  | 0 true true",
+        "ticked: shown but gone right out, its two containers made in sight and hearing their auras, none run")
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(Now(B), "seen: cd; runs: ", "an enemy targeted: in sight, none run")
+    Equal(#printed, 0, "no errors")
+end
+
+do
+    -- B:Hold on its own leaves the bar right out until the bars are next
+    -- shown: here a Utility bar taken out of the layout while unlocked (its
+    -- mover and arrows up inside the hidden bar), as when a container would
+    -- be made in it with nothing laid out after.
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev" })
+    local B, L = ns.Bars, ns.Layout
+    ns.Set("growArrows", true)
+    B:Assign("Wrath", "util")
+    L:Apply("pyramid")
+    L:TakeOut("util")
+    B:SetUnlocked(true)
+    local util = B:Get("util")
+    Equal(tostring(S[util].shown) .. " " .. tostring(S[util.mover].shown) .. " " .. tostring(S[util.arrows].shown), "false true true",
+        "out of the layout while unlocked: hidden, its mover and arrows up inside it")
+    B:Hold(util)
+    Equal(tostring(S[util].shown) .. " " .. tostring(InSight(util)) .. " " .. tostring(util.gone) .. " " .. S[util].alpha .. " "
+        .. tostring(util.mover:IsVisible()) .. " " .. tostring(util.arrows:IsVisible()), "true false true 0 false false",
+        "held: shown, but gone right out, see-through, its mover and arrows down")
+    -- A bar already shown when it's held is left as it is (no layout or
+    -- show may follow, as for B:Relayout).
+    local cd = B:Get("cd")
+    B:Hold(cd)
+    Equal(tostring(InSight(cd)) .. " " .. tostring(cd.gone) .. " " .. S[cd].alpha .. " " .. tostring(cd.mover:IsVisible()) .. " "
+        .. tostring(cd.arrows:IsVisible()), "true nil 1 true true", "held while shown: left in sight, its mover and arrows up")
+    B:SetUnlocked(false)
+    Equal(#printed, 0, "no errors")
+end
+
+do
+    -- In a fight. Items running out wait for the fight to end, and the Buffs
+    -- and Debuffs bars never come or go in one, but the Cooldowns and Utility
+    -- bars do, as Use my bars is unticked in a fight: gone right out at once.
+    Fresh()
+    itemCount[5512] = 1
+    local ns = Load({ useBars = true })
+    local B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:Assign("family:healthstone", "cd")
+    B:SetAura("buff", "Thorns", true)
+    B:SetOption("cd", "showAuras", true)
+    -- Any show or hide of these two in the lockdown is noted (combatToggle).
+    watched[B:Get("cd")], watched[B:Get("buff")] = true, true
+    Runs()
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    itemCount[5512] = 0
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Runs(), "", "the last Healthstone used in a fight: the bar waits for the fight to end, none")
+    SlashCmdList.FECM("")
+    FECMFrame:Select("general")
+    FECMFrame.useBars:Click()
+    Equal(tostring(S[B:Get("cd")].shown) .. " " .. tostring(S[B:Get("cd")].combatToggle) .. " "
+        .. tostring(S[B:Get("buff")].combatToggle) .. " " .. Now(B), "true nil nil seen: buff; runs: ", "Use my bars unticked in a"
+        .. " fight: the Cooldowns bar goes right out at once, never hidden, none run (the Buffs bar waits)")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(tostring(S[B:Get("buff")].shown) .. " " .. Now(B), "true seen: ; runs: ", "and the Buffs bar once it ends, none run")
+    FECMFrame:Hide()
+    Equal(#printed, 0, "no errors")
+end
+
+-- How each bar looks to a player now: seen or not, whether its mover and
+-- grow arrows are up (even see-through), how many frames on it take the mouse
+-- (shown ones with the mouse on, or a mouse script: a see-through one still
+-- catches clicks), and where it's placed and how big.
+local function Picture(B)
+    local lines = {}
+    for _, key in ipairs({ "cd", "util", "buff", "debuff" }) do
+        local bar, mice = B:Get(key), 0
+        local function Walk(frame)
+            local s = S[frame]
+            if frame:IsVisible() and (Last(frame, "EnableMouse") == true or s.scripts.OnEnter or s.scripts.OnMouseUp
+                or s.scripts.OnDragStart or s.scripts.OnReceiveDrag or s.scripts.OnClick) then
+                mice = mice + 1
+            end
+            for _, kid in ipairs(s.kids or {}) do Walk(kid) end
+        end
+        Walk(bar)
+        local point = S[bar].points[1] or {}
+        lines[#lines + 1] = ("%s %s, mover %s, arrows %s, takes the mouse %d, at %s %s,%s, %sx%s"):format(key,
+            InSight(bar) and "seen" or "unseen", tostring(bar.mover:IsVisible()), tostring(bar.arrows:IsVisible()), mice,
+            tostring(point[1]), tostring(point[4]), tostring(point[5]), tostring(S[bar].width), tostring(S[bar].height))
+    end
+    return table.concat(lines, "; ")
+end
+
+do
+    -- A bar gone right out is seen, takes the mouse, and is placed and sized
+    -- as a hidden one was, by the layout, its mover and arrows, Unlock bars
+    -- and Edit Mode: the same steps with the game's aura containers (bars
+    -- holding them go right out) and without any (every bar shown and hidden
+    -- as before batch 6), in a layout with grow arrows on. Played twice: with
+    -- Cooldowns hiding and Utility fading out of combat, then with the bars
+    -- holding containers fading (a bar gone right out must not show at the
+    -- Fade opacity) and Utility, with buff and debuff times too, hiding.
+    local function Play(withContainers, modes)
+        Fresh()
+        if not withContainers then _G.CustomAuraContainerSlotDefaultOptions = nil end
+        local ns = Load({ useBars = true, notesSeen = "dev" })
+        local B, L = ns.Bars, ns.Layout
+        ns.Set("growArrows", true)
+        B:Assign("Moonfire", "cd")
+        B:Assign("Wrath", "util")
+        B:SetAura("buff", "Thorns", true)
+        B:SetOption("cd", "showAuras", true)
+        if modes.utilAuras then B:SetOption("util", "showAuras", true) end
+        for _, key in ipairs({ "cd", "util", "buff", "debuff" }) do
+            if modes[key] then B:SetOption(key, "outOfCombat", modes[key]) end
+        end
+        L:Apply("pyramid")
         SlashCmdList.FECM("")
-        Step(FECMFrame, 0)
-        repaired[#repaired + 1] = tostring(ForeverEnhancedCooldownManagerDB.helpSeen) .. " " .. Nudge(FECMFrame)
-    end
-    Equal(table.concat(repaired, ", "), "nil true true, nil true true, nil true true, nil true true",
-        "a bad saved value is cleared on load, and the note shows")
-    Equal(#printed, 0, "no errors")
-end)()
-
--- The Layout page's foot: every label with room ----------------------------------------------------
--- On a screenshot of the game Live preview's label ran into Row spacing's. Live
--- preview is now the drawing's own tick, in its box's bottom left corner,
--- level with Unlock bars; under the box, three rows: Show grow arrows and
--- All bars, Show the Personal Resource Display and Row spacing, Match the
--- resource display and Icon spacing. All bars' longer label has room before
--- its track, which lines up with the spacing sliders'. The title row's
--- words stay clear of Undo and Reset, whatever it says.
-
-;(function()
-    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
-    for _, timer in ipairs(timers) do timer() end
-    SlashCmdList.FECM("")
-    local w = FECMFrame
-    w:Select("layout")
-    local page = w.pages.layout
-    local L = ns.Layout
-    Equal(Fit.Problems(page), "", "at the start: every label clear of the next control, all inside the page")
-    -- Under the box: three rows, each tick level with its slider, clear of it.
-    local function Middle(obj)
-        local _, t, _, b = Fit.Rect(obj)
-        return (t + b) / 2
-    end
-    Equal(tostring(Middle(page.growArrows) == Middle(page.allBars)) .. " " .. tostring(Middle(page.shown) == Middle(page.spacing)) .. " "
-        .. tostring(Middle(page.match) == Middle(page.iconSpacing)), "true true true", "each tick level with its slider")
-    local tracks = {}
-    local pageLeft = Fit.Rect(page)
-    for _, slider in ipairs({ page.allBars, page.spacing, page.iconSpacing }) do tracks[#tracks + 1] = Num(Fit.Rect(slider.track) - pageLeft) end
-    local _, _, _, boxBottom = Fit.Rect(page.box)
-    local _, allTop = Fit.Rect(page.allBars)
-    Equal(table.concat(tracks, " ") .. " " .. Num(allTop - boxBottom), "482.00 482.00 482.00 10.00", "the tracks lined up, All bars 10 under the box")
-    -- Each slider's label clear of its track, which its thumb reaches 5
-    -- back over at the lowest, and each value clear of the thumb at the
-    -- highest, inside its own room.
-    local tight = {}
-    for _, slider in ipairs({ page.allBars, page.spacing, page.iconSpacing }) do
-        local label, track = S[slider.label], S[slider.track].points
-        if Fit.Wide(label.text, label.template) + 5 + 3 > track[1][2] then tight[#tight + 1] = label.text end
-        for _, value in ipairs({ "0", "20", "50", "150" }) do
-            local shown = S[slider.value]
-            if Fit.Wide(value, shown.template) + 5 > -track[2][2] or Fit.Wide(value, shown.template) > shown.width then
-                tight[#tight + 1] = label.text .. " at " .. value
+        FECMFrame:Select("general")
+        local steps, gone = {}, 0
+        local function Step(name)
+            for _, key in ipairs(ns.BAR_KEYS) do
+                if B:Get(key).gone then gone = gone + 1 end
             end
+            steps[#steps + 1] = { name, Picture(B) }
+        end
+        Step("set up, out of a fight with no target (Cooldowns hides out of combat, Debuffs empty)")
+        target = true
+        Fire("PLAYER_TARGET_CHANGED")
+        Step("an enemy targeted")
+        target = false
+        Fire("PLAYER_TARGET_CHANGED")
+        Step("the target lost")
+        Fire("PLAYER_REGEN_DISABLED")
+        lockdown = true
+        Step("a fight starts")
+        target = true
+        Fire("PLAYER_TARGET_CHANGED")
+        Step("a target in the fight")
+        lockdown = false
+        Fire("PLAYER_REGEN_ENABLED")
+        target = false
+        Fire("PLAYER_TARGET_CHANGED")
+        Step("the fight over, no target")
+        B:SetUnlocked(true)
+        Step("Unlock bars")
+        B:SetUnlocked(false)
+        Step("Lock")
+        EditModeManagerFrame:Show()
+        Step("Edit Mode open")
+        EditModeManagerFrame:Hide()
+        Step("Edit Mode closed")
+        L:TakeOut("buff")
+        Step("Buffs taken out of the layout")
+        B:SetUnlocked(true)
+        Step("unlocked with Buffs out")
+        B:SetUnlocked(false)
+        L:PutBack("buff")
+        Step("Buffs put back")
+        B:SetAura("buff", "Thorns", false)
+        Step("the Buffs bar's last entry taken off")
+        B:SetAura("debuff", "Moonfire", true)
+        Step("the Debuffs bar's first entry")
+        FECMFrame.useBars:Click()
+        Step("Use my bars unticked")
+        FECMFrame.useBars:Click()
+        Step("ticked again")
+        Fire("PLAYER_REGEN_DISABLED")
+        lockdown = true
+        FECMFrame.useBars:Click()
+        Step("unticked in a fight")
+        lockdown = false
+        Fire("PLAYER_REGEN_ENABLED")
+        Step("that fight over")
+        FECMFrame.useBars:Click()
+        FECMFrame:Hide()
+        Step("ticked again, the window closed")
+        return steps, gone, #containers, #printed
+    end
+    for _, case in ipairs({
+        { name = "Cooldowns hiding, Utility fading", made = 4, modes = { cd = "hide", util = "fade" } },
+        { name = "Cooldowns, Buffs and Debuffs fading, Utility with buff and debuff times hiding", made = 6,
+            modes = { cd = "fade", util = "hide", buff = "fade", debuff = "fade", utilAuras = true } },
+    }) do
+        local with, gone, made, errors = Play(true, case.modes)
+        local without, goneBefore, madeBefore, errorsBefore = Play(false, case.modes)
+        Equal(made .. " " .. tostring(gone > 10) .. " " .. madeBefore .. " " .. goneBefore .. " " .. errors .. " " .. errorsBefore,
+            case.made .. " true 0 0 0 0", case.name .. ": with the containers, bars holding them go right out at times; without,"
+            .. " none is made or goes right out")
+        for i, step in ipairs(with) do
+            Equal(step[2], without[i][2], case.name .. ", " .. step[1] .. ": a bar gone right out looks, takes the mouse and is placed"
+                .. " as a hidden one")
         end
     end
-    Equal(table.concat(tight, ", "), "", "every slider's label clear of its track, every value inside its room")
-    -- Live preview: the drawing's own tick, in the box's foot, where the
-    -- drawing never goes, clear of Put back and Unlock bars.
-    local ll, lt, lr, lb = Fit.Rect(page.live)
-    local bl, _, _, bb = Fit.Rect(page.box)
-    local _, unlockTop = Fit.Rect(page.unlock)
-    Equal(tostring(S[page.live].parent == page.box) .. " " .. Num(ll - bl) .. " " .. Num(bb - lb) .. " " .. tostring(bb - lt <= 28) .. " "
-        .. tostring(Middle(page.live) == Middle(page.unlock)) .. " " .. tostring(Fit.Clear(page.live, page.unlock)) .. " " .. Num(unlockTop - lt),
-        "true 12.00 10.00 true true true -1.00", "in the box's bottom left corner, within the room its foot keeps clear, level with Unlock bars")
-    -- Bars taken out: Put back and its buttons after it, two to a line, none
-    -- on Live preview or Unlock bars.
-    for _, key in ipairs(ns.BAR_KEYS) do L:TakeOut(key) end
-    w:Refresh()
-    Equal(Fit.Problems(page), "", "all four taken out: Put back and its buttons clear of Live preview, Unlock bars and each other")
-    for _, key in ipairs(ns.BAR_KEYS) do L:PutBack(key) end
-    w:Refresh()
+end
 
-    -- The title row, whatever it says, clear of Undo or Reset.
-    local said = {}
-    local function Check(label)
-        said[#said + 1] = S[page.status].text
-        local problems = Fit.Problems(page)
-        if problems ~= "" then said[#said] = label .. ": " .. problems end
+do
+    -- /ccm debug (hidden, never announced) with entries on the Buffs and
+    -- Debuffs bars: those keep them in holders, not icons, so the report
+    -- lists each entry's spells there (it stopped on a nil icon before).
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev" })
+    local B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetOption("cd", "showAuras", true)
+    local function Report()
+        local ok, err = pcall(SlashCmdList.FECM, "debug")
+        local report = ok and FECMDebugFrame and S[FECMDebugFrame.edit].text or ("error: " .. tostring(err))
+        if FECMDebugFrame then FECMDebugFrame:Hide() end
+        return report
     end
-    Check("start")
-    page.cards[1]:Click()
-    Equal(tostring(S[page.undo].shown), "true", "a layout picked: Undo shows")
-    Check("picked")
-    prdOn = false
-    w:Refresh()
-    Check("display off")
-    prdOn = true
-    ns.Bars:SetUnlocked(true)
-    w:Refresh()
-    Check("unlocked")
-    ns.Bars:SetUnlocked(false)
-    L:TurnOff()
-    L.moved = true
-    w:Refresh()
-    Check("moved")
-    L.moved = nil
-    w:Refresh()
-    Check("off")
-    ns.Set("useBars", false)
-    w:Refresh()
-    Check("bars off")
-    ns.Set("useBars", true)
-    Equal(table.concat(said, " | "), "Pick a layout to stack your bars around the display. | Your bars follow your resource display. | "
-        .. "Your rows close up where the display would be. | Unlocked: drag a bar on screen to move it. | "
-        .. "You moved a bar, so they're no longer stacked. | Your bars stay where you put them. | Your bars are off.",
-        "every state's words, each clear of Undo, Reset and Turn on")
+    local function Has(report, text) return report:find(text, 1, true) ~= nil end
+    local report = Report()
+    Equal(tostring(Has(report, "buff bar: shown true (holds aura containers), 1 entries\n  1. Thorns | spells 467,782,1075,8914,9756,9910"))
+        .. " " .. tostring(Has(report, "debuff bar: shown true (holds aura containers), 1 entries\n  1. Moonfire | spells 8921,8924,")),
+        "true true", "the report lists each Buffs and Debuffs entry with its spells, not as an icon (it stopped on a nil icon before)")
+    Equal(tostring(Has(report, "cd bar: shown true (holds aura containers), 1 icons\n  1. Moonfire | spell 8924 | reactive false"))
+        .. " " .. tostring(Has(report, "util bar: shown false, 0 icons")), "true true", "and the Cooldowns and Utility icons as before")
+    B:SetAura("buff", "Thorns", false)
+    Equal(tostring(Has(Report(), "buff bar: shown false (holds aura containers), 0 entries\ndebuff bar:")), "true",
+        "a bar gone right out reads as not shown")
     Equal(#printed, 0, "no errors")
-end)()
+end
 
--- Every page in the window: no label runs into the next control -----------------------------------
--- Each page the window builds, in the states that change what it shows.
--- Raid Timers isn't here: at this estimate a few of its labels reach a few
--- units into the next control or past the page's edge, but measured on
--- screenshots of the game (about 6.2 a letter, 5.25 small) they're clear.
-
-;(function()
-    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
-    for _, timer in ipairs(timers) do timer() end
-    SlashCmdList.FECM("")
-    local w = FECMFrame
-    local found = {}
-    local function Check(key, label)
-        w:Select(key)
-        local problems = Fit.Problems(w.pages[key] or w.pages.bar)
-        if problems ~= "" then found[#found + 1] = (label or key) .. ": " .. problems end
-    end
-    for _, key in ipairs({ "cd", "util", "buff", "debuff", "look", "layout", "cast", "general", "pulse" }) do Check(key) end
-    local problems = Fit.Problems(w.navFrame) .. Fit.Problems(w.header)
-    if problems ~= "" then found[#found + 1] = "list or title bar: " .. problems end
-    -- Look, with Blizzard's Cooldown Manager and your display off, a reload
-    -- waiting: the warnings take their rows' room.
-    cvarOn, prdOn = false, false
-    ns.Set("prdSkin", true)
-    ns.Set("skin", not ns.Get("skin"))
-    Check("look", "look with warnings")
-    cvarOn, prdOn = true, true
-    -- General, with EraUI there: Open instead of its links.
-    _G.C_AddOns = { IsAddOnLoaded = function(name) return name == "EraUI" end }
-    Check("general", "general with EraUI")
-    _G.C_AddOns = nil
-    -- A bar page with your bars off, and one taken out of the layout.
-    ns.Set("useBars", false)
-    Check("cd", "bars off")
-    ns.Set("useBars", true)
-    ns.Layout:TakeOut("util")
-    Check("util", "taken out")
-    Equal(table.concat(found, " | "), "", "on every page and in every state, each label clear of the next control, all inside the page")
-    Equal(#printed, 0, "no errors")
-end)()
-
--- What's new's foot: its two lines clear of its buttons ----------------------------------------------
--- On the left "Found a bug or have an idea?" and the line on seeing it again;
--- on the right, on the same rows, Got it, Show me what's new (while there's a
--- tour of what's new) and Discord. Fit.Wide's 6.5 a letter is too wide here:
--- the shipped "Found a bug" line sits clear of Discord in the game. Measured
--- on a screenshot of the window's footer, the small font runs 5.1 to 5.6
--- units a letter, so counted at 5.6, the widest, with all three buttons up.
-
-;(function()
-    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
-    for _, timer in ipairs(timers) do timer() end
-    local News = ns.Tour.News
-    ns.Tour.News = function() return { {} } end -- a tour of what's new to offer
-    ns.ShowNotes()
-    ns.Tour.News = News
-    local notes = FECMNotes
-    local dl, dt, _, db = Fit.Rect(notes.discord)
-    local found = {}
-    for _, line in ipairs({ notes.ask, notes.hint }) do
-        local l, t, _, b = Fit.Rect(line)
-        local right = l + #S[line].text * 5.6
-        if not (t < db and dt < b) then found[#found + 1] = S[line].text .. ": not on Discord's rows" end
-        if right > dl then found[#found + 1] = ('"%s" ends at %.1f, under Discord from %.1f'):format(S[line].text, right, dl) end
-    end
-    Equal(tostring(S[notes.tour].shown) .. " " .. tostring(S[notes.discord].shown) .. " | " .. table.concat(found, " | "), "true true | ",
-        "with Show me what's new and Discord up, the lines on the left end before Discord")
-    notes:Hide()
-    Equal(#printed, 0, "no errors")
-end)()
-
-Equal(#printed, 0, "no errors")
-
-print = _G.print
 Equal(SecretMisuse[1], nil, "no secret misused anywhere")
-io.write("Page help and fit checks passed: " .. checks .. " assertions.\n")
+print = _G.print
+io.write("Aura container checks passed: " .. checks .. " assertions.\n")

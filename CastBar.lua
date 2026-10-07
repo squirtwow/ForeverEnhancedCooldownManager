@@ -173,16 +173,28 @@ function C:Make(parent)
     -- A soft shadow round the whole cast bar while shadows are on, and no
     -- extra border: its own 1px edges are one (Dress places the shadow).
     frame.decor = Style:Decor(frame, frame, -EDGE)
+    -- The choices it was last sized for, and the colour it was last given.
+    frame.fit, frame.paint = {}, {}
     return frame
 end
 
--- Sizes and colours a cast bar from your choices: its height, the design,
--- the texture, the colour and which parts show.
-local function Dress(frame, colour)
-    local height = ns.Get("castHeight")
-    local design = ns.Get("barStyle")
-    local outline = design == "outline"
-    local withIcon, withTime = ns.Get("castIcon"), ns.Get("castTime")
+local BLACK = { 0, 0, 0 }
+
+-- Sizes a cast bar from your choices: its height, the design, the texture,
+-- which parts show and its shadow. A cast or a swing starts every second or
+-- two, so it's only done again when one of these has changed since. True
+-- when it was done.
+local function Fit(frame)
+    local height, design, texture = ns.Get("castHeight"), ns.Get("barStyle"), Style:BarTexture()
+    local withIcon, withTime, withName = ns.Get("castIcon"), ns.Get("castTime"), ns.Get("castName")
+    local shadow, border = ns.Get("iconShadow"), ns.Get("iconBorder")
+    local fit = frame.fit
+    if fit.height == height and fit.design == design and fit.texture == texture and fit.icon == withIcon
+        and fit.time == withTime and fit.name == withName and fit.shadow == shadow and fit.border == border then
+        return false
+    end
+    fit.height, fit.design, fit.texture, fit.icon, fit.time = height, design, texture, withIcon, withTime
+    fit.name, fit.shadow, fit.border = withName, shadow, border
     local bar = frame.bar
     frame:SetHeight(height)
     frame.icon:SetSize(height, height)
@@ -191,15 +203,11 @@ local function Dress(frame, colour)
     bar:ClearAllPoints()
     bar:SetPoint("TOPLEFT", withIcon and height + 3 or 0, 0)
     bar:SetPoint("BOTTOMRIGHT")
-    -- Dressed for every cast: the texture is only set again when it changes.
-    local texture = Style:BarTexture()
+    -- The texture is only set again when it changes.
     if bar.fill ~= texture then
         bar.fill = texture
         bar:SetStatusBarTexture(texture)
     end
-    bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
-    local edge = outline and colour or { 0, 0, 0 }
-    bar.edge:SetColorTexture(edge[1], edge[2], edge[3], 1)
     bar.sheen:SetShown(design == "glass")
     local font = Style:Font(math.max(9, height * .55))
     bar.name:SetFontObject(font)
@@ -207,14 +215,30 @@ local function Dress(frame, colour)
     bar.name:ClearAllPoints()
     bar.name:SetPoint("LEFT", 4, 0)
     bar.name:SetPoint("RIGHT", withTime and -40 or -4, 0)
-    bar.name:SetShown(ns.Get("castName"))
+    bar.name:SetShown(withName)
     bar.time:SetShown(withTime)
     -- The shadow reaches as far out as your rows' does: it starts on the
     -- bar's edge, as theirs starts on their icons, or just past it while a
     -- border sits under their shadow and pushes it out.
-    local shadow = ns.Get("iconShadow")
-    frame.decor.inset = ns.Get("iconBorder") == shadow and -EDGE or 0
+    frame.decor.inset = border == shadow and -EDGE or 0
     Style:ShowDecor(frame.decor, false, shadow ~= "off")
+    return true
+end
+
+-- Sizes and colours a cast bar from your choices. The colour goes with the
+-- cast (gold, green, red, or yours), so it's set whenever it changes, and
+-- again after a new fit.
+local function Dress(frame, colour)
+    local fitted = Fit(frame)
+    local r, g, b = colour[1], colour[2], colour[3]
+    local paint = frame.paint
+    if not fitted and paint.r == r and paint.g == g and paint.b == b then return end
+    paint.r, paint.g, paint.b = r, g, b
+    local outline = frame.fit.design == "outline"
+    local bar = frame.bar
+    bar:SetStatusBarColor(r, g, b, outline and .45 or 1)
+    local edge = outline and colour or BLACK
+    bar.edge:SetColorTexture(edge[1], edge[2], edge[3], 1)
 end
 
 -- A cast's colour: red once it's broken off.

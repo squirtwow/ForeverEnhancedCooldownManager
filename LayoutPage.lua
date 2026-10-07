@@ -1006,7 +1006,7 @@ function ns.BuildLayoutPage(window, page, width, height)
     page.spacing, page.iconSpacing = spacing, iconSpacing
     -- Every bar bigger or smaller together, above the spacing sliders: a
     -- longer label, so its track starts 90 further in, lined up with theirs.
-    local allBars = T:Slider(page, "All bars (Needs testing)", ns.BAR_SCALE, 5, ALL_BARS_ROOM + TRACK + 40, function(value)
+    local allBars = T:Slider(page, "All bars", ns.BAR_SCALE, 5, ALL_BARS_ROOM + TRACK + 40, function(value)
         B:SetScale(value)
         window:Refresh()
     end, ALL_BARS_ROOM)
@@ -1016,7 +1016,7 @@ function ns.BuildLayoutPage(window, page, width, height)
     page.allBars = allBars
     -- Arrows on your bars for the way each grows, while you arrange them:
     -- level with All bars, on its left.
-    local growArrows = Tick("Show grow arrows (Needs testing)", 58,
+    local growArrows = Tick("Show grow arrows", 58,
         "While your bars are unlocked, or in Edit Mode, an arrow on each shows which way it grows as icons come and go,"
             .. " and where a new row goes.", function(self)
             ns.Set("growArrows", self:GetChecked())

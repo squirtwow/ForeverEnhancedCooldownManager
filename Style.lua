@@ -185,11 +185,22 @@ local function Show(ring, shown)
     for _, strip in ipairs(ring) do strip:SetShown(shown) end
 end
 
--- The pieces for one icon or bar, made on owner around region, all hidden.
--- inset: how far inside region the icon art's edge is.
-function S:Decor(owner, region, inset)
-    local decor = { region = region, inset = inset or 0, border = Ring(owner, "BORDER", -8, 1), shadow = {} }
+-- The rings themselves, on the decor's owner, all hidden.
+local function Rings(decor)
+    local owner = decor.owner
+    decor.border, decor.shadow = Ring(owner, "BORDER", -8, 1), {}
     for i, alpha in ipairs(SHADOW) do decor.shadow[i] = Ring(owner, "BACKGROUND", -8, alpha) end
+    decor.borderShown, decor.shadowShown = false, false
+end
+
+-- The pieces for one icon or bar, on owner around region. inset: how far
+-- inside region the icon art's edge is. Both are off unless chosen, so the
+-- rings (20 textures) are only made the first time either is shown; now
+-- makes them at once (an icon of Blizzard's aura container, which only
+-- takes art as it's made).
+function S:Decor(owner, region, inset, now)
+    local decor = { owner = owner, region = region, inset = inset or 0 }
+    if now then Rings(decor) end
     return decor
 end
 
@@ -200,15 +211,31 @@ function S:DecorFor(scope)
 end
 
 -- Shows or hides the border and the shadow; the shadow starts outside the
--- border when both show.
+-- border when both show. Only what changed is set: the rings are placed
+-- again when where they go changes (and not while both are off), and shown
+-- or hidden when that changes. Blizzard's rows ask on every relayout, your
+-- cast bar on every cast.
 function S:ShowDecor(decor, border, shadow)
     if not decor then return end
-    local start = -decor.inset
-    Place(decor.border, decor.region, start)
-    Show(decor.border, border)
-    for i, ring in ipairs(decor.shadow) do
-        Place(ring, decor.region, start + (border and 1 or 0) + i - 1)
-        Show(ring, shadow)
+    border, shadow = border and true or false, shadow and true or false
+    if not decor.border then
+        if not (border or shadow) then return end
+        Rings(decor)
+    end
+    local region, inset = decor.region, decor.inset
+    if (border or shadow) and (decor.placed ~= region or decor.placedInset ~= inset or decor.placedBorder ~= border) then
+        decor.placed, decor.placedInset, decor.placedBorder = region, inset, border
+        local start = -inset
+        Place(decor.border, region, start)
+        for i, ring in ipairs(decor.shadow) do Place(ring, region, start + (border and 1 or 0) + i - 1) end
+    end
+    if decor.borderShown ~= border then
+        decor.borderShown = border
+        Show(decor.border, border)
+    end
+    if decor.shadowShown ~= shadow then
+        decor.shadowShown = shadow
+        for _, ring in ipairs(decor.shadow) do Show(ring, shadow) end
     end
 end
 

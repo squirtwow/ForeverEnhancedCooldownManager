@@ -2,8 +2,19 @@
 -- mock game: spellbook ranks, secret cooldowns in combat, usable and range
 -- tints, showing and hiding, dragging, settings kept over a reload, and the panel.
 local checks = 0
+local SECRET -- the tests' own secret, made with the mock game's below
+-- Also fails on a secret the addon misused since the last check (below), even
+-- one its own pcall kept quiet, and on a widget method Forever lacks that the
+-- addon looked for. Secrets match secrets: SECRET stands for any.
 local function Equal(actual, expected, label)
     checks = checks + 1
+    if SecretMisuse[1] then error(label .. ": the addon misused a secret before this check: " .. SecretMisuse[1], 2) end
+    if WidgetMisses[1] then error(label .. ": the addon looked for a method Forever lacks before this check: " .. WidgetMisses[1], 2) end
+    if IsSecret(actual) or IsSecret(expected) then
+        assert(IsSecret(actual) and IsSecret(expected) and (rawequal(actual, expected) or rawequal(expected, SECRET)
+            or rawequal(actual, SECRET)), label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+        return
+    end
     assert(actual == expected, label .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
 end
 
@@ -14,17 +25,95 @@ local objects = {} -- everything created, newest last
 local Proto = {}
 local frames = {}
 
+-- Like the game: each kind of widget has only the methods Forever gives it,
+-- and its template's (Tools/WidgetMethods.lua, made from Forever's widget
+-- API docs and the templates' Lua mixins). Any other capitalised name is nil,
+-- as in the game, and one an addon file looks for is noted in WidgetMisses
+-- (its file and line), so a call to a method Forever lacks (a retail-only one,
+-- or a typo) fails the next check, even inside the addon's own pcall or an
+-- `if x.Method then`. Blizzard's frames the tests stand in for get their Lua
+-- methods by name in S[frame].mixin. (Globals: this file's main chunk is at
+-- Lua's 200 locals.)
+do
+    local list = dofile("Tools/WidgetMethods.lua")
+    local function Into(set, names) for name in names:gmatch("%S+") do set[name] = true end return set end
+    local kinds, templates = {}, {}
+    for kind, apis in pairs(list.kinds) do
+        kinds[kind] = {}
+        for api in apis:gmatch("%S+") do Into(kinds[kind], assert(list.apis[api], api)) end
+    end
+    for name, names in pairs(list.templates) do templates[name] = Into({}, names) end
+    local blizzard = {}
+    for name, names in pairs(list.blizzard) do blizzard[name] = Into({}, names) end
+    -- One of Blizzard's own frames a test stands in for: its Lua methods too.
+    function Blizzard(frame, name)
+        S[frame].mixin = assert(blizzard[name], "the mock game has no " .. name .. ": add it to Tools/GenerateWidgetMethods.mjs")
+        return frame
+    end
+    WidgetMisses = {}
+    -- Methods an addon file looks for on purpose and does without where a
+    -- frame lacks them: Skin.lua's Read finds these getters of Blizzard's
+    -- cooldown items on them, and none on the window's sample Tracked Bar.
+    local LOOKS = { ["Skin.lua GetBaseSpellID"] = true, ["Skin.lua GetEquipSlot"] = true }
+    -- The first Lua code up the stack past WidgetHas and the widget's
+    -- __index, if it's an addon file's: its file and line.
+    local function Addon(key)
+        for level = 4, 40 do
+            local info = debug.getinfo(level, "Sl")
+            if not info then return nil end
+            if info.what ~= "C" and info.what ~= "J" then
+                local source = info.source or ""
+                if source:sub(1, 1) == "@" and not source:find("Tools", 1, true)
+                    and not LOOKS[source:sub(2) .. " " .. key] then
+                    return source:sub(2) .. ":" .. tostring(info.currentline)
+                end
+                return nil
+            end
+        end
+    end
+    function WidgetKind(kind)
+        assert(kinds[kind], "the mock game has no " .. tostring(kind) .. " widgets: add them to Tools/GenerateWidgetMethods.mjs")
+    end
+    function WidgetTemplate(template)
+        for name in tostring(template):gmatch("[^,%s]+") do
+            assert(templates[name], "the mock game has no " .. name .. ": add it to Tools/GenerateWidgetMethods.mjs")
+        end
+    end
+    -- Whether a widget has the method: its kind's, its template's or, for
+    -- Blizzard's frames, their own Lua ones. A miss by an addon file is noted.
+    function WidgetHas(s, key)
+        if kinds[s.kind][key] or (s.mixin and s.mixin[key]) then return true end
+        for name in (s.frameTemplate or ""):gmatch("[^,%s]+") do
+            if templates[name][key] then return true end
+        end
+        local at = Addon(key)
+        if at then WidgetMisses[#WidgetMisses + 1] = at .. ": Forever has no " .. s.kind .. ":" .. key end
+        return false
+    end
+end
+
 local function New(kind, parent)
+    WidgetKind(kind)
     local obj = {}
     S[obj] = { kind = kind, parent = parent, shown = true, last = {}, scripts = {}, events = {}, points = {},
         width = 0, height = 0, alpha = 1 }
     objects[#objects + 1] = obj
+    -- Each frame knows the frames inside it (not its textures and text,
+    -- which have no OnShow or OnHide), so showing or hiding it reaches them.
+    if parent and S[parent] and kind ~= "Texture" and kind ~= "FontString" then
+        local kids = S[parent].kids
+        if not kids then
+            kids = {}
+            S[parent].kids = kids
+        end
+        kids[#kids + 1] = obj
+    end
+    -- A method the mock doesn't model keeps its last call's arguments.
     setmetatable(obj, { __index = function(_, key)
+        if type(key) ~= "string" or not key:match("^[A-Z]") or not WidgetHas(S[obj], key) then return nil end
         local method = Proto[key]
         if method then return method end
-        if type(key) == "string" and key:match("^[A-Z]") then
-            return function(self, ...) S[self].last[key] = table.pack(...) end
-        end
+        return function(self, ...) S[self].last[key] = table.pack(...) end
     end })
     return obj
 end
@@ -32,15 +121,51 @@ end
 local function Last(obj, method, i) local call = S[obj].last[method]; return call and call[i or 1] end
 
 local watched = setmetatable({}, { __mode = "k" })
-local function Toggled(self, v)
-    local s = S[self]
-    if watched[self] and InCombatLockdown() and s.shown ~= v then s.combatToggle = true end
-    local changed = s.shown ~= v
-    s.shown = v
-    -- Like the game: showing or hiding runs the frame's OnShow or OnHide.
-    if changed then
+-- Like the game: OnShow and OnHide run as a frame comes into sight or goes
+-- out of it, for the frame and then every shown frame inside it, all inside
+-- the code that showed or hid it. A frame shown or hidden inside a hidden
+-- one changes quietly; its OnShow waits for that one to show.
+local Toggled
+do
+    -- (The frame shown or hidden comes first; the rest stay shown
+    -- themselves. One its own script just changed is left there.)
+    local function Seen(self, v, first)
+        local s = S[self]
         local script = s.scripts[v and "OnShow" or "OnHide"]
         if script then script(self) end
+        local kids, still = s.kids, s.shown
+        if first then still = s.shown == v end
+        if not (kids and still) then return end
+        for i = 1, #kids do
+            local kid = kids[i]
+            local k = S[kid]
+            if k.shown and k.parent == self then Seen(kid, v) end
+        end
+    end
+    function Toggled(self, v)
+        local s = S[self]
+        if watched[self] and InCombatLockdown() and s.shown ~= v then s.combatToggle = true end
+        if s.shown == v then return end
+        local parent = s.parent
+        local inSight = parent == nil or S[parent] == nil or parent:IsVisible()
+        s.shown = v
+        if inSight then Seen(self, v, true) end
+    end
+end
+-- Moved into another frame: it follows that one's showing and hiding now.
+function Proto:SetParent(parent)
+    local s = S[self]
+    s.last.SetParent = table.pack(parent)
+    local old = s.parent and S[s.parent]
+    if old and old.kids then
+        for i = #old.kids, 1, -1 do
+            if old.kids[i] == self then table.remove(old.kids, i) end
+        end
+    end
+    s.parent = parent
+    if parent and S[parent] then
+        S[parent].kids = S[parent].kids or {}
+        table.insert(S[parent].kids, self)
     end
 end
 function Proto:Show() Toggled(self, true) end
@@ -106,7 +231,7 @@ function Proto:SetDesaturated(v) S[self].desaturated = v end
 function Proto:SetAlphaFromBoolean(v, ifTrue, ifFalse)
     local s = S[self]
     s.alphaFrom, s.alphaIf = v, tostring(ifTrue) .. " " .. tostring(ifFalse)
-    if type(v) == "boolean" then s.alpha = v and (ifTrue or 1) or (ifFalse or 0) end
+    if type(v) == "boolean" and not IsSecret(v) then s.alpha = v and (ifTrue or 1) or (ifFalse or 0) end
 end
 -- A cooldown's countdown numbers, made the first time they're asked for.
 function Proto:GetCountdownFontString() local s = S[self]; s.numbers = s.numbers or New("FontString", self); return s.numbers end
@@ -118,6 +243,19 @@ function Proto:IsVisible()
     local parent = s.parent
     return parent == nil or S[parent] == nil or parent:IsVisible()
 end
+-- What a player sees (for the tests): shown, in shown frames, and not
+-- see-through (its opacity times theirs). A bar gone right out is shown but
+-- not in sight. (Global: TestBars' main chunk is at Lua's 200 locals.)
+function InSight(frame)
+    local alpha = 1
+    while frame and S[frame] do
+        local s = S[frame]
+        if not s.shown then return false end
+        alpha = alpha * (s.alpha or 1)
+        frame = s.parent
+    end
+    return alpha > 0
+end
 
 local function Fire(event, ...)
     for _, f in ipairs(frames) do
@@ -127,7 +265,75 @@ end
 
 -- Game environment ------------------------------------------------------------------
 
-local SECRET = setmetatable({}, { __tostring = function() return "secret" end })
+-- Secrets, as the game keeps them in a fight. Like the game's: when the
+-- addon's own code compares one, does sums with it, indexes, calls, measures
+-- or iterates it, joins it into text or turns it into text, it errors
+-- ("attempt to compare a secret number value"), and type() says what it
+-- stands for, so a type check alone never gets past one. Each such use is
+-- also noted (SecretMisuse, with the addon's file and line), so one inside
+-- the addon's own pcall still fails the next check. The mock game and the
+-- tests are the game's own code here, so they may look. Lua has no hook for
+-- `if secret then` or `secret == plain`, so those two can't be caught.
+-- SECRET is the tests' own: the mock game hands back its typed twin
+-- (SECRETS.number, .boolean or .string) for what each API returns (Typed).
+do
+    local rawtype, kinds = type, setmetatable({}, { __mode = "k" })
+    -- The first Lua code up the stack, past the game's own C functions ("J" in fengari)
+    -- (tostring, string.format): the addon's (its file and line) or not.
+    local function Addon()
+        for level = 3, 40 do
+            local info = debug.getinfo(level, "Sl")
+            if not info then return nil end
+            if info.what ~= "C" and info.what ~= "J" then
+                local source = info.source or ""
+                if source:sub(1, 1) == "@" and not source:find("Tools", 1, true) then
+                    return source:sub(2) .. ":" .. tostring(info.currentline)
+                end
+                return nil
+            end
+        end
+    end
+    local function Kind(a, b) return kinds[a] or kinds[b] end
+    local function Boom(verb, plain)
+        return function(a, b)
+            local at = Addon()
+            if not at then return plain(a, b) end
+            local message = "attempt to " .. verb .. " a secret " .. Kind(a, b) .. " value"
+            SecretMisuse[#SecretMisuse + 1] = at .. ": " .. message
+            error(message, 2)
+        end
+    end
+    local function Same(a) return a end
+    local META = { __metatable = false,
+        __index = Boom("index", function() return nil end), __newindex = Boom("index", function() end),
+        __call = Boom("call", function() error("the tests called a secret") end),
+        __eq = Boom("compare", rawequal), __lt = Boom("compare", function() return false end),
+        __le = Boom("compare", function() return false end),
+        __concat = Boom("concatenate", function() return "secret" end), __len = Boom("get the length of", function() return 0 end),
+        __tostring = Boom("turn into text", function() return "secret" end),
+        __pairs = Boom("iterate", function() return next, {}, nil end) }
+    for _, op in ipairs({ "add", "sub", "mul", "div", "mod", "pow", "unm", "idiv", "band", "bor", "bxor", "shl", "shr", "bnot" }) do
+        META["__" .. op] = Boom("perform arithmetic on", function(a, b) return kinds[a] and a or b end)
+    end
+    local function Make(kind)
+        local secret = setmetatable({}, META)
+        kinds[secret] = kind
+        return secret
+    end
+    SECRET = Make("table")
+    SECRETS = { number = Make("number"), boolean = Make("boolean"), string = Make("string") }
+    SecretMisuse = {}
+    function IsSecret(v) return rawtype(v) == "table" and kinds[v] ~= nil end
+    -- What an API hands back for a value the test set: SECRET as the kind it returns.
+    function Typed(kind, v)
+        if rawequal(v, SECRET) then return SECRETS[kind] end
+        return v
+    end
+    _G.type = function(v)
+        if rawtype(v) == "table" and kinds[v] then return kinds[v] end
+        return rawtype(v)
+    end
+end
 local book, usable, noMana, range, active, target, cvars, printed
 local hostile = true -- whether the target can be attacked
 local cooldownCalls, lockdown, containers, containerCallsInCombat
@@ -166,6 +372,8 @@ local function Environment(keepCVars)
     frames, printed, cooldownCalls = {}, {}, {}
     usable, noMana, range, active, target = {}, {}, {}, false, false
     lockdown, containers, containerCallsInCombat = false, {}, 0
+    -- Blizzard's aura container code run inside the addon's (below).
+    ContainerRuns = {}
     bindings, cvarOn, reloads, timers = {}, true, 0, {}
     _G.C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
     actionSlots, keyOf, macroSpells, macroItems, actionReads, actionPage, bonusIndex = {}, {}, {}, {}, 0, 1, nil
@@ -202,9 +410,12 @@ local function Environment(keepCVars)
         if slot == 0 then return "|cffffffff|Hitem:" .. tostring(ammo) .. "|h[Rough Arrow]|h|r" end
         return "|cff1eff00|Hitem:" .. tostring(trinket) .. "|h[Lucky Charm]|h|r"
     end
-    _G.GetInventoryItemCount = function(_, slot) assert(slot == 0); return ammoCount end
+    _G.GetInventoryItemCount = function(_, slot) assert(slot == 0); return Typed("number", ammoCount) end
     _G.GetInventoryItemTexture = function() return 777 end
-    _G.GetInventoryItemCooldown = function(_, slot) assert(slot == 13); return trinketCooldown[1], trinketCooldown[2], trinketCooldown[3] end
+    _G.GetInventoryItemCooldown = function(_, slot)
+        assert(slot == 13)
+        return Typed("number", trinketCooldown[1]), Typed("number", trinketCooldown[2]), Typed("number", trinketCooldown[3])
+    end
     _G.C_Container = {
         GetContainerNumSlots = function(bag) return bag == 0 and #bagItems or 0 end,
         GetContainerItemInfo = function(bag, slot) return bagItems[slot] end,
@@ -217,8 +428,10 @@ local function Environment(keepCVars)
                 or { 15, 0 }
             return id, nil, nil, class[1] == 6 and "INVTYPE_AMMO" or "", nil, class[1], class[2]
         end,
-        GetItemCooldown = function() return itemCooldown[1], itemCooldown[2], itemCooldown[3] end,
-        GetItemCount = function(id) return itemCount[id] or 0 end,
+        GetItemCooldown = function()
+            return Typed("number", itemCooldown[1]), Typed("number", itemCooldown[2]), Typed("number", itemCooldown[3])
+        end,
+        GetItemCount = function(id) return Typed("number", itemCount[id] or 0) end,
         IsUsableItem = function() return true, false end,
         GetItemIconByID = function() return 888 end,
         GetItemNameByID = function(id) return id == 118 and "Minor Healing Potion" or nil end,
@@ -242,15 +455,28 @@ local function Environment(keepCVars)
             index = index - #line.items
         end
     end
-    local duration = { IsActive = function() return active end }
+    local duration = { IsActive = function() return Typed("boolean", active) end }
+    -- Spells the game watches for range (EnableSpellRangeCheck, which sends
+    -- SPELL_RANGE_CHECK_UPDATE as one goes in or out of range): each ask
+    -- counted and each let-go taken off. And spells with no range (NoRange).
+    RangeChecks, NoRange = {}, {}
     _G.C_Spell = {
+        EnableSpellRangeCheck = function(id, enable)
+            assert(type(id) == "number" and type(enable) == "boolean", "a spell ID, and on or off")
+            RangeChecks[id] = (RangeChecks[id] or 0) + (enable and 1 or -1)
+            assert(RangeChecks[id] >= 0, "a range check let go that was never asked for")
+        end,
+        SpellHasRange = function(id) return NoRange[id] ~= true end,
         GetSpellCooldownDuration = function(id, ignoreGCD)
             assert(ignoreGCD == true, "global cooldown must be ignored")
             cooldownCalls[#cooldownCalls + 1] = id
             return duration
         end,
-        IsSpellUsable = function(id) if usable[id] == nil then return true, false end return usable[id], noMana[id] end,
-        IsSpellInRange = function(id, unit) assert(unit == "target"); return range[id] end,
+        IsSpellUsable = function(id)
+            if usable[id] == nil then return true, false end
+            return Typed("boolean", usable[id]), Typed("boolean", noMana[id])
+        end,
+        IsSpellInRange = function(id, unit) assert(unit == "target"); return Typed("boolean", range[id]) end,
         GetSpellTexture = function() return 1 end,
         GetSpellName = function(id) return ({ [16870] = "Clearcasting", [16886] = "Nature's Grace", [1243] = "Power Word: Fortitude" })[id] end,
         GetSpellInfo = function() return nil end,
@@ -266,9 +492,9 @@ local function Environment(keepCVars)
     _G.UnitName = function(unit) assert(unit == "player"); return character.name end
     _G.GetRealmName = function() return character.realm end
     _G.CustomAuraContainerSlotDefaultOptions = {}
-    _G.issecretvalue = function(v) return v == SECRET end
+    _G.issecretvalue = IsSecret
     _G.UnitExists = function() return target end
-    _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return hostile end
+    _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return Typed("boolean", hostile) end
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
     _G.C_CVar = {
@@ -285,6 +511,10 @@ local function Environment(keepCVars)
     _G.print = function(msg) printed[#printed + 1] = msg end
     _G.CreateFrame = function(kind, name, parent, template)
         local f = New(kind, parent)
+        if template then
+            WidgetTemplate(template)
+            S[f].template, S[f].frameTemplate = template, template
+        end
         if kind == "AuraContainer" then
             assert(template == "CustomAuraContainerTemplate", "secure custom aura container")
             local slots = {}
@@ -306,6 +536,7 @@ local function Environment(keepCVars)
                     assert(name == "initializeFrame" or type(value) ~= "function", "addon code handed to the container: " .. name)
                 end
                 local button = New("Button", f)
+                S[button].frameTemplate = "CustomAuraButtonTemplate"
                 local supplied = {}
                 S[button].supplied = supplied
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
@@ -328,8 +559,41 @@ local function Environment(keepCVars)
             rawset(f, "SetAuraSlotCandidateFilters", function(_, key, filters)
                 Guard(); slots[key].filters = filters
             end)
-            rawset(f, "SetUnit", function(_, unit) S[f].unit = unit end)
+            -- Like the game: its unit set, it signs up for that unit's aura
+            -- events, but only while it can be seen (UpdateEventRegistrations
+            -- asks IsVisible); its own OnShow and OnHide below sign it up
+            -- again or off. listening: whether it hears its auras change.
+            rawset(f, "SetUnit", function(_, unit)
+                if S[f].unit ~= unit then S[f].listening = f:IsVisible() end
+                S[f].unit = unit
+            end)
             rawset(f, "UpdateAllAuras", function() S[f].refreshes = (S[f].refreshes or 0) + 1 end)
+            -- Like the game: the container's own OnShow and OnHide
+            -- (AuraContainerPrivateMixin OnShow_Intrinsic and
+            -- OnHide_Intrinsic, Blizzard_AuraContainer.lua) sign it up for
+            -- its events again and mark it for a full update. They are
+            -- Blizzard's code, but run inside whatever code showed or hid it
+            -- or a frame it sits in (not through the secure doors its
+            -- methods above go through). Each run is counted, and each one
+            -- with the addon's own code on the stack is noted in
+            -- ContainerRuns: "OnShow Bars.lua UpdateShown", the innermost
+            -- addon function, with "in a fight" when it was.
+            for _, which in ipairs({ "OnShow", "OnHide" }) do
+                S[f].scripts[which] = function()
+                    S[f].intrinsic = (S[f].intrinsic or 0) + 1
+                    S[f].listening = f:IsVisible()
+                    for level = 2, 60 do
+                        local info = debug.getinfo(level, "Sn")
+                        if not info then break end
+                        local source = info.source or ""
+                        if info.what ~= "C" and source:sub(1, 1) == "@" and not source:find("Tools", 1, true) then
+                            ContainerRuns[#ContainerRuns + 1] = which .. " " .. source:sub(2) .. " " .. tostring(info.name)
+                                .. (lockdown and " in a fight" or "")
+                            break
+                        end
+                    end
+                end
+            end
             local groups = {}
             S[f].groups = groups
             rawset(f, "AddAuraGroup", function(_, key, filter, options)
@@ -405,7 +669,6 @@ local function Environment(keepCVars)
             -- loop: Forever's template lists OnHide twice, and the second
             -- runs its OnShow method, which looks for a key nothing sets
             -- (ActionButtonSpellAlerts.xml and .lua).
-            S[f].template = template
             for _, key in ipairs({ "ProcStartAnim", "ProcLoop" }) do
                 local anim = { plays = 0, playing = false }
                 function anim:Play() self.plays = self.plays + 1; self.playing = true end
@@ -423,7 +686,7 @@ local function Environment(keepCVars)
         return f
     end
     _G.UIParent = New("Frame")
-    _G.EditModeManagerFrame = New("Frame")
+    _G.EditModeManagerFrame = Blizzard(New("Frame"), "EditModeManagerFrame")
     S[EditModeManagerFrame].shown = false
     S[UIParent].cx, S[UIParent].cy = 500, 400
     _G.GameFontHighlight = { GetFont = function() return "font", 12, "" end }
@@ -490,7 +753,19 @@ local B = ns.Bars
 -- chunk has no room for another local.
 function NextFrame(bars)
     local driver = (bars or ns.Bars).driver
-    S[driver].scripts.OnUpdate(driver, 0)
+    local run = driver and S[driver].scripts.OnUpdate
+    if run then run(driver, 0) end
+end
+-- The next frame for the timers queued after from (the bars redrawn once
+-- after a spellbook change, say): each runs now, once.
+function Later(from)
+    for i = from + 1, #timers do timers[i]() end
+end
+-- An event, then the next frame for what it queued.
+function Settle(event, ...)
+    local from = #timers
+    Fire(event, ...)
+    Later(from)
 end
 -- Gear changed, as the game says, and the rebuild it waits for: the timers
 -- it queued run.
@@ -507,7 +782,10 @@ function EscapeListed(name)
     end
     return count
 end
-local list = ns.Spells:List()
+-- With your bars off (the default) nothing wants your spellbook at login, so
+-- it isn't read; it's read the first time something looks in it.
+Equal(#ns.Spells:List(), 0, "bars off: your spellbook and bags aren't read at login")
+local list = ns.Spells:Fresh()
 Equal(#list, 11, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower, two druid procs, then the healthstone and"
     .. " potion families; passive and future spells left out")
 local moonfire = ns.Spells:Find("Moonfire")
@@ -528,7 +806,8 @@ Equal(list[8].name .. " " .. list[9].line, "Nature's Grace Items", "procs come a
 -- Off by default ------------------------------------------------------------------------
 
 Equal(B:Enabled(), false, "own bars start off")
-Equal(B:Get("cd") and S[B:Get("cd")].shown, false, "no bar shown while off")
+Equal(tostring(B:Get("cd")) .. " " .. tostring(B:Get("buff")) .. " " .. tostring(B.driver), "nil nil nil",
+    "no bar shown while off: none is even made, nor their driver")
 
 -- Assigning spells ---------------------------------------------------------------------
 
@@ -739,7 +1018,7 @@ do
     B:RefreshAll()
     Equal(tostring(S[moon.glow].shown) .. " " .. tostring(S[over.glow].shown), "true false",
         "a spell the game lights up on your action bars glows here too, reactive or not")
-    lit[moon.spellID] = SECRET
+    lit[moon.spellID] = SECRETS.boolean
     B:RefreshAll()
     Equal(S[moon.glow].shown, false, "a hidden answer is never read")
     lit[moon.spellID] = false
@@ -785,8 +1064,19 @@ B:Rebuild()
 -- A new rank moves the bar onto it ------------------------------------------------------
 
 Book(true)
-Fire("SPELLS_CHANGED")
-Equal(cd.icons[2].spellID, 8925, "trained rank 3: the bar uses it")
+do
+    -- Several at once (a form shift): the bars laid out once, on the next
+    -- frame, your spellbook read once.
+    local from, scan, scans = #timers, ns.Spells.Scan, 0
+    ns.Spells.Scan = function(...) scans = scans + 1 return scan(...) end
+    Fire("SPELLS_CHANGED")
+    Fire("SPELLS_CHANGED")
+    local before = cd.icons[2].spellID
+    Later(from)
+    ns.Spells.Scan = scan
+    Equal(before .. " " .. cd.icons[2].spellID .. " " .. scans, "8924 8925 1",
+        "trained rank 3: the bar uses it on the next frame, laid out and read once for both changes")
+end
 Equal(ns.BarData("cd").spells[2], "Moonfire", "saved setup unchanged")
 
 -- Kept over a reload ----------------------------------------------------------------------
@@ -950,7 +1240,8 @@ local slots = S[box].slots
 Equal(slots.b16 ~= nil and slots.b17 == nil, true, "sixteen buff slots")
 Equal(slots.b1.filter, "HELPFUL", "helpful auras only")
 Equal(slots.b1.enabled, false, "slots start switched off")
-Equal(S[buffs].shown, false, "an empty Buffs bar stays hidden")
+Equal(tostring(InSight(buffs)) .. " " .. tostring(S[buffs].shown), "false true",
+    "an empty Buffs bar stays out of sight: gone right out, never hidden, as it holds a container")
 local b1 = slots.b1
 Equal(S[b1.button].last.SetAllPoints[1], buffs.holders[1], "each slot follows the addon's own holder")
 Equal(S[b1.button].last.EnableMouse[1], false, "slots never take the mouse")
@@ -965,7 +1256,7 @@ Equal(#S[box].points == 1 and anchor[1] == "CENTER" and anchor[2] == buffs and a
 
 -- Packed (the default): one group per buff, in order, only active ones shown.
 local groups = S[box].groups
-Equal(B:SetBuff("Thorns", true), true, "Thorns ticked")
+Equal(B:SetAura("buff", "Thorns", true), true, "Thorns ticked")
 local g1 = groups.g1
 Equal(g1 ~= nil and g1.enabled, true, "its group switched on")
 Equal(g1.filter, "HELPFUL", "helpful auras only")
@@ -975,8 +1266,8 @@ Equal(g1.layout.layoutIndex, 1, "first in line")
 Equal(S[g1.button].width == 36 and S[g1.button].height, 36, "group icons drawn at the base size")
 Equal(g1.supplied.SetIcon ~= nil and g1.supplied.SetDurationCooldown ~= nil, true, "with icon and sweep")
 Equal(slots.b1.enabled, false, "fixed slots stay off")
-Equal(S[buffs].shown, true, "the bar shows")
-B:SetBuff("Clearcasting", true)
+Equal(InSight(buffs), true, "the bar shows")
+B:SetAura("buff", "Clearcasting", true)
 Equal(groups.g2.filters.includeSpellIDs[16870] and groups.g2.layout.layoutIndex, 2, "a proc next in line")
 Equal(groups.g3, nil, "groups made only as needed")
 B:Move("buff", 2, -1)
@@ -992,7 +1283,7 @@ Equal(Last(g1Timer, "SetHideCountdownNumbers"), true, "and hidden when asked")
 B:SetOption("buff", "showTimer", true)
 B:Move("buff", 2, -1)
 B:Assign("Thorns", "cd")
-Equal(B:HasBuff("Thorns"), true, "a spell can be on a cooldown bar and the Buffs bar")
+Equal(B:HasAura("buff", "Thorns"), true, "a spell can be on a cooldown bar and the Buffs bar")
 Equal(B:Find("Thorns"), "cd", "and stays on its cooldown bar")
 B:Assign("Thorns", nil)
 Equal(S[buffs.holders[1]].shown, false, "no placeholders while packed")
@@ -1012,7 +1303,7 @@ B:SetOption("buff", "size", 36)
 -- Nothing touches the secure slots, or shows or hides the bar, in combat.
 Fire("PLAYER_REGEN_DISABLED")
 lockdown = true
-B:SetBuff("Clearcasting", false)
+B:SetAura("buff", "Clearcasting", false)
 Equal(containerCallsInCombat, 0, "no slot or group changes in combat")
 Equal(slots.b2.enabled, true, "Clearcasting's slot waits")
 B:SetOption("buff", "outOfCombat", "hide")
@@ -1020,10 +1311,10 @@ Equal(S[buffs].alpha, 1, "only in combat: visible in a fight")
 ns.Set("useBars", false)
 B:Rebuild()
 Equal(S[buffs].combatToggle, nil, "never shown or hidden in combat")
-Equal(S[buffs].shown, true, "hiding waits for the fight to end")
+Equal(InSight(buffs), true, "going waits for the fight to end")
 lockdown = false
 Fire("PLAYER_REGEN_ENABLED")
-Equal(S[buffs].shown, false, "hidden after the fight")
+Equal(tostring(InSight(buffs)) .. " " .. tostring(S[buffs].shown), "false true", "gone right out after the fight, never hidden")
 Equal(slots.b1.enabled or slots.b2.enabled, false, "and every slot switched off")
 ns.Set("useBars", true)
 B:Rebuild()
@@ -1056,7 +1347,7 @@ Equal(dg1.filters.isFromPlayerOrPlayerPet, true, "only the ones you cast")
 Equal(dg1.filters.includeSpellIDs[8921] and dg1.filters.includeSpellIDs[8924], true, "any rank of Moonfire")
 Equal(S[containers[1]].groups.g1, nil, "the Buffs bar is left alone")
 Equal(S[containers[1]].slots.b1.filters, nil, "and its slots too")
-Equal(S[debuffs].shown, true, "the bar shows")
+Equal(InSight(debuffs), true, "the bar shows")
 local before = S[dbox].refreshes or 0
 target, hostile = true, true
 Fire("PLAYER_TARGET_CHANGED")
@@ -1318,7 +1609,7 @@ do
     for _ = 1, 16 do Fire("PLAYER_EQUIPMENT_CHANGED") end
     local waiting = scans
     for i = from + 1, #timers do timers[i]() end
-    Equal(waiting .. " " .. scans .. " " .. #timers - from, "0 1 1", "16 slots changed at once: one rebuild, on the next frame")
+    Equal(waiting .. " " .. scans, "0 1", "16 slots changed at once: one rebuild, on the next frame")
     GearChanged()
     Equal(scans, 2, "and a later change rebuilds again")
     ns.Spells.Scan = scan
@@ -1332,7 +1623,7 @@ do
         _G.UnitClass = function() return class, class end
         uses[#uses + 1] = class .. "=" .. tostring(ns.Spells:UsesAmmo()) .. "," .. tostring(ns.Spells:ForMe("ammo", "util"))
     end
-    _G.UnitClass = function() return SECRET, SECRET end
+    _G.UnitClass = function() return SECRETS.string, SECRETS.string end
     uses[#uses + 1] = "secret=" .. tostring(ns.Spells:ForMe("ammo", "util"))
     Equal(table.concat(uses, " "), "HUNTER=true,true WARRIOR=true,true ROGUE=true,true WARLOCK=false,false MAGE=false,false"
         .. " PRIEST=false,false PALADIN=false,false SHAMAN=false,false DRUID=false,false secret=true",
@@ -1385,7 +1676,7 @@ end
     local Spells = ns.Spells
     local stones = Spells:Find("family:healthstone")
     Equal(stones.name .. " | " .. stones.line .. " | " .. stones.rankText .. " | " .. tostring(Spells:IsItem(stones)),
-        "Healthstones | Items | Best you carry (Needs testing) | true", "Healthstones listed with your items, as one entry")
+        "Healthstones | Items | Best you carry | true", "Healthstones listed with your items, as one entry")
     Equal(stones.itemID .. " " .. stones.current .. " " .. stones.icon, "9421 Major Healthstone 109421",
         "showing the best one you carry: a Major over a Minor")
     Equal(tostring(Spells:Find("family:healing") ~= nil) .. " " .. tostring(Spells:Find("family:mana") ~= nil) .. " "
@@ -1400,7 +1691,7 @@ end
         end
     end
     Equal(twice .. " " .. Spells:Family(19013).key .. " " .. Spells:Family(268883).name .. " " .. Spells:Family(13444).name
-        .. " " .. tostring(Spells:Family(247240)) .. " " .. tostring(Spells:Family(SECRET)),
+        .. " " .. tostring(Spells:Family(247240)) .. " " .. tostring(Spells:Family(SECRETS.number)),
         "0 family:healthstone Healing Potions Mana Potions nil nil", "each rank in one family, and nothing secret looked up")
 
     -- On a bar: the one it shows, with its count and name.
@@ -1499,13 +1790,13 @@ end
     Equal(potion.itemID .. " " .. S[potion.count].text, "13446 2", "the Major once you can use it")
     -- Bags or use hidden in a fight: each stays as it is, with no errors.
     local count, use = _G.C_Item.GetItemCount, _G.C_Item.IsUsableItem
-    _G.C_Item.GetItemCount = function() return SECRET end
+    _G.C_Item.GetItemCount = function() return SECRETS.number end
     unusable[13446] = true -- a change it can't see yet
     Fire("PLAYER_REGEN_DISABLED")
     lockdown = true
     Fire("BAG_UPDATE_DELAYED")
     _G.C_Item.GetItemCount = count
-    _G.C_Item.IsUsableItem = function() return SECRET, SECRET end
+    _G.C_Item.IsUsableItem = function() return SECRETS.boolean, SECRETS.boolean end
     Fire("BAG_UPDATE_DELAYED")
     Equal(potion.itemID .. " " .. icon.itemID .. " " .. S[potion.count].text .. " " .. #printed, "13446 19013 2 0",
         "counts or use hidden in a fight: nothing moves, no errors")
@@ -1536,7 +1827,7 @@ end
     page.showItems:Click()
     local row = ListRow("family:healing")
     Equal(tostring(row ~= nil) .. " " .. S[row.name].text .. " | " .. S[row.rank].text .. " | " .. tostring(row.check:GetChecked()),
-        "true Healing Potions | Best you carry (Needs testing) | false", "listed as one row, labelled as needing testing")
+        "true Healing Potions | Best you carry | false", "listed as one row, labelled as the best you carry")
     S[row.check].scripts.OnEnter(row.check)
     Equal(S[w.note].text, "Move Healing Potions here from Utility. One icon for the best one you carry, switching as your bags change.",
         "its note says how it works")
@@ -1678,7 +1969,11 @@ trinketCooldown = { SECRET, SECRET, 1 }
 S[cdBar.icons[1]].alpha = nil
 B:RefreshAll()
 Equal(S[cdBar.icons[1]].alpha, nil, "a hidden item cooldown doesn't dim or undim it")
+-- (Back as the game still shows it, in full: an alpha is only set as it changes.)
+S[cdBar.icons[1]].alpha = 1
 trinketCooldown = { 0, 0, 1 }
+B:RefreshAll()
+Equal(S[cdBar.icons[1]].alpha, .4, "ready again: dimmed")
 B:SetOption("cd", "whenReady", "show")
 Equal(S[cdBar.icons[1]].alpha, 1, "Show: in full")
 
@@ -1802,7 +2097,7 @@ ns = Load(kept)
 Equal(ns.CustomSpells()["Power Word: Fortitude"][1], 1243, "added spells kept over a reload")
 Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "with their bar")
 Equal(ns.Spells:Find("item:118").name, "Minor Healing Potion", "items on a bar stay listed when your bags run out")
-ns.Bars:SetBuff("Power Word: Fortitude", false)
+ns.Bars:SetAura("buff", "Power Word: Fortitude", false)
 Equal(ns.CustomSpells()["Power Word: Fortitude"], nil, "forgotten once on no bar")
 
 -- Lower ranks on their own ------------------------------------------------------------
@@ -1820,7 +2115,7 @@ B:Assign("Moonfire", "util")
 Equal(B:Get("cd").icons[1].spellID, 8921, "the fixed-rank icon uses rank 1")
 Equal(B:Get("util").icons[1].spellID, 8924, "the normal one uses the highest")
 Book(true)
-Fire("SPELLS_CHANGED")
+Settle("SPELLS_CHANGED")
 Equal(B:Get("cd").icons[1].spellID, 8921, "training rank 3 leaves the fixed rank alone")
 Equal(B:Get("util").icons[1].spellID, 8925, "and moves the normal one up")
 Equal(#ns.Spells:Find("Moonfire").lower, 2, "rank 2 now also listed on its own")
@@ -1920,7 +2215,7 @@ lockdown = false
 -- Spells added by name stay while any profile uses them.
 ns.UseProfile("Balance")
 ns.AddCustom("Power Word: Fortitude", { 1243 })
-B:SetBuff("Power Word: Fortitude", true)
+B:SetAura("buff", "Power Word: Fortitude", true)
 ns.UseProfile(mine .. " 2")
 ns.PruneCustom()
 Equal(ns.CustomSpells()["Power Word: Fortitude"] ~= nil, true, "an added spell in another profile is remembered")
@@ -2000,9 +2295,9 @@ Equal(EscapeListed("FECMFrame"), 1, "Escape closes the window: it's on the game'
 Equal(S[w.close.label].text, "X", "a plain X")
 Equal(S[w.note].text, "Made with |TInterface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Heart.tga:0:0:0:0:32:32:0:32:0:32:176:125:240|t"
     .. " by |cffb07df0Squirt|r", "the footer's credit: the heart and Squirt in the accent")
-Equal(S[w.versionText].text, "dev   /ccm to open", "the footer shows the version")
+Equal(S[w.versionText].text, "dev   Options > AddOns or /ccm to open", "the footer shows the version")
 w:Refresh()
-Equal(S[w.versionText].text, "dev   /ccm to open", "and keeps it")
+Equal(S[w.versionText].text, "dev   Options > AddOns or /ccm to open", "and keeps it")
 
 -- Your bars off: each bar page offers to turn them on.
 Equal(S[page.turnOn].shown, true, "bar page offers to turn your bars on")
@@ -2108,7 +2403,7 @@ do
         S[button].scripts.OnLeave(button)
     end
     Equal(table.concat(notes, " | "), "Every icon shows in full, ready or cooling down. | "
-        .. "Each icon dims while it's ready, so the ones cooling down stand out. (Needs testing) | "
+        .. "Each icon dims while it's ready, so the ones cooling down stand out. | "
         .. "Each icon hides while it's ready, so only the ones cooling down show.", "each choice's note")
     ready.buttons[1]:Click()
     w:Select("buff")
@@ -2595,7 +2890,7 @@ do
     Named()
     ns = Load(db)
     Equal(ns.ProfileName(), "Zriel Gustbellow (Druid) - Zephras", "the same character later: its profile by its GUID, its name kept")
-    character.guid, surname = "Player-1-0006", SECRET
+    character.guid, surname = "Player-1-0006", SECRETS.string
     Environment(true)
     Named()
     ns = Load(db)
@@ -2893,7 +3188,7 @@ Racials(5, "HUNTER")
 Equal(tostring(ns.Spells:ForMe("Touch of Weakness", "debuff")) .. " " .. tostring(ns.Spells:ForMe("Cannibalize", "cd")),
     "false true", "an undead hunter has the undead racial, not the priest spell")
 -- While the game won't say your race, another race's racial still stays off.
-_G.UnitRace = function() return SECRET, SECRET, SECRET end
+_G.UnitRace = function() return SECRETS.string, SECRETS.string, SECRETS.number end
 Equal(tostring(ns.Spells:ForMe("Cannibalize", "cd")) .. " " .. tostring(ns.Spells:ForMe("Underwater Breathing", "cd")),
     "false false", "a hidden race keeps another race's racials off (the game says the hunter doesn't know them)")
 Racials(6, "HUNTER")
@@ -3393,7 +3688,7 @@ Equal(tostring(ok) .. " " .. said .. " " .. #asks, "false Underwater Breathing i
     "Underwater Breathing is passive by the data, though the game says otherwise, and it isn't asked")
 ok = B:Add("cd", "8921")
 Equal(tostring(ok) .. " " .. List("cd") .. " " .. #asks, "true Moonfire 0", "Moonfire is active by the data, though the game says otherwise")
-says[1400001], says[1400002], says[1400003] = true, SECRET, "error"
+says[1400001], says[1400002], says[1400003] = true, SECRETS.boolean, "error"
 ok, said = B:Add("util", "1400001")
 Equal(tostring(ok) .. " " .. said .. " " .. table.concat(asks, ","), "false Moonlit Path is passive, so there's nothing to track. 1400001",
     "a spell the data doesn't cover, passive by the game")
@@ -3532,25 +3827,27 @@ end
 
 -- What's new -------------------------------------------------------------------------------
 
--- A first install has nothing new: the version is noted and nothing shows.
+-- A first install has nothing new: the welcome shows instead, and the
+-- version is noted as it does (Tools/TestLifecycle.lua reloads before then).
 Environment()
 ns = Load(nil)
-Equal(ns.NotesSeen(), "dev", "a first install notes the version")
+Equal(tostring(ns.NotesSeen()), "nil", "a first install notes nothing before the welcome shows")
 for _, timer in ipairs(timers) do timer() end
 Equal(FECMNotes == nil or not S[FECMNotes].shown, true, "without showing What's new")
+Equal(ns.NotesSeen(), "dev", "the version noted as the welcome shows")
 
 -- After an update it shows once, a moment after login, never in combat.
 Environment()
 ns = Load({ useBars = true })
-Equal(ns.NotesSeen(), "dev", "an update notes the new version at once")
+Equal(tostring(ns.NotesSeen()), "nil", "an update notes the new version only as What's new shows")
 Equal(FECMNotes, nil, "and waits a moment to show What's new")
 lockdown = true
 for _, timer in ipairs(timers) do timer() end
-Equal(FECMNotes, nil, "not in combat")
+Equal(FECMNotes == nil and tostring(ns.NotesSeen()), "nil", "not in combat, and not noted yet")
 lockdown = false
 Fire("PLAYER_REGEN_ENABLED")
 local notes = FECMNotes
-Equal(notes ~= nil and S[notes].shown, true, "but once the fight is over")
+Equal(notes ~= nil and S[notes].shown and ns.NotesSeen(), "dev", "but once the fight is over, noted as it shows")
 Equal(EscapeListed("FECMNotes"), 1, "Escape closes it: it's on the game's own list")
 Equal(S[notes.version].text, "Version " .. ns.NOTES[1].version, "headed with the newest notes' version")
 Equal(S[notes.close.label].text, "X", "under the window's title bar")
@@ -3636,10 +3933,11 @@ local rows = {}
 for _, row in ipairs(notes.flow) do rows[#rows + 1] = row.rule and "--" or S[row.text].text end
 Equal(table.concat(rows, "|"), "ADDED|This one.|FIXED|A bug.|--|Version 1.0.0|ADDED|The first.",
     "then the release before, under a line")
+Equal(S[notes.hint].text, "See it again in the settings.", "the way back to it: the settings, not a typed command")
 SlashCmdList.FECM("")
 local footerVersion
 for _, f in ipairs(objects) do
-    if S[f].text == "v1.1.0   /ccm to open" then footerVersion = f end
+    if S[f].text == "v1.1.0   Options > AddOns or /ccm to open" then footerVersion = f end
 end
 Equal(footerVersion ~= nil, true, "the window's footer shows the version too")
 _G.C_AddOns = nil
@@ -3711,11 +4009,11 @@ function Proto:GetRect()
 end
 local prd
 local function Display()
-    prd = New("Frame")
+    prd = Blizzard(New("Frame"), "PersonalResourceDisplayFrame")
     S[prd].rect = { 400, 300, 200, 20 } -- its middle 90 below the middle of the screen
     rawset(prd, "HealthBarsContainer", New("Frame", prd))
     S[prd.HealthBarsContainer].rect = { 400, 305, 200, 15 }
-    rawset(prd, "PowerBar", New("Frame", prd))
+    rawset(prd, "PowerBar", New("StatusBar", prd))
     S[prd.PowerBar].rect = { 400, 300, 200, 5 }
     rawset(prd, "AlternatePowerBar", false)
     rawset(prd, "ClassFrameContainer", false)
@@ -3794,7 +4092,7 @@ L:Stack()
 -- Edit Mode's Hide Health Bar hides the container, not the health bar in
 -- it: the rows then sit flush on the power bar.
 do
-    local health = New("Frame", prd.HealthBarsContainer)
+    local health = New("StatusBar", prd.HealthBarsContainer)
     S[health].rect = { 400, 205, 200, 15 }
     rawset(prd.HealthBarsContainer, "healthBar", health)
     L:Stack()
@@ -4069,13 +4367,13 @@ do
     -- game, as it does here), its space kept.
     local Secret = { __eq = function() error("compared a secret value") end }
     local hidden, secret = setmetatable({}, Secret), setmetatable({}, Secret)
-    _G.issecretvalue = function(value) return rawequal(value, secret) or rawequal(value, SECRET) end
+    _G.issecretvalue = function(value) return rawequal(value, secret) or IsSecret(value) end
     Enum.PersonalResourceDisplayVisibleSetting.Hidden = hidden
     rawset(prd, "visibleSetting", secret)
     L:Stack()
     Equal(At(B:Get("util")) .. " " .. #printed, "TOP 0 -100 0", "a setting the game hides: never compared, its space kept, no errors")
     Equal(rawequal(rawget(prd, "visibleSetting"), secret), true, "a hidden setting left as it was")
-    _G.issecretvalue = function(value) return value == SECRET end
+    _G.issecretvalue = IsSecret
     Enum.PersonalResourceDisplayVisibleSetting.Hidden = 2
     rawset(prd, "visibleSetting", 0)
     prd:Show()
@@ -4168,7 +4466,7 @@ Equal(bp.listError, nil, "the bar page drew without errors")
     local STONES = "Put Healthstones on Cooldowns. One icon for the best one you carry, switching as your bags change."
     Equal(Note("family:healthstone"), STONES .. NONE, "a family you carry none of: the tick's note says it shows once you carry one")
     local open = _G.C_Item.GetItemCount
-    _G.C_Item.GetItemCount = function() return SECRET end
+    _G.C_Item.GetItemCount = function() return SECRETS.number end
     Equal(Note("family:healthstone") .. " " .. #printed, STONES .. " 0", "counts hidden: no guess, no errors")
     _G.C_Item.GetItemCount = open
     w:Select("util")
@@ -4238,7 +4536,7 @@ Equal(bp.listError, nil, "the bar page drew without errors")
     Equal(Util(), "0 false TOP 0 -100", "used up out of a fight: off at once")
     -- Counts hidden while you carry them: kept on, not taken off.
     local open = _G.C_Item.GetItemCount
-    _G.C_Item.GetItemCount = function() return SECRET end
+    _G.C_Item.GetItemCount = function() return SECRETS.number end
     Fire("BAG_UPDATE_DELAYED")
     Equal(Names(cdBar) .. " " .. #printed, "Moonfire,family:healing,item:118,Wrath 0", "hidden counts while carried: kept on")
     _G.C_Item.GetItemCount = open
@@ -4257,7 +4555,7 @@ Equal(bp.listError, nil, "the bar page drew without errors")
         "Wrath, moved into the greyed potion's place, is drawn again, not left greyed")
     -- Counts the game won't give keep what was known.
     local count = _G.C_Item.GetItemCount
-    _G.C_Item.GetItemCount = function() return SECRET end
+    _G.C_Item.GetItemCount = function() return SECRETS.number end
     itemCount[118] = 1
     Fire("BAG_UPDATE_DELAYED")
     Equal(Names(cdBar) .. " " .. #printed, "Moonfire,Wrath 0", "hidden counts: kept as they were, no errors")
@@ -4272,7 +4570,7 @@ Equal(bp.listError, nil, "the bar page drew without errors")
         "dragged to another bar: told it shows once you carry one")
     -- Whether it's worn, hidden by the game: kept off as it was, no errors.
     local isWorn = _G.C_Item.IsEquippedItem
-    _G.C_Item.IsEquippedItem = function() return SECRET end
+    _G.C_Item.IsEquippedItem = function() return SECRETS.boolean end
     GearChanged()
     Equal(Names(utilBar) .. " " .. #printed, " 0", "whether it's worn hidden: kept off as it was, no errors")
     _G.C_Item.IsEquippedItem = isWorn
@@ -4374,17 +4672,17 @@ do
     -- Anything the game won't say is turned away, never guessed at.
     local instant = _G.C_Item.GetItemInfoInstant
     _G.C_Item.GetItemInfoInstant = function(id)
-        if id == 3030 then return id, nil, nil, SECRET, nil, 6, 2 end -- Razor Arrow, where it's worn kept secret
-        if id == 3033 then return id, nil, nil, "INVTYPE_AMMO", nil, SECRET, SECRET end -- Solid Shot, its class secret
-        if id == 3034 then return id, nil, nil, SECRET, nil, SECRET, SECRET end
+        if id == 3030 then return id, nil, nil, SECRETS.string, nil, 6, 2 end -- Razor Arrow, where it's worn kept secret
+        if id == 3033 then return id, nil, nil, "INVTYPE_AMMO", nil, SECRETS.number, SECRETS.number end -- Solid Shot, its class secret
+        if id == 3034 then return id, nil, nil, SECRETS.string, nil, SECRETS.number, SECRETS.number end
         return instant(id)
     end
     local Spells = ns.Spells
     Equal(table.concat({ tostring(Spells:IsAmmo(3030)), tostring(Spells:IsAmmo(3033)), tostring(Spells:IsAmmo(3034)),
-        tostring(Spells:IsAmmo(SECRET)), tostring(Spells:IsAmmo(118)), tostring(Spells:IsAmmo(nil)) }, " "),
+        tostring(Spells:IsAmmo(SECRETS.number)), tostring(Spells:IsAmmo(118)), tostring(Spells:IsAmmo(nil)) }, " "),
         "true true false false false false", "ammo by its class or where it's worn; nothing secret or unknown counts")
     _G.C_Item.GetItemInfoInstant = instant
-    for _, held in ipairs({ { "item", SECRET }, { SECRET, 118 }, { "spell", 1, "spell", SECRET } }) do
+    for _, held in ipairs({ { "item", SECRETS.number }, { SECRETS.string, 118 }, { "spell", 1, "spell", SECRETS.number } }) do
         cursor = held
         S[lp.rows.cd].scripts.OnReceiveDrag(lp.rows.cd)
         Equal(S[w.note].text .. " " .. tostring(cursor == held) .. " " .. #ns.BarData("cd").spells,
@@ -4593,7 +4891,7 @@ local power = 0 -- the main bar's power: 0 mana (caster form), 1 rage (bear form
 _G.UnitPowerType = function() return power end
 Display()
 S[prd].rect = { 400, 280, 200, 60 } -- Blizzard's frame keeps a minimum height
-local extra = New("Frame", prd)
+local extra = New("StatusBar", prd)
 rawset(extra, "powerName", "MANA")
 S[extra].rect = { 400, 294, 200, 6 }
 rawset(prd, "AlternatePowerBar", extra)
@@ -4645,7 +4943,7 @@ Equal(At(B:Get("util")), "TOP 0 -100", "and part again when it's back")
 
 Environment()
 Display()
-_G.PlayerCastingBarFrame = New("Frame")
+_G.PlayerCastingBarFrame = Blizzard(New("Frame"), "PlayerCastingBarFrame")
 local native = PlayerCastingBarFrame
 ns = Load({ useBars = true, prdSkin = false })
 B, L = ns.Bars, ns.Layout
@@ -4701,7 +4999,7 @@ Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 740, "Creature-0-1")
 Equal(S[cb.bar.name].text, "Interrupted", "a channel cut short says so too")
 _G.UnitChannelInfo = function() return nil end
 -- Times the game keeps secret: Blizzard's own bar shows that cast.
-casting = { "Wrath", "Wrath", 136006, SECRET, SECRET, false, "cast-4" }
+casting = { "Wrath", "Wrath", 136006, SECRETS.number, SECRETS.number, false, "cast-4" }
 Fire("UNIT_SPELLCAST_START", "player", "cast-4", 5176)
 native:SetAlpha(1) -- Blizzard's own bar starting the same cast
 Equal(S[cb].alpha .. " " .. S[native].alpha, "0 1", "a cast with secret times: Blizzard's bar shows it")
@@ -4777,7 +5075,7 @@ Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
 ;(function()
     Environment()
     Display()
-    _G.PlayerCastingBarFrame = New("Frame")
+    _G.PlayerCastingBarFrame = Blizzard(New("Frame"), "PlayerCastingBarFrame")
     local native = PlayerCastingBarFrame
     -- Forever's own swing timers: the addon never touches them.
     local forever = {}
@@ -4822,9 +5120,9 @@ Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
     Equal(string.format("%g %g", Last(sw.bar, "SetValue", 1), Time()), "1 1.5", "filling, with the seconds left")
     -- The off hand, and swings the game keeps secret, are skipped.
     Fire("PLAYER_SWING", 1.8, 1)
-    Fire("PLAYER_SWING", SECRET, 2)
-    Fire("PLAYER_SWING", 1.2, SECRET)
-    Fire("PLAYER_SWING", SECRET, SECRET)
+    Fire("PLAYER_SWING", SECRETS.number, 2)
+    Fire("PLAYER_SWING", 1.2, SECRETS.number)
+    Fire("PLAYER_SWING", SECRETS.number, SECRETS.number)
     -- Secret numbers too: the game says so, whatever they'd read as.
     local plain = issecretvalue
     _G.issecretvalue = function(v) return v == 1.7 or plain(v) end
@@ -4866,7 +5164,7 @@ Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
     class = "DRUID"
     Fire("PLAYER_SWING", 2, 2)
     Equal(S[sw.bar.name].text, "Ranged", "a ranged swing for any other class")
-    weapons[16], weapons[18] = nil, SECRET
+    weapons[16], weapons[18] = nil, SECRETS.number
     Fire("PLAYER_SWING", 3.2, 0)
     local sword = S[sw.icon].texture
     Fire("PLAYER_SWING", 2, 2)
@@ -5151,7 +5449,7 @@ end)()
     Environment()
     Display()
     prdOn = true
-    _G.PlayerCastingBarFrame = New("Frame")
+    _G.PlayerCastingBarFrame = Blizzard(New("Frame"), "PlayerCastingBarFrame")
     ns = Load({ useBars = true, castBar = true, castIcon = true })
     local B, L, C = ns.Bars, ns.Layout, ns.CastBar
     local cb = C.row
@@ -5201,7 +5499,7 @@ end)()
     -- its own edges just outside them, where the restyle's would be.
     Environment()
     Display()
-    _G.PlayerCastingBarFrame = New("Frame")
+    _G.PlayerCastingBarFrame = Blizzard(New("Frame"), "PlayerCastingBarFrame")
     ns = Load({ useBars = true, prdSkin = false, castBar = true })
     B, L, C = ns.Bars, ns.Layout, ns.CastBar
     cb = C.row
@@ -5216,7 +5514,7 @@ end)()
 
     -- Its shadow reaches as far out as your rows' does, whatever borders go under theirs.
     local function Reach(ring) return 1 - S[ring[3]].points[1][4] end -- past the edge it's round
-    local function Shown(ring) return tostring(S[ring[1]].shown) end
+    local function Shown(ring) return tostring(ring ~= nil and S[ring[1]].shown == true) end -- rings not made yet: not shown
     local cd = B:Get("cd")
     local reaches = {}
     for _, pair in ipairs({ { "off", "bar" }, { "bar", "bar" }, { "icon", "bar" }, { "off", "icon" }, { "icon", "icon" }, { "bar", "icon" } }) do
@@ -5248,26 +5546,27 @@ B = ns.Bars
 B:Assign("Moonfire", "cd")
 B:SetAura("buff", "Thorns", true)
 local cdBar, buffBar = B:Get("cd"), B:Get("buff")
-local function Shown(ring) return tostring(S[ring[1]].shown) end
-Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown(cdBar.decor.shadow[1]), "false false", "none to start with")
+local function Shown(ring) return tostring(ring ~= nil and S[ring[1]].shown == true) end -- rings not made yet: not shown
+Equal(tostring(cdBar.icons[1].decor.border) .. " " .. tostring(cdBar.decor.shadow) .. " " .. tostring(buffBar.holders[1].decor.border),
+    "nil nil nil", "none to start with: both off, so not even made (20 textures an icon or bar)")
 SlashCmdList.FECM("")
 w = FECMFrame
 w:Select("look")
 w.iconBorder.buttons[2]:Click()
 w.iconShadow.buttons[3]:Click()
 Equal(ns.Get("iconBorder") .. " " .. ns.Get("iconShadow"), "icon bar", "picked on the Look page")
-Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown(cdBar.decor.shadow[1]) .. " " .. Shown(cdBar.decor.border),
+Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown((cdBar.decor.shadow or {})[1]) .. " " .. Shown(cdBar.decor.border),
     "true true false", "a border round each icon and a shadow round each bar")
 Equal(Shown(buffBar.holders[1].decor.border), "true", "the Buffs bar's icons too")
-Equal(Shown(w.sampleIcons.icons[1].decor.border) .. " " .. Shown(w.sampleIcons.decor.shadow[1]), "true true",
+Equal(Shown(w.sampleIcons.icons[1].decor.border) .. " " .. Shown((w.sampleIcons.decor.shadow or {})[1]), "true true",
     "shown in the Look page's preview")
-Equal(Shown(ns.CastBar.row.decor.shadow[1]) .. " " .. Shown(ns.CastBar.row.decor.border), "true false",
+Equal(Shown((ns.CastBar.row.decor.shadow or {})[1]) .. " " .. Shown(ns.CastBar.row.decor.border), "true false",
     "your cast bar gets the shadow, keeping its own edges")
 B:Assign("Wrath", "cd")
 Equal(Shown(cdBar.icons[2].decor.border), "true", "new icons get it as they're made")
 w.iconBorder.buttons[1]:Click()
 w.iconShadow.buttons[1]:Click()
-Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown(cdBar.decor.shadow[1]) .. " " .. Shown(ns.CastBar.row.decor.shadow[1]),
+Equal(Shown(cdBar.icons[1].decor.border) .. " " .. Shown((cdBar.decor.shadow or {})[1]) .. " " .. Shown((ns.CastBar.row.decor.shadow or {})[1]),
     "false false false", "and Off takes them away")
 Equal(#printed, 0, "no errors from borders and shadows")
 
@@ -5284,8 +5583,8 @@ do
     ns.Set("iconShadow", "bar")
     B:ApplyDecor()
     local cd, buff, debuff = B:Get("cd"), B:Get("buff"), B:Get("debuff")
-    Equal(Shown(cd.decor.border) .. " " .. Shown(cd.decor.shadow[1]), "true true", "a cooldown bar gets the whole-bar box")
-    Equal(Shown(buff.decor.border) .. " " .. Shown(buff.decor.shadow[1]) .. " " .. Shown(debuff.decor.border), "false false false",
+    Equal(Shown(cd.decor.border) .. " " .. Shown((cd.decor.shadow or {})[1]), "true true", "a cooldown bar gets the whole-bar box")
+    Equal(Shown(buff.decor.border) .. " " .. Shown((buff.decor.shadow or {})[1]) .. " " .. Shown(debuff.decor.border), "false false false",
         "packed Buffs and Debuffs don't: their icons come and go")
     B:SetOption("cd", "whenReady", "hide")
     Equal(Shown(cd.decor.border), "false", "nor a bar that hides its ready icons")
@@ -5294,7 +5593,7 @@ do
     B:SetUnlocked(false)
     Equal(Shown(cd.decor.border), "false", "locked again, it goes")
     B:SetOption("cd", "whenReady", "dim")
-    Equal(Shown(cd.decor.border) .. " " .. Shown(cd.decor.shadow[1]), "true true", "a bar that dims them keeps them in place, and its box")
+    Equal(Shown(cd.decor.border) .. " " .. Shown((cd.decor.shadow or {})[1]), "true true", "a bar that dims them keeps them in place, and its box")
     B:SetOption("cd", "whenReady", "show")
     Equal(Shown(cd.decor.border), "true", "and it's back with Hide when ready off")
     B:SetOption("buff", "showMissing", true)
@@ -5311,7 +5610,7 @@ do
     ns.Set("iconShadow", "icon")
     B:ApplyDecor()
     local spot = debuff.holders[1]
-    Equal(Shown(spot.decor.border) .. " " .. Shown(spot.decor.shadow[1]) .. " " .. Shown(debuff.decor.border), "true true false",
+    Equal(Shown(spot.decor.border) .. " " .. Shown((spot.decor.shadow or {})[1]) .. " " .. Shown(debuff.decor.border), "true true false",
         "each icon: the spots ringed while there's an enemy")
     target = false
     Fire("PLAYER_TARGET_CHANGED")
@@ -5349,14 +5648,14 @@ do
     Equal(ns.BarData("util").wrap .. " " .. ns.BarData("util").grow .. " " .. util.count, "down centre 5", "five icons, a row of four and one under it")
     Equal(Box(util.block), "TOPLEFT>bar.TOPLEFT(0,0) BOTTOMRIGHT>bar.TOPRIGHT(0," .. -size .. ")", "the bar's box goes round the full row only")
     Equal(Box(util.tail), "TOPLEFT>icon5.TOPLEFT(0,0) BOTTOMRIGHT>icon5.BOTTOMRIGHT(0,0)", "the short row's box round its one icon")
-    Equal(Shown(util.decor.shadow[1]) .. " " .. Shown(util.tailDecor.shadow[1]) .. " " .. Shown(util.tailDecor.border),
+    Equal(Shown((util.decor.shadow or {})[1]) .. " " .. Shown((util.tailDecor.shadow or {})[1]) .. " " .. Shown(util.tailDecor.border),
         "true true false", "both shadowed, as chosen (no border)")
     Equal(tostring(S[util.decor.shadow[1][1]].points[1][2] == util.block) .. " " .. tostring(S[util.tailDecor.shadow[1][1]].points[1][2] == util.tail),
         "true true", "each ring follows its box")
     -- A full last row: one box round the bar, as before.
     B:Assign("Overpower", nil)
-    Equal(#S[util.block].points .. " " .. tostring(Last(util.block, "SetAllPoints") == util) .. " " .. Shown(util.tailDecor.shadow[1])
-        .. " " .. Shown(util.decor.shadow[1]), "0 true false true", "four icons, four across: the whole bar, no second box")
+    Equal(#S[util.block].points .. " " .. tostring(Last(util.block, "SetAllPoints") == util) .. " " .. Shown((util.tailDecor.shadow or {})[1])
+        .. " " .. Shown((util.decor.shadow or {})[1]), "0 true false true", "four icons, four across: the whole bar, no second box")
     -- Growing up (above the display) and from the right: the short row is on
     -- top, its first icon on the right.
     B:Assign("Overpower", "util")
@@ -5370,31 +5669,31 @@ do
     local utilSpells = ns.BarData("util").spells
     local held = { table.remove(utilSpells), table.remove(utilSpells) }
     B:Relayout("util")
-    Equal(util.count .. " " .. Shown(util.tailDecor.shadow[1]) .. " " .. Shown(util.decor.shadow[1]), "4 false true",
+    Equal(util.count .. " " .. Shown((util.tailDecor.shadow or {})[1]) .. " " .. Shown((util.decor.shadow or {})[1]), "4 false true",
         "four left: one box again")
     utilSpells[#utilSpells + 1], utilSpells[#utilSpells + 2] = held[2], held[1]
     B:Relayout("util")
-    Equal(util.count .. " " .. Shown(util.tailDecor.shadow[1]), "6 true", "six again: the short row's box is back")
+    Equal(util.count .. " " .. Shown((util.tailDecor.shadow or {})[1]), "6 true", "six again: the short row's box is back")
     -- One short of a full row is short too: five in rows of three.
     B:Assign("Walk on Air", nil)
     B:SetOption("util", "perRow", 3)
-    Equal(util.count .. " " .. Shown(util.tailDecor.shadow[1]) .. " " .. Box(util.tail), "5 true "
+    Equal(util.count .. " " .. Shown((util.tailDecor.shadow or {})[1]) .. " " .. Box(util.tail), "5 true "
         .. "TOPLEFT>icon5.TOPLEFT(0,0) BOTTOMRIGHT>icon4.BOTTOMRIGHT(0,0)", "three and two: the two boxed on their own")
     -- Hiding ready icons: no box at all, short row or not.
     B:SetOption("util", "whenReady", "hide")
-    Equal(Shown(util.decor.shadow[1]) .. " " .. Shown(util.tailDecor.shadow[1]), "false false", "a bar that hides its ready icons gets neither")
+    Equal(Shown((util.decor.shadow or {})[1]) .. " " .. Shown((util.tailDecor.shadow or {})[1]), "false false", "a bar that hides its ready icons gets neither")
     B:SetOption("util", "whenReady", "show")
-    Equal(Shown(util.decor.shadow[1]) .. " " .. Shown(util.tailDecor.shadow[1]), "true true", "both back")
+    Equal(Shown((util.decor.shadow or {})[1]) .. " " .. Shown((util.tailDecor.shadow or {})[1]), "true true", "both back")
     -- Fixed Buffs spots work the same; packed ones never get a box.
     for _, name in ipairs({ "Thorns", "Moonfire", "Wrath", "Walk on Air", "Clearcasting" }) do B:SetAura("buff", name, true) end
     B:SetOption("buff", "perRow", 4)
     B:SetOption("buff", "showMissing", true)
     local buff = B:Get("buff")
     local tailTo = S[buff.tail].points[1]
-    Equal(tostring(tailTo and tailTo[2] == buff.holders[5]) .. " " .. Shown(buff.tailDecor.shadow[1]), "true true",
+    Equal(tostring(tailTo and tailTo[2] == buff.holders[5]) .. " " .. Shown((buff.tailDecor.shadow or {})[1]), "true true",
         "five fixed Buffs spots, four across: the fifth boxed on its own")
     B:SetOption("buff", "showMissing", false)
-    Equal(tostring(buff.short) .. " " .. Shown(buff.tailDecor.shadow[1]) .. " " .. Shown(buff.decor.shadow[1]), "false false false",
+    Equal(tostring(buff.short) .. " " .. Shown((buff.tailDecor.shadow or {})[1]) .. " " .. Shown((buff.decor.shadow or {})[1]), "false false false",
         "packed: no box, and no short row")
     Equal(#printed, 0, "no errors from short rows")
     end)()
@@ -5773,7 +6072,7 @@ confirm.no:Click()
 Equal(L:IsHidden("debuff"), false, "Cancel leaves it in")
 lp.rows.debuff.out:Click()
 confirm.yes:Click()
-Equal(tostring(L:IsHidden("debuff")) .. " " .. tostring(S[B:Get("debuff")].shown), "true false",
+Equal(tostring(L:IsHidden("debuff")) .. " " .. tostring(InSight(B:Get("debuff"))), "true false",
     "taken out: it doesn't show, even with a debuff on it")
 Equal(tostring(S[lp.rows.debuff].shown) .. " " .. tostring(S[lp.outButtons.debuff].shown), "false true",
     "its row is gone from the drawing, with a button to put it back")
@@ -5795,7 +6094,7 @@ w:Select("layout")
 lp = w.pages.layout
 confirm = w.confirm
 lp.outButtons.debuff:Click()
-Equal(tostring(L:IsHidden("debuff")) .. " " .. tostring(S[B:Get("debuff")].shown), "false true", "put back, it shows again")
+Equal(tostring(L:IsHidden("debuff")) .. " " .. tostring(InSight(B:Get("debuff"))), "false true", "put back, it shows again")
 -- All four out: after Live preview, two to a line, clear of Unlock bars and Reset positions.
 for _, key in ipairs(ns.BAR_KEYS) do L:TakeOut(key) end
 w:Refresh()
@@ -6047,8 +6346,8 @@ end
     Equal(ns.Get("minimap") == false and S[FECMMinimapButton].shown == false, true, "the General tick hides the minimap button")
     SlashCmdList.FECM("tour")
     for _ = 1, 8 do box.next:Click() end
-    Equal(Outlined() == tw.versionText and Anchor() == "BOTTOMLEFT TOPLEFT", true, "without it, the last step points at /ccm")
-    Equal(S[box.text].text:find("any time with /ccm.", 1, true) ~= nil, true, "and says so")
+    Equal(Outlined() == tw.versionText and Anchor() == "BOTTOMLEFT TOPLEFT", true, "without it, the last step points at the footer: Options > AddOns or /ccm")
+    Equal(S[box.text].text:find("any time from Options > AddOns, or with /ccm.", 1, true) ~= nil, true, "and says so")
     box.next:Click()
     tw.minimap:Click()
     Equal(S[FECMMinimapButton].shown, true, "ticking it brings the button back")
@@ -6606,7 +6905,7 @@ end
         shown[#shown + 1] = K:Format(raw)
     end
     Equal(table.concat(shown, " "), "1 S2 C3 A4 M4 SM5 ACSQ CWD N5 N+ Sp S-", "keys shortened as action bars show them")
-    Equal(tostring(K:Format(nil)) .. " " .. tostring(K:Format("PADLTRIGGER")) .. " " .. tostring(K:Format(SECRET)), "nil nil nil",
+    Equal(tostring(K:Format(nil)) .. " " .. tostring(K:Format("PADLTRIGGER")) .. " " .. tostring(K:Format(SECRETS.string)), "nil nil nil",
         "nothing for no key, a gamepad button or a secret")
 
     -- Off by default: nothing is read and no timer is queued.
@@ -6676,11 +6975,11 @@ end
     local reads = actionReads
     lockdown = true
     bonusIndex = 8
-    Fire("UPDATE_BONUS_ACTIONBAR")
-    Equal(S[wrath.key].text .. " " .. tostring(S[key].shown), "1 false", "in a fight, a form's page: its keys at once")
+    Settle("UPDATE_BONUS_ACTIONBAR")
+    Equal(S[wrath.key].text .. " " .. tostring(S[key].shown), "1 false", "in a fight, a form's page: its keys on the next frame")
     Equal(actionReads, reads, "from what was read before the fight")
     bonusIndex = nil
-    Fire("UPDATE_BONUS_ACTIONBAR")
+    Settle("UPDATE_BONUS_ACTIONBAR")
     Equal(S[key].text .. " " .. S[wrath.key].text, "1 C2", "and back")
 
     -- A slot changed in a fight is read once it's over.
@@ -6772,11 +7071,11 @@ end
     -- The main bar paged in a fight: text and the addon's own anchors only.
     lockdown = true
     bonusIndex = 8
-    Fire("UPDATE_BONUS_ACTIONBAR")
+    Settle("UPDATE_BONUS_ACTIONBAR")
     Equal(tostring(S[potion.key].shown) .. " " .. At(potion.count), "false BOTTOMRIGHT BOTTOMRIGHT -1 1",
-        "a form's page in a fight takes the potion's key away: its count follows at once")
+        "a form's page in a fight takes the potion's key away: its count follows on the next frame")
     bonusIndex = nil
-    Fire("UPDATE_BONUS_ACTIONBAR")
+    Settle("UPDATE_BONUS_ACTIONBAR")
     lockdown = false
     Equal(At(potion.count), "TOPRIGHT TOPRIGHT -1 -1", "and back")
     B:SetAura("buff", "Thorns", true)
@@ -6932,7 +7231,7 @@ end)()
         local p = S[region].points[1]
         return p[1] .. " " .. p[3] .. " " .. p[4] .. " " .. p[5]
     end
-    local function On(ring) return S[ring[1]].shown == true end
+    local function On(ring) return ring ~= nil and S[ring[1]].shown == true end -- rings not made yet: off
 
     Environment()
     Display()
@@ -6963,7 +7262,7 @@ end)()
     -- border and shadow.
     local function Look(tile)
         return (S[tile.key].shown and S[tile.key].text or "-") .. (On(tile.decor.border) and "b" or "")
-            .. (On(tile.decor.shadow[1]) and "s" or "")
+            .. (On((tile.decor.shadow or {})[1]) and "s" or "")
     end
     local function Row(key)
         local list = {}
@@ -6974,7 +7273,7 @@ end)()
     end
     local function Boxed(key)
         local decor = page.rows[key].decor
-        return (On(decor.border) and "b" or "") .. (On(decor.shadow[1]) and "s" or "")
+        return (On(decor.border) and "b" or "") .. (On((decor.shadow or {})[1]) and "s" or "")
     end
 
     -- The tick: on to start with, beside the display's, clear of the sliders.
@@ -6999,12 +7298,14 @@ end)()
     Equal(At(moon.key) .. " " .. tostring(S[moon.key].points[1][2] == moon) .. " " .. Last(moon.key, "SetFontObject") .. " "
         .. S[moon.key].width .. " " .. Last(moon.key, "SetJustifyH") .. " " .. S[moon.key].colour[1],
         "BOTTOM BOTTOM 0 2 true FECMFont8 21 CENTER 0.9", "placed and sized as on an icon the tile's size (25)")
-    Equal(S[moon.key].parent == moon and S[moon.decor.border[1]].parent == moon, true, "the tile's own text and rings")
+    Equal(tostring(S[moon.key].parent == moon) .. " " .. tostring(moon.decor.border), "true nil",
+        "the tile's own text; no rings made while border and shadow are off")
 
     -- The border and shadow from the Look page, live.
     ns.Set("iconBorder", "icon")
     Equal(Row("cd") .. " | " .. Row("buff") .. " | " .. Boxed("cd"), "1b S2b -b - - - | -b - - - | ",
         "a border round each icon, the Buffs row's too; empty spots stay plain")
+    Equal(S[moon.decor.border[1]].parent == moon, true, "the tile's own rings, made as one is chosen")
     ns.Set("iconShadow", "icon")
     Equal(Row("cd"), "1bs S2bs -bs - - -", "and a shadow")
     ns.Set("iconBorder", "bar")
@@ -7102,10 +7403,10 @@ end)()
     ns.Keybinds:Update()
     lockdown = true
     bonusIndex = 8
-    Fire("UPDATE_BONUS_ACTIONBAR")
-    Equal(Row("cd") .. " " .. draws, "-b -b C1b - - - 0", "a form's page in a fight: its keys at once")
+    Settle("UPDATE_BONUS_ACTIONBAR")
+    Equal(Row("cd") .. " " .. draws, "-b -b C1b - - - 0", "a form's page in a fight: its keys on the next frame")
     bonusIndex = nil
-    Fire("UPDATE_BONUS_ACTIONBAR")
+    Settle("UPDATE_BONUS_ACTIONBAR")
     lockdown = false
     Equal(Row("cd"), "C1b S2b 4b - - -", "and back")
     page.Refresh = refresh
@@ -7131,13 +7432,13 @@ end)()
     for _, row in pairs(page.rows) do
         strips[row.strip] = true
         local parts = { { row.span, "Texture", row.strip } }
-        for _, ring in ipairs({ row.decor.border, table.unpack(row.decor.shadow) }) do
+        for _, ring in ipairs({ row.decor.border or {}, table.unpack(row.decor.shadow or {}) }) do -- rings not made yet: none
             for _, strip in ipairs(ring) do parts[#parts + 1] = { strip, "Texture", row.strip } end
         end
         for _, tile in ipairs(row.tiles) do
             tiles[tile] = true
             parts[#parts + 1] = { tile.key, "FontString", tile }
-            for _, ring in ipairs({ tile.decor.border, table.unpack(tile.decor.shadow) }) do
+            for _, ring in ipairs({ tile.decor.border or {}, table.unpack(tile.decor.shadow or {}) }) do
                 for _, strip in ipairs(ring) do parts[#parts + 1] = { strip, "Texture", tile } end
             end
         end
@@ -7334,7 +7635,7 @@ end)()
     lw:Select("layout")
     local page = lw.pages.layout
     local all = page.allBars
-    Equal(S[all.label].text .. " " .. all.current, "All bars (Needs testing) 150", "an All bars slider on the Layout page, showing where it is")
+    Equal(S[all.label].text .. " " .. all.current, "All bars 150", "an All bars slider on the Layout page, showing where it is")
     Equal(Point(all) .. " " .. Width(all) .. " | " .. Point(all.track) .. " | " .. Point(page.spacing.track),
         "BOTTOMRIGHT -16 56 330 | LEFT 190 0 | LEFT 100 0", "above Row spacing, with room for its longer label")
     -- The page is 638 across.
@@ -7577,7 +7878,7 @@ end)()
     local tick = lp.growArrows
     local p, all = S[tick].points[1], S[lp.allBars].points[1]
     Equal(S[tick.text].text .. " " .. tostring(tick:GetChecked()) .. " " .. p[1] .. " " .. p[2] .. " " .. p[3],
-        "Show grow arrows (Needs testing) false BOTTOMLEFT 16 58", "a Show grow arrows tick on the Layout page, off, bottom left")
+        "Show grow arrows false BOTTOMLEFT 16 58", "a Show grow arrows tick on the Layout page, off, bottom left")
     Equal(tostring(p[3] + S[tick].height / 2 == all[3] + S[lp.allBars].height / 2) .. " "
         .. tostring(16 + 18 + #S[tick.text].text * 6 <= 638 - 16 - S[lp.allBars].width - 8) .. " "
         .. tostring(p[3] + S[tick].height <= S[lp.box].points[2][3] - 8), "true true true",
@@ -8217,7 +8518,7 @@ end)()
     Equal(Over(rows.buff, THORNS), "Drop to add Thorns to Buffs.", "a buff over the Buffs row")
     Equal(Over(rows.cd, { "item", 118 }), "Drop to add Healing Potions to Cooldowns.", "a potion from your bags")
     Equal(Over(rows.cd, { "macro", 4 }), "Only spells and items can go on a bar.", "anything else")
-    Equal(Over(rows.cd, { "spell", 1, "spell", SECRET }) .. " " .. Over(rows.cd, { SECRET, 118 }),
+    Equal(Over(rows.cd, { "spell", 1, "spell", SECRETS.number }) .. " " .. Over(rows.cd, { SECRETS.string, 118 }),
         "Only spells and items can go on a bar. Only spells and items can go on a bar.", "what the game won't say")
     Equal(Over(rows.cd, nil) .. " | " .. Over(rows.cd.tiles[1], nil), HINT .. " | " .. Own(rows.cd.tiles[1]),
         "with nothing held, the row's and the icon's own notes")
@@ -8458,7 +8759,7 @@ end)()
     end
     local held = { DODGE, WRATH, MOONFIRE, THORNS, { "spell", 5, "spell", 16870 }, { "spell", 6, "spell", 1243 },
         { "spell", 7, "spell", 99999 }, { "item", 118 }, { "item", 117 }, { "item", 2516 }, { "item", 11111 },
-        { "macro", 4 }, { "spell", 1, "spell", SECRET }, { SECRET, 118 } }
+        { "macro", 4 }, { "spell", 1, "spell", SECRETS.number }, { SECRETS.string, 118 } }
     local base = Save()
     local before = State()
     local differ, kinds = {}, {}
@@ -8557,7 +8858,7 @@ end)()
     Equal(groups.self.enabled, true, "packed again: back on")
     -- With nothing else on the Buffs bar, it still shows for them.
     B:SetAura("buff", "Thorns", false)
-    Equal(tostring(S[buff].shown) .. " " .. tostring(groups.self.enabled), "true true", "an empty Buffs bar still shows your debuffs")
+    Equal(tostring(InSight(buff)) .. " " .. tostring(groups.self.enabled), "true true", "an empty Buffs bar still shows your debuffs")
     lockdown = true
     B:SetOption("buff", "selfDebuffs", false)
     Equal(tostring(containerCallsInCombat) .. " " .. tostring(groups.self.enabled), "0 true", "unticked in a fight: waits")
@@ -8684,4 +8985,5 @@ end)()
 end)()
 
 print = _G.print
+Equal(SecretMisuse[1], nil, "no secret misused anywhere")
 io.write("Bars and window checks passed: " .. checks .. " assertions.\n")

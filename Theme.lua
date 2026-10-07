@@ -148,12 +148,6 @@ function T:HideTip(owner)
     if tip and (owner == nil or tip.owner == owner) then tip:Hide() end
 end
 
-function T:Panel(parent)
-    local panel = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    self:Flat(panel, T.PANEL)
-    return panel
-end
-
 -- A window's title bar: the addon's icon, its name with "Enhanced" in the
 -- accent, the accent washing in from the right, and an X.
 function T:TitleBar(window, height)

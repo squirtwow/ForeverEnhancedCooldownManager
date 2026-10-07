@@ -82,7 +82,7 @@ S.FAMILIES = FAMILIES
 local NO_MANA = { WARRIOR = true, ROGUE = true }
 -- Only these classes fire bows, guns and crossbows, so only they use ammo.
 local AMMO_CLASSES = { HUNTER = true, WARRIOR = true, ROGUE = true }
-local FAMILY_NOTE = "Best you carry (Needs testing)"
+local FAMILY_NOTE = "Best you carry"
 
 local familyOf, familyByKey = {}, {}
 for _, family in ipairs(FAMILIES) do
@@ -357,7 +357,14 @@ local function ScanSaved()
     end
 end
 
+-- The list is only read when something wants it: after your spellbook, gear,
+-- bags or bars change (S:Stale) it waits, and is read again the next time
+-- anything looks in it. With your bars off, /ccm closed and the Cooldown
+-- pulse off, nothing does, so it's never read at all.
+local stale, reads = true, 0
+
 function S:Scan()
+    stale, reads = false, reads + 1
     wipe(list)
     wipe(byKey)
     ScanSpellbook()
@@ -367,11 +374,38 @@ function S:Scan()
     return list
 end
 
+local function Ready()
+    if stale then S:Scan() end
+end
+
+-- Something the list holds may have changed: it's read again when next wanted.
+function S:Stale()
+    stale = true
+end
+
+-- How many times the list has been read, and whether it may hold something
+-- new since the read-th time: read again since, or waiting to be.
+function S:Reads()
+    return reads
+end
+
+function S:Changed(read)
+    return stale or reads ~= read
+end
+
+-- The list, read again first if anything changed since.
+function S:Fresh()
+    Ready()
+    return list
+end
+
+-- The list as last read, even if something has changed since. For the tests.
 function S:List()
     return list
 end
 
 function S:Find(key)
+    Ready()
     return byKey[key]
 end
 
@@ -500,6 +534,7 @@ end
 -- Breathing anywhere, Plainsrunning but on the Buffs bar), or nil.
 function S:PassiveNote(key, bar)
     if type(key) ~= "string" then return nil end
+    Ready()
     local entry = byKey[key]
     return Untracked(entry and entry.name or (key:gsub("@%d+$", "")), Judged(key), bar)
 end
@@ -568,6 +603,7 @@ end
 function S:ForMe(key, bar)
     if type(key) ~= "string" then return false end
     if key == "ammo" then return self:UsesAmmo() end
+    Ready()
     local entry = byKey[key]
     if entry and not entry.added then return true end
     if ItemKey(key) then return true end
@@ -603,6 +639,7 @@ end
 -- An entry's icon, even for a spell you haven't learned yet (from the game
 -- data), so the window only shows a question mark for something unknown.
 function S:Icon(key)
+    Ready()
     local entry = byKey[key]
     if entry and entry.icon then return entry.icon end
     local ids = type(key) == "string" and ns.RANKS and ns.RANKS[(key:gsub("@%d+$", ""))]
@@ -639,6 +676,7 @@ end
 function S:Suggest(text, limit)
     text = type(text) == "string" and text:lower():match("^%s*(.-)%s*$") or ""
     if #text < 2 then return {} end
+    Ready()
     local seen, found = {}, {}
     local function Consider(name, icon, spellID, own)
         if seen[name] then return end
@@ -667,6 +705,7 @@ end
 function S:Resolve(text)
     text = type(text) == "string" and text:match("^%s*(.-)%s*$") or ""
     if text == "" then return nil, "Type a spell name or ID first." end
+    Ready()
     local id = tonumber(text)
     if id then
         local name = C_Spell.GetSpellName and Text(C_Spell.GetSpellName(id))

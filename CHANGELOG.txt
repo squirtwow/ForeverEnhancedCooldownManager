@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.3
+
+### Fixed
+- Unticking Use my bars gives your resource display its own width back at once.
+- A bar you're dragging is let go when the settings close mid-drag.
+- What's new and the first-time welcome still show if you reload before they appear.
+
+### Improved
+- Lighter on your game, most of all with Use my bars off.
+- Lighter in a fight: bars, cast bar, swing timer, keybinds and Cooldown pulse only redo what changed.
+
+### Changed
+- Your bars turn red out of range the moment the game says so.
+- The settings, the tour and What's new point you to buttons rather than /ccm (it still works).
+- Bars with buffs, debuffs or buff and debuff times fade right out instead of hiding (it looks the same).
+- All bars, Show grow arrows, Dim when ready and Best you carry are no longer marked Needs testing.
+
 ## 1.5.2
 
 ### Added
@@ -43,7 +60,7 @@
 ## 1.4.2
 
 ### Changed
-- Switching the Cooldown Manager or resource display from /fecm now asks for a reload.
+- Switching the Cooldown Manager or resource display from /ccm now asks for a reload.
 - Smoother gear set swaps.
 - Lighter icon updates in combat.
 - New profiles are named with your surname.
@@ -83,7 +100,7 @@
 ### Added
 - Swap icons: drop one icon onto another to swap them.
 - The footer tells you what dropping a spell will do, or why it can't go there.
-- /fecm reset asks before resetting your layout.
+- /ccm reset asks before resetting your layout.
 - Gold edge on Victory Rush, Hammer of Wrath and Divine Grace when they're ready.
 
 ### Changed

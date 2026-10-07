@@ -30,7 +30,15 @@ local REPAGE = { ACTIONBAR_PAGE_CHANGED = true, UPDATE_BONUS_ACTIONBAR = true, U
 
 local actions = {} -- slot -> { spell=, item=, name=, macro= }   (read outside combat)
 local bound = {} -- binding -> key text                           (read outside combat)
-local bySpell, byItem, byName = {}, {}, {} -- id/name -> { text=, tier= } for what the keys press now
+-- What the keys press now, by spell ID, item ID and spell name: each key's
+-- text, and its tier beside it (lower wins), so working them out again as
+-- the main bar changes page makes nothing new.
+local function Map() return { text = {}, tier = {} } end
+local bySpell, byItem, byName = Map(), Map(), Map()
+local function Clear(map)
+    wipe(map.text)
+    wipe(map.tier)
+end
 
 -- Every value from the game passes through one of these before it is
 -- compared or used as a key.
@@ -157,8 +165,8 @@ end
 -- press now, then the side bars in order, then the lower button.
 local function Put(map, id, text, tier)
     if id == nil then return end
-    local was = map[id]
-    if not was or tier < was.tier then map[id] = { text = text, tier = tier } end
+    local was = map.tier[id]
+    if not was or tier < was then map.text[id], map.tier[id] = text, tier end
 end
 local function Take(slot, binding)
     local action, text = actions[slot], bound[binding]
@@ -171,9 +179,9 @@ end
 
 -- From what was read only, so safe in combat.
 local function Resolve()
-    wipe(bySpell)
-    wipe(byItem)
-    wipe(byName)
+    Clear(bySpell)
+    Clear(byItem)
+    Clear(byName)
     local page = MainPage()
     if page then
         for i = 1, BUTTONS do Take((page - 1) * BUTTONS + i, MAIN[1] .. i) end
@@ -198,9 +206,9 @@ function K:Update()
     if not ns.Get("keybinds") then
         wipe(actions)
         wipe(bound)
-        wipe(bySpell)
-        wipe(byItem)
-        wipe(byName)
+        Clear(bySpell)
+        Clear(byItem)
+        Clear(byName)
         self.pending = nil
         Push()
         return
@@ -222,6 +230,14 @@ function K:Repage()
     Push()
 end
 
+-- A form change, a stance or a paging key brings several page changes at
+-- once: the keys are worked out once, on the next frame.
+local repaging = false
+local function Repaged()
+    repaging = false
+    K:Repage()
+end
+
 -- At most one read every DELAY: one-button helpers can change a slot every
 -- global cooldown.
 local queued
@@ -235,8 +251,7 @@ local function Later()
 end
 
 local function Lookup(map, id)
-    local found = id ~= nil and map[id]
-    return found and found.text or nil
+    return id ~= nil and map.text[id] or nil
 end
 
 -- The key for one of your bar's entries (Spells.lua). A spell uses its
@@ -290,7 +305,10 @@ function K:Start()
             -- was secret then get their key now.
             if K.pending then K:Update() else Push() end
         elseif REPAGE[event] then
-            K:Repage()
+            if not repaging then
+                repaging = true
+                C_Timer.After(0, Repaged)
+            end
         elseif InCombatLockdown() then
             K.pending = true
         else

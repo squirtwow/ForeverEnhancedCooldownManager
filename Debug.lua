@@ -40,6 +40,8 @@ local function Build()
     frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", frame.StartMoving)
     frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    -- Closed mid-drag (Escape), it never hears the mouse let go: stop moving now.
+    frame:SetScript("OnHide", frame.StopMovingOrSizing)
     T:Flat(frame, T.BG, T.BORDER)
     local title = T:Text(frame, "GameFontNormal")
     title:SetPoint("TOPLEFT", 12, -12)

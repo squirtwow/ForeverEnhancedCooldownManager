@@ -762,6 +762,15 @@ function ns.LayoutData()
     return layout
 end
 
+-- The layout as saved, read without repairing it, for what's asked often:
+-- which bars are taken out, on every target change and fight. It's
+-- repaired as the settings load, and every change to it goes through
+-- ns.LayoutData first.
+function ns.SavedLayout()
+    local layout = db and db.layout
+    return type(layout) == "table" and layout or nil
+end
+
 -- Blizzard's Tracked Bars coloured one by one: the bar's spell ID -> a bar
 -- colour. Bars not listed use the colour for all bars.
 function ns.BarColours()
@@ -905,8 +914,9 @@ function ns.SetBarColour(spellID, key)
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 
--- What's new: the version whose notes were last shown, or passed over on a
--- first install.
+-- What's new: the version whose notes were last shown, or passed over for
+-- the welcome on a first install. Marked as they show (Notes.lua), so a
+-- reload or logout before then keeps them due.
 function ns.NotesSeen()
     return db and type(db.notesSeen) == "string" and db.notesSeen or nil
 end
@@ -914,6 +924,16 @@ end
 function ns.SetNotesSeen(version)
     if not db then return end
     db.notesSeen = version
+end
+
+-- A first install's welcome, until it shows: still due after a reload or
+-- logout before it does, when the settings file isn't empty any more.
+function ns.WelcomeDue()
+    return db ~= nil and db.welcomeDue == true
+end
+
+function ns.SetWelcomeDue(due)
+    if db then db.welcomeDue = due and true or nil end
 end
 
 -- The ? in the window's title bar: clicked at least once, on any character.
@@ -1004,7 +1024,7 @@ local function BuildOptionsEntry()
     about:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -10)
     about:SetWidth(560)
     about:SetJustifyH("LEFT")
-    about:SetText("A cleaner look for Blizzard's Cooldown Manager and Personal Resource Display, plus cooldown, buff and cast bars of your own. Type /ccm, click the minimap button, or click below, for the settings.")
+    about:SetText("A cleaner look for Blizzard's Cooldown Manager and Personal Resource Display, plus cooldown, buff and cast bars of your own. Click below or the minimap button for the settings, or type /ccm.")
     local open = CreateFrame("Button", nil, canvas, "UIPanelButtonTemplate")
     open:SetSize(160, 24)
     open:SetPoint("TOPLEFT", about, "BOTTOMLEFT", 0, -14)
@@ -1025,6 +1045,8 @@ local function Load()
     db = ForeverEnhancedCooldownManagerDB
     -- An empty settings file: the addon's first login on this account.
     ns.firstInstall = next(db) == nil
+    if db.welcomeDue ~= true then db.welcomeDue = nil end -- the welcome not shown yet: true, or not saved at all
+    if ns.firstInstall then db.welcomeDue = true end
     db.probe = nil -- results of a development check the released addon doesn't have
     db.session = nil -- a login count earlier builds kept
     db.pulseMin, db.pulseAdd = nil, nil -- the Cooldown pulse's first test build: a shortest cooldown, and spells added by name
