@@ -353,6 +353,21 @@ test("Blizzard's aura containers never run the addon's code while they update", 
   assert.equal(count(buffs, /AddGroup\(container, "/g), 2, 'both kinds of group added through AddGroup');
 });
 
+// Nothing the addon reads is ever run as code: a shared profile is taken
+// apart a character at a time (ProfileShare.lua). No way of running text is
+// anywhere in what it ships, nor named in a string, and the share strings'
+// reader never looks a global up by name. Tools/TestShare.lua also traps
+// every such call while strings are read and imported.
+test('no text is ever run as code', () => {
+  const ways = /\b(loadstring|load|dofile|loadfile|require|setfenv|getfenv|getglobal|setglobal|RunScript|RunMacroText|RunMacro)\b/;
+  assert.deepEqual(files.filter(name => ways.test(code[name])).map(name => `${name}: ${code[name].match(ways)[0]}`), [],
+    'a way to run text');
+  const named = /["'](loadstring|load|dofile|loadfile|RunScript|RunMacroText|RunMacro)["']|["'](load|Run)["']\s*\.\./;
+  assert.deepEqual(where(named), [], 'a way to run text, named in a string');
+  assert.ok(code['ProfileShare.lua'], 'the share strings are read in ProfileShare.lua');
+  assert.doesNotMatch(code['ProfileShare.lua'], /\b_G\b|\brawget\b/, 'the reader looks nothing up by name');
+});
+
 // Nothing left behind: every function the shipped files define is used by
 // them (T:Panel was left over until 2026-10-07). A few read the addon's own
 // state for the tests and say "For the tests" in the note just above them;

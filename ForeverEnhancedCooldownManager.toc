@@ -27,6 +27,7 @@ LayoutPage.lua
 CastBarPage.lua
 RaidTimersPage.lua
 PulsePage.lua
+ProfileShare.lua
 ProfileMenu.lua
 Window.lua
 Tour.lua

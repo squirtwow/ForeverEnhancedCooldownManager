@@ -200,7 +200,11 @@ local STEPS = {
     {
         version = "1.0.0",
         title = "Profiles",
-        text = "Each character has its own spell lists. Share one between characters, even across classes, or use one on all of them.",
+        text = function()
+            -- Share and Import: a new file, so only after a full restart.
+            return "Each character has its own spell lists. Use one on several characters, even across classes, or on all of them."
+                .. (ns.ProfileShare and " Share and Import trade profiles with other players as text." or "")
+        end,
         -- Once the menu is open the box moves beside it, so it never covers it.
         target = function(w) return ProfilesOpen(w) and w.profilePanel or w.profileButton end,
         side = function(w) return ProfilesOpen(w) and "left" or "below" end,
@@ -481,10 +485,16 @@ local HELP = {
     },
     {
         page = "cd",
-        bars = { buff = true },
+        bars = AURA_BARS,
         title = "Your debuffs on you",
-        text = "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, after your buffs."
-            .. " Not with missing buffs greyed.",
+        text = function()
+            if ShownBar() == "debuff" then
+                return "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, at the end of this bar."
+                    .. " Not with missing debuffs greyed."
+            end
+            return "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, after your buffs."
+                .. " Not with missing buffs greyed."
+        end,
         target = function(w) return w.pages.bar.options.showSelf end,
         side = "below",
     },

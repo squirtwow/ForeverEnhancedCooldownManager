@@ -552,13 +552,14 @@ end
 
 -- Debuffs your own spells put on you. Neither aura bar can show one added by
 -- name: the Buffs bar reads your buffs, the Debuffs bar your target's debuffs,
--- and the game hides a debuff on you from a spell ID lookup. The Buffs bar's
--- "Show your debuffs on you" shows them instead (Buffs.lua, F:ApplySelf).
+-- and the game hides a debuff on you from a spell ID lookup. "Show your
+-- debuffs on you", on either bar, shows them instead (Buffs.lua, F:ApplySelf).
 local SELF_DEBUFFS = { [6788] = "Weakened Soul", [11196] = "Recently Bandaged", [25771] = "Forbearance" }
 
--- One line in the footer (two spilled out of the window in game).
+-- One line in the footer (two spilled out of the window in game; 94 letters,
+-- Recently Bandaged's, fit on one).
 local function SelfNote(name)
-    return name .. " can't go on a bar by name. Tick \"Show your debuffs on you\" on the Buffs bar."
+    return name .. " can't go on a bar by name. Tick \"Show your debuffs on you\" on Buffs or Debuffs."
 end
 
 -- Why typed text (a name or spell ID) or a bar entry's key can't go on a bar

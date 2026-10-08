@@ -1,5 +1,6 @@
 -- The Buffs and Debuffs bars: your buffs and class procs while they're on
--- you, and your own debuffs on your target. Auras are secret in combat, so
+-- you, and your own debuffs on your target; either can also show the debuffs
+-- you put on yourself (F:ApplySelf). Auras are secret in combat, so
 -- the icons come from Blizzard's secure aura container, the same way the
 -- portrait CC works in EraUI: each icon gets its look once, before the game
 -- restricts it, and the addon only ever tells the container which spell IDs
@@ -262,25 +263,96 @@ local function Signature(ids)
 end
 
 -- Debuffs you put on yourself (Weakened Soul from your own shield, Recently
--- Bandaged), after your buffs on the Buffs bar, when ticked. The game won't
--- let an addon pick out a debuff on you by spell ID, only by who cast it, so
--- this is one group for all of yours. Packed only: fixed spots belong to
--- entries. Up to four, well under the ten Blizzard makes for a group.
+-- Bandaged), when ticked, on the Buffs bar, the Debuffs bar or both. The game
+-- won't let an addon pick out a debuff on you by spell ID, only by who cast
+-- it, so this is one group for all of yours. Packed only: fixed spots belong
+-- to entries. Up to four, well under the ten Blizzard makes for a group.
+-- * The Buffs bar's container watches you, so the group goes in it, after
+--   your buffs (before them when the bar grows left).
+-- * The Debuffs bar's watches your target, and a container watches one unit,
+--   so that bar gets a second container of its own for them, watching you
+--   (SelfContainer). The game sizes a container itself and nothing may hang
+--   off one, so it's anchored to the bar: just past the bar's end the way it
+--   grows, or in the bar's own spot while the bar has no entries (SelfSpot).
 local SELF_MAX = 4
 function F:SelfOn(bar)
-    return bar ~= nil and ns.AURA_BARS[bar.key].unit == "player" and bar.data ~= nil and bar.data.selfDebuffs == true
+    return bar ~= nil and ns.AURA_BARS[bar.key] ~= nil and bar.data ~= nil and bar.data.selfDebuffs == true
         and self:Packed(bar.data)
 end
 
-function F:ApplySelf(bar, packed, spacing)
-    local container = bar.container
-    if ns.AURA_BARS[bar.key].unit ~= "player" then return end
+-- The Debuffs bar's container for your debuffs on you, made the first time
+-- they're ticked with your bars on, as the Buffs bar's group is: never in a
+-- fight (F:Apply waits for it to end), on a bar already holding its own
+-- container (F:Create), so the bar is never shown or hidden after and the
+-- container is made in sight. Made once; if the game turns it down, that's
+-- said once and not tried again.
+local function SelfContainer(bar)
+    if bar.selfContainer or bar.selfFailed then return bar.selfContainer end
+    ns.Bars:Hold(bar)
+    local ok, err = pcall(function()
+        local container = CreateFrame("AuraContainer", nil, bar, "CustomAuraContainerTemplate")
+        container:SetPoint("CENTER", bar, "CENTER")
+        container:SetSize(BASE, BASE)
+        container:EnableMouse(false)
+        container:SetFrameLevel(bar:GetFrameLevel() + 5)
+        container:SetEditModePreviewEnabled(false)
+        container:SetUnit("player")
+        bar.selfContainer = container
+    end)
+    if not ok then
+        bar.selfFailed = true
+        if not F.lastError then
+            F.lastError = tostring(err)
+            print("|cffffd100" .. ns.TITLE .. ":|r your debuffs on you on the " .. ns.BAR_NAMES[bar.key]
+                .. " bar couldn't start. Please report this: " .. F.lastError)
+        end
+    end
+    return bar.selfContainer
+end
+
+-- Where that container sits on the bar: its point, the bar's point, and how
+-- far out (in the container's own size, as it's scaled with the icons). Past
+-- the end the bar grows to, the bar's spacing from it: the right end, or the
+-- left when it grows left. With no entries, where they'd start instead.
+local function SelfSpot(bar, spacing)
+    local grow = bar.data.grow
+    if bar.count == 0 then
+        local side = grow == "left" and "RIGHT" or grow == "right" and "LEFT" or "CENTER"
+        return side, side, 0
+    end
+    if grow == "left" then return "RIGHT", "LEFT", -spacing end
+    return "LEFT", "RIGHT", spacing
+end
+
+function F:ApplySelf(bar, packed, spacing, scale)
+    local own = ns.AURA_BARS[bar.key].unit == "player"
     local on = packed and bar.data.selfDebuffs == true
-    -- After the last entry, or before the first when the bar grows left.
+    -- After the last entry, or before the first when the bar grows left (on
+    -- the Debuffs bar the group is alone in its container, so it's moot).
     local layout = { layoutIndex = bar.data.grow == "left" and 0 or ns.BUFF_SLOTS + 1, groupSpacing = spacing }
-    local signature = on and (layout.layoutIndex .. "|" .. spacing) or ""
+    local signature, point, to, x = "", nil, nil, nil
+    if on then
+        signature = layout.layoutIndex .. "|" .. spacing
+        if not own then
+            point, to, x = SelfSpot(bar, spacing)
+            signature = signature .. "|" .. point .. "|" .. to .. "|" .. x .. "|" .. scale
+        end
+    end
     if bar.appliedSelf == signature then return end
+    -- On the Debuffs bar, nothing is made until they're first wanted.
+    local container
+    if own then
+        container = bar.container
+    elseif on or bar.selfGroup then
+        container = SelfContainer(bar)
+    end
+    if not container then return end
     bar.appliedSelf = signature
+    if point then
+        container:ClearAllPoints()
+        container:SetPoint(point, bar, to, x, 0)
+        container:SetScale(scale)
+    end
     if on and not bar.selfGroup then
         AddGroup(container, "self", "HARMFUL", { initializeFrame = F.Guard(GroupLook(bar)), maxFrameCount = SELF_MAX,
             candidateFilters = { isFromPlayerOrPlayerPet = true }, layout = layout })
@@ -348,7 +420,7 @@ function F:Apply(bar)
             end
         end
     end
-    self:ApplySelf(bar, on and packed, spacing)
+    self:ApplySelf(bar, on and packed, spacing, scale)
     if bar.appliedScale ~= scale then
         bar.appliedScale = scale
         container:SetScale(scale)

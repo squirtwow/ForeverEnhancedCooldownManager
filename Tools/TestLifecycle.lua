@@ -2,7 +2,8 @@
 -- the player's clicks: Use my bars unticked while a layout matched the
 -- Personal Resource Display to your rows, a bar or the /ccm debug box still
 -- being dragged as the game closes its windows (Escape, a loading screen,
--- death), and What's new or the first-install welcome after a reload or
+-- death), a bar held through a bag or spell change, a rebuild or a fight
+-- ending, and What's new or the first-install welcome after a reload or
 -- logout before they showed. The mock game is a copy of
 -- Tools/TestBars.lua's: Tools/TestMockSync.mjs checks the two match, and
 -- with --write copies it across. Tools/TestBars.lua is near the mock game's
@@ -911,6 +912,99 @@ do
     S[bar].last.StopMovingOrSizing = nil
     B:SetUnlocked(false)
     Equal(tostring(L:Active()) .. " " .. tostring(S[bar].last.StopMovingOrSizing), "true nil", "locking with nothing held leaves the bars and layout be")
+    Equal(#printed, 0, "no errors")
+end
+
+-- A bar held through a bag or spell change stays on the cursor ----------------------------------
+
+do
+    Fresh()
+    bagItems = { { itemID = 118, hyperlink = "|cffffffff|Hitem:118|h[Minor Healing Potion]|h|r", iconFileID = 888 } }
+    itemCount[118] = 3
+    local ns = Load({ useBars = true, notesSeen = "dev" })
+    local B, L = ns.Bars, ns.Layout
+    B:Assign("Moonfire", "cd")
+    B:Assign("item:118", "cd")
+    SlashCmdList.FECM("")
+    B:SetUnlocked(true)
+    local bar, data = B:Get("cd"), ns.BarData("cd")
+    local s = S[bar]
+    -- The game carrying a bar: from where it sits, under the cursor till the
+    -- mouse lets go. Anchored anywhere while it's carried, it goes back to
+    -- that spot and stays there, off the cursor (snapped).
+    rawset(bar, "StartMoving", function() s.moving, s.snapped, s.home = true, false, { s.cx, s.cy } end)
+    rawset(bar, "StopMovingOrSizing", function() s.moving = nil end)
+    rawset(bar, "ClearAllPoints", function()
+        if s.moving then s.snapped, s.cx, s.cy = true, s.home[1], s.home[2] end
+        s.points = {}
+    end)
+    local function Cursor(x, y)
+        if s.moving and not s.snapped then s.cx, s.cy = x, y end
+    end
+    local function PickUp() S[bar.mover].scripts.OnDragStart(bar.mover) end
+    local function LetGo() S[bar.mover].scripts.OnDragStop(bar.mover) end
+    -- An event, then the next frame for the timers it queued: each runs now, once.
+    local function Settle(event)
+        local from = #timers
+        Fire(event)
+        for i = from + 1, #timers do timers[i]() end
+    end
+    local function Spot() return string.format("%s %s %s", tostring(data.x), tostring(data.y), tostring(data.point)) end
+    local function Held() return tostring(bar.dragging) .. " " .. tostring(s.moving) .. " " .. tostring(s.snapped) end
+    s.cx, s.cy = 500, 160 -- where it sits, above the action bar
+    -- A plain drag, nothing else happening: where it lands.
+    PickUp()
+    Cursor(450, 350)
+    LetGo()
+    local dropped = Spot()
+    Equal(Held() .. " " .. tostring(data.x ~= nil), "nil nil false true", "a plain drag: let go and kept where the mouse left it")
+    PickUp()
+    Cursor(560, 300)
+    LetGo()
+    Equal(Spot() ~= dropped, true, "dragged somewhere else")
+    -- The same drag again, with the game busy while it's held.
+    PickUp()
+    Cursor(520, 320)
+    itemCount[118] = 5
+    Settle("BAG_UPDATE_DELAYED")
+    Equal(Held(), "true true false", "a bag change while a bar is held: still on the cursor")
+    Equal(S[bar.icons[2].count].text, 5, "its icons still change: the potion's new count")
+    Cursor(480, 340)
+    Book(true)
+    Settle("SPELLS_CHANGED")
+    Equal(Held(), "true true false", "a rank learned while it's held: still on the cursor")
+    Equal(bar.icons[1].spellID, 8925, "its icons still change: Moonfire's new rank")
+    B:Rebuild()
+    Equal(Held(), "true true false", "the bars rebuilt (a change of yours) while it's held: still on the cursor")
+    -- Held through a fight that used the last potion: the bars make room
+    -- again as it ends.
+    lockdown = true
+    Fire("PLAYER_REGEN_DISABLED")
+    itemCount[118] = 0
+    lockdown = false
+    Settle("PLAYER_REGEN_ENABLED")
+    Equal(Held(), "true true false", "a fight ending while it's held: still on the cursor")
+    Cursor(450, 350)
+    LetGo()
+    Equal(Held() .. " " .. Spot(), "nil nil false " .. dropped, "let go: it lands where the mouse left it, as a plain drag does")
+    -- In a layout: a plain drag takes it out of the layout, where the mouse
+    -- left it; held through a rebuild (which stacks the layout again), the same.
+    L:Apply("pyramid")
+    s.cx, s.cy = 300, 200 -- where the layout put it
+    PickUp()
+    Cursor(450, 350)
+    LetGo()
+    dropped = Spot()
+    Equal(tostring(L:Active()) .. " " .. tostring(data.x ~= nil), "false true", "a plain drag out of a layout: kept where the mouse left it")
+    L:Apply("pyramid")
+    s.cx, s.cy = 300, 200 -- where the layout put it
+    PickUp()
+    Settle("SPELLS_CHANGED")
+    B:Rebuild()
+    Equal(Held(), "true true false", "held in a layout through a spell change and a rebuild: still on the cursor")
+    Cursor(450, 350)
+    LetGo()
+    Equal(tostring(L:Active()) .. " " .. Spot(), "false " .. dropped, "let go: out of the layout, where the mouse left it, as a plain drag does")
     Equal(#printed, 0, "no errors")
 end
 

@@ -218,6 +218,20 @@ ns.RELOAD = {
     prdSkin = true,
 }
 
+-- What a shared profile carries of the look (ProfileShare.lua): how your
+-- bars, the restyled bars, your cast bar, Raid Timers and the Cooldown pulse
+-- look, and where they sit. Never a tick that switches a part on or off (your
+-- bars, the look on Blizzard's bars or display, the cast bar, swing timer,
+-- combo points, keybinds, the pulse, each Raid Timers part), nor the window's
+-- own (its accent, lists, preview, grow arrows and the minimap button).
+ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "iconShadow", "readyGlow",
+    "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
+    "castColour", "castHeight", "castIcon", "castName", "castTime", "swingColour",
+    "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
+    "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
+    "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",
+    "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseX", "pulseY" }
+
 -- Bars: each bar lists spells by name, so the highest known rank is
 -- always the one shown.
 ns.BAR_KEYS = { "cd", "util", "buff", "debuff" }
@@ -240,6 +254,10 @@ ns.WRAP_NAMES = { down = "Below", up = "Above" }
 -- from the centre.
 local POINTS = { CENTER = true, TOP = true, BOTTOM = true, TOPLEFT = true, TOPRIGHT = true,
     BOTTOMLEFT = true, BOTTOMRIGHT = true }
+ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
+-- A bar's settings a shared profile carries (its spells are in the profile).
+ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "outOfCombat", "showMissing", "showNames", "showTimer",
+    "showAuras", "selfDebuffs", "grow", "wrap", "point", "x", "y" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -660,6 +678,105 @@ function ns.DeleteProfile(text)
     return true, "Deleted " .. name .. "."
 end
 
+-- A copy of a list, or of a table one level deep; empty for anything else.
+local function CopyList(list)
+    local copy = {}
+    for i, value in ipairs(type(list) == "table" and list or {}) do copy[i] = value end
+    return copy
+end
+
+local function CopyTable(from)
+    local copy = {}
+    for key, value in pairs(type(from) == "table" and from or {}) do
+        copy[key] = type(value) == "table" and CopyList(value) or value
+    end
+    return copy
+end
+
+local function CopySet(from)
+    local copy = {}
+    for key, value in pairs(type(from) == "table" and from or {}) do
+        if type(value) ~= "table" then copy[key] = value end
+    end
+    return copy
+end
+
+-- A shared profile's look, bar sizes and spots, layout and Tracked Bar
+-- colours in place of yours, everything it leaves out at its default (it
+-- only carries what differs). Each is repaired as it goes in.
+local function UseSetup(setup)
+    local look = type(setup.look) == "table" and setup.look or {}
+    for _, key in ipairs(ns.SHARE_LOOK) do
+        local value = look[key]
+        if value ~= nil and ns.Valid(key, value) then db[key] = value else db[key] = nil end
+    end
+    local bars = type(setup.bars) == "table" and setup.bars or {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local data, from = ns.BarData(key), type(bars[key]) == "table" and bars[key] or {}
+        for _, field in ipairs(ns.SHARE_BAR_FIELDS) do data[field] = from[field] end
+        ns.BarData(key)
+    end
+    local layout = CopyTable(setup.layout)
+    layout.hidden = CopySet(type(setup.layout) == "table" and setup.layout.hidden)
+    db.layout = layout
+    ns.LayoutData()
+    db.barColours = CopySet(setup.colours)
+    ns.BarColours()
+end
+
+-- Every name on a bar in any profile, in the lists used before the character
+-- is known, and in bars saved before profiles (name -> true).
+local function NamesInUse()
+    local used = {}
+    local function Mark(lists)
+        for _, key in ipairs(ns.BAR_KEYS) do
+            for _, spell in ipairs(type(lists[key]) == "table" and lists[key] or {}) do used[spell] = true end
+        end
+    end
+    for _, profile in pairs(Profiles()) do
+        if type(profile) == "table" then Mark(profile) end
+    end
+    Mark(scratch)
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = type(db.bars) == "table" and db.bars[key]
+        local old = type(bar) == "table" and rawget(bar, "spells")
+        if type(old) == "table" then Mark({ [key] = old }) end
+    end
+    return used
+end
+
+-- A profile someone shared (read and checked by ProfileShare.lua) as a new
+-- profile under the name given, with a number after it if that's taken, and
+-- switched to: the profile you were on stays as it is. Spells it added by
+-- name or ID come too, but only names none of your profiles has on a bar:
+-- spells added by ID are every profile's, so one of yours (added by you, or
+-- a name the game doesn't know) never takes on the string's IDs.
+-- withLook: its look, bar sizes and spots, and layout too, in place of yours
+-- (they're every character's). Never in combat.
+function ns.ImportProfile(text, shared, withLook)
+    local why = Blocked()
+    if why then return false, why end
+    if type(shared) ~= "table" or type(shared.lists) ~= "table" then return false, "Paste a profile first." end
+    local name, problem = CleanName(text)
+    if not name then return false, problem end
+    name = FreeName(name)
+    local profile = { joins = {}, pulsePick = CopySet(shared.pick), pulseStyle = CopySet(shared.style) }
+    for _, key in ipairs(ns.BAR_KEYS) do profile[key] = CopyList(shared.lists[key]) end
+    for key in pairs(ns.AURA_BARS) do
+        local joins = type(shared.joins) == "table" and shared.joins[key]
+        if type(joins) == "table" then profile.joins[key] = CopySet(joins) end
+    end
+    local custom, yours = ns.CustomSpells(), NamesInUse()
+    Profiles()[name] = Lists(profile)
+    for spell, ids in pairs(type(shared.added) == "table" and shared.added or {}) do
+        if type(spell) == "string" and custom[spell] == nil and not yours[spell] then custom[spell] = CopyList(ids) end
+    end
+    ns.CustomSpells()
+    if withLook and type(shared.setup) == "table" then UseSetup(shared.setup) end
+    Switch(name)
+    return true, "Imported " .. name .. (withLook and " with its look and layout" or "") .. ", and switched to it.", name
+end
+
 -- Bars ---------------------------------------------------------------------------
 
 -- A bar's spells aren't stored with it: reading them gives this character's list.
@@ -702,7 +819,7 @@ function ns.BarData(key)
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
-    bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs bar: debuffs you put on yourself, off unless ticked
+    bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
     bar.perRow = Limit(bar.perRow, ns.BAR_LIMITS.perRow)
     if not ns.GROW_NAMES[bar.grow] then bar.grow = "centre" end
     if not ns.WRAP_NAMES[bar.wrap] then bar.wrap = "down" end
@@ -871,21 +988,7 @@ end
 -- Forgets added spells once they're on no bar in any profile.
 function ns.PruneCustom()
     if not db then return end
-    local custom, used = ns.CustomSpells(), {}
-    local function Mark(lists)
-        for _, key in ipairs(ns.BAR_KEYS) do
-            for _, spell in ipairs(type(lists[key]) == "table" and lists[key] or {}) do used[spell] = true end
-        end
-    end
-    for _, profile in pairs(Profiles()) do
-        if type(profile) == "table" then Mark(profile) end
-    end
-    Mark(scratch)
-    for _, key in ipairs(ns.BAR_KEYS) do
-        local bar = type(db.bars) == "table" and db.bars[key]
-        local old = type(bar) == "table" and rawget(bar, "spells")
-        if type(old) == "table" then Mark({ [key] = old }) end
-    end
+    local custom, used = ns.CustomSpells(), NamesInUse()
     for name in pairs(custom) do
         if not used[name] then custom[name] = nil end
     end

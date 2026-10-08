@@ -1043,7 +1043,9 @@ local function BuildHelp(window, header)
     window.help = help
     function window:Help()
         if self.profilePanel and self.profilePanel:IsShown() then
-            self:Say("Profiles: click one to use it, or x to delete it. Type a name to make, copy or rename one.")
+            -- With Share and Import there (a new file: after a full restart).
+            self:Say(self.profileShare and "Profiles: click to use, x to delete, type a name to make one. Share or Import one as text."
+                or "Profiles: click one to use it, or x to delete it. Type a name to make, copy or rename one.")
             return self:Refresh()
         end
         if ns.Tour and ns.Tour:StartPage(self.selected) then return end

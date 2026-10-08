@@ -1298,6 +1298,259 @@ do
     end
 end
 
+-- Your debuffs on you on the Debuffs bar too -------------------------------------------------------
+-- A player looked for Weakened Soul on the Debuffs bar first. That bar's
+-- container watches your target, and a container watches one unit, so your
+-- debuffs on you get a second container of the bar's own, watching you. It's
+-- made and driven as the Buffs bar's group for them is: the first time
+-- they're ticked with your bars on, never in a fight (a tick then waits for it
+-- to end), on a bar already holding a container (so never shown or hidden
+-- after, B:Hold), in sight, each icon's look given as its group is added and
+-- never after. The game sizes a container itself and nothing may hang off
+-- one, so it's anchored to the bar: just past the bar's end the way it grows,
+-- or in the bar's own spot while the bar has no entries.
+
+-- A number as text, to four figures (1 and 1.0 alike).
+local function Figure(v)
+    return type(v) == "number" and ("%.4g"):format(v) or tostring(v)
+end
+
+-- Where the Debuffs bar's container for you sits: how many points, the
+-- first one's point, whether it's on the bar, its point on the bar, the
+-- offset, and the container's scale.
+local function SelfSpot(bar)
+    local own = bar.selfContainer
+    if not own then return "none" end
+    local points = S[own].points
+    local p = points[1] or {}
+    return #points .. " " .. tostring(p[1]) .. " " .. tostring(p[2] == bar) .. " " .. tostring(p[3]) .. " " .. Figure(p[4]) .. " "
+        .. Figure(p[5]) .. " " .. Figure(S[own].scale)
+end
+
+-- The Debuffs bar's group for your debuffs on you, or an empty table.
+local function SelfGroup(bar)
+    local own = bar.selfContainer
+    return own and S[own].groups.self or {}
+end
+
+do
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev" })
+    local B = ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    local debuff = B:Get("debuff")
+    Runs()
+    local before = #containers
+    Equal(tostring(ns.BarData("debuff").selfDebuffs) .. " " .. tostring(debuff.selfContainer) .. " " .. before, "false nil 2",
+        "off at first: nothing more made than the Buffs and Debuffs bars' own containers")
+    B:SetOption("debuff", "selfDebuffs", true)
+    local own = debuff.selfContainer
+    local s = own and S[own] or {}
+    Equal(tostring(#containers - before) .. " " .. tostring(s.unit) .. " " .. tostring(s.parent == debuff) .. " " .. tostring(s.listening)
+        .. " [" .. Runs() .. "] " .. containerCallsInCombat, "1 player true true [] 0",
+        "ticked: one more container, on the bar, watching you, made in sight and hearing your auras, none of its own code run"
+        .. " inside the addon's")
+    local group = SelfGroup(debuff)
+    local filters = group.filters or {}
+    Equal(tostring(group.filter) .. " " .. tostring(group.enabled) .. " " .. tostring(filters.isFromPlayerOrPlayerPet) .. " "
+        .. tostring(filters.includeSpellIDs) .. " " .. tostring(group.max) .. " " .. #(group.frames or {}),
+        "HARMFUL true true nil 4 10", "one group for your debuffs on you, by who cast them, no spell IDs, up to four: as the Buffs bar's")
+    local mine = S[debuff.container]
+    Equal(mine.unit .. " " .. tostring(mine.groups.self) .. " " .. tostring(mine.groups.g1.enabled), "target nil true",
+        "the bar's own container still watches your target, with nothing of yours on you in it")
+    Equal(Figure(S[debuff.container].scale) .. " " .. tostring(S[debuff].shown) .. " " .. tostring(debuff.holds), "1 true true",
+        "the bar was holding a container already: it's never shown or hidden for this one")
+    -- Where it sits: past the bar's end, the bar's spacing from it, as big as
+    -- the bar's own icons.
+    Equal(SelfSpot(debuff), "1 LEFT true RIGHT 4 0 1", "just past the bar's right end (it grows from its centre), the bar's spacing from it")
+    B:SetOption("debuff", "grow", "left")
+    Equal(SelfSpot(debuff), "1 RIGHT true LEFT -4 0 1", "growing left: past its left end, away from where it's held")
+    B:SetOption("debuff", "grow", "right")
+    Equal(SelfSpot(debuff), "1 LEFT true RIGHT 4 0 1", "growing right: past its right end")
+    B:SetOption("debuff", "size", 54)
+    Equal(SelfSpot(debuff) .. " " .. Figure(S[debuff.container].scale), "1 LEFT true RIGHT 2.667 0 1.5 1.5",
+        "bigger icons: scaled with the bar's own, the same room from it")
+    B:SetOption("debuff", "size", 36)
+    B:SetOption("debuff", "grow", "centre")
+    -- No entries: in the bar's own spot, the bar showing for them alone.
+    B:SetAura("debuff", "Moonfire", false)
+    Equal(SelfSpot(debuff) .. " " .. tostring(InSight(debuff)) .. " " .. tostring(group.enabled), "1 CENTER true CENTER 0 0 1 true true",
+        "no entries: in the bar's own spot, the bar still showing for your debuffs on you")
+    B:SetOption("debuff", "grow", "right")
+    Equal(SelfSpot(debuff), "1 LEFT true LEFT 0 0 1", "growing right with no entries: from the edge it grows from")
+    B:SetOption("debuff", "grow", "centre")
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(SelfSpot(debuff), "1 LEFT true RIGHT 4 0 1", "an entry back: past the end again")
+    -- They show whatever you target: the debuffs on you, not another's
+    -- debuff or a buff, and a target change never touches their container.
+    target = false
+    local refreshes = s.refreshes or 0
+    Fire("PLAYER_TARGET_CHANGED")
+    s.Update({ { id = 6788, harmful = true, mine = true }, { id = 11196, harmful = true, mine = true }, { id = 99, harmful = true },
+        { id = 467 } })
+    Equal(#group.active .. " " .. tostring(InSight(own)) .. " " .. ((s.refreshes or 0) - refreshes), "2 true 0",
+        "no target: your two debuffs on you show, another's debuff and a buff don't, and the target change didn't touch them")
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(#group.active .. " " .. ((s.refreshes or 0) - refreshes) .. " [" .. Runs() .. "]", "2 0 []",
+        "an enemy targeted: still yours, still untouched, none of their code run inside the addon's")
+    -- More than four of yours: four show, and the container makes no icon and
+    -- runs none of the addon's code as it updates.
+    local many = {}
+    for i = 1, 7 do many[i] = { id = 90000 + i, harmful = true, mine = true } end
+    s.Update(many)
+    local bare = 0
+    for _, button in ipairs(group.frames) do if not S[button].supplied.SetIcon then bare = bare + 1 end end
+    Equal(#group.active .. " " .. s.late .. " " .. s.addonCalls .. " " .. bare, "4 0 0 0",
+        "seven of yours: four show; no icon made and none of the addon's code run mid-update; every icon had its look as it was added")
+    -- Missing debuffs greyed (fixed spots): off, as on the Buffs bar.
+    B:SetOption("debuff", "showMissing", true)
+    Equal(tostring(group.enabled), "false", "missing debuffs greyed: off, the spots belong to entries")
+    B:SetOption("debuff", "showMissing", false)
+    Equal(tostring(group.enabled), "true", "packed again: back on")
+    -- Use my bars off: off with them; on: back.
+    ns.Set("useBars", false)
+    B:Rebuild()
+    Equal(tostring(group.enabled) .. " " .. tostring(InSight(debuff)), "false false", "Use my bars off: off, the bar gone")
+    ns.Set("useBars", true)
+    B:Rebuild()
+    Equal(tostring(group.enabled) .. " " .. tostring(InSight(debuff)), "true true", "on again: back")
+    -- Both bars ticked: each shows them, each in its own container.
+    B:SetOption("buff", "selfDebuffs", true)
+    local buffGroup = S[B:Get("buff").container].groups.self
+    Equal(tostring(buffGroup and buffGroup.enabled) .. " " .. tostring(group.enabled) .. " " .. #containers, "true true 3",
+        "ticked on both bars: both show them, the Buffs bar in its own container, nothing more made")
+    B:SetOption("buff", "selfDebuffs", false)
+    -- Unticked: switched off, the container kept (as a group is); an empty
+    -- bar goes right out again.
+    B:SetOption("debuff", "selfDebuffs", false)
+    Equal(tostring(group.enabled) .. " " .. tostring(debuff.selfContainer == own) .. " " .. #containers, "false true 3",
+        "unticked: switched off, the container kept")
+    B:SetAura("debuff", "Moonfire", false)
+    Equal(tostring(InSight(debuff)) .. " " .. tostring(S[debuff].shown) .. " [" .. Runs() .. "]", "false true []",
+        "unticked with no entries: the bar gone right out, still shown, none of the containers' code run")
+    B:SetOption("debuff", "selfDebuffs", true)
+    Equal(tostring(group.enabled) .. " " .. tostring(InSight(debuff)) .. " " .. #containers .. " " .. SelfSpot(debuff),
+        "true true 3 1 CENTER true CENTER 0 0 1", "ticked again: the same container, back on, the empty bar back")
+    Equal(#printed, 0, "no errors")
+end
+
+do
+    -- Ticked in a fight: nothing is made or set up until it ends, as for the
+    -- Buffs bar; unticked in one, it waits too.
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev" })
+    local B = ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    local debuff = B:Get("debuff")
+    local before = #containers
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetOption("debuff", "selfDebuffs", true)
+    Equal(tostring(debuff.selfContainer) .. " " .. (#containers - before) .. " " .. containerCallsInCombat, "nil 0 0",
+        "ticked in a fight: nothing made or set up")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    local own = debuff.selfContainer
+    Equal(tostring(own ~= nil) .. " " .. tostring(own and S[own].listening) .. " " .. tostring(SelfGroup(debuff).enabled) .. " ["
+        .. Runs() .. "]", "true true true []", "made as it ends, in sight and hearing your auras, switched on")
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetOption("debuff", "selfDebuffs", false)
+    Equal(tostring(SelfGroup(debuff).enabled) .. " " .. containerCallsInCombat, "true 0", "unticked in a fight: waits")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(tostring(SelfGroup(debuff).enabled), "false", "and goes once it's over")
+    Equal(#printed, 0, "no errors")
+end
+
+do
+    -- Saved ticked: made at login with the bars, and the empty bar shows for
+    -- them. With your bars off, nothing is made, as ever.
+    Fresh()
+    Load({ notesSeen = "dev", bars = { debuff = { selfDebuffs = true } } })
+    Equal(#containers .. " [" .. Runs() .. "]", "0 []", "saved ticked with your bars off: still no container")
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", bars = { debuff = { selfDebuffs = true } } })
+    local debuff = ns.Bars:Get("debuff")
+    local own = debuff.selfContainer
+    Equal(#containers .. " " .. tostring(own and S[own].unit) .. " " .. tostring(own and S[own].listening) .. " "
+        .. tostring(SelfGroup(debuff).enabled) .. " " .. tostring(InSight(debuff)) .. " [" .. Runs() .. "]",
+        "3 player true true true []", "saved ticked with your bars on: made at login, watching you, the empty Debuffs bar showing")
+    Equal(#printed, 0, "no errors")
+end
+
+do
+    -- The tick: on the Buffs and Debuffs pages, each bar its own. The new
+    -- Debuffs one says Needs testing in its label until it's seen in game,
+    -- in fewer words to fit. Typing Weakened Soul in either page's add box
+    -- points to both ticks, still on one line, and one left on a bar points
+    -- to the tick on its page, or to the Buffs one.
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    local tick = w.pages.bar.options.showSelf
+    local function Note()
+        local hint = tick.hint
+        if type(hint) == "function" then hint = hint(tick) end
+        return hint
+    end
+    local seen = {}
+    for _, key in ipairs({ "cd", "util", "buff", "debuff" }) do
+        w:Select(key)
+        if tick:IsVisible() then seen[#seen + 1] = key end
+    end
+    Equal(table.concat(seen, " "), "buff debuff", "on the Buffs and Debuffs pages only")
+    -- A bar's icon for one of those debuffs, left on it from before the add
+    -- box turned them away: what its note says on each page.
+    ns.Bars:Assign("Moonfire", "cd")
+    w:Select("cd")
+    local iconNote = w.pages.bar.icons[1].hint
+    local function IconNote(key)
+        w:Select(key)
+        return iconNote({ name = "Recently Bandaged" })
+    end
+    local icons = {}
+    for _, key in ipairs({ "buff", "debuff", "cd" }) do icons[#icons + 1] = IconNote(key) end
+    local longestIcon = 0
+    for _, note in ipairs(icons) do longestIcon = math.max(longestIcon, #note) end
+    Equal(table.concat(icons, " | ") .. " " .. tostring(longestIcon <= 94), "Recently Bandaged can't show here. Tick \"Show your debuffs"
+        .. " on you\" and drag it off the bar. | Recently Bandaged can't show here. Tick \"Your debuffs on you\" and drag it off the"
+        .. " bar. | Recently Bandaged can't show here. Drag it off, and tick \"Show your debuffs on you\" on Buffs. true",
+        "one left on a bar: its note names this page's tick, or the Buffs one, on one line")
+    w:Select("buff")
+    local buffLabel, buffNote = S[tick.text].text, Note()
+    w:Select("debuff")
+    Equal(buffLabel .. " | " .. S[tick.text].text, "Show your debuffs on you | Your debuffs on you (Needs testing)",
+        "the Debuffs one says Needs testing, in fewer words")
+    S[tick].width = 0
+    w:Select("buff")
+    w:Select("debuff")
+    Equal(S[tick].width > 18, true, "its click area is sized to the words again")
+    w:Select("buff")
+    Equal(S[tick.text].text, "Show your debuffs on you", "back on Buffs: its own words")
+    w:Select("debuff")
+    Equal(buffNote, "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, after your buffs."
+        .. " Not with missing buffs greyed.", "the Buffs one's note as before")
+    Equal(Note(), "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, at the end of this bar."
+        .. " Not with missing debuffs greyed.", "the Debuffs one's: where they go")
+    Equal(tostring(tick:GetChecked()), "false", "unticked at first")
+    tick:Click()
+    w:Select("buff")
+    local buffTicked = tick:GetChecked()
+    w:Select("debuff")
+    Equal(tostring(ns.BarData("debuff").selfDebuffs) .. " " .. tostring(ns.BarData("buff").selfDebuffs) .. " " .. tostring(buffTicked)
+        .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(SelfGroup(ns.Bars:Get("debuff")).enabled), "true false false true true",
+        "ticked on the Debuffs page: that bar's alone, and it shows them")
+    local note = ns.Spells:SelfDebuffNote("Weakened Soul")
+    local longest = ns.Spells:SelfDebuffNote("Recently Bandaged")
+    Equal(tostring(note:find("Tick \"Show your debuffs on you\" on Buffs or Debuffs.", 1, true) ~= nil) .. " " .. tostring(#longest <= 100),
+        "true true", "Weakened Soul typed: pointed to the tick on either bar, the longest still one line (94 letters fit in game)")
+    w:Hide()
+    Equal(#printed, 0, "no errors")
+end
+
 do
     -- /ccm debug (hidden, never announced) with entries on the Buffs and
     -- Debuffs bars: those keep them in holders, not icons, so the report

@@ -838,8 +838,8 @@ end
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
 local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
-    "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
-    "MinimapButton.lua", "Notes.lua", "Debug.lua" }
+    "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
+    "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
 local function LoadAll(saved)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
@@ -2314,7 +2314,7 @@ end
         cd = SPELL .. " | cd true",
         util = SPELL .. " | util true",
         buff = BAR .. ", MISSING ONES GREYED, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 5 | buff true",
-        debuff = BAR .. ", MISSING ONES GREYED, JOIN TWO INTO ONE | 4 | debuff true",
+        debuff = BAR .. ", MISSING ONES GREYED, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 5 | debuff true",
         look = "THE LOOK, KEYBINDS ON ICONS, FONT AND BAR TEXTURE, READY GLOW | 4 | look true",
         layout = "LAYOUTS, LIVE PREVIEW, ALL BARS, GROW ARROWS | 4 | layout true",
         cast = "CAST BAR, COLOURS, HEIGHT AND PARTS | 3 | cast true",
@@ -2423,6 +2423,12 @@ end)()
     for _ = 1, 2 do box.next:Click() end
     Equal(S[box.text].text, "Ticked, each debuff keeps its spot, greyed while it's missing from your target."
         .. " Unticked, only the ones up show, in one row.", "the Debuffs bar's: from your target")
+    -- Its own Your debuffs on you, at the end of the bar.
+    for _ = 1, 2 do box.next:Click() end
+    local o = S[box.outline].points
+    Equal(S[box.title].text .. " | " .. S[box.text].text .. " | " .. tostring(o[1][2] == bp.options.showSelf and S[bp.options.showSelf].shown),
+        "YOUR DEBUFFS ON YOU | Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, at the end of this bar."
+        .. " Not with missing debuffs greyed. | true", "the Debuffs bar's debuffs on you: at the end of the bar, outlining its tick")
     box.skip:Click()
     -- Cast bar's Colours: the box under both rows, clear of the chosen
     -- colours' names (Blizzard's gold, Silver) that the step talks about.
@@ -2445,8 +2451,8 @@ end)()
     w.profileButton:Click()
     help:Click()
     Equal(tostring(S[box].shown) .. " " .. tostring(S[w.profilePanel].shown) .. " " .. S[w.note].text,
-        "false true Profiles: click one to use it, or x to delete it. Type a name to make, copy or rename one.",
-        "with the profile menu open, the footer explains it and the menu stays")
+        "false true Profiles: click to use, x to delete, type a name to make one. Share or Import one as text.",
+        "with the profile menu open, the footer explains it (Share and Import too) and the menu stays")
     w.profileButton:Click()
     -- A page with nothing to walk through: the footer says so.
     local start = Tour.StartPage

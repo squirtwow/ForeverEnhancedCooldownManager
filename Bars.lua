@@ -488,6 +488,10 @@ local function Round(n)
 end
 
 local function Place(bar)
+    -- A bar being dragged is the game's to move till it's let go (Drop,
+    -- which places it then): anchored now (a bag or spell change laying the
+    -- bars out again), it would jump back to its old spot, off the cursor.
+    if bar.dragging then return end
     local data = bar.data
     local width, height = bar:GetWidth() or 0, bar:GetHeight() or 0
     local point, side = Point(data)
@@ -1030,8 +1034,9 @@ function B:UpdateShown()
             -- A bar taken out of your layout doesn't show at all.
             local out = ns.Layout ~= nil and ns.Layout:IsHidden(key)
             if bar.kind == "aura" then
-                -- Shown whenever it has entries, never in a fight; hiding
-                -- out of combat fades it right out instead.
+                -- Shown whenever it has entries (or your debuffs on you
+                -- ticked), never in a fight; hiding out of combat fades it
+                -- right out instead.
                 local has = bar.count > 0 or ns.BuffBar:SelfOn(bar)
                 local show = on and not out and (unlocked or has) or false
                 if Showing(bar) ~= show then
@@ -1364,7 +1369,7 @@ end
 -- what dropping it does.
 local function Vet(key, text)
     -- A debuff on you (Weakened Soul): no bar shows it by name, the Buffs
-    -- bar's tick does.
+    -- or Debuffs bar's tick does.
     local selfNote = ns.Spells:SelfDebuffNote(text)
     if selfNote then return false, selfNote end
     local found, ids, given = ns.Spells:Resolve(text)

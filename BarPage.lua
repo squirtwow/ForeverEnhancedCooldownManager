@@ -17,6 +17,12 @@ local function Full(key)
     return ns.BAR_NAMES[key] .. " is full."
 end
 
+-- The "Show your debuffs on you" tick on each aura bar's page. The Debuffs
+-- one is new, so its label says Needs testing until it's seen in game, in
+-- fewer words to fit the page.
+local SELF_TICK = { buff = "Show your debuffs on you", debuff = "Your debuffs on you" }
+local SELF_LABEL = { buff = SELF_TICK.buff, debuff = SELF_TICK.debuff .. " (Needs testing)" }
+
 function ns.BuildBarPage(window, page, width)
     local B = ns.Bars
     local state = { bar = "cd", search = "" }
@@ -266,7 +272,11 @@ function ns.BuildBarPage(window, page, width)
         window:Hint(icon, function(self)
             if not self.name then return nil end
             if ns.Spells:SelfDebuffNote(self.name) then
-                return self.name .. " can't show here. Tick \"Show your debuffs on you\" and drag it off the bar."
+                -- This page's own tick, or where to find one (one line: 93 letters at most).
+                if SELF_TICK[state.bar] then
+                    return self.name .. " can't show here. Tick \"" .. SELF_TICK[state.bar] .. "\" and drag it off the bar."
+                end
+                return self.name .. " can't show here. Drag it off, and tick \"" .. SELF_TICK.buff .. "\" on Buffs."
             end
             return self.name .. ". Drag it onto another icon to swap them, or off the bar to take it off."
         end)
@@ -332,10 +342,16 @@ function ns.BuildBarPage(window, page, width)
     local showAuras = Option("Show buff and debuff time", "showAuras", -107,
         "While the buff a spell put on you, or its debuff on your target (like Shadow Word: Pain), is up,"
             .. " its icon shows the time left with a gold edge.")
-    -- The Buffs bar only, in the same spot.
-    local showSelf = Option("Show your debuffs on you", "selfDebuffs", -107,
-        "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, after your buffs."
-            .. " Not with missing buffs greyed.")
+    -- The Buffs and Debuffs bars, in the same spot, each its own (its label
+    -- set on refresh: SELF_LABEL).
+    local showSelf = Option(SELF_LABEL.buff, "selfDebuffs", -107, function()
+        if state.bar == "debuff" then
+            return "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, at the end of this bar."
+                .. " Not with missing debuffs greyed."
+        end
+        return "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, after your buffs."
+            .. " Not with missing buffs greyed."
+    end)
 
     -- A label and joined buttons for a choice, with the footer explaining it:
     -- note is the same for every button, or one for each choice by its key.
@@ -723,8 +739,12 @@ function ns.BuildBarPage(window, page, width)
         showTimer:SetChecked(data.showTimer)
         showAuras:SetShown(not aura)
         showAuras:SetChecked(data.showAuras)
-        showSelf:SetShown(state.bar == "buff")
+        showSelf:SetShown(aura ~= nil)
         showSelf:SetChecked(data.selfDebuffs)
+        if aura then
+            showSelf.text:SetText(SELF_LABEL[state.bar])
+            showSelf:SetWidth(18 + (showSelf.text:GetStringWidth() or 0)) -- the label is its click area
+        end
         showItems:SetShown(not aura)
         showRanks:SetShown(not aura)
         showItems:SetChecked(ns.Get("listItems"))

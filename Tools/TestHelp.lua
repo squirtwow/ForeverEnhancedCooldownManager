@@ -792,8 +792,8 @@ end
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
 local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
-    "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
-    "MinimapButton.lua", "Notes.lua", "Debug.lua" }
+    "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
+    "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
 -- A fresh game, logged in with these saved settings (nil: a first install).
 local function Start(saved)
     Environment()

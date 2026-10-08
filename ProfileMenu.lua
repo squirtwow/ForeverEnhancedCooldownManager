@@ -1,8 +1,9 @@
 -- The profile menu in the /ccm window's header: the profile this character
 -- uses, and a panel under it listing every profile (click one to switch, or
 -- its x to delete it after asking) with a box to type a name for New, Copy
--- or Rename. Profiles hold the spell lists only (the bars', and the Cooldown
--- pulse's ticks); the rules live in Core.lua.
+-- or Rename, and Share and Import at its top (ProfileShare.lua). Profiles
+-- hold the spell lists only (the bars', and the Cooldown pulse's ticks); the
+-- rules live in Core.lua.
 local _, ns = ...
 local T = ns.Theme
 
@@ -134,7 +135,7 @@ function ns.BuildProfileMenu(window, header, anchor)
     hint:SetPoint("TOPLEFT", 10, -136)
     hint:SetWidth(WIDTH - 20)
     hint:SetText("Click a profile to use it, or x to delete it. Type a name to make, copy or rename one. "
-        .. "Any class can share a profile: each character only shows its own spells.")
+        .. "Any class can use a profile: each character only shows its own spells.")
 
     -- The profile you're on, for every character and any made later.
     local everyone = T:Button(panel, "Use on all characters", WIDTH - 20, 22)
@@ -196,6 +197,30 @@ function ns.BuildProfileMenu(window, header, anchor)
         window:Refresh()
     end)
     window:HookScript("OnHide", function() panel:Hide() end)
+
+    -- Share and Import, at the top right, level with the heading: the
+    -- profile you're on as text, or one pasted in as a new profile
+    -- (ProfileShare.lua: a new file, so only after a full restart).
+    local share = ns.ProfileShare
+    if share then
+        local box = share.BuildBox(window)
+        local import = T:Button(panel, "Import", 56, 18)
+        import:SetPoint("TOPRIGHT", -10, -6)
+        import:SetScript("OnClick", function() box:Open("import") end)
+        window:Hint(import, "Paste a shared profile to make it a new profile. Yours stays as it is. (Needs testing)")
+        local send = T:Button(panel, "Share", 56, 18)
+        send:SetPoint("RIGHT", import, "LEFT", -4, 0)
+        send:SetScript("OnClick", function()
+            local text, why = share.Export()
+            if not text then
+                window:Say(why)
+                return window:Refresh()
+            end
+            box:Open("export", text)
+        end)
+        window:Hint(send, "Your profile, with your bars' look and layout, as text to copy and share. (Needs testing)")
+        window.profileShare, window.profileImport = send, import
+    end
 
     function window:RefreshProfiles()
         local current = ns.ProfileName()
