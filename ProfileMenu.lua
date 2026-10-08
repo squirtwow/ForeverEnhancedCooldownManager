@@ -207,7 +207,7 @@ function ns.BuildProfileMenu(window, header, anchor)
         local import = T:Button(panel, "Import", 56, 18)
         import:SetPoint("TOPRIGHT", -10, -6)
         import:SetScript("OnClick", function() box:Open("import") end)
-        window:Hint(import, "Paste a shared profile to make it a new profile. Yours stays as it is. (Needs testing)")
+        window:Hint(import, "Paste a shared profile to make it a new profile. Yours stays as it is.")
         local send = T:Button(panel, "Share", 56, 18)
         send:SetPoint("RIGHT", import, "LEFT", -4, 0)
         send:SetScript("OnClick", function()
@@ -218,7 +218,7 @@ function ns.BuildProfileMenu(window, header, anchor)
             end
             box:Open("export", text)
         end)
-        window:Hint(send, "Your profile, with your bars' look and layout, as text to copy and share. (Needs testing)")
+        window:Hint(send, "Your profile, with your bars' look and layout, as text to copy and share.")
         window.profileShare, window.profileImport = send, import
     end
 

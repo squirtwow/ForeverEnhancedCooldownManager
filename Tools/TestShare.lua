@@ -1163,8 +1163,9 @@ do
     local read, shared, why, readTried = H.Trap(P.Read, text)
     Equal(tostring(read) .. " " .. tostring(why) .. " " .. #readTried .. " " .. H.Sane(ns, shared) .. "|", "true nil 0 |",
         "read back: no error, nothing run, every value sane")
-    Equal(shared.name .. " | " .. shared.version .. " | " .. shared.skipped, "Zriel (Druid) - Zephras | dev | 0",
-        "with its name and the version that made it, nothing left out")
+    Equal(tostring(shared.name) .. " | " .. shared.version .. " | " .. shared.skipped, "nil | dev | 0",
+        "no name (by default it's your character's, and strings get posted in public), the version that made it, nothing left out")
+    Equal(tostring(text:find("Zriel", 1, true)), "nil", "the character's name is nowhere in it")
     Equal(H.Text({ lists = shared.lists, buff = shared.joins.buff, debuff = shared.joins.debuff or {}, pick = shared.pick,
         style = shared.style }), profile, "every list, join, pulse tick and Long style comes back the same")
     Equal(H.Text(shared.added), H.Text({ ["Power Word: Fortitude"] = { 1243 } }), "and the spell added by ID, with its ID")
@@ -1196,13 +1197,14 @@ do
     local ownBefore = H.Text(db.profiles[own])
     local shared2 = ns2.ProfileShare.Read(text)
     local redrawn = H.Spy(ns2)
-    local ran, done, message, importTried, name = H.Trap(ns2.ProfileShare.Import, shared2.name, shared2, true)
+    -- The box's name when none is typed (the string has none).
+    local ran, done, message, importTried, name = H.Trap(ns2.ProfileShare.Import, ns2.ProfileShare.IMPORTED, shared2, true)
     Equal(redrawn(), "cast bar, display, font, icon decor, icon glow, icon keys, raid timers, restyled bars",
         "everything that shows the look is drawn again, as the pages do on a change")
     Equal(tostring(ran and done) .. " " .. #importTried .. " | " .. tostring(name) .. " | " .. tostring(message),
-        "true 0 | Zriel (Druid) - Zephras | Imported Zriel (Druid) - Zephras with its look and layout, and switched to it.",
-        "imported with its look and layout, running nothing, under its own name (free here)")
-    Equal(ns2.ProfileName() .. " | " .. tostring(db.chars["Player-1-0077"]), "Zriel (Druid) - Zephras | Zriel (Druid) - Zephras",
+        "true 0 | Shared profile | Imported Shared profile with its look and layout, and switched to it.",
+        "imported with its look and layout, running nothing, as \"Shared profile\" when no name is typed")
+    Equal(ns2.ProfileName() .. " | " .. tostring(db.chars["Player-1-0077"]), "Shared profile | Shared profile",
         "and this character switched to it")
     Equal(H.ProfileNow(ns2), profile, "every list, join, pulse tick and Long style the same")
     Equal(H.SetupNow(ns2), setup, "the look, every bar's settings and spot, the layout and the colours the same")
@@ -1611,8 +1613,8 @@ do
     Equal(S[w.profileInput].points[1][3] .. " " .. S[w.profileList].points[2][5], "-54 -50",
         "the list and the name box where they were")
     Equal(tostring(rawget(w.profileShare, "hint")) .. " | " .. tostring(rawget(w.profileImport, "hint")),
-        "Your profile, with your bars' look and layout, as text to copy and share. (Needs testing) | "
-        .. "Paste a shared profile to make it a new profile. Yours stays as it is. (Needs testing)", "each says what it does")
+        "Your profile, with your bars' look and layout, as text to copy and share. | "
+        .. "Paste a shared profile to make it a new profile. Yours stays as it is.", "each says what it does")
 
     -- Share: the string, selected, to copy; it can't be typed over.
     w.profileShare:Click()
@@ -1727,8 +1729,8 @@ do
     Paste(mine)
     box.make:Click()
     Equal(tostring(S[confirm.shade].shown) .. " " .. ns.ProfileName() .. " " .. ns.Get("barStyle") .. " | " .. S[w.note].text,
-        "false Zriel (Druid) - Zephras 2 glass | Imported Zriel (Druid) - Zephras 2, and switched to it.",
-        "unticked: made at once, under a free name, the look left as it is")
+        "false Shared profile glass | Imported Shared profile, and switched to it.",
+        "unticked: made at once, as \"Shared profile\" (your own string carries no name), the look left as it is")
     -- Refused in a fight: the box stays and says why.
     w.profileButton:Click()
     w.profileImport:Click()

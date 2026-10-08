@@ -26,7 +26,7 @@ local MAX_PICKS = 400 -- Cooldown pulse ticks, and the cooldowns switched to Lon
 local MAX_IDS = 10 -- spell IDs an added spell keeps
 local MAX_COLOURS = 200 -- Tracked Bars coloured one by one
 local MAX_ID = 2147483647 -- the biggest spell or item ID
-P.IMPORTED = "Imported" -- a new profile's name when the string has none and none is typed
+P.IMPORTED = "Shared profile" -- a new profile's name when none is typed (strings carry no name)
 
 P.NOT_OURS = "That string isn't a FECM profile."
 P.DAMAGED = "That profile is cut short or damaged. Copy all of it again."
@@ -532,11 +532,12 @@ local function SetupNow()
 end
 
 -- The profile you're on, with the look and layout, as a share string; or
--- nil and why not.
+-- nil and why not. It leaves out the profile's name: by default that is your
+-- character's name, and strings get posted in public (the user's call,
+-- 2026-10-08). The importer names it, or gets "Imported".
 function P.Export()
-    local name = ns.ProfileName()
-    if not name then return nil, "Your profile hasn't loaded yet." end
-    local data = { n = name, a = ns.Version(), l = {}, g = SetupNow() }
+    if not ns.ProfileName() then return nil, "Your profile hasn't loaded yet." end
+    local data = { a = ns.Version(), l = {}, g = SetupNow() }
     local custom, added, joins = ns.CustomSpells(), {}, {}
     for _, key in ipairs(ns.BAR_KEYS) do
         data.l[key] = Entries(ns.ActiveList(key))

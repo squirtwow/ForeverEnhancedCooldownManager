@@ -57,7 +57,7 @@ EraUI.
   other players count at any rank. It can also show your debuffs on you, like
   Weakened Soul (off by default)
 - Debuffs bar: your own debuffs on your target, with a search that lists your
-  class's debuffs
+  class's debuffs. It can show your debuffs on you too (off by default)
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag
   items in from your bags, and any ammo becomes one icon for whatever you have
   equipped
@@ -114,6 +114,8 @@ EraUI.
 - Spell lists and Cooldown pulse ticks live in profiles. Characters can share
   one, even across classes: each only shows its own class's spells and racials.
   Use on all characters puts one profile on every character
+- Share a profile as text from the Profile menu, or Import one someone shared:
+  it becomes a new profile, so yours stays as it is
 - An accent colour for the window, and What's new after each update, with a
   short tour of just the new features
 - Hover anything in the settings and the footer tells you what it does

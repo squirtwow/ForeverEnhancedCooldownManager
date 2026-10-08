@@ -17,11 +17,10 @@ local function Full(key)
     return ns.BAR_NAMES[key] .. " is full."
 end
 
--- The "Show your debuffs on you" tick on each aura bar's page. The Debuffs
--- one is new, so its label says Needs testing until it's seen in game, in
--- fewer words to fit the page.
-local SELF_TICK = { buff = "Show your debuffs on you", debuff = "Your debuffs on you" }
-local SELF_LABEL = { buff = SELF_TICK.buff, debuff = SELF_TICK.debuff .. " (Needs testing)" }
+-- The "Show your debuffs on you" tick on each aura bar's page (the Debuffs
+-- one seen working in game 2026-10-08, so no Needs testing label).
+local SELF_TICK = { buff = "Show your debuffs on you", debuff = "Show your debuffs on you" }
+local SELF_LABEL = { buff = SELF_TICK.buff, debuff = SELF_TICK.debuff }
 
 function ns.BuildBarPage(window, page, width)
     local B = ns.Bars

@@ -1516,13 +1516,13 @@ do
     local longestIcon = 0
     for _, note in ipairs(icons) do longestIcon = math.max(longestIcon, #note) end
     Equal(table.concat(icons, " | ") .. " " .. tostring(longestIcon <= 94), "Recently Bandaged can't show here. Tick \"Show your debuffs"
-        .. " on you\" and drag it off the bar. | Recently Bandaged can't show here. Tick \"Your debuffs on you\" and drag it off the"
+        .. " on you\" and drag it off the bar. | Recently Bandaged can't show here. Tick \"Show your debuffs on you\" and drag it off the"
         .. " bar. | Recently Bandaged can't show here. Drag it off, and tick \"Show your debuffs on you\" on Buffs. true",
         "one left on a bar: its note names this page's tick, or the Buffs one, on one line")
     w:Select("buff")
     local buffLabel, buffNote = S[tick.text].text, Note()
     w:Select("debuff")
-    Equal(buffLabel .. " | " .. S[tick.text].text, "Show your debuffs on you | Your debuffs on you (Needs testing)",
+    Equal(buffLabel .. " | " .. S[tick.text].text, "Show your debuffs on you | Show your debuffs on you",
         "the Debuffs one says Needs testing, in fewer words")
     S[tick].width = 0
     w:Select("buff")

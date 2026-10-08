@@ -10,6 +10,18 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.5.4",
+        sections = {
+            { "Added", {
+                "The Debuffs bar can show your debuffs on you, like Weakened Soul.",
+                "Share your profile as text, or import one someone shared, from the Profile menu.",
+            } },
+            { "Fixed", {
+                "A bar you're dragging stays on your mouse when your bags or spells change.",
+            } },
+        },
+    },
+    {
         version = "1.5.3",
         sections = {
             { "Fixed", {
