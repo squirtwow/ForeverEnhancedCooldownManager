@@ -119,6 +119,7 @@ ns.DEFAULTS = {
     minimapFree = false, -- free-floating: anywhere on the screen, not on the minimap's edge
     minimapX = 0, -- where it sits while free-floating: from the middle of the screen
     minimapY = 0,
+    talentSwitch = false, -- another talent tree taking the lead in points switches to its role's profile (profile menu)
 }
 ns.DECOR_KEYS = { "off", "icon", "bar" }
 ns.DECOR_NAMES = { off = "Off", icon = "Each icon", bar = "Whole bar" }
@@ -293,6 +294,13 @@ end
 -- uses one profile, at first its own "Name (Class) - Realm". Several
 -- characters can share one, and profiles never change in combat.
 ns.PROFILE_MAX = 48 -- longest profile name
+-- Roles: a profile for each role you play, for your class (Roles, below).
+ns.ROLE_KEYS = { "tank", "healer", "damage" }
+ns.ROLE_NAMES = { tank = "Tank", healer = "Healer", damage = "Damage" }
+-- A talent tree's role (Talents, below): one of those, or None, so nothing
+-- switches when it takes the lead. None is no role of its own: no profile.
+ns.TREE_ROLE_KEYS = { "tank", "healer", "damage", "none" }
+ns.TREE_ROLE_NAMES = { tank = "Tank", healer = "Healer", damage = "Damage", none = "None" }
 
 local active -- this character's profile, once the character is known
 local scratch = {} -- lists used before then; never saved
@@ -356,6 +364,52 @@ local function Everyone()
     if type(name) == "string" and Profiles()[name] then return name end
 end
 
+-- A table of tables saved by a text key (a class, a character's GUID): the
+-- rest let go, then each inner table's entries kept only as keep(key, value)
+-- says. Nil if there's nothing.
+local function Keyed(saved, keep)
+    if type(saved) ~= "table" then return nil end
+    for outer, inner in pairs(saved) do
+        if type(outer) ~= "string" or type(inner) ~= "table" then
+            saved[outer] = nil
+        else
+            for key, value in pairs(inner) do
+                if not keep(key, value) then inner[key] = nil end
+            end
+        end
+    end
+    return saved
+end
+
+-- Role links (class -> role -> profile name; each to a profile that's
+-- there, each profile for one role), each class's talent trees set to a role
+-- or None (class -> the tree's group ID -> role), and the main tree each character
+-- was last seen with (GUID -> the tree's ID; none until one leads), kept
+-- only while Switch with my talents is on.
+local function RepairRoles(profiles)
+    db.roles = Keyed(db.roles, function(role, name)
+        return ns.ROLE_NAMES[role] ~= nil and type(name) == "string" and profiles[name] ~= nil
+    end)
+    for _, links in pairs(db.roles or {}) do
+        local taken = {}
+        for _, role in ipairs(ns.ROLE_KEYS) do
+            if links[role] and taken[links[role]] then links[role] = nil end
+            if links[role] then taken[links[role]] = true end
+        end
+    end
+    db.treeRoles = Keyed(db.treeRoles, function(id, role)
+        return Finite(id) and id > 0 and ns.TREE_ROLE_NAMES[role] ~= nil
+    end)
+    local mains = db.mainTrees
+    if db.talentSwitch ~= true or type(mains) ~= "table" then
+        db.mainTrees = nil
+    else
+        for guid, id in pairs(mains) do
+            if type(guid) ~= "string" or not (Finite(id) and id > 0) then mains[guid] = nil end
+        end
+    end
+end
+
 local function RepairProfiles()
     local profiles = Profiles()
     for name, profile in pairs(profiles) do
@@ -366,6 +420,7 @@ local function RepairProfiles()
         if type(guid) ~= "string" or type(name) ~= "string" then chars[guid] = nil end
     end
     db.everyone = Everyone()
+    RepairRoles(profiles)
 end
 
 -- The list a bar shows: this character's profile, or a stand-in until the
@@ -522,11 +577,25 @@ local function CleanName(text)
     return name
 end
 
+-- Every switch clears what the talents last said (Talents, below), so the
+-- menu never shows a note about a profile you've since left; a switch the
+-- talents make says it again after.
 local function Switch(name)
     Chars()[PlayerGUID()] = name
     active = name
+    ns.talentNote = nil
     if ns.Bars and ns.Bars.started then ns.Bars:Changed() end
     if ns.Pulse and ns.Pulse.started then ns.Pulse:Apply() end
+end
+
+-- Role links follow a profile renamed (to its new name) and let go of one
+-- deleted (to nil), for every class.
+local function Relink(from, to)
+    for _, links in pairs(type(db.roles) == "table" and db.roles or {}) do
+        for role, name in pairs(links) do
+            if name == from then links[role] = to end
+        end
+    end
 end
 
 function ns.UseProfile(name)
@@ -538,31 +607,33 @@ function ns.UseProfile(name)
     return true, "Now using " .. name .. "."
 end
 
+-- A copy of a profile's lists: its bars', their joins and the Cooldown
+-- pulse's ticks, sharing nothing with it.
+local function Duplicate(from)
+    local profile = { joins = {} }
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local list = {}
+        for i, spell in ipairs(type(from[key]) == "table" and from[key] or {}) do list[i] = spell end
+        profile[key] = list
+    end
+    for key, joins in pairs(type(from.joins) == "table" and from.joins or {}) do
+        profile.joins[key] = {}
+        for name in pairs(joins) do profile.joins[key][name] = true end
+    end
+    for field in pairs(PULSE_LISTS) do
+        profile[field] = {}
+        for key, value in pairs(type(from[field]) == "table" and from[field] or {}) do profile[field][key] = value end
+    end
+    return profile
+end
+
 local function Create(text, copy)
     local why = Blocked()
     if why then return false, why end
     local name, problem = CleanName(text)
     if not name then return false, problem end
     if Profiles()[name] then return false, name .. " already exists." end
-    local from, profile = Profiles()[active], { joins = {} }
-    for _, key in ipairs(ns.BAR_KEYS) do
-        local list = {}
-        if copy then
-            for i, spell in ipairs(from[key]) do list[i] = spell end
-        end
-        profile[key] = list
-    end
-    if copy then
-        for key, joins in pairs(from.joins or {}) do
-            profile.joins[key] = {}
-            for name in pairs(joins) do profile.joins[key][name] = true end
-        end
-    end
-    for field in pairs(PULSE_LISTS) do
-        profile[field] = {}
-        for key, value in pairs(copy and from[field] or {}) do profile[field][key] = value end
-    end
-    Profiles()[name] = profile
+    Profiles()[name] = copy and Duplicate(Profiles()[active]) or Lists({})
     Switch(name)
     return true, (copy and "Copied your lists to " or "Made ") .. name .. ", and switched to it."
 end
@@ -610,7 +681,9 @@ local function Rename(name)
         if used == active then chars[guid] = name end
     end
     if db.everyone == active then db.everyone = name end
+    Relink(active, name)
     active = name
+    ns.talentNote = nil -- it may name the old name
 end
 
 function ns.RenameProfile(text)
@@ -668,6 +741,7 @@ function ns.DeleteProfile(text)
         if used == name then chars[guid] = nil end
     end
     if db.everyone == name then db.everyone = nil end
+    Relink(name, nil)
     if name == active then
         local fresh = FreeName(OwnName(true))
         profiles[fresh] = Lists({})
@@ -775,6 +849,314 @@ function ns.ImportProfile(text, shared, withLook)
     if withLook and type(shared.setup) == "table" then UseSetup(shared.setup) end
     Switch(name)
     return true, "Imported " .. name .. (withLook and " with its look and layout" or "") .. ", and switched to it.", name
+end
+
+-- Roles ---------------------------------------------------------------------------
+-- Tank, Healer and Damage in the profile menu: a profile for each role you
+-- play, linked for your class (db.roles: class -> role -> profile name), so
+-- every character of that class finds the same three. Clicking a role
+-- switches to its profile; the first time, your lists are saved as it,
+-- named for your class and the role ("Druid Healer"). Right-click saves your
+-- lists over it. A link follows its profile renamed and goes with it
+-- deleted. Links are your own: a shared profile never carries one.
+
+local function Plain(value)
+    return not (issecretvalue and issecretvalue(value))
+end
+
+-- Your class: its file name ("DRUID", for links and talent trees) and its
+-- name as the game shows it ("Druid", in a role profile's name); nil while
+-- the game doesn't say.
+local function Class()
+    if not UnitClass then return nil end
+    local name, file = UnitClass("player")
+    if not (Plain(name) and Plain(file)) or type(name) ~= "string" or type(file) ~= "string" or name == "" or file == "" then
+        return nil
+    end
+    return file, name
+end
+
+local function RoleLinks(class)
+    if type(db.roles) ~= "table" then db.roles = {} end
+    if type(db.roles[class]) ~= "table" then db.roles[class] = {} end
+    return db.roles[class]
+end
+
+-- A role's profile for your class, while it's there.
+function ns.RoleProfile(role)
+    local class = db and Class()
+    local links = class and type(db.roles) == "table" and db.roles[class]
+    local name = type(links) == "table" and links[role]
+    if type(name) == "string" and Profiles()[name] then return name end
+    return nil
+end
+
+-- The name a role's first profile gets: your class and the role ("Druid
+-- Healer"), with a number after it if that's taken.
+function ns.RoleName(role)
+    local _, className = Class()
+    if not (db and className and ns.ROLE_NAMES[role]) then return nil end
+    return FreeName(Cut(className .. " " .. ns.ROLE_NAMES[role], ns.PROFILE_MAX))
+end
+
+-- Why a role can't be used or saved now, or nil.
+local function RoleBlocked(role)
+    local why = Blocked()
+    if why then return why end
+    if not ns.ROLE_NAMES[role] then return "There's no such role." end
+    if not Class() then return "Your class isn't known yet." end
+end
+ns.RoleBlocked = RoleBlocked
+
+-- Your lists as a role's first profile, linked for your class: its name.
+local function MakeRole(role)
+    local name = ns.RoleName(role)
+    Profiles()[name] = Duplicate(Profiles()[active])
+    RoleLinks((Class()))[role] = name
+    return name
+end
+
+-- Switches to a role's profile, making it from your lists the first time.
+-- Never in combat.
+function ns.UseRole(role)
+    local why = RoleBlocked(role)
+    if why then return false, why end
+    ns.talentNote = nil
+    local word, name = ns.ROLE_NAMES[role], ns.RoleProfile(role)
+    if name == active then return true, ("You're already on %s, your %s profile."):format(name, word) end
+    if name then
+        Switch(name)
+        return true, ("Now using %s, your %s profile."):format(name, word)
+    end
+    name = MakeRole(role)
+    Switch(name)
+    return true, ("Saved your lists as %s, your %s profile, and switched to it."):format(name, word)
+end
+
+-- Your lists saved over a role's profile (the menu asks first), or as its
+-- first one; you stay on the profile you're on. Never in combat.
+function ns.SaveRole(role)
+    local why = RoleBlocked(role)
+    if why then return false, why end
+    ns.talentNote = nil
+    local word, name = ns.ROLE_NAMES[role], ns.RoleProfile(role)
+    if name == active then return true, ("You're on %s: it saves as you go."):format(name) end
+    if not name then return true, ("Saved your lists as %s, your %s profile."):format(MakeRole(role), word) end
+    Profiles()[name] = Duplicate(Profiles()[active])
+    ns.PruneCustom()
+    return true, ("Saved your lists over %s, your %s profile."):format(name, word)
+end
+
+-- Talents ---------------------------------------------------------------------------
+-- Switch with my talents (off unless ticked): each of your class's talent
+-- trees is set to a role, and when another tree takes the lead in points (a
+-- respec, or points spent levelling), the addon switches to that role's
+-- profile, after the fight if you're in one. Only a change of main tree
+-- switches, so a role picked by hand stays until the next one. A tree set
+-- to None never switches (you pick a role yourself), but still counts as
+-- your main tree. A character with no points spent yet has no main tree:
+-- its first point only notes one. Forever's talents are trait trees: your
+-- class has one, its talent trees are that tree's groups, and a group's
+-- points are what's spent in it, read as the game's own talent frame reads
+-- them (C_Traits; seen in game 2026-10-08: "Assassination = 10, Combat = 3",
+-- with no answer at all for a tree with none spent).
+
+-- A tree's role unless you set one: by the name the game gives it. A
+-- druid's Feral Combat is tank and cat alike, so it's None.
+local TREE_ROLES = {
+    WARRIOR = { Protection = "tank" },
+    PALADIN = { Holy = "healer", Protection = "tank" },
+    PRIEST = { Discipline = "healer", Holy = "healer" },
+    SHAMAN = { Restoration = "healer" },
+    DRUID = { Restoration = "healer", ["Feral Combat"] = "none" },
+}
+local TALENT_EVENTS = { "PLAYER_ENTERING_WORLD", "PLAYER_TALENT_UPDATE", "TRAIT_CONFIG_UPDATED", "TRAIT_CONFIG_LIST_UPDATED",
+    "ACTIVE_TALENT_GROUP_CHANGED" }
+local talentWatch -- the frame hearing talent changes, made the first time the tick is on
+local talentWaiting -- a check held until the fight ends
+
+-- A plain number from a call, or nil.
+local function Number(ok, value)
+    if ok and Plain(value) and Finite(value) then return value end
+end
+
+-- Your active talents' config: the one your spec group fights with.
+local function TalentConfig()
+    local talents, spec = C_ClassTalents, C_SpecializationInfo
+    if type(talents) == "table" and type(talents.GetActiveConfigID) == "function" then
+        local config = Number(pcall(talents.GetActiveConfigID))
+        if config then return config end
+    end
+    if type(spec) == "table" and type(spec.GetActiveSpecGroup) == "function" and type(spec.GetCombatConfigIDForSpecGroup) == "function" then
+        local group = Number(pcall(spec.GetActiveSpecGroup))
+        return group and Number(pcall(spec.GetCombatConfigIDForSpecGroup, group))
+    end
+end
+
+-- Your talent trees in the game's order: { id, name, points } each; nil
+-- while they can't be read.
+function ns.TalentTrees()
+    local traits = C_Traits
+    local config = type(traits) == "table" and TalentConfig()
+    if not config then return nil end
+    local ok, info = pcall(traits.GetConfigInfo, config)
+    local treeIDs = ok and Plain(info) and type(info) == "table" and info.treeIDs
+    local tree = Plain(treeIDs) and type(treeIDs) == "table" and Number(true, treeIDs[1])
+    if not tree then return nil end
+    local got, groups = pcall(traits.GetGroupDisplayInfoByTreeID, tree)
+    if not (got and Plain(groups) and type(groups) == "table") then return nil end
+    local trees, ids, byID = {}, {}, {}
+    for _, group in ipairs(groups) do
+        local id = Plain(group) and type(group) == "table" and Number(true, group.groupID)
+        local name = id and group.displayName
+        if id and Plain(name) and type(name) == "string" and name ~= "" and not byID[id] then
+            byID[id] = { id = id, name = name, points = 0 }
+            trees[#trees + 1], ids[#ids + 1] = byID[id], id
+        end
+    end
+    if #trees == 0 then return nil end
+    -- A tree with nothing spent may not be answered for: none in it.
+    local spent, infos = pcall(traits.GetGroupCurrencyInfo, config, ids)
+    for _, entry in ipairs(spent and Plain(infos) and type(infos) == "table" and infos or {}) do
+        local id = Plain(entry) and type(entry) == "table" and Number(true, entry.traitNodeGroupID)
+        local currencies = id and byID[id] and entry.currencyInfos
+        local first = Plain(currencies) and type(currencies) == "table" and currencies[1]
+        local points = Plain(first) and type(first) == "table" and Number(true, first.spent)
+        if points and points > 0 then byID[id].points = points end
+    end
+    return trees
+end
+
+-- The tree with the most points; nil with none spent, or two level at the top.
+local function MainTree(trees)
+    local main, level
+    for _, tree in ipairs(trees) do
+        if tree.points > 0 and (not main or tree.points > main.points) then
+            main, level = tree, false
+        elseif main and tree.points == main.points then
+            level = true
+        end
+    end
+    if not level then return main end
+end
+
+-- What the talents last did, for the menu and the footer: switched you, or
+-- found the role had no profile. Said once, never in chat: in the footer at
+-- once with the window open, else the next time it opens (Say only keeps
+-- it for the next refresh, and opening refreshes; a window not made yet
+-- says ns.talentNote when it's made, Window.lua).
+local function TalentNote(text)
+    ns.talentNote = text
+    local window = ns.window
+    if not window then return end
+    window:Say(text)
+    if window:IsShown() then window:Refresh() end
+end
+
+-- The talents' older note no longer holds (a new main tree with nothing to
+-- switch, or a new role for the main tree), so it goes from the menu, and
+-- from the footer if it was waiting there for the window to open. Quiet:
+-- the caller refreshes the window itself.
+local function DropTalentNote(quiet)
+    local old, window = ns.talentNote, ns.window
+    ns.talentNote = nil
+    if not (old and window) then return end
+    if window.message == old then window:Say(nil) end
+    if not quiet and window:IsShown() then window:Refresh() end
+end
+
+-- A tree's role (or "none"): the one you set for it, or the one its name
+-- suggests (Damage for any not listed).
+function ns.TreeRole(tree)
+    local class = db and Class()
+    local saved = class and type(db.treeRoles) == "table" and type(db.treeRoles[class]) == "table" and db.treeRoles[class][tree.id]
+    if ns.TREE_ROLE_NAMES[saved] then return saved end
+    return class and TREE_ROLES[class] and TREE_ROLES[class][tree.name] or "damage"
+end
+
+-- A tree set to a role (or None) for your class, by its ID (name, the
+-- tree's own, gives its default role). A new role for your main tree drops
+-- the talents' note about it (the menu refreshes after), but switches
+-- nothing: only a change of main tree does.
+function ns.SetTreeRole(id, role, name)
+    local class = db and Class()
+    if not (class and Finite(id) and id > 0 and ns.TREE_ROLE_NAMES[role]) then return end
+    local before = ns.TreeRole({ id = id, name = name })
+    if type(db.treeRoles) ~= "table" then db.treeRoles = {} end
+    if type(db.treeRoles[class]) ~= "table" then db.treeRoles[class] = {} end
+    db.treeRoles[class][id] = role
+    local guid = PlayerGUID()
+    if role ~= before and guid and type(db.mainTrees) == "table" and db.mainTrees[guid] == id then DropTalentNote(true) end
+end
+
+-- Looks at your talents: the main tree changed since it was last seen,
+-- its role's profile is switched to (if it has one, and the tree isn't set
+-- to None). In a fight it waits for the fight to end. The first look on a
+-- character (or after the tick goes on) only notes the main tree; with no
+-- points spent (a new character, or talents not sent yet) there's none to
+-- note, so the first tree to lead is only noted too.
+function ns.CheckTalents()
+    if not (db and active and ns.Get("talentSwitch")) then return end
+    local guid = PlayerGUID()
+    if not guid then return end
+    if InCombatLockdown() then
+        talentWaiting = true
+        if talentWatch then talentWatch:RegisterEvent("PLAYER_REGEN_ENABLED") end
+        return
+    end
+    local trees = ns.TalentTrees()
+    if not trees then return end
+    local main = MainTree(trees)
+    if type(db.mainTrees) ~= "table" then db.mainTrees = {} end
+    local last = db.mainTrees[guid]
+    if last == nil then
+        if main then db.mainTrees[guid] = main.id end
+        return
+    end
+    if not main or main.id == last then return end
+    db.mainTrees[guid] = main.id
+    local role = ns.TreeRole(main)
+    if role == "none" then return DropTalentNote() end -- you pick a role yourself
+    local word, name = ns.ROLE_NAMES[role], ns.RoleProfile(role)
+    if not name then
+        return TalentNote(("Your main talent tree is now %s, but %s has no profile yet: click %s to make one.")
+            :format(main.name, word, word))
+    end
+    if name == active then return DropTalentNote() end -- already there
+    Switch(name)
+    TalentNote(("Your main talent tree is now %s: switched to %s, your %s profile."):format(main.name, name, word))
+end
+
+-- Hears talent changes while the tick is on (and nothing while it's off).
+local function ListenTalents()
+    local on = ns.Get("talentSwitch")
+    if not talentWatch then
+        if not on then return end
+        talentWatch = CreateFrame("Frame")
+        talentWatch:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_REGEN_ENABLED" then
+                self:UnregisterEvent(event)
+                if not talentWaiting then return end
+                talentWaiting = nil
+            end
+            ns.CheckTalents()
+        end)
+    end
+    for _, event in ipairs(TALENT_EVENTS) do
+        if on then talentWatch:RegisterEvent(event) else talentWatch:UnregisterEvent(event) end
+    end
+end
+
+-- Switch with my talents on or off: either way each character notes its
+-- main tree afresh, so only a change of main tree from now on switches.
+function ns.SetTalentSwitch(on)
+    if not db then return end
+    on = on == true
+    ns.talentNote, db.mainTrees = nil, nil
+    ns.Set("talentSwitch", on)
+    ListenTalents()
+    ns.CheckTalents()
+    return on and "Your profile now follows your main talent tree." or "Your profile no longer follows your talents."
 end
 
 -- Bars ---------------------------------------------------------------------------
@@ -1162,6 +1544,7 @@ local function Load()
     ns.CustomSpells()
     ns.BarColours()
     ns.ResolveProfile()
+    ListenTalents()
     for key in pairs(ns.RELOAD) do ns.loaded[key] = ns.Get(key) end
 
     SLASH_FECM1 = "/ccm"

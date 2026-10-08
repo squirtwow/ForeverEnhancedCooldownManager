@@ -203,6 +203,7 @@ local STEPS = {
         text = function()
             -- Share and Import: a new file, so only after a full restart.
             return "Each character has its own spell lists. Use one on several characters, even across classes, or on all of them."
+                .. " Tank, Healer and Damage keep a profile for each role, and Switch with my talents can pick one for you."
                 .. (ns.ProfileShare and " Share and Import trade profiles with other players as text." or "")
         end,
         -- Once the menu is open the box moves beside it, so it never covers it.

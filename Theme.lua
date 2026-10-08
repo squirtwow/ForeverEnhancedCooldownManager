@@ -130,8 +130,12 @@ function T:ShowTip(owner, title, text, placement)
         self.tip = tip
     end
     tip.title:SetText(title:upper())
+    -- Wide enough for the title as well as the text: the addon's own name in
+    -- capitals is wider than the text column.
+    local width = math.max(TIP_WIDTH, math.ceil(tip.title:GetStringWidth() or 0))
+    tip.text:SetWidth(width)
     tip.text:SetText(text)
-    tip:SetSize(TIP_WIDTH + 24, 38 + (tip.text:GetStringHeight() or 12))
+    tip:SetSize(width + 24, 38 + (tip.text:GetStringHeight() or 12))
     tip.owner = owner
     tip:ClearAllPoints()
     if placement == "below" then
@@ -280,17 +284,20 @@ function T:Square(parent, label, accented)
     return button
 end
 
--- Joined buttons; the chosen one fills with the accent.
+-- Joined buttons; the chosen one fills with the accent. Each is an equal
+-- share of the width, unless the items give their own (item.width): all
+-- or none, since a share takes no account of the widths given.
 function T:Segmented(parent, items, width, onSelect)
     local bar = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     bar:SetSize(width, 20)
     self:Flat(bar, T.FIELD, T.CONTROL_BORDER)
     bar.buttons = {}
-    local each = (width - 2) / #items
+    local each, x = (width - 2) / #items, 1
     for i, item in ipairs(items) do
         local button = CreateFrame("Button", nil, bar)
-        button:SetSize(each, 18)
-        button:SetPoint("LEFT", 1 + (i - 1) * each, 0)
+        button:SetSize(item.width or each, 18)
+        button:SetPoint("LEFT", x, 0)
+        x = x + (item.width or each)
         button.fill = button:CreateTexture(nil, "BACKGROUND")
         button.fill:SetAllPoints()
         button.label = self:Text(button, "GameFontHighlightSmall")

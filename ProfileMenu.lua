@@ -1,15 +1,28 @@
 -- The profile menu in the /ccm window's header: the profile this character
 -- uses, and a panel under it listing every profile (click one to switch, or
 -- its x to delete it after asking) with a box to type a name for New, Copy
--- or Rename, and Share and Import at its top (ProfileShare.lua). Profiles
--- hold the spell lists only (the bars', and the Cooldown pulse's ticks); the
--- rules live in Core.lua.
+-- or Rename, and Share and Import at its top (ProfileShare.lua). At its foot,
+-- Roles: Tank, Healer and Damage, a profile for each, and Switch with my
+-- talents with each talent tree's role (or None) under it. Profiles hold the spell
+-- lists only (the bars', and the Cooldown pulse's ticks); the rules live in
+-- Core.lua.
 local _, ns = ...
 local T = ns.Theme
 
 local WIDTH, ROW = 300, 22
 local LIST_ROWS = 8 -- profiles listed at once; more scroll
+-- The menu's tallest: it hangs 38 down the 560-tall window and stays clear
+-- of the footer's line (539 down), so a hover note there is never under it
+-- (Tools/TestHelp.lua measures it).
+local MENU_MAX = 496
 local LIST_WIDTH = WIDTH - 28 -- the list, clear of its scroll thumb
+-- A talent tree's Tank, Healer, Damage and None, at the right: each as wide
+-- as its word needs (together the choice less its 2 edges), so the tree's
+-- name and points keep their room.
+local TREE_CHOICE = 156
+local TREE_WIDTHS = { tank = 32, healer = 45, damage = 45, none = 32 }
+local TICK_ROW = 24 -- the Switch with my talents tick's own row, under the role buttons
+local UNTESTED = " (Needs testing)" -- the roles and talents, until they're seen in game
 
 local function Users(name)
     if ns.OnAll(name) then return "all characters" end
@@ -222,6 +235,168 @@ function ns.BuildProfileMenu(window, header, anchor)
         window.profileShare, window.profileImport = send, import
     end
 
+    -- Roles: a profile for each role you play, for your class (Core.lua).
+    -- Click one to switch to it; the first time it saves your lists as it
+    -- ("Druid Healer"). Right-click saves your lists over it, asking first,
+    -- and you stay where you are. The one you're on is edged in the accent;
+    -- one not made yet is greyed.
+    -- Placed now as for one profile, then moved on refresh (as the box above).
+    local roleHeading = T:Heading(panel, "Roles")
+    roleHeading:SetPoint("TOPLEFT", 10, -194)
+    -- In plain sight beside the heading until the roles and talents are seen
+    -- working in game (the user's call, 2026-10-08), not only on hover.
+    local roleTesting = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
+    roleTesting:SetText("Needs testing")
+    roleTesting:SetPoint("LEFT", roleHeading, "RIGHT", 8, 0)
+    local function UseRole(role)
+        local ok, message = ns.UseRole(role)
+        window:Say(message)
+        if ok then panel:Hide() end
+        window:Refresh()
+    end
+    local function SaveRole(role)
+        local name = ns.RoleProfile(role)
+        local function Save()
+            local _, message = ns.SaveRole(role)
+            window:Say(message)
+            window:Refresh()
+        end
+        if ns.RoleBlocked(role) or not name or name == ns.ProfileName() then return Save() end
+        local others = ns.ProfileUsers(name)
+        window:Ask(('Save your lists over "%s"?'):format(name),
+            ("Your %s profile gets the spell lists and pulse ticks of the profile you're on, in place of its own. "):format(ns.ROLE_NAMES[role])
+                .. (others == 1 and "Another character uses it, and gets them too. " or others > 1
+                    and (others .. " other characters use it, and get them too. ") or "") .. "This can't be undone.",
+            "Save", Save)
+    end
+    local function RoleNote(role)
+        local word, name = ns.ROLE_NAMES[role], ns.RoleProfile(role)
+        if name and name == ns.ProfileName() then
+            return ("You're on %s, your %s profile."):format(name, word) .. UNTESTED
+        elseif name then
+            return ("Switch to %s, your %s profile. Right-click to save your lists over it."):format(name, word) .. UNTESTED
+        end
+        -- Named as it will be made ("Druid Tank"), while your class is known.
+        local made = ns.RoleName(role)
+        return (made and ("Save your lists as %s and switch to it."):format(made)
+            or ("Save your lists as your %s profile and switch to it."):format(word))
+            .. " Right-click to save them without switching." .. UNTESTED
+    end
+    local roleButtons = {}
+    for i, role in ipairs(ns.ROLE_KEYS) do
+        local roleButton = T:Button(panel, ns.ROLE_NAMES[role], 90, 22)
+        roleButton.role, roleButton.x = role, 10 + (i - 1) * 94
+        roleButton:SetPoint("TOPLEFT", roleButton.x, -210)
+        roleButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        roleButton:SetScript("OnClick", function(_, mouse)
+            if mouse == "RightButton" then SaveRole(role) else UseRole(role) end
+        end)
+        window:Hint(roleButton, function() return RoleNote(role) end)
+        roleButtons[role] = roleButton
+    end
+    window.roleHeading, window.roleButtons, window.roleTesting = roleHeading, roleButtons, roleTesting
+
+    -- Switch with my talents, on its own row under the role buttons (the
+    -- heading's row holds the Needs testing tag), and while it's ticked each
+    -- talent tree under it with its points and its role, or None (it never
+    -- switches); under them what the talents last did.
+    local talents = T:Check(panel, "Switch with my talents", function(self)
+        window:Say(ns.SetTalentSwitch(self:GetChecked()))
+        window:Refresh()
+    end)
+    talents:SetPoint("TOPLEFT", 10, -236)
+    window:Hint(talents, "When another talent tree takes the lead in points, switch to its role's profile, after any fight."
+        .. UNTESTED)
+    local roleItems = {}
+    for _, role in ipairs(ns.TREE_ROLE_KEYS) do
+        roleItems[#roleItems + 1] = { key = role, label = ns.TREE_ROLE_NAMES[role], width = TREE_WIDTHS[role] }
+    end
+    local treeRows = {}
+    local function TreeRow(i)
+        if treeRows[i] then return treeRows[i] end
+        local row = {}
+        row.name = T:Text(panel, "GameFontHighlightSmall")
+        row.choice = T:Segmented(panel, roleItems, TREE_CHOICE, function(role)
+            if row.tree then ns.SetTreeRole(row.tree.id, role, row.tree.name) end
+            window:Refresh()
+        end)
+        for _, choice in ipairs(row.choice.buttons) do
+            window:Hint(choice, function()
+                local tree = row.tree and row.tree.name or "this tree"
+                if choice.key == "none" then
+                    return ("When %s takes the lead in points, don't switch: click a role yourself."):format(tree) .. UNTESTED
+                end
+                return ("When %s takes the lead in points, switch to your %s profile."):format(tree, ns.ROLE_NAMES[choice.key]) .. UNTESTED
+            end)
+        end
+        treeRows[i] = row
+        return row
+    end
+    local talentStatus = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
+    talentStatus:SetPoint("TOPLEFT", 10, -238)
+    talentStatus:SetWidth(WIDTH - 20)
+    talentStatus:Hide()
+    window.talentTick, window.treeRows, window.talentStatus = talents, treeRows, talentStatus
+
+    -- The talent trees as they are now (read once a refresh), none while
+    -- unticked; the note under them, what the talents last did or why there
+    -- are no trees to show; and how tall the roles and talents stand.
+    local function RolesNow()
+        local on = ns.Get("talentSwitch")
+        local trees = on and ns.TalentTrees() or {}
+        local status = on and (ns.talentNote or (#trees == 0 and "Your talent trees can't be read yet.")) or nil
+        talentStatus:SetText(status or "")
+        talentStatus:SetShown(status ~= nil) -- shown before it's measured
+        local tall = (#trees > 0 and 40 + #trees * 24 or 38) + TICK_ROW
+        if status then tall = tall + 6 + math.ceil(talentStatus:GetStringHeight() or 12) end
+        return trees, status, tall
+    end
+
+    -- Roles and talents under the hint, from y down; the bottom they reach.
+    local function PlaceRoles(y, trees, status)
+        local current, accent = ns.ProfileName(), T:Accent()
+        roleHeading:ClearAllPoints()
+        roleHeading:SetPoint("TOPLEFT", 10, -y)
+        for _, role in ipairs(ns.ROLE_KEYS) do
+            local roleButton, name = roleButtons[role], ns.RoleProfile(role)
+            roleButton:ClearAllPoints()
+            roleButton:SetPoint("TOPLEFT", roleButton.x, -(y + 16))
+            local lit = name ~= nil and name == current
+            local edge = lit and accent or T.CONTROL_BORDER
+            roleButton:SetBackdropBorderColor(edge[1], edge[2], edge[3], 1)
+            local text = lit and accent or name and T.TEXT or T.MUTED
+            roleButton.label:SetTextColor(text[1], text[2], text[3])
+            roleButton.lit = lit
+        end
+        talents:ClearAllPoints()
+        talents:SetPoint("TOPLEFT", 10, -(y + 42))
+        talents:SetChecked(ns.Get("talentSwitch"))
+        local bottom = y + 38 + TICK_ROW
+        for i, tree in ipairs(trees) do
+            local row = TreeRow(i)
+            row.tree = tree
+            local top = y + 44 + TICK_ROW + (i - 1) * 24
+            row.name:ClearAllPoints()
+            row.name:SetPoint("TOPLEFT", 18, -(top + 4))
+            row.name:SetText(("%s |cff%s%d|r"):format(tree.name, T:Hex(T.MUTED), tree.points))
+            row.choice:ClearAllPoints()
+            row.choice:SetPoint("TOPRIGHT", -10, -top)
+            row.choice:SetSelected(ns.TreeRole(tree))
+            row.name:Show()
+            row.choice:Show()
+            bottom = top + 20
+        end
+        for i = #trees + 1, #treeRows do
+            treeRows[i].tree = nil
+            treeRows[i].name:Hide()
+            treeRows[i].choice:Hide()
+        end
+        if not status then return bottom end
+        talentStatus:ClearAllPoints()
+        talentStatus:SetPoint("TOPLEFT", 10, -(bottom + 6))
+        return bottom + 6 + math.ceil(talentStatus:GetStringHeight() or 12)
+    end
+
     function window:RefreshProfiles()
         local current = ns.ProfileName()
         button:SetLabel("|cff8b8d92Profile|r   " .. (current or "loading..."))
@@ -238,9 +413,14 @@ function ns.BuildProfileMenu(window, header, anchor)
             row:Show()
         end
         for i = #names + 1, #rows do rows[i]:Hide() end
-        -- The list is as tall as its profiles, up to LIST_ROWS; the box,
-        -- buttons and hint follow it.
-        tall = math.max(1, math.min(#names, LIST_ROWS))
+        -- The list is as tall as its profiles, up to LIST_ROWS, and fewer
+        -- while the talent trees and their note take room, so the menu
+        -- never reaches the window's footer (MENU_MAX); the box, buttons,
+        -- hint, roles and talents follow it.
+        local trees, status, rolesTall = RolesNow()
+        local hintTall = math.max(28, math.ceil(hint:GetStringHeight() or 28))
+        local room = math.floor((MENU_MAX - 10 - 32 - 92 - hintTall - rolesTall) / ROW)
+        tall = math.max(1, math.min(#names, LIST_ROWS, room))
         list.content:SetHeight(math.max(1, #names * ROW))
         Pin()
         local y = 32 + tall * ROW
@@ -257,6 +437,6 @@ function ns.BuildProfileMenu(window, header, anchor)
         everyone:SetAlpha(onAll and .5 or 1)
         hint:ClearAllPoints()
         hint:SetPoint("TOPLEFT", 10, -(y + 82))
-        panel:SetHeight(y + 92 + math.max(28, math.ceil(hint:GetStringHeight() or 28)))
+        panel:SetHeight(PlaceRoles(y + 92 + hintTall, trees, status) + 10)
     end
 end

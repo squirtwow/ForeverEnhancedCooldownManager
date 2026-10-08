@@ -2451,7 +2451,7 @@ end)()
     w.profileButton:Click()
     help:Click()
     Equal(tostring(S[box].shown) .. " " .. tostring(S[w.profilePanel].shown) .. " " .. S[w.note].text,
-        "false true Profiles: click to use, x to delete, type a name to make one. Share or Import one as text.",
+        "false true Click a profile or role to use it, right-click a role to save. Share or Import as text.",
         "with the profile menu open, the footer explains it (Share and Import too) and the menu stays")
     w.profileButton:Click()
     -- A page with nothing to walk through: the footer says so.

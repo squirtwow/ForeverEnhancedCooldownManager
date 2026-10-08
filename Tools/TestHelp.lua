@@ -1411,6 +1411,109 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- The profile menu: every piece inside it, none on another -----------------------------------------
+-- Its Roles at the foot: the heading with Switch with my talents at its
+-- right, Tank, Healer and Damage under them, and while the tick is on each
+-- talent tree (its name and points, then its four choices: Tank, Healer,
+-- Damage and None, each word inside its own) and a note under them.
+-- The menu stays inside the window, hanging under its button, and ends
+-- clear of the footer's line (where every control's hover note shows), the
+-- list showing fewer profiles while the trees and note take room.
+
+;(function()
+    local names = { "Balance", "Feral Combat", "Restoration" }
+    _G.C_ClassTalents = { GetActiveConfigID = function() return 77 end }
+    _G.C_Traits = {
+        GetConfigInfo = function() return { treeIDs = { 501 } } end,
+        GetGroupDisplayInfoByTreeID = function()
+            return { { groupID = 101, displayName = names[1] }, { groupID = 102, displayName = names[2] },
+                { groupID = 103, displayName = names[3] } }
+        end,
+        GetGroupCurrencyInfo = function() return { { traitNodeGroupID = 102, currencyInfos = { { spent = 51 } } } } end,
+    }
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w.profileButton:Click()
+    local found = {}
+    -- The footer's line: one line of small text up from its foot.
+    local footerTop = select(4, Fit.Rect(w.note)) - 12
+    -- A tree's choices, end to end inside it: each word 2 clear of its edges.
+    local function Choices(choice)
+        local problems = {}
+        local left, _, right = Fit.Rect(choice)
+        local at = left + 1
+        for _, button in ipairs(choice.buttons) do
+            local bl, _, br = Fit.Rect(button)
+            local ll, _, lr = Fit.Rect(button.label)
+            local word = S[button.label].text
+            if math.abs(bl - at) > .01 then problems[#problems + 1] = word .. " not against the one before" end
+            if ll < bl + 2 or lr > br - 2 then problems[#problems + 1] = ('"%s" (%.1f wide) runs out of its %.1f'):format(word,
+                Fit.Wide(word, "GameFontHighlightSmall"), br - bl) end
+            at = br
+        end
+        if math.abs(at - (right - 1)) > .01 then problems[#problems + 1] = ("the choices end at %.1f, not %.1f"):format(at, right - 1) end
+        if #choice.buttons ~= 4 then problems[#problems + 1] = #choice.buttons .. " choices, not 4" end
+        return table.concat(problems, ", ")
+    end
+    local function Check(label)
+        w:Refresh()
+        local problems = Fit.Problems(w.profilePanel)
+        local _, top, _, bottom = Fit.Rect(w.profilePanel)
+        local _, _, _, under = Fit.Rect(w.profileButton)
+        if top < under or bottom > footerTop - 4 then problems = problems .. " the menu reaches " .. top .. " to " .. bottom end
+        for _, row in ipairs(w.treeRows) do
+            if row.choice:IsVisible() then
+                local wrong = Choices(row.choice)
+                if wrong ~= "" then problems = problems .. " " .. S[row.name].text .. ": " .. wrong end
+            end
+        end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    Check("one profile")
+    for _, role in ipairs(ns.ROLE_KEYS) do ns.UseRole(role) end
+    Check("three roles")
+    w.talentTick:Click()
+    Check("talents ticked")
+    ns.talentNote = "Your main talent tree is now Feral Combat, but Tank has no profile yet: click Tank to make one."
+    Check("with a note")
+    for i = 1, 12 do ns.NewProfile(("Profile %02d"):format(i)) end
+    Check("a long list")
+    -- After the list: every switch (each New here) clears what the talents last said.
+    ns.talentNote = "Your main talent tree is now Feral Combat, but Tank has no profile yet: click Tank to make one."
+    Check("a long list with a note")
+    Equal(tostring(S[w.profilePanel].shown) .. " " .. #w.treeRows .. " " .. tostring(S[w.talentStatus].shown), "true 3 true",
+        "(the menu open, three trees and the note showing)")
+    -- The longest note there can be: a long tree name and a profile name as long as they come.
+    ns.talentNote = "Your main talent tree is now Beast Mastery: switched to " .. ("Profile name as long as they come, made by hand"):sub(1, 48)
+        .. ", your Damage profile."
+    Check("a long list with the longest note")
+    -- The longest tree name there is, at 51 points ("Beast Mastery 51"), clear of its choices.
+    names[2] = "Beast Mastery"
+    Check("the longest tree name")
+    Equal(S[w.treeRows[2].name].text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") .. " | " .. #w.treeRows[2].choice.buttons, "Beast Mastery 51 | 4",
+        "(the longest tree name showing, with four choices)")
+    Equal(table.concat(found, " | "), "", "the profile menu with its roles and talents: each piece clear of the next, all inside it,"
+        .. " each tree's four choices' words inside them, and it inside the window under its button, clear of the footer's line")
+    Equal(tostring(footerTop) .. " " .. tostring(S[w.profileList].shown), "539 true", "(the footer's line measured where it shows)")
+    -- Each choice's hover note for the longest tree name, on one line of the
+    -- footer: counted at 5.6 a letter (the small font's widest, as What's
+    -- new's foot below), inside the note's width.
+    local long = {}
+    for _, choice in ipairs(w.treeRows[2].choice.buttons) do
+        S[choice].scripts.OnEnter(choice)
+        local text = S[w.note].text
+        if not text:find("Beast Mastery", 1, true) then long[#long + 1] = choice.key .. ": not shown"
+        elseif #text * 5.6 > w.note:GetWidth() then long[#long + 1] = ('"%s" runs %.1f'):format(text, #text * 5.6) end
+        S[choice].scripts.OnLeave(choice)
+    end
+    Equal(w.note:GetWidth() .. " | " .. table.concat(long, " | "), "560 | ",
+        "hovered, each tree choice's note for Beast Mastery fits on the footer's one line")
+    _G.C_ClassTalents, _G.C_Traits = nil, nil
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- What's new's foot: its two lines clear of its buttons ----------------------------------------------
 -- On the left "Found a bug or have an idea?" and the line on seeing it again;
 -- on the right, on the same rows, Got it, Show me what's new (while there's a

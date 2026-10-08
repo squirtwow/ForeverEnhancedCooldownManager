@@ -1044,8 +1044,9 @@ local function BuildHelp(window, header)
     function window:Help()
         if self.profilePanel and self.profilePanel:IsShown() then
             -- With Share and Import there (a new file: after a full restart).
-            self:Say(self.profileShare and "Profiles: click to use, x to delete, type a name to make one. Share or Import one as text."
-                or "Profiles: click one to use it, or x to delete it. Type a name to make, copy or rename one.")
+            -- The menu's own hint, always in sight, says x deletes and a typed name makes one.
+            self:Say(self.profileShare and "Click a profile or role to use it, right-click a role to save. Share or Import as text."
+                or "Click a profile or role to use it, right-click a role to save. Type a name to make one.")
             return self:Refresh()
         end
         if ns.Tour and ns.Tour:StartPage(self.selected) then return end
@@ -1338,6 +1339,9 @@ local function BuildWindow()
     end
 
     ns.window = window
+    -- What Switch with my talents last did before the window was first made,
+    -- in the footer as it first opens (Core.lua TalentNote).
+    if ns.talentNote then window:Say(ns.talentNote) end
     return window
 end
 

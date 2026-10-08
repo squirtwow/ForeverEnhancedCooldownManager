@@ -1072,7 +1072,7 @@ end
 -- Settings a shared profile never carries: switching a part on or off, and the window's own.
 H.NOT_SHARED = { "skin", "useBars", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "castBar", "swingTimer",
     "pullTimer", "raidWarnings", "bossCasts", "pulse", "keybinds", "layoutPreview", "growArrows", "minimap", "minimapAngle",
-    "minimapFree", "minimapX", "minimapY" }
+    "minimapFree", "minimapX", "minimapY", "talentSwitch" }
 
 -- Every setting is either shared or kept out, on purpose -------------------------------------------
 -- A setting added later must be put on one side or the other.
@@ -1752,8 +1752,8 @@ do
     ns.ShowWindow()
     w.profileButton:Click()
     w.help:Click()
-    Equal(S[w.note].text, "Profiles: click to use, x to delete, type a name to make one. Share or Import one as text.",
-        "the ? over the profile menu mentions Share and Import")
+    Equal(S[w.note].text, "Click a profile or role to use it, right-click a role to save. Share or Import as text.",
+        "the ? over the profile menu mentions Share and Import (and the roles)")
     Equal(#S[w.note].text <= 91, true, "on one line, no longer than before")
     w.profileButton:Click()
     ns.Tour:Start()
