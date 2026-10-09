@@ -1125,6 +1125,9 @@ ns.Set("prdCombo", true)
 ns.Resource:Apply()
 local row = ns.Resource:ComboRow()
 Equal(row ~= nil and S[row].shown, true, "ticked, a druid in cat form gets them")
+-- Forever 70291 draws the game's own combo points too: see-through while ours show.
+Equal(S[prd.ClassFrameContainer].alpha .. " " .. tostring(S[prd.ClassFrameContainer].shown),
+    "0 " .. tostring(S[prd.ClassFrameContainer].shown), "the game's own combo points go see-through, nothing else changed")
 local top = S[row].points[1]
 Equal(top[1] .. " " .. tostring(top[2] == prd.AlternatePowerBar) .. " " .. top[3] .. " " .. top[5], "TOPLEFT true BOTTOMLEFT -4",
     "under the lowest bar, Blizzard's padding apart")
@@ -1154,6 +1157,7 @@ ns.Resource:Apply()
 power = 0
 Fire("UPDATE_SHAPESHIFT_FORM")
 Equal(tostring(ns.Resource:ComboRow()) .. " " .. tostring(S[row].shown), "nil false", "gone out of cat form")
+Equal(S[prd.ClassFrameContainer].alpha, 1, "ours gone: the game's back in full")
 power = 3
 Fire("UPDATE_SHAPESHIFT_FORM")
 Equal(S[row].shown, true, "back in cat form")

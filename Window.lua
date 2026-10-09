@@ -253,7 +253,7 @@ local function BuildLook(window, page, width)
         "The second mana bar some specs get, under your main bar.",
         function() if ns.Resource then ns.Resource:Apply() end end)
     local combo = Choice("Combo points under your energy bar", "prdCombo", -182,
-        "Forever's display has none, so the addon draws them: five segments as wide as the display, for rogues and druids in cat form.",
+        "Five segments as wide as the display, for rogues and druids in cat form. The game's own combo points go see-through while these show.",
         function() if ns.Resource then ns.Resource:Apply() end end)
     window.look, window.personal, window.repeatMana, window.combo = look, personal, repeatMana, combo
 

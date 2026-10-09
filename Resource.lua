@@ -120,8 +120,8 @@ local function ExtraMana(frame)
 end
 
 -- Combo points ---------------------------------------------------------------------
--- Blizzard left combo points out of Forever's display, so the addon draws its
--- own under the display's lowest bar: five segments as wide as the display, in
+-- Blizzard left combo points out of Forever's display (until 70291, below), so
+-- the addon draws its own under the display's lowest bar: five segments as wide as the display, in
 -- the Tracked Bars design and texture and a colour of your choice. Flat by
 -- default, so they stay sharp at any size, and they stretch or shrink with the
 -- display.
@@ -231,12 +231,27 @@ local function ComboPoints()
     for _, bar in ipairs(combo.segments) do bar:SetValue(points) end
 end
 
+-- Since Forever 1.60.1 (70291) the display draws the game's own combo points
+-- too, for rogues and druids, under the bars (its ClassFrameContainer). While
+-- ours show, the game's are made see-through, so there's one set: only their
+-- alpha, as with the extra mana bar above (nothing shown, hidden, moved or
+-- set on them), and back to full when ours go. Edit Mode's own Hide Class
+-- Resources still works as before.
+local classMuted = false
+local function MuteClassFrame(frame, mute)
+    local container = frame and frame.ClassFrameContainer
+    if not container or mute == classMuted then return end
+    classMuted = mute
+    container:SetAlpha(mute and 0 or 1)
+end
+
 -- Shows or hides the row and puts it in place; a layout makes room for it.
 local function ComboUpdate()
     local frame = _G.PersonalResourceDisplayFrame
     if not (frame and combo) then return end
     local want = ComboWanted()
     if want then ComboPlace(frame) end
+    MuteClassFrame(frame, want)
     combo:SetShown(want)
     ComboPoints()
     if want ~= comboShown then
