@@ -184,7 +184,7 @@ function ns.BuildProfileMenu(window, header, anchor)
     end)
     places:SetPoint("TOPLEFT", 10, -132)
     window:Hint(places, "Each profile keeps its own bar spots and sizes, and the Layout page arrangement, so switching"
-        .. " profile moves your bars. Off, they're every character's." .. UNTESTED)
+        .. " profile moves your bars. Off, they're every character's.")
     window.profilePlaces = places
 
     -- Each button acts on the typed name. Every one of them leaves you on a

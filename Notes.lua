@@ -10,6 +10,17 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.5.6",
+        sections = {
+            { "Added", {
+                "Positions per profile (Profile menu, off by default): each profile keeps its own bar spots and sizes.",
+            } },
+            { "Fixed", {
+                "With Combo points under your energy bar on, the game's own new combo points no longer show as well.",
+            } },
+        },
+    },
+    {
         version = "1.5.5",
         sections = {
             { "Added", {

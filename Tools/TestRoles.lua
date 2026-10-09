@@ -1892,8 +1892,9 @@ do
     Equal(S[tick.text].text .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(S[tick].shown),
         "Positions per profile false true", "the tick, unticked")
     local hint = rawget(tick, "hint")
-    Equal(hint:find("(Needs testing)", 1, true) ~= nil and hint:find("\226\128\148", 1, true) == nil, true,
-        "its hover says Needs testing, no em dash")
+    -- Seen in game 2026-10-09: no Needs testing any more.
+    Equal(hint:find("(Needs testing)", 1, true) == nil and hint:find("\226\128\148", 1, true) == nil, true,
+        "its hover is plain, no em dash")
     -- In a fight it can't change.
     lockdown = true
     tick:Click()

@@ -118,6 +118,8 @@ EraUI.
   it becomes a new profile, so yours stays as it is
 - Tank, Healer and Damage keep a profile for each role. Switch with my talents
   (off by default) changes to your main talent tree's role profile
+- Positions per profile (off by default): each profile keeps its own bar spots
+  and sizes
 - An accent colour for the window, and What's new after each update, with a
   short tour of just the new features
 - Hover anything in the settings and the footer tells you what it does
