@@ -355,6 +355,8 @@ local function Lists(profile)
             if type(key) ~= "string" or key == "" or value ~= keep then profile[field][key] = nil end
         end
     end
+    -- Positions per profile: its spots and sizes, repaired as they're used.
+    if profile.place ~= nil and type(profile.place) ~= "table" then profile.place = nil end
     return profile
 end
 
@@ -492,6 +494,9 @@ local function FreeName(name)
     return candidate
 end
 
+-- Positions per profile (below): defined after the copy helpers they use.
+local SavePlace, LoadPlace, PlaceForCopy, PlaceAtLogin
+
 -- Works out this character's profile, making its own on its first login
 -- (or using the one chosen for every character). The first character to log
 -- in after profiles arrived keeps the lists that were saved before them. A
@@ -537,6 +542,7 @@ function ns.ResolveProfile(final)
         db[field] = nil
     end
     active = name
+    PlaceAtLogin()
     return true
 end
 
@@ -579,8 +585,14 @@ end
 
 -- Every switch clears what the talents last said (Talents, below), so the
 -- menu never shows a note about a profile you've since left; a switch the
--- talents make says it again after.
+-- talents make says it again after. With Positions per profile on, the
+-- profile you leave keeps where your bars are and how big, and the one you
+-- switch to brings its own.
 local function Switch(name)
+    if db.placePerProfile == true then
+        SavePlace()
+        if LoadPlace(name) and ns.Layout then ns.Layout.undo, ns.Layout.moved = nil, nil end
+    end
     Chars()[PlayerGUID()] = name
     active = name
     ns.talentNote = nil
@@ -624,6 +636,7 @@ local function Duplicate(from)
         profile[field] = {}
         for key, value in pairs(type(from[field]) == "table" and from[field] or {}) do profile[field][key] = value end
     end
+    profile.place = PlaceForCopy(from)
     return profile
 end
 
@@ -682,6 +695,7 @@ local function Rename(name)
     end
     if db.everyone == active then db.everyone = name end
     Relink(active, name)
+    if db.placeOwner == active then db.placeOwner = name end
     active = name
     ns.talentNote = nil -- it may name the old name
 end
@@ -742,6 +756,9 @@ function ns.DeleteProfile(text)
     end
     if db.everyone == name then db.everyone = nil end
     Relink(name, nil)
+    -- The spots on screen are that profile's: they stay, for whichever
+    -- profile you're on next (nothing saves them back into the deleted one).
+    if db.placeOwner == name then db.placeOwner = nil end
     if name == active then
         local fresh = FreeName(OwnName(true))
         profiles[fresh] = Lists({})
@@ -773,6 +790,110 @@ local function CopySet(from)
         if type(value) ~= "table" then copy[key] = value end
     end
     return copy
+end
+
+-- Positions per profile ---------------------------------------------------------
+-- Off unless ticked (Profile menu). Your bars' spots and sizes are every
+-- character's (db.bars, db.layout), and all the drawing reads them there.
+-- While the tick is on, each profile also keeps a copy (profile.place): a
+-- switch saves the one on screen into the profile you leave (db.placeOwner,
+-- whose spots are on screen) and puts the next profile's in its place. So
+-- a Hunter and a Warlock on their own profiles keep their own bar spots.
+-- "Where and how big": each bar's spot, grow and wrap directions, icon size,
+-- spacing and icons per row, and the whole Layout page arrangement. The
+-- look (colours, border, font, All bars) stays every character's.
+local PLACE_FIELDS = { "size", "spacing", "perRow", "grow", "wrap", "point", "x", "y" }
+ns.PLACE_FIELDS = PLACE_FIELDS
+
+-- The spots and sizes on screen now, sharing nothing with them.
+local function Snapshot()
+    local place = { bars = {}, layout = CopyTable(db.layout) }
+    place.layout.hidden = CopySet(type(db.layout) == "table" and db.layout.hidden)
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar, saved = type(db.bars) == "table" and db.bars[key], {}
+        if type(bar) == "table" then
+            for _, field in ipairs(PLACE_FIELDS) do saved[field] = rawget(bar, field) end
+        end
+        place.bars[key] = saved
+    end
+    return place
+end
+
+-- A profile's saved spots, copied (for a profile made from it).
+local function CopyPlace(place)
+    if type(place) ~= "table" then return nil end
+    local copy = { bars = {}, layout = CopyTable(place.layout) }
+    copy.layout.hidden = CopySet(type(place.layout) == "table" and place.layout.hidden)
+    for key, bar in pairs(type(place.bars) == "table" and place.bars or {}) do copy.bars[key] = CopySet(bar) end
+    return copy
+end
+
+-- The profile whose spots are on screen keeps them.
+SavePlace = function()
+    local owner = db.placeOwner
+    local profile = type(owner) == "string" and Profiles()[owner]
+    if type(profile) == "table" then profile.place = Snapshot() end
+end
+
+-- A profile's spots and sizes on screen, each value repaired as it goes in
+-- (ns.BarData, ns.LayoutData). A profile with none yet (made before the
+-- tick, or new) takes the ones on screen. True if anything changed.
+LoadPlace = function(name)
+    db.placeOwner = name
+    local profile = Profiles()[name]
+    local place = type(profile) == "table" and profile.place
+    if type(place) ~= "table" then return false end
+    local bars = type(place.bars) == "table" and place.bars or {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local data, from = ns.BarData(key), type(bars[key]) == "table" and bars[key] or {}
+        for _, field in ipairs(PLACE_FIELDS) do data[field] = from[field] end
+        ns.BarData(key)
+    end
+    local layout = CopyTable(place.layout)
+    layout.hidden = CopySet(type(place.layout) == "table" and place.layout.hidden)
+    db.layout = layout
+    ns.LayoutData()
+    return true
+end
+
+function ns.PlacePerProfile()
+    return db ~= nil and db.placePerProfile == true
+end
+
+-- Ticks Positions per profile on or off. On: every profile starts with the
+-- spots on screen, so nothing moves until you move it. Off: the spots on
+-- screen are every character's again, and the profiles' copies go.
+function ns.SetPlacePerProfile(on)
+    if not db then return "" end
+    on = on == true
+    if on == ns.PlacePerProfile() then return "" end
+    if InCombatLockdown() then return "Profiles can't change in combat." end
+    db.placePerProfile = on or nil
+    local profiles = Profiles()
+    if on then
+        for _, profile in pairs(profiles) do profile.place = Snapshot() end
+        db.placeOwner = active
+        return "Each profile keeps its own bar spots and sizes now, starting with the ones you have."
+    end
+    for _, profile in pairs(profiles) do profile.place = nil end
+    db.placeOwner = nil
+    return "Your bar spots and sizes are every character's again."
+end
+
+-- At login, the profile this character uses brings its spots: another
+-- character's may still be on screen. Before the bars are made.
+PlaceAtLogin = function()
+    if db.placePerProfile ~= true or not active or db.placeOwner == active then return end
+    SavePlace()
+    if LoadPlace(active) and ns.Bars and ns.Bars.started then ns.Bars:Changed() end
+end
+
+-- A copy of the profile you're on, for a new profile made from it: its
+-- spots are the ones on screen.
+PlaceForCopy = function(from)
+    if db.placePerProfile ~= true then return nil end
+    if from == Profiles()[active] then return Snapshot() end
+    return CopyPlace(from and from.place)
 end
 
 -- A shared profile's look, bar sizes and spots, layout and Tracked Bar
@@ -846,7 +967,15 @@ function ns.ImportProfile(text, shared, withLook)
         if type(spell) == "string" and custom[spell] == nil and not yours[spell] then custom[spell] = CopyList(ids) end
     end
     ns.CustomSpells()
-    if withLook and type(shared.setup) == "table" then UseSetup(shared.setup) end
+    if withLook and type(shared.setup) == "table" then
+        -- Positions per profile: the profile you leave keeps its own spots,
+        -- and the imported ones on screen become the new profile's.
+        if db.placePerProfile == true then
+            SavePlace()
+            db.placeOwner = nil
+        end
+        UseSetup(shared.setup)
+    end
     Switch(name)
     return true, "Imported " .. name .. (withLook and " with its look and layout" or "") .. ", and switched to it.", name
 end

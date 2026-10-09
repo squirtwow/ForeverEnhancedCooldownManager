@@ -10,7 +10,7 @@ local _, ns = ...
 local T = ns.Theme
 
 local WIDTH, ROW = 300, 22
-local LIST_ROWS = 8 -- profiles listed at once; more scroll
+local LIST_ROWS = 7 -- profiles listed at once; more scroll (7 since Positions per profile took a row)
 -- The menu's tallest: it hangs 38 down the 560-tall window and stays clear
 -- of the footer's line (539 down), so a hover note there is never under it
 -- (Tools/TestHelp.lua measures it).
@@ -22,6 +22,7 @@ local LIST_WIDTH = WIDTH - 28 -- the list, clear of its scroll thumb
 local TREE_CHOICE = 156
 local TREE_WIDTHS = { tank = 32, healer = 45, damage = 45, none = 32 }
 local TICK_ROW = 24 -- the Switch with my talents tick's own row, under the role buttons
+local PLACES_ROW = 22 -- the Positions per profile tick's own row, under Use on all characters
 local UNTESTED = " (Needs testing)" -- the roles and talents, until they're seen in game
 
 local function Users(name)
@@ -174,6 +175,17 @@ function ns.BuildProfileMenu(window, header, anchor)
             or "Loads the profile you're on for every character. Each one only shows its own class's spells and racials."
     end)
     window.profileEveryone = everyone
+
+    -- Positions per profile: its own row under Use on all characters.
+    local places = T:Check(panel, "Positions per profile", function(self)
+        window:Say(ns.SetPlacePerProfile(self:GetChecked()))
+        self:SetChecked(ns.PlacePerProfile())
+        window:Refresh()
+    end)
+    places:SetPoint("TOPLEFT", 10, -132)
+    window:Hint(places, "Each profile keeps its own bar spots and sizes, and the Layout page arrangement, so switching"
+        .. " profile moves your bars. Off, they're every character's." .. UNTESTED)
+    window.profilePlaces = places
 
     -- Each button acts on the typed name. Every one of them leaves you on a
     -- different profile or name, so the menu closes once it has worked.
@@ -419,7 +431,7 @@ function ns.BuildProfileMenu(window, header, anchor)
         -- hint, roles and talents follow it.
         local trees, status, rolesTall = RolesNow()
         local hintTall = math.max(28, math.ceil(hint:GetStringHeight() or 28))
-        local room = math.floor((MENU_MAX - 10 - 32 - 92 - hintTall - rolesTall) / ROW)
+        local room = math.floor((MENU_MAX - 10 - 32 - 92 - PLACES_ROW - hintTall - rolesTall) / ROW)
         tall = math.max(1, math.min(#names, LIST_ROWS, room))
         list.content:SetHeight(math.max(1, #names * ROW))
         Pin()
@@ -435,8 +447,11 @@ function ns.BuildProfileMenu(window, header, anchor)
         local onAll = ns.OnAll(current)
         everyone:SetLabel(onAll and "On all characters" or "Use on all characters")
         everyone:SetAlpha(onAll and .5 or 1)
+        places:ClearAllPoints()
+        places:SetPoint("TOPLEFT", 10, -(y + 77))
+        places:SetChecked(ns.PlacePerProfile())
         hint:ClearAllPoints()
-        hint:SetPoint("TOPLEFT", 10, -(y + 82))
-        panel:SetHeight(PlaceRoles(y + 92 + hintTall, trees, status) + 10)
+        hint:SetPoint("TOPLEFT", 10, -(y + 82 + PLACES_ROW))
+        panel:SetHeight(PlaceRoles(y + 92 + PLACES_ROW + hintTall, trees, status) + 10)
     end
 end

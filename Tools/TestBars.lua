@@ -2997,13 +2997,13 @@ do
     end
     Equal(shown .. " " .. inList .. " " .. S[list.content].height, "31 31 682", "every profile listed, in a list that scrolls")
     local bottom = S[list].points[2]
-    Equal(bottom[1] .. " " .. bottom[3] .. " " .. bottom[4] .. " " .. bottom[5], "BOTTOMRIGHT TOPLEFT 282 -204",
-        "pinned by two corners, eight rows tall")
-    Equal(S[w.profileInput].points[1][3], -208, "the name box right under those eight")
+    Equal(bottom[1] .. " " .. bottom[3] .. " " .. bottom[4] .. " " .. bottom[5], "BOTTOMRIGHT TOPLEFT 282 -182",
+        "pinned by two corners, seven rows tall (since Positions per profile took a row)")
+    Equal(S[w.profileInput].points[1][3], -186, "the name box right under those seven")
     Equal(tostring(S[w.profilePanel].height <= 420) .. " " .. tostring(Last(w.profilePanel, "SetClampedToScreen")), "true true",
         "the menu stays short and on screen")
     for _, timer in ipairs(timers) do timer() end
-    Equal(S[list].points[2][5], -204, "pinned again a moment after opening")
+    Equal(S[list].points[2][5], -182, "pinned again a moment after opening")
     -- A short list is as tall as its profiles.
     Environment()
     ns = Load({ useBars = true })

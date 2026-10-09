@@ -1767,8 +1767,9 @@ do
     ns.talentNote = "Your main talent tree is now Feral Combat, but Tank has no profile yet: click Tank to make one."
     w:Refresh()
     local ticked = Rows()
-    Equal(unticked .. " " .. tostring(ticked < unticked and ticked >= 5), "8 true",
-        "the list shows 8 profiles unticked, a few fewer (" .. ticked .. ") with the trees and note, and still scrolls to the rest")
+    -- 7 since Positions per profile took a row under Use on all characters.
+    Equal(unticked .. " " .. tostring(ticked < unticked and ticked >= 4), "7 true",
+        "the list shows 7 profiles unticked, a few fewer (" .. ticked .. ") with the trees and note, and still scrolls to the rest")
     -- Every new control in the menu says what it does, and that it needs testing.
     local missing = {}
     for _, role in ipairs(ns.ROLE_KEYS) do
@@ -1847,6 +1848,138 @@ do
     for _, choice in ipairs(w.treeRows[1].choice.buttons) do words[#words + 1] = S[choice.label].text .. " " .. choice.hint(choice) end
     Equal(table.concat(words, " "):find("\226\128\148", 1, true), nil, "no em dashes")
     Equal(#printed, 0, "no errors")
+end
+
+-- Positions per profile: each profile keeps its own bar spots and sizes ------------------------------
+
+-- A bar's spot and size as text.
+function R.Spot(ns, key)
+    local d = ns.BarData(key)
+    return ("%s %s %s %d"):format(tostring(d.point), tostring(d.x), tostring(d.y), d.size)
+end
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    R.class = { "Druid", "DRUID" }
+    _G.C_Traits, _G.C_ClassTalents, _G.C_SpecializationInfo = nil, nil, nil
+    local ns = R.Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local db = ForeverEnhancedCooldownManagerDB
+    local own = "Zriel (Druid) - Zephras"
+    local function CD() return ns.BarData("cd") end
+    -- Moves the Cooldowns bar (and sizes it) as dragging would, then redraws:
+    -- the bar's spot as saved after (redraws keep it in the bar's own anchor).
+    local function Move(x, size)
+        local d = CD()
+        d.point, d.x, d.y, d.size = d.point or "CENTER", x, d.y or -40, size or d.size
+        ns.Bars:Rebuild()
+        return R.Spot(ns, "cd")
+    end
+    local first = Move(100, 40)
+    -- Off at first: switching never moves a bar, and no profile keeps spots.
+    Equal(tostring(ns.PlacePerProfile()), "false", "off by default")
+    ns.CopyProfile("Zriel Two")
+    local shared = Move(222)
+    ns.UseProfile(own)
+    Equal(R.Spot(ns, "cd") .. " " .. tostring(db.profiles[own].place) .. " " .. tostring(db.profiles["Zriel Two"].place),
+        shared .. " nil nil", "off: one set of spots for every profile")
+    Equal(first ~= shared, true, "the bar did move")
+
+    -- The tick in the menu, under Use on all characters, unticked.
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    R.Open(w)
+    local tick = w.profilePlaces
+    Equal(S[tick.text].text .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(S[tick].shown),
+        "Positions per profile false true", "the tick, unticked")
+    local hint = rawget(tick, "hint")
+    Equal(hint:find("(Needs testing)", 1, true) ~= nil and hint:find("\226\128\148", 1, true) == nil, true,
+        "its hover says Needs testing, no em dash")
+    -- In a fight it can't change.
+    lockdown = true
+    tick:Click()
+    Equal(tostring(ns.PlacePerProfile()) .. " | " .. S[w.note].text, "false | Profiles can't change in combat.", "not in a fight")
+    lockdown = false
+    R.Open(w)
+    tick:Click()
+    Equal(tostring(ns.PlacePerProfile()) .. " " .. tostring(tick:GetChecked()) .. " | " .. S[w.note].text,
+        "true true | Each profile keeps its own bar spots and sizes now, starting with the ones you have.", "ticked")
+    Equal(R.Spot(ns, "cd") .. " | " .. tostring(db.profiles[own].place.bars.cd.x == CD().x and db.profiles["Zriel Two"].place.bars.cd.x == CD().x)
+        .. " | " .. tostring(db.placeOwner), shared .. " | true | " .. own,
+        "ticking it on: every profile starts with the spots on screen, nothing moves")
+
+    -- Each profile keeps its own: spots, sizes and the layout.
+    ns.UseProfile("Zriel Two")
+    local two = Move(-300, 52)
+    ns.LayoutData().gap = 9
+    ns.UseProfile(own)
+    Equal(R.Spot(ns, "cd"), shared, "back on yours: your spot and size")
+    Equal(ns.LayoutData().gap ~= 9, true, "and your layout")
+    ns.UseProfile("Zriel Two")
+    Equal(R.Spot(ns, "cd") .. " gap " .. ns.LayoutData().gap, two .. " gap 9", "on the other: its own spot, size and layout")
+    -- The look stays every character's.
+    ns.Set("barScale", 120)
+    ns.UseProfile(own)
+    Equal(ns.Get("barScale"), 120, "All bars and the look are shared")
+
+    -- A copy, and a role's first profile, start with the spots on screen.
+    local eleven = Move(11)
+    ns.CopyProfile("Zriel Copy")
+    Equal(R.Spot(ns, "cd") .. " " .. tostring(db.profiles["Zriel Copy"].place.bars.cd.x == CD().x), eleven .. " true",
+        "a copy brings your spots")
+    ns.UseRole("healer")
+    Equal(ns.ProfileName() .. " " .. R.Spot(ns, "cd"), "Druid Healer " .. eleven, "a role starts where you are")
+    local healer = Move(77)
+    ns.UseProfile("Zriel Two")
+    ns.UseRole("healer")
+    Equal(R.Spot(ns, "cd"), healer, "and keeps its own after")
+
+    -- Rename follows; a deleted profile's spots stay on screen for the next.
+    ns.RenameProfile("Zriel Heals")
+    Equal(tostring(db.placeOwner) .. " " .. tostring(db.profiles["Zriel Heals"].place ~= nil), "Zriel Heals true", "rename follows")
+    ns.UseProfile("Zriel Copy")
+    ns.DeleteProfile("Zriel Copy")
+    Equal(tostring(db.profiles["Zriel Copy"]) .. " " .. R.Spot(ns, "cd"), "nil " .. eleven,
+        "deleting the one you're on: its spots stay for the new one")
+    ns.UseProfile("Zriel Two")
+    Equal(R.Spot(ns, "cd"), two, "and the others are untouched")
+
+    -- An import with its look: the profile you leave keeps its spots.
+    ns.UseProfile(own)
+    local before = R.Spot(ns, "cd")
+    ns.ImportProfile("From A Friend", { lists = {}, setup = { bars = { cd = { point = "CENTER", x = 400, y = 20 } }, layout = {} } }, true)
+    local friend = R.Spot(ns, "cd")
+    Equal(ns.ProfileName() .. " " .. math.floor(CD().x), "From A Friend 400", "imported spots on screen")
+    ns.UseProfile(own)
+    Equal(R.Spot(ns, "cd"), before, "yours kept its own")
+    ns.UseProfile("From A Friend")
+    Equal(R.Spot(ns, "cd"), friend, "the import keeps the friend's")
+    ns.UseProfile(own)
+    Equal(#printed, 0, "no errors")
+
+    -- Another character on another profile logs in: its spots, and yours kept.
+    local saved = db
+    character = { guid = "Player-1-0009", name = "Grom", realm = "Zephras" }
+    R.class = { "Warrior", "WARRIOR" }
+    saved.chars["Player-1-0009"] = "Zriel Two"
+    local ns2 = R.Start(saved)
+    Equal(ns2.ProfileName() .. " " .. R.Spot(ns2, "cd"), "Zriel Two " .. two, "another character: its profile's spots")
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    R.class = { "Druid", "DRUID" }
+    local ns3 = R.Start(saved)
+    Equal(ns3.ProfileName() .. " " .. R.Spot(ns3, "cd"), own .. " " .. before, "back on the first: its spots")
+
+    -- Unticked: the spots on screen are everyone's again, the copies go.
+    SlashCmdList.FECM("")
+    local w3 = FECMFrame
+    R.Open(w3)
+    w3.profilePlaces:Click()
+    local left = 0
+    for _, profile in pairs(saved.profiles) do if profile.place then left = left + 1 end end
+    Equal(tostring(ns3.PlacePerProfile()) .. " " .. left .. " " .. tostring(saved.placeOwner) .. " " .. R.Spot(ns3, "cd"),
+        "false 0 nil " .. before, "unticked: nothing moves, the copies go")
+    ns3.UseProfile("Zriel Two")
+    Equal(R.Spot(ns3, "cd"), before, "and switching moves nothing again")
+    Equal(#printed, 0, "no errors after")
 end
 
 print = _G.print
