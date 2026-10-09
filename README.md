@@ -116,6 +116,8 @@ EraUI.
   Use on all characters puts one profile on every character
 - Share a profile as text from the Profile menu, or Import one someone shared:
   it becomes a new profile, so yours stays as it is
+- Tank, Healer and Damage keep a profile for each role. Switch with my talents
+  (off by default) changes to your main talent tree's role profile
 - An accent colour for the window, and What's new after each update, with a
   short tour of just the new features
 - Hover anything in the settings and the footer tells you what it does

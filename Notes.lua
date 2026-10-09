@@ -10,6 +10,18 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.5.5",
+        sections = {
+            { "Added", {
+                "Tank, Healer and Damage profiles in the Profile menu.",
+                "Switch with my talents (off by default): changes to your main talent tree's role profile.",
+            } },
+            { "Fixed", {
+                "The minimap button's tooltip fits the addon's name.",
+            } },
+        },
+    },
+    {
         version = "1.5.4",
         sections = {
             { "Added", {
