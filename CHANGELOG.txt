@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.8
+
+### Added
+- Darkness slider on the Look page: the empty part of your bars, from today's look to solid black.
+- Thick edges on the Look page: a 2px edge round your bars and their icons.
+
+### Changed
+- Two buffs with the same name read alike: "Energized (ID 1259691)" and "Energized (ID 1270842)".
+- Spell data updated for Forever's latest build. Traps saved under their old names keep working.
+
+### Fixed
+- Rogue poisons, Read Ley Line, Skysight, Bloodrage, Vanish, totems and more now light on the Buffs and Debuffs bars.
+- Hunter pet abilities show the pet's own cooldown. (Needs testing)
+- Ranks of one buff (totems, talent auras, foods) share one icon again. (Needs testing)
+- A buff's ID added on Cooldowns or Utility no longer gets stuck there.
+- Cooldown pulse: potions move on to the one you carry, and an item you've run out of doesn't pulse.
+
 ## 1.5.7
 
 ### Fixed
