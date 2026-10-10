@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.7
+
+### Fixed
+- Two buffs with the same name, like the Skyborne's two Energized, can each go on the Buffs or Debuffs bar by spell ID.
+
 ## 1.5.6
 
 ### Added

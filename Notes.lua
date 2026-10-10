@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.5.7",
+        sections = {
+            { "Fixed", {
+                "Two buffs with the same name, like the Skyborne's two Energized, can each go on the Buffs or Debuffs bar by spell ID.",
+            } },
+        },
+    },
+    {
         version = "1.5.6",
         sections = {
             { "Added", {
