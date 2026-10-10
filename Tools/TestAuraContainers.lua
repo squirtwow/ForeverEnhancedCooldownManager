@@ -1581,6 +1581,315 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Two spells of one name: GitHub issue 1 ------------------------------------------------------------
+-- The Skyborne's Read Ley Line gives two buffs both called Energized: 1259691
+-- (15 seconds) and 1270842 (15 minutes). With 1259691 on the Buffs bar, the
+-- page's search found no 1270842 ("No matches"), and adding it by ID only
+-- gave the first entry a second ID: one icon lit by either. Now it goes on
+-- pinned to its own ID ("Energized#1270842", Spells.lua S:Pin): an entry of
+-- its own, with its own icon, place, joins and removal, each container group
+-- or slot watching only its own entry's IDs, told out of combat only. The
+-- Cooldowns and Utility bars go by name, as before. (In a function of its
+-- own: this file's main chunk has little room for more locals.)
+
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B, Sp = ns.Bars, ns.Spells
+    local NAMES = { [1259691] = "Energized", [1270842] = "Energized", [1259705] = "Read Ley Line" }
+    local function Named()
+        local game = C_Spell.GetSpellName
+        C_Spell.GetSpellName = function(id) return NAMES[id] or game(id) end
+    end
+    Named()
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    local page = w.pages.bar
+    local db = ForeverEnhancedCooldownManagerDB
+    local function Search(text)
+        page.search:SetText(text)
+        S[page.search].scripts.OnTextChanged(page.search, true)
+    end
+    -- The list's Energized rows, each with its muted text, and ticked,
+    -- unticked or offered under Other spells; or the first heading when
+    -- there are none.
+    local function Rows()
+        local out, heading = {}, nil
+        for _, row in ipairs(page.rows) do
+            if S[row].shown and S[row.check].shown and (S[row.name].text or ""):find("Energized", 1, true) then
+                local muted = S[row.rank].text or ""
+                out[#out + 1] = S[row.name].text .. (muted ~= "" and (" [" .. muted .. "]") or "") .. " "
+                    .. (row.other and "offered" or row.check:GetChecked() and "ticked" or "unticked")
+            elseif S[row].shown and not S[row.check].shown then
+                heading = heading or S[row.header].text
+            end
+        end
+        return #out > 0 and table.concat(out, " | ") or tostring(heading)
+    end
+    local function Other(lookup)
+        for _, row in ipairs(page.rows) do
+            if S[row].shown and row.other == lookup then return row end
+        end
+    end
+    local function Note(frame)
+        local hint = frame.hint
+        if type(hint) == "function" then hint = hint(frame) end
+        return hint
+    end
+    local function List(key) return table.concat(ns.BarData(key).spells, ",") end
+    -- Spells remembered by name (db.custom): "Name=ids", in order.
+    local function Custom()
+        local out = {}
+        for name, ids in pairs(db.custom or {}) do out[#out + 1] = name .. "=" .. table.concat(ids, ",") end
+        table.sort(out)
+        return table.concat(out, " ")
+    end
+    local function IDs(set)
+        local list = {}
+        for id in pairs(set or {}) do list[#list + 1] = id end
+        table.sort(list)
+        return table.concat(list, ",")
+    end
+    -- What each of a bar's container groups (packed) and slots (missing ones
+    -- greyed) that's switched on watches, in order.
+    local function Watched(key)
+        local bar = B:Get(key)
+        local s, out = S[bar.container], {}
+        for i = 1, bar.groups do
+            local group = s.groups["g" .. i]
+            if group.enabled then out[#out + 1] = "g" .. i .. " " .. IDs(group.filters and group.filters.includeSpellIDs) end
+        end
+        for i = 1, ns.BUFF_SLOTS do
+            local slot = s.slots["b" .. i]
+            if slot.enabled then out[#out + 1] = "b" .. i .. " " .. IDs(slot.filters and slot.filters.includeSpellIDs) end
+        end
+        return table.concat(out, " | ")
+    end
+    -- The groups that light for these auras.
+    local function Lit(key, auras)
+        local bar = B:Get(key)
+        local s, out = S[bar.container], {}
+        s.Update(auras)
+        for i = 1, bar.groups do
+            if #s.groups["g" .. i].active > 0 then out[#out + 1] = "g" .. i end
+        end
+        return table.concat(out, " ")
+    end
+    local ENERGIZED, LONG = { id = 1259691 }, { id = 1270842 }
+
+    -- The key: a spell's name and its ID, and nothing else reads as one.
+    local name, id = Sp:Pinned("Energized#1270842")
+    local refused = {}
+    for _, key in ipairs({ "Energized", "Moonfire@2", "Energized#0", "Energized#01", "Energized#2147483648", "Energized#12a",
+        "#1270842", "Ener@gized#1270842", "Ener#gized#1270842", "item:118", "family:healing" }) do
+        if Sp:Pinned(key) then refused[#refused + 1] = key end
+    end
+    Equal(tostring(name) .. " " .. tostring(id) .. " | " .. table.concat(refused, " "), "Energized 1270842 | ",
+        "a pinned key is a spell's name, # and its ID; a plain name, a fixed rank, an item or a bad ID isn't one")
+
+    w:Select("buff")
+    Search("1259691")
+    local first = Rows()
+    Search("1270842")
+    Equal(first .. " | " .. Rows(), "Energized (ID 1259691) offered | Energized (ID 1270842) offered",
+        "neither tracked: the Buffs page's search finds each by its ID")
+    Search("1259691")
+    Other("1259691").check:Click()
+    Equal(S[w.note].text .. " " .. List("buff") .. " " .. Custom(), "Added Energized to Buffs. Energized Energized=1259691",
+        "1259691 added: kept by name, remembered by its ID, as before")
+    Search("1270842")
+    local row = Other("1270842")
+    Equal(Rows() .. " | " .. tostring(row and Note(row.check)), "Energized (ID 1270842) offered | Add Energized (ID 1270842) to Buffs"
+        .. " as its own icon, for this spell ID only.", "then 1270842 is still found (it said No matches), and says what ticking it does")
+    row.check:Click()
+    Equal(S[w.note].text .. " " .. List("buff") .. " " .. Custom(),
+        "Added Energized (ID 1270842) to Buffs. Energized,Energized#1270842 Energized=1259691",
+        "added as an entry of its own, pinned to its ID; the first keeps its own ID, and nothing more is remembered")
+    Equal(Rows(), "Energized (ID 1270842) ticked", "searched again: listed and ticked, not offered again")
+    Search("1259691")
+    Equal(Rows(), "Energized [ID 1259691] ticked", "the first, by its ID: ticked, its ID beside it")
+    Search("")
+    Equal(Rows(), "Energized [ID 1259691] ticked | Energized (ID 1270842) ticked", "the whole list: both, each ticked, told apart")
+    local bar = B:Get("buff")
+    Equal(bar.count .. " | " .. Watched("buff"), "2 | g1 1259691 | g2 1270842", "two icons on the bar, each group watching its own ID")
+    Equal(Lit("buff", { ENERGIZED }) .. " | " .. Lit("buff", { LONG }) .. " | " .. Lit("buff", { ENERGIZED, LONG }) .. " | "
+        .. Lit("buff", { { id = 1259705 } }), "g1 | g2 | g1 g2 | ", "each lights for its own buff only, both for both, neither for the racial")
+    Equal(page.icons[1].name .. " | " .. page.icons[2].name .. " | " .. Note(page.icons[2]), "Energized | Energized (ID 1270842) | Energized"
+        .. " (ID 1270842). Drag it onto another icon to swap them, or off the bar to take it off.", "the page's tray names them apart")
+    -- Typed or dropped again, each is there already, as before.
+    local said = {}
+    for _, text in ipairs({ "1270842", "1259691" }) do
+        local ok, message = B:Add("buff", text)
+        said[#said + 1] = tostring(ok) .. " " .. message
+    end
+    local _, held = B:CanAdd("buff", "1270842")
+    Equal(table.concat(said, " | ") .. " | " .. held .. " | " .. List("buff"), "true Energized (ID 1270842) is already on Buffs. | true"
+        .. " Energized is already on Buffs. | Energized (ID 1270842) is already on Buffs. | Energized,Energized#1270842",
+        "added again, each says it's on the bar already, and nothing changes")
+    -- The Cooldowns bar goes by name, as before: an ID not pinned yet is
+    -- taken in by the name's own entry there, and nothing new is pinned.
+    NAMES[1300004] = "Energized"
+    local _, cooldowns = B:CanAdd("cd", "1300004")
+    Equal(cooldowns .. " " .. tostring(Sp:Pin(1300004, "cd")) .. " " .. tostring(Sp:Pin(1300004, "util")),
+        "Drop to add Energized to Cooldowns. nil nil", "on the Cooldowns and Utility bars nothing new is pinned")
+    -- But an ID pinned already goes there as that entry: given to the
+    -- name's entry instead, it would light the first icon on Buffs for the
+    -- second buff too.
+    local _, pinnedThere = B:CanAdd("cd", "1270842")
+    local added, addedNote = B:Add("cd", "1270842")
+    Equal(pinnedThere .. " | " .. tostring(added) .. " " .. addedNote .. " | " .. List("cd") .. " | " .. Custom() .. " | "
+        .. Watched("buff"), "Drop to add Energized (ID 1270842) to Cooldowns. | true Added Energized (ID 1270842) to Cooldowns."
+        .. " | Energized#1270842 | Energized=1259691 | g1 1259691 | g2 1270842",
+        "an ID pinned on Buffs, typed on Cooldowns: its pinned entry goes there, the first still watching its own ID only")
+    B:Assign("Energized#1270842", nil)
+    -- A name too long to share with an ID after it (a shared key is 64
+    -- letters at most) goes by name, as before.
+    local long = ("Long Spell Name "):rep(4):sub(1, 60)
+    NAMES[1300001], NAMES[1300002] = long, long
+    ns.AddCustom(long, { 1300001 })
+    B:SetAura("buff", long, true)
+    local _, longNote = B:CanAdd("buff", "1300002")
+    Equal(tostring(Sp:Pin(1300002, "buff")) .. " " .. longNote, "nil Drop to add " .. long .. " to Buffs.",
+        "a 60-letter name: not pinned, it joins its name's entry")
+    B:SetAura("buff", long, false)
+    -- Another spell of a spellbook spell's name: pinned, watching its own ID
+    -- only, not the ranks the spellbook's entry watches.
+    NAMES[1300003] = "Thorns"
+    B:SetAura("buff", "Thorns", true)
+    B:Add("buff", "1300003")
+    Equal(List("buff") .. " | " .. Watched("buff"), "Energized,Energized#1270842,Thorns,Thorns#1300003 | g1 1259691 | g2 1270842"
+        .. " | g3 467,782,1075,8914,9756,9910 | g4 1300003", "beside a spellbook spell: its own ID only, not the spell's ranks")
+    B:SetAura("buff", "Thorns#1300003", false)
+    B:SetAura("buff", "Thorns", false)
+    -- Judged by its spell's own name, as any entry: a racial's buff pinned
+    -- by its ID (the tauren's Plainsrunning) shows for that race only.
+    B:SetAura("buff", "Plainsrunning#1299038", true)
+    local skyborne = tostring(Sp:ForMe("Plainsrunning#1299038", "buff"))
+    local race = _G.UnitRace
+    _G.UnitRace = function() return "Tauren", "Tauren", 6 end
+    B:Changed()
+    Equal(skyborne .. " " .. tostring(Sp:ForMe("Plainsrunning#1299038", "buff")) .. " " .. table.concat((B:Mine("buff")), ","),
+        "false true Energized,Energized#1270842,Plainsrunning#1299038", "a racial's buff pinned by ID: a tauren's, not a Skyborne's")
+    _G.UnitRace = race
+    B:SetAura("buff", "Plainsrunning#1299038", false)
+
+    -- Each its own place, joins and look.
+    B:MoveTo("buff", 2, 1)
+    Equal(List("buff") .. " | " .. Watched("buff"), "Energized#1270842,Energized | g1 1270842 | g2 1259691", "moved: the groups follow")
+    B:MoveTo("buff", 2, 1)
+    B:SetJoined("buff", 2, true)
+    Equal(bar.count .. " | " .. Watched("buff") .. " | " .. Lit("buff", { LONG }), "1 | g1 1259691,1270842 | g1",
+        "joined: one icon, lit by either")
+    B:SetJoined("buff", 2, false)
+    B:SetOption("buff", "showMissing", true)
+    B:SetOption("buff", "showNames", true)
+    Equal(Watched("buff") .. " | " .. S[bar.holders[1].label].text .. " | " .. S[bar.holders[2].label].text,
+        "b1 1259691 | b2 1270842 | Energized | Energized (ID 1270842)", "missing ones greyed: a slot each, each named")
+    B:SetOption("buff", "showNames", false)
+    B:SetOption("buff", "showMissing", false)
+    Equal(Watched("buff"), "g1 1259691 | g2 1270842", "packed again")
+
+    -- Taken off in a fight: the containers are told once it's over, the
+    -- other entry still there, still remembered.
+    Runs()
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local ok, message = B:TakeOff("buff", "Energized#1270842")
+    Equal(tostring(ok) .. " " .. message .. " " .. List("buff") .. " | " .. Watched("buff") .. " | " .. containerCallsInCombat,
+        "true Took Energized (ID 1270842) off Buffs. Energized | g1 1259691 | g2 1270842 | 0",
+        "taken off in a fight: off the list, nothing told to the containers yet")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Watched("buff") .. " | " .. Custom() .. " | " .. Lit("buff", { LONG }) .. " | [" .. Runs() .. "]",
+        "g1 1259691 | Energized=1259691 |  | []", "after it: the other watches its own ID still, and nothing lights for the long one")
+    B:Add("buff", "1270842")
+    B:Remove("buff", 1)
+    Equal(List("buff") .. " | " .. Custom() .. " | " .. Watched("buff") .. " | " .. Lit("buff", { ENERGIZED }) .. " | "
+        .. Lit("buff", { LONG }), "Energized#1270842 |  | g1 1270842 |  | g1",
+        "the first taken off: the pinned one stays, watching its own ID; the first's ID let go")
+    Search("1270842")
+    first = Rows()
+    Search("1259691")
+    Equal(first .. " | " .. Rows(), "Energized (ID 1270842) ticked | Energized (ID 1259691) offered",
+        "the pinned one ticked by its ID; the other offered again")
+    Other("1259691").check:Click()
+    Equal(List("buff") .. " | " .. Custom() .. " | " .. Watched("buff"), "Energized#1270842,Energized | Energized=1259691 | g1 1270842"
+        .. " | g2 1259691", "and goes back on by name, as the first did")
+
+    Equal(#printed .. " " .. containerCallsInCombat, "0 0", "no errors, no container told anything in a fight")
+
+    -- Kept over a reload, and on the Debuffs bar the same way.
+    local saved = db
+    Fresh()
+    ns = Load(saved)
+    B, Sp, db = ns.Bars, ns.Spells, ForeverEnhancedCooldownManagerDB
+    Named()
+    Equal(List("buff") .. " | " .. B:Get("buff").count .. " | " .. Watched("buff"), "Energized#1270842,Energized | 2 | g1 1270842"
+        .. " | g2 1259691", "after a reload: both, each watching its own ID")
+    ok, message = B:Add("debuff", "1270842")
+    local group = S[B:Get("debuff").container].groups.g1
+    Equal(tostring(ok) .. " " .. message .. " " .. List("debuff") .. " | " .. Watched("debuff") .. " | "
+        .. tostring(group.filters.isFromPlayerOrPlayerPet), "true Added Energized (ID 1270842) to Debuffs. Energized#1270842 | g1 1270842"
+        .. " | true", "on the Debuffs bar: the pinned one goes on as itself, only yours")
+    B:Add("debuff", "1259691")
+    Equal(List("debuff") .. " | " .. Watched("debuff") .. " | " .. Custom(), "Energized#1270842,Energized | g1 1270842 | g2 1259691"
+        .. " | Energized=1259691", "and the first beside it, by name")
+    Equal(#printed .. " " .. containerCallsInCombat, "0 0", "no errors, no container told anything in a fight")
+
+    -- Saved by 1.5.6: an entry kept by name watches the IDs it was given,
+    -- as it did. One given both IDs keeps one icon for both.
+    Fresh()
+    ns = Load({ useBars = true, notesSeen = "dev", everyone = "Old", custom = { Energized = { 1259691 }, Thorns = { 467 } },
+        profiles = { Old = { cd = {}, util = {}, buff = { "Energized", "Thorns" }, debuff = {}, joins = { buff = { Thorns = true } } } } })
+    B, Sp, db = ns.Bars, ns.Spells, ForeverEnhancedCooldownManagerDB
+    Named()
+    Equal(List("buff") .. " | " .. Watched("buff"), "Energized,Thorns | g1 467,782,1075,8914,9756,9910,1259691",
+        "1.5.6's saved Energized: by name, watching its ID, joined as it was")
+    ok, message = B:Add("buff", "1270842")
+    Equal(message .. " " .. List("buff") .. " | " .. Custom(), "Added Energized (ID 1270842) to Buffs. Energized,Thorns,Energized#1270842"
+        .. " | Energized=1259691 Thorns=467", "the second goes on pinned, beside it")
+    Fresh()
+    ns = Load({ useBars = true, notesSeen = "dev", everyone = "Old", custom = { Energized = { 1259691, 1270842 } },
+        profiles = { Old = { cd = {}, util = {}, buff = { "Energized" }, debuff = {}, joins = {} } } })
+    B, Sp, db = ns.Bars, ns.Spells, ForeverEnhancedCooldownManagerDB
+    Named()
+    ok, message = B:Add("buff", "1270842")
+    Equal(Watched("buff") .. " | " .. message .. " " .. List("buff"), "g1 1259691,1270842 | Energized is already on Buffs. Energized",
+        "one given both IDs before: one icon for both, as it was, and 1270842 is on the bar already")
+
+    -- Spells added by ID are remembered for every profile. With both on the
+    -- first profile's Buffs bar, another profile (another character) adding
+    -- the 15-minute one first gets it pinned too: by name it would have
+    -- made the first profile's Energized watch the 15-minute buff instead,
+    -- two icons for one buff and none for the other.
+    Fresh()
+    ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    B, Sp, db = ns.Bars, ns.Spells, ForeverEnhancedCooldownManagerDB
+    Named()
+    B:Add("buff", "1259691")
+    B:Add("buff", "1270842")
+    local firstProfile = ns.ProfileName()
+    ns.NewProfile("Second")
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    page = w.pages.bar
+    w:Select("buff")
+    Search("1270842")
+    row = Other("1270842")
+    Equal(Rows() .. " | " .. tostring(row and Note(row.check)), "Energized (ID 1270842) offered | Add Energized (ID 1270842) to Buffs"
+        .. " as its own icon, for this spell ID only.", "another profile: the 15-minute one offered pinned, the first's Energized remembered")
+    row.check:Click()
+    Equal(List("buff") .. " | " .. Custom() .. " | " .. Watched("buff"), "Energized#1270842 | Energized=1259691 | g1 1270842",
+        "added there pinned; what the first's Energized watches is kept")
+    ok, message = B:Add("buff", "1259691")
+    Equal(message .. " " .. List("buff") .. " | " .. Custom() .. " | " .. Watched("buff"), "Added Energized to Buffs."
+        .. " Energized#1270842,Energized | Energized=1259691 | g1 1270842 | g2 1259691", "then the 15-second one there by name, as the first has it")
+    ns.UseProfile(firstProfile)
+    Equal(List("buff") .. " | " .. Watched("buff"), "Energized,Energized#1270842 | g1 1259691 | g2 1270842",
+        "back on the first profile: each icon still watching its own ID")
+    Equal(#printed, 0, "no errors")
+end)()
+
 Equal(SecretMisuse[1], nil, "no secret misused anywhere")
 print = _G.print
 io.write("Aura container checks passed: " .. checks .. " assertions.\n")

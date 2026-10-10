@@ -4,7 +4,8 @@
 -- name or ID. Bars store each entry's key (a spell name, "item:<id>",
 -- "slot:<n>" or "family:<name>"), so training a new rank, swapping a trinket
 -- or carrying a better potion moves every bar along without any change to
--- the saved setup.
+-- the saved setup. Two more kinds of key carry a number after the name: a
+-- fixed rank, "Name@N", and a spell pinned to one ID, "Name#ID" (S:Pin).
 local _, ns = ...
 
 local S = {}
@@ -103,10 +104,60 @@ local function Text(value)
     return type(value) == "string" and Open(value) and value ~= "" and value or nil
 end
 
+-- Spells pinned to one ID. Two spells can share a name (the Skyborne's
+-- racial gives two buffs called Energized, 1259691 for 15 seconds and
+-- 1270842 for 15 minutes), and an entry kept by name watches every ID it
+-- was given. On the Buffs and Debuffs bars, an ID whose name is already in
+-- your lists, for another spell, goes on as an entry of its own, kept as
+-- "Energized#1270842", which watches that ID alone (and the aura of its own
+-- a passive gives). It needs nothing remembered (ns.CustomSpells): the key
+-- carries it. Spell names never hold # or @, so no key saved before means
+-- anything else now.
+local MAX_ID = 2147483647 -- the biggest spell ID
+local MAX_KEY = 64 -- the longest key a shared profile keeps (ProfileShare.lua)
+
+-- A pinned key's spell name and ID, or nil for any other key.
+local function Pinned(key)
+    if type(key) ~= "string" then return nil end
+    local name, id = key:match("^([^#@]+)#([1-9]%d*)$")
+    id = tonumber(id)
+    if not (name and id and id <= MAX_ID) then return nil end
+    return name, id
+end
+
+function S:Pinned(key)
+    return Pinned(key)
+end
+
+-- The key a spell's name and ID are pinned under, or nil when they can't be
+-- (a name too long to share with the ID after it).
+local function PinKey(name, id)
+    if type(name) ~= "string" or name == "" or name:find("[#@]") then return nil end
+    if type(id) ~= "number" or id < 1 or id > MAX_ID or id ~= math.floor(id) then return nil end
+    local key = ("%s#%d"):format(name, id)
+    return #key <= MAX_KEY and key or nil
+end
+
+-- How a pinned entry is named, in the window and under its icon.
+local function PinName(name, id)
+    return ("%s (ID %d)"):format(name, id)
+end
+
+function S:PinName(name, id)
+    return PinName(name, id)
+end
+
+-- The spell's own name in an entry's key: without a fixed rank's "@N" or a
+-- pinned ID's "#ID".
+local function Base(key)
+    return (key:gsub("@%d+$", ""):gsub("#%d+$", ""))
+end
+
 -- Every spell ID a buff of this name can carry: the ranks you know, all ranks
 -- in the game data, and its group version. A passive added by its ID also
 -- carries the aura of its own it gives (Plainsrunning's speed buff), which
--- is what lights it on the Buffs or Debuffs bar.
+-- is what lights it on the Buffs or Debuffs bar. With no name, just the IDs
+-- known and their auras (a spell pinned to one ID).
 local function BuffIDs(name, known)
     local ids, seen = {}, {}
     local function Add(list)
@@ -119,8 +170,10 @@ local function BuffIDs(name, known)
     end
     Add(known)
     local ranks = ns.RANKS or {}
-    Add(ranks[name])
-    if GROUP[name] then Add(ranks[GROUP[name]]) end
+    if name then
+        Add(ranks[name])
+        if GROUP[name] then Add(ranks[GROUP[name]]) end
+    end
     for _, id in ipairs(known or {}) do
         Add(ns.PASSIVE_BUFFS and ns.PASSIVE_BUFFS[id])
         Add(ns.PASSIVE_DEBUFFS and ns.PASSIVE_DEBUFFS[id])
@@ -331,9 +384,11 @@ end
 
 -- Anything on a bar that isn't in your spellbook or bags right now: spells
 -- added by name or ID (each keeping the IDs it was added with, as added),
--- items you've run out of (the bars leave them off until you carry one
--- again), your ammo with none equipped, and Mana Potions kept on a bar by a
--- class without mana (a profile shared with one that has it).
+-- spells pinned to one ID (watching that one), items you've run out of (the
+-- bars leave them off until you carry one again), your ammo with none
+-- equipped, and Mana Potions kept on a bar by a class without mana (a
+-- profile shared with one that has it). An added spell with one of its name
+-- pinned beside it shows its own IDs in the list, so the two read apart.
 local function ScanSaved()
     local custom = ns.CustomSpells and ns.CustomSpells() or {}
     for _, key in ipairs(ns.BAR_KEYS) do
@@ -347,12 +402,24 @@ local function ScanSaved()
                     AddFamily(familyByKey[saved])
                 elseif itemID then
                     AddItem(itemID)
+                elseif Pinned(saved) then
+                    -- Its own ID only: not its name's other ranks or group version.
+                    local name, id = Pinned(saved)
+                    Add({ key = saved, name = PinName(name, id), baseName = name, kind = "spell", line = S.LINES.added,
+                        ids = BuffIDs(nil, { id }), spellID = id, icon = C_Spell.GetSpellTexture(id), rankText = "",
+                        added = { id }, pinned = id })
                 elseif custom[saved] then
                     local ids = BuffIDs(saved, custom[saved])
                     Add({ key = saved, name = saved, kind = "spell", line = S.LINES.added, ids = ids,
                         spellID = ids[#ids], icon = C_Spell.GetSpellTexture(ids[1]), rankText = "", added = custom[saved] })
                 end
             end
+        end
+    end
+    for _, entry in ipairs(list) do
+        local plain = entry.pinned and byKey[entry.baseName]
+        if plain and plain.added and plain.rankText == "" then
+            plain.rankText = (#plain.added > 1 and "IDs " or "ID ") .. table.concat(plain.added, ", ")
         end
     end
 end
@@ -519,14 +586,17 @@ local function Untracked(name, ids, bar)
     return name .. " is passive, so there's nothing to track."
 end
 
--- The spells a bar entry is judged by: the ones it was added with, or for a
--- name with nothing else to go on (another character's spell that isn't in
--- your spellbook), the game data's IDs for that name. None for your own
--- spells, procs and items: the spellbook passes over passives.
+-- The spells a bar entry is judged by: the ones it was added with (a pinned
+-- one's ID), or for a name with nothing else to go on (another character's
+-- spell that isn't in your spellbook), the game data's IDs for that name.
+-- None for your own spells, procs and items: the spellbook passes over
+-- passives.
 local function Judged(key)
     local entry = byKey[key]
     if entry then return entry.added end
-    local name = key:gsub("@%d+$", "")
+    local _, id = Pinned(key)
+    if id then return { id } end
+    local name = Base(key)
     return ns.RANKS and ns.RANKS[name] or ns.PASSIVES and ns.PASSIVES[name]
 end
 
@@ -536,7 +606,7 @@ function S:PassiveNote(key, bar)
     if type(key) ~= "string" then return nil end
     Ready()
     local entry = byKey[key]
-    return Untracked(entry and entry.name or (key:gsub("@%d+$", "")), Judged(key), bar)
+    return Untracked(entry and entry.name or Base(key), Judged(key), bar)
 end
 
 -- The same for what "Add by name or spell ID" finds, as it would go on a bar:
@@ -567,7 +637,7 @@ end
 function S:SelfDebuffNote(text)
     if type(text) == "number" then text = tostring(text) end
     if type(text) ~= "string" then return nil end
-    local trimmed = (text:match("^%s*(.-)%s*$"):gsub("@%d+$", ""))
+    local trimmed = Base(text:match("^%s*(.-)%s*$"))
     local id, lower = tonumber(trimmed), trimmed:lower()
     for spellID, name in pairs(SELF_DEBUFFS) do
         if spellID == id or name:lower() == lower then return SelfNote(name) end
@@ -609,7 +679,7 @@ function S:ForMe(key, bar)
     if entry and not entry.added then return true end
     if ItemKey(key) then return true end
     if self:PassiveNote(key, bar) then return false end
-    local name = key:gsub("@%d+$", "")
+    local name = Base(key)
     local classes = ns.SPELL_CLASSES and ns.SPELL_CLASSES[name]
     local procs = ProcClasses()[name]
     local races = ns.SPELL_RACES and ns.SPELL_RACES[name]
@@ -643,7 +713,8 @@ function S:Icon(key)
     Ready()
     local entry = byKey[key]
     if entry and entry.icon then return entry.icon end
-    local ids = type(key) == "string" and ns.RANKS and ns.RANKS[(key:gsub("@%d+$", ""))]
+    local _, pinned = Pinned(key)
+    local ids = pinned and { pinned } or type(key) == "string" and ns.RANKS and ns.RANKS[Base(key)]
     local icon = ids and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(ids[1])
     return icon or 134400
 end
@@ -725,4 +796,35 @@ function S:Resolve(text)
     local name = info and Text(info.name)
     if name and info.spellID then return name, { info.spellID } end
     return nil, "No spell called \"" .. text .. "\" was found."
+end
+
+-- The key a spell ID (typed, searched or dragged) goes on a bar under when
+-- it's pinned already in your lists (on any bar, so the Cooldowns bar never
+-- hands its ID to the entry of its name too), or on the Buffs or Debuffs bar
+-- when it's another spell of a name in your lists: pinned to that ID, when
+-- the entry of that name watches none of the auras it would (the second
+-- Energized). A name only another profile has (remembered for every
+-- profile, ns.CustomSpells) counts too, so adding the other one first here
+-- never changes what that profile's entry watches. Nil when it goes by its
+-- name, as before: a name not in your lists yet, an ID whose aura its entry
+-- watches already (the Flurry talent, whose buff is the Flurry proc's; a
+-- mage's Regeneration where a troll's is saved), and any other ID on the
+-- Cooldowns and Utility bars.
+function S:Pin(id, bar)
+    if type(id) ~= "number" then return nil end
+    local name = C_Spell.GetSpellName and Text(C_Spell.GetSpellName(id))
+    local key = name and PinKey(name, id)
+    if not key then return nil end
+    Ready()
+    if byKey[key] then return key end
+    if not (ns.AURA_BARS and ns.AURA_BARS[bar]) then return nil end
+    local entry = byKey[name]
+    local remembered = not entry and ns.CustomSpells and ns.CustomSpells()[name]
+    if not (entry or remembered) then return nil end
+    local watched = {}
+    for _, each in ipairs(entry and (entry.ids or {}) or BuffIDs(name, remembered)) do watched[each] = true end
+    for _, aura in ipairs(BuffIDs(nil, { id })) do
+        if watched[aura] then return nil end
+    end
+    return key
 end

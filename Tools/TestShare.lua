@@ -960,6 +960,9 @@ function H.Sane(ns, shared)
             if key == "cd" or key == "util" then cooldown[v] = true end
             if v:find("^item:") and not v:find("^item:[1-9]%d*$") then return "an item key " .. v end
             if v:find("^slot:") and v ~= "slot:13" and v ~= "slot:14" then return "a slot key " .. v end
+            -- A spell pinned to one ID: a name, # and a whole ID, nothing else.
+            local pinned = v:match("^[^#@]+#([1-9]%d*)$")
+            if v:find("#", 1, true) and not (pinned and ID(tonumber(pinned))) then return "a pinned key " .. v end
         end
         count = count + #list
     end
@@ -980,7 +983,7 @@ function H.Sane(ns, shared)
         if v ~= "long" or not Word(name) then return "a style" end
     end
     for name, ids in pairs(shared.added) do
-        if not on[name] or #ids < 1 or #ids > 10 then return "added " .. tostring(name) end
+        if not on[name] or #ids < 1 or #ids > 10 or name:find("#", 1, true) then return "added " .. tostring(name) end
         for _, id in pairs(ids) do
             if not ID(id) then return "an added ID" end
         end
@@ -1327,6 +1330,94 @@ do
     Equal(B:Get("cd").count .. " " .. B:Get("util").count, "1 1", "and only yours go on the bars")
     SlashCmdList.FECM("")
     Equal(tostring(S[FECMFrame.nav.cd.count].text), "1", "the window's bar list counts yours only")
+end
+
+-- Two spells of one name, out and back (GitHub issue 1) ----------------------------------------------
+-- A spell pinned to one ID ("Energized#1270842", beside the Energized added
+-- by 1259691) goes in a string by its key alone, with no added IDs: the key
+-- carries its ID. Read back and imported on another account, each is an
+-- entry of its own again, watching its own ID, joins and all, and that
+-- account shares the very same string. A string made by 1.5.6 (by the
+-- released code, commit 7ba1dda) still reads and imports as it did, and the
+-- second Energized then goes on pinned beside its one. A key that only
+-- looks pinned is left out, as are added IDs for a pinned key.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    local game = C_Spell.GetSpellName
+    local function Named(id) return ({ [1259691] = "Energized", [1270842] = "Energized" })[id] or game(id) end
+    C_Spell.GetSpellName = Named
+    local function IDs(set)
+        local list = {}
+        for id in pairs(set or {}) do list[#list + 1] = id end
+        table.sort(list)
+        return table.concat(list, ",")
+    end
+    -- Each of a bar's icons' spell IDs.
+    local function Slots(bar)
+        local out = {}
+        for i = 1, bar.count do out[i] = IDs(bar.slotIDs[i]) end
+        return table.concat(out, " | ")
+    end
+    B:Add("buff", "1259691")
+    B:SetAura("buff", "Thorns", true)
+    B:Add("buff", "1270842")
+    B:SetJoined("buff", 3, true)
+    B:Add("debuff", "1270842")
+    local profile = H.ProfileNow(ns)
+    Equal(profile:find('"Energized#1270842"', 1, true) ~= nil and H.Text(ns.CustomSpells()), '{["Energized"]={[1]=1259691}}',
+        "on your bars: the pinned one on Buffs (joined to Thorns) and Debuffs, the first remembered by its ID")
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. table.concat(shared.lists.buff, ",") .. " | "
+        .. table.concat(shared.lists.debuff, ",") .. " | " .. H.Text(shared.joins.buff) .. " | " .. H.Text(shared.added),
+        '|0 | Energized,Thorns,Energized#1270842 | Energized#1270842 | {["Energized#1270842"]=true} | {["Energized"]={[1]=1259691}}',
+        "read back: both by their keys, the join, and added IDs only for the one kept by name")
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local ok, message = ns2.ProfileShare.Import("Energized", ns2.ProfileShare.Read(text), true)
+    local B2 = ns2.Bars
+    Equal(tostring(ok) .. " " .. message .. " | " .. H.Text(ns2.CustomSpells()), 'true Imported Energized with its look and layout, and'
+        .. ' switched to it. | {["Energized"]={[1]=1259691}}', "imported on another account: the first's ID comes, nothing for the pinned one")
+    Equal(H.ProfileNow(ns2), profile, "every list and join the same")
+    Equal(Slots(B2:Get("buff")) .. " || " .. Slots(B2:Get("debuff")), "1259691 | 467,782,1075,8914,9756,9910,1270842 || 1270842",
+        "each its own icon again, watching its own ID (the pinned one joined to Thorns)")
+    Equal(ns2.ProfileShare.Export(), text, "and it shares the very same string back")
+
+    -- Made by 1.5.6, with Energized added by 1259691 on the Buffs bar and
+    -- Mark of the Wild joined to it.
+    local OLD = "FECM1:e1MxOmFTMzpkZXZTMTpje1M5OkVuZXJnaXplZFtOMTI1OTY5MTtdfVMxOmd7UzE6YntTNDpidWZmW11TMjpjZFtdUzY6ZGVidWZmW11TNDp1dGls"
+        .. "W119UzE6a1tdUzE6bHtTNTphYm92ZVtdUzU6YmVsb3dbUzI6Y2RTNDp1dGlsUzQ6YnVmZlM2OmRlYnVmZl1TMzpnYXBOMDtTNjpoaWRkZW5bXVMyOm9uRlM3OnNw"
+        .. "YWNpbmdOMDt9UzE6c1tdfVMxOmp7UzQ6YnVmZntTMTY6TWFyayBvZiB0aGUgV2lsZFR9fVMxOmx7UzQ6YnVmZltTNjpUaG9ybnNTOTpFbmVyZ2l6ZWRTMTY6TWFy"
+        .. "ayBvZiB0aGUgV2lsZF1TMjpjZFtTODpNb29uZmlyZV1TNjpkZWJ1ZmZbUzg6TW9vbmZpcmVdUzQ6dXRpbFtdfX0="
+    character = { guid = "Player-1-0078", name = "Orla", realm = "Zephras" }
+    local ns3 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local old = ns3.ProfileShare.Read(OLD)
+    Equal(H.Sane(ns3, old) .. "|" .. old.skipped .. " | " .. table.concat(old.lists.buff, ",") .. " | " .. H.Text(old.joins.buff) .. " | "
+        .. H.Text(old.added) .. " | " .. ns3.ProfileShare.Describe(old), '|0 | Thorns,Energized,Mark of the Wild | {["Mark of the Wild"]=true}'
+        .. ' | {["Energized"]={[1]=1259691}} | Holds 5 bar entries, with its look and layout.', "a 1.5.6 string reads as it did")
+    ok = ns3.ProfileShare.Import("Old", old, false)
+    local B3 = ns3.Bars
+    Equal(tostring(ok) .. " " .. H.Text(ns3.CustomSpells()) .. " | " .. Slots(B3:Get("buff")),
+        'true {["Energized"]={[1]=1259691}} | 467,782,1075,8914,9756,9910 | 1259691',
+        "and imports as it did: Energized by name, watching its ID")
+    C_Spell.GetSpellName = Named
+    local said
+    ok, said = B3:Add("buff", "1270842")
+    Equal(said .. " " .. table.concat(ns3.BarData("buff").spells, ",") .. " | " .. Slots(B3:Get("buff")), "Added Energized (ID 1270842)"
+        .. " to Buffs. Thorns,Energized,Mark of the Wild,Energized#1270842 | 467,782,1075,8914,9756,9910 | 1259691 | 1270842",
+        "the second goes on pinned beside it, an icon of its own")
+    Equal(H.Text(ns3.ProfileShare.Read(ns3.ProfileShare.Export()).added), '{["Energized"]={[1]=1259691}}',
+        "shared again: added IDs only for the one by name")
+
+    -- Keys that only look pinned, and added IDs for a pinned key: left out.
+    local odd = P.Read(H.String({ l = { buff = { "Energized#0", "Energized#1270842", "#5", "Ener@gized#7", "Energized#99999999999",
+        "Energized#12a", "Ener#gized#3" } }, c = { ["Energized#1270842"] = { 5 }, Energized = { 1 } } }))
+    Equal(H.Sane(ns, odd) .. "|" .. table.concat(odd.lists.buff, ",") .. " | " .. H.Text(odd.added) .. " | " .. odd.skipped,
+        "|Energized#1270842 | {} | 8", "a bad ID, no name, a rank mark, an ID past the biggest, or # twice: left out, and no IDs for a pinned key")
+    Equal(#printed, 0, "no errors")
 end
 
 -- Broken, cut short, huge, nested, wrong and hostile strings ------------------------------------------

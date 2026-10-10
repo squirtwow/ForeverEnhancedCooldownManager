@@ -215,11 +215,13 @@ end
 
 local families
 -- A bar entry's key as the bars keep them (Spells.lua): a spell's name,
--- "Name@N" for one of its ranks, "item:<id>", "slot:13" or "slot:14" (the
--- trinkets), "ammo", or a healthstone or potion family. Nil for anything else.
+-- "Name@N" for one of its ranks, "Name#ID" for a spell pinned to one ID,
+-- "item:<id>", "slot:13" or "slot:14" (the trinkets), "ammo", or a
+-- healthstone or potion family. Nil for anything else.
 local function Entry(value)
     local key = Word(value)
     if not key then return nil end
+    if key:find("#", 1, true) then return ns.Spells:Pinned(key) and key or nil end
     if key:find("^item:") then
         local id = key:match("^item:([1-9]%d?%d?%d?%d?%d?%d?%d?%d?%d?)$")
         return id and ID(tonumber(id)) and key or nil
@@ -411,10 +413,11 @@ local function Clean(data)
         end
     end
     for _ in pairs(shared.pick) do shared.picks = shared.picks + 1 end
-    -- The spell IDs of entries added by name or ID, for the names on its bars.
+    -- The spell IDs of entries added by name or ID, for the names on its
+    -- bars. A spell pinned to one ID carries it in its key, and takes none.
     for name, ids in pairs(Table(data.c)) do
         local kept = {}
-        if type(name) == "string" and listed[name] then
+        if type(name) == "string" and listed[name] and not ns.Spells:Pinned(name) then
             for _, id in ipairs(Table(ids)) do
                 if ID(id) and #kept < MAX_IDS then kept[#kept + 1] = id end
             end
@@ -542,7 +545,9 @@ function P.Export()
     for _, key in ipairs(ns.BAR_KEYS) do
         data.l[key] = Entries(ns.ActiveList(key))
         for _, entry in ipairs(data.l[key]) do
-            if type(custom[entry]) == "table" and #IDs(custom[entry]) > 0 then added[entry] = IDs(custom[entry]) end
+            if not ns.Spells:Pinned(entry) and type(custom[entry]) == "table" and #IDs(custom[entry]) > 0 then
+                added[entry] = IDs(custom[entry])
+            end
         end
     end
     for key in pairs(ns.AURA_BARS) do

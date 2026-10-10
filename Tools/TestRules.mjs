@@ -35,6 +35,8 @@ test('the .toc loads every file once, each after what it needs', () => {
   const at = name => toc.indexOf(name);
   // The pulse watches with the bars' spell list; its page follows Raid Timers' under More, both before the window.
   assert.ok(at('Spells.lua') < at('Pulse.lua') && at('Bars.lua') < at('Pulse.lua'), 'Pulse.lua after Spells.lua and Bars.lua');
+  // A share string's keys are checked with Spells.lua's own reading of a pinned key.
+  assert.ok(at('Spells.lua') < at('ProfileShare.lua'), 'ProfileShare.lua after Spells.lua');
   assert.ok(at('RaidTimersPage.lua') < at('PulsePage.lua') && at('PulsePage.lua') < at('Window.lua'),
     'PulsePage.lua after RaidTimersPage.lua, before Window.lua');
   assert.equal(at('Core.lua'), 0, 'Core.lua first');

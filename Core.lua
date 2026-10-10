@@ -1479,6 +1479,8 @@ function ns.SetPulseStyle(key, style)
 end
 
 -- Spells added by name or ID that aren't in your spellbook: name -> spell IDs.
+-- A spell pinned to one ID ("Energized#1270842", Spells.lua) carries its ID
+-- in its key, so it's never in here.
 function ns.CustomSpells()
     if not db then return {} end
     if type(db.custom) ~= "table" then db.custom = {} end

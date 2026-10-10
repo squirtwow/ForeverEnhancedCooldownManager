@@ -496,6 +496,7 @@ function ns.BuildBarPage(window, page, width)
         -- and one you carry none of (an item too) that it shows once you do.
         window:Hint(row.check, function()
             local bar, name = ns.BAR_NAMES[state.bar], row.label or ""
+            if row.other and row.pinned then return "Add " .. name .. " to " .. bar .. " as its own icon, for this spell ID only." end
             if row.other then return "Add " .. name .. " to " .. bar .. ", by name: it isn't in your spellbook." end
             if row.check:GetChecked() then return "Take " .. name .. " off " .. bar .. "." end
             local entry = row.spell and ns.Spells:Find(row.spell)
@@ -534,7 +535,7 @@ function ns.BuildBarPage(window, page, width)
         row:SetPoint("TOPLEFT", 0, -y)
         row.header:SetText(text:upper())
         row.header:Show()
-        row.spell, row.other = nil, nil
+        row.spell, row.other, row.pinned = nil, nil, nil
         for _, part in ipairs({ row.check, row.icon, row.name, row.rank, row.where }) do part:Hide() end
         row:Show()
         y = y + HEADER_ROW
@@ -562,7 +563,7 @@ function ns.BuildBarPage(window, page, width)
 
     local function Spell(entry, indent, rankText)
         local row = Entry(entry.icon, indent and entry.rankText or entry.name, rankText, indent)
-        row.spell, row.other, row.label = entry.key, nil, entry.name
+        row.spell, row.other, row.label, row.pinned = entry.key, nil, entry.name, nil
         if ns.AURA_BARS[state.bar] then
             row.check:SetChecked(B:HasAura(state.bar, entry.key))
         else
@@ -597,8 +598,9 @@ function ns.BuildBarPage(window, page, width)
             -- stays off your bar (unticking it here would take it off
             -- theirs). Nor is it offered under Other spells, but for an ID
             -- that isn't passive given for a passive's name (the mage's
-            -- Regeneration, where a troll's is saved).
-            if not ns.Spells:PassiveNote(entry.key, state.bar) then known[entry.name] = true end
+            -- Regeneration, where a troll's is saved). Known by name and by
+            -- key: a spell pinned to one ID is known by both.
+            if not ns.Spells:PassiveNote(entry.key, state.bar) then known[entry.name], known[entry.key] = true, true end
             if Fits(entry) and ns.Spells:ForMe(entry.key, state.bar)
                 and (text == "" or entry.name:lower():find(text, 1, true) or (id and entry.spellID == id)) then
                 if text == "" and entry.line ~= line then
@@ -613,14 +615,18 @@ function ns.BuildBarPage(window, page, width)
         end
         -- Searching also finds spells outside your spellbook, by name or ID.
         -- Not a passive this bar can't track (Underwater Breathing), which
-        -- would only be turned away.
+        -- would only be turned away. On the Buffs and Debuffs bars, an ID
+        -- for another spell of a name already in your lists (the second
+        -- Energized) is offered too: it goes on pinned to that ID.
         if #text >= 3 or id then
             local others = {}
             if id then
                 local name = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
-                if type(name) == "string" and not known[name] and not ns.Spells:AddNote(text, state.bar) then
-                    others[1] = { name = name, label = name .. " (ID " .. id .. ")", lookup = text,
-                        icon = C_Spell.GetSpellTexture(id) }
+                local pinned = type(name) == "string" and ns.Spells:Pin(id, state.bar)
+                if type(name) == "string" and not known[pinned or name] and not ns.Spells:AddNote(text, state.bar) then
+                    local label = name .. " (ID " .. id .. ")"
+                    others[1] = { name = pinned and label or name, label = label, lookup = text,
+                        icon = C_Spell.GetSpellTexture(id), pinned = pinned or nil }
                 end
             else
                 for _, found in ipairs(ns.Spells:Suggest(text, 8)) do
@@ -634,7 +640,7 @@ function ns.BuildBarPage(window, page, width)
                 Header("Other spells")
                 for _, other in ipairs(others) do
                     local row = Entry(other.icon, other.label, "")
-                    row.spell, row.other, row.label = nil, other.lookup, other.name
+                    row.spell, row.other, row.label, row.pinned = nil, other.lookup, other.name, other.pinned
                     row.check:SetChecked(false)
                 end
             end

@@ -1366,7 +1366,10 @@ end
 -- (and what was remembered before, when the ID given joins those), and
 -- whether it's on the bar already with nothing new. B:Add and B:CanAdd both
 -- go by it, so what the footer says while a spell is held over a bar is
--- what dropping it does.
+-- what dropping it does. On the Buffs or Debuffs bar, an ID for another
+-- spell of a name in your lists is kept pinned to that ID (Spells.lua
+-- S:Pin): an entry of its own, with nothing remembered, and the entry of
+-- its name left watching what it did.
 local function Vet(key, text)
     -- A debuff on you (Weakened Soul): no bar shows it by name, the Buffs
     -- or Debuffs bar's tick does.
@@ -1374,16 +1377,19 @@ local function Vet(key, text)
     if selfNote then return false, selfNote end
     local found, ids, given = ns.Spells:Resolve(text)
     if not found then return false, ids end
+    local pinned = given and ns.Spells:Pin(given, key)
+    local shown = pinned and ns.Spells:PinName(found, given)
+    if pinned then found, ids = pinned, nil end
     local entry = ns.Spells:Find(found)
     local fits, why = B:Fits(key, entry, given ~= nil)
     if not fits then return false, why end
     local passive = ns.Spells:AddNote(text, key)
     if passive then return false, passive end
     if not Space(key, found) then return false, Full(key) end
-    local plan = { name = found, shown = entry and entry.name or found }
+    local plan = { name = found, shown = entry and entry.name or shown or found }
     if ids and not entry then
         plan.remember = ids
-    elseif given and entry and entry.added then
+    elseif given and entry and entry.added and not pinned then
         local merged, known = {}, false
         for i, id in ipairs(entry.added) do
             merged[i] = id
@@ -1411,7 +1417,9 @@ end
 -- gives the name it's kept under. A passive is turned away as dragged or
 -- typed, by its own ID: the troll's Regeneration isn't the mage's. An ID
 -- given for a name already added (the troll's Regeneration, saved by another
--- character) is remembered with it, so the mage's goes on by its ID.
+-- character) is remembered with it, so the mage's goes on by its ID; on the
+-- Buffs or Debuffs bar, one its entry doesn't watch goes on pinned instead,
+-- as an icon of its own (the second Energized).
 function B:Add(key, text)
     local ok, plan = Vet(key, text)
     if not ok then return false, plan end
@@ -1595,12 +1603,14 @@ local function Named(name)
     return entry and entry.name or name
 end
 
--- An entry dragged off a bar: true and what happened.
+-- An entry dragged off a bar: true and what happened. Named before it goes:
+-- one in no other list (a spell pinned to one ID) leaves your list with it.
 function B:TakeOff(key, name)
     local index = IndexOf(key, name)
     if not index then return false end
+    local shown = Named(name)
     self:Remove(key, index)
-    return true, "Took " .. Named(name) .. " off " .. ns.BAR_NAMES[key] .. "."
+    return true, "Took " .. shown .. " off " .. ns.BAR_NAMES[key] .. "."
 end
 
 -- Why an entry can't go on a bar where it wouldn't show for you: a buff added
