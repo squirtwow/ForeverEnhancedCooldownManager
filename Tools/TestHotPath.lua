@@ -1324,6 +1324,25 @@ do
     Fire("BAG_UPDATE_DELAYED")
     NextFrame(ns)
     Equal(tostring(watchers["family:healing"].itemID), "858", "the family moves on to the potion you carry, and its pulse with it")
+    -- On no bar (or with your bars off) nothing there moves it on: the pulse
+    -- does, its icon too, still only looking at the items again. As in
+    -- Forever Enhanced Cooldown Pulse.
+    do
+        B:Assign("family:healing", nil)
+        Fire("BAG_UPDATE_DELAYED")
+        NextFrame(ns)
+        local icon = C_Item.GetItemIconByID
+        C_Item.GetItemIconByID = function(id) if id == 118 then return 135929 end return icon(id) end
+        itemCount[118], itemCount[858] = 1, 0
+        game, addon = Measure(function()
+            Fire("BAG_UPDATE_DELAYED")
+            NextFrame(ns)
+        end)
+        local potion = watchers["family:healing"]
+        Equal(potion.itemID .. " " .. potion.icon .. " | " .. Counts(addon, "Watched", "Restock"), "118 135929 | 0 1",
+            "on no bar, the Lesser drunk and a Minor carried: the pulse moves the family on, icon and all, without working it out again")
+        C_Item.GetItemIconByID = icon
+    end
     -- A spell learned: worked out again.
     game, addon = Measure(function()
         Fire("SPELLS_CHANGED")

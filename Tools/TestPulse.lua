@@ -1467,6 +1467,28 @@ do
     Fire("BAG_UPDATE_DELAYED")
     Tick(P)
     Equal(tostring(watchers["item:6948"] ~= nil), "true", "back in your bags: watched again, the window shut")
+    -- Run out of again with /ccm shut: kept (only your bags changed), and no
+    -- pulse for it. Then the list read again without it (your bars laid out
+    -- again, by a change to one): no longer listed, it's asked about by its
+    -- own ID, and still says nothing. As in Forever Enhanced Cooldown Pulse.
+    do
+        bagItems[1], itemCount[6948] = nil, 0
+        Fire("BAG_UPDATE_DELAYED")
+        Tick(P)
+        local kept = watchers["item:6948"]
+        clock = clock + 5
+        Done(kept.cooldown)
+        local before = tostring(P:Showing())
+        ns.Bars:Rebuild()
+        clock = clock + 5
+        Done(kept.cooldown)
+        Equal(before .. " | " .. tostring(kept == watchers["item:6948"]) .. " " .. tostring(ns.Spells:Find("item:6948")) .. " "
+            .. tostring(P:Showing()), "nil | true nil nil",
+            "run out of, /ccm shut: no pulse; the list read again without it: still watched, no longer listed, and still no pulse")
+        bagItems[1], itemCount[6948] = { itemID = 6948, hyperlink = "|cffffffff|Hitem:6948::|h[Hearthstone]|h|r", iconFileID = 134414 }, 1
+        Fire("BAG_UPDATE_DELAYED")
+        Tick(P)
+    end
     w:Show()
     RowFor(page, "item:6948").check:Click()
     bagItems[1], itemCount[6948] = nil, 0

@@ -1582,8 +1582,8 @@ do
 end
 
 -- Two spells of one name: GitHub issue 1 ------------------------------------------------------------
--- The Skyborne's Read Ley Line gives two buffs both called Energized: 1259691
--- (15 seconds) and 1270842 (15 minutes). With 1259691 on the Buffs bar, the
+-- The Skyborne's Read Ley Line gives two buffs both called Energized: 1270842
+-- (15 seconds) and 1259691 (15 minutes). With 1259691 on the Buffs bar, the
 -- page's search found no 1270842 ("No matches"), and adding it by ID only
 -- gave the first entry a second ID: one icon lit by either. Now it goes on
 -- pinned to its own ID ("Energized#1270842", Spells.lua S:Pin): an entry of
@@ -1859,8 +1859,8 @@ end
 
     -- Spells added by ID are remembered for every profile. With both on the
     -- first profile's Buffs bar, another profile (another character) adding
-    -- the 15-minute one first gets it pinned too: by name it would have
-    -- made the first profile's Energized watch the 15-minute buff instead,
+    -- the 15-second one first gets it pinned too: by name it would have
+    -- made the first profile's Energized watch the 15-second buff instead,
     -- two icons for one buff and none for the other.
     Fresh()
     ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
@@ -1877,16 +1877,481 @@ end
     Search("1270842")
     row = Other("1270842")
     Equal(Rows() .. " | " .. tostring(row and Note(row.check)), "Energized (ID 1270842) offered | Add Energized (ID 1270842) to Buffs"
-        .. " as its own icon, for this spell ID only.", "another profile: the 15-minute one offered pinned, the first's Energized remembered")
+        .. " as its own icon, for this spell ID only.", "another profile: the 15-second one offered pinned, the first's Energized remembered")
     row.check:Click()
     Equal(List("buff") .. " | " .. Custom() .. " | " .. Watched("buff"), "Energized#1270842 | Energized=1259691 | g1 1270842",
         "added there pinned; what the first's Energized watches is kept")
     ok, message = B:Add("buff", "1259691")
     Equal(message .. " " .. List("buff") .. " | " .. Custom() .. " | " .. Watched("buff"), "Added Energized to Buffs."
-        .. " Energized#1270842,Energized | Energized=1259691 | g1 1270842 | g2 1259691", "then the 15-second one there by name, as the first has it")
+        .. " Energized#1270842,Energized | Energized=1259691 | g1 1270842 | g2 1259691", "then the 15-minute one there by name, as the first has it")
     ns.UseProfile(firstProfile)
     Equal(List("buff") .. " | " .. Watched("buff"), "Energized,Energized#1270842 | g1 1259691 | g2 1270842",
         "back on the first profile: each icon still watching its own ID")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Spells whose aura has another ID -----------------------------------------------------------------
+-- Some spells put no aura on anyone themselves, or not the one a bar would
+-- show: a rogue's poison is made by one spell and put on the target by
+-- another of its name (Deadly Poison 2835 makes it, 2818 is the debuff),
+-- Bloodrage's rage buff is 29131, a totem's buff on everyone near it is
+-- its own spell, and the Skyborne's Read Ley Line and Skysight set off
+-- Energized and Elemental Blessing. The game data links each spell to those
+-- auras (Ranks.lua ns.SPELL_AURAS, and by the aura's name ns.NAME_AURAS),
+-- so its entry lights for them on the Buffs and Debuffs bars and in the
+-- Cooldowns bar's buff and debuff times. The ranks of one aura are one
+-- icon (ns.AURA_FAMILIES: a totem's buff, a talent's aura, Well Fed from
+-- any food), as in 1.5.6, while two spells of one name (the two Energized)
+-- still go on one each. A hunter's pet abilities are the pet's own spells,
+-- and the trap debuffs build 70291 renamed keep every rank. (In a function
+-- of its own: this file's main chunk has little room for more locals.)
+;(function()
+    local data = {}
+    assert(loadfile("Ranks.lua"))("ForeverEnhancedCooldownManager", data)
+    local function Has(list, ...)
+        local set = {}
+        for _, id in ipairs(list or {}) do set[id] = true end
+        for _, id in ipairs({ ... }) do
+            if not set[id] then return false end
+        end
+        return true
+    end
+    local function Joined(list) return list and table.concat(list, ",") or "none" end
+    local function FamilyOf(id)
+        for _, ids in ipairs(data.AURA_FAMILIES) do
+            if Has(ids, id) then return ids end
+        end
+        return nil
+    end
+    -- From the game data (build 70338).
+    local links = data.SPELL_AURAS
+    Equal(Joined(links[2835]) .. " | " .. Joined(links[13220]) .. " | " .. Joined(links[3421]) .. " | " .. Joined(links[2687]) .. " | "
+        .. Joined(links[1856]) .. " | " .. Joined(links[1238122]) .. " | " .. Joined(links[5246]) .. " | " .. Joined(links[11129]),
+        "2818,434312 | 13218,13222,13223,13224 | 3409,11201,25809 | 29131 | 11327,11329 | 19675 | 20511 | 28682",
+        "a poison's maker leads to its debuff (every rank's, for a name the later ranks share), Bloodrage to its rage buff,"
+        .. " Vanish to its stealth, Feral Charge to its root, Intimidating Shout to its stun, Combustion to its stacks")
+    Equal(Joined(links[1259705]) .. " | " .. Joined(links[1259686]) .. " | " .. Joined(links[8512]) .. " | " .. Joined(links[8227])
+        .. " | " .. Joined(links[400574]) .. " | " .. Joined(links[1240827]) .. " | " .. Joined(links[1499]) .. " | " .. Joined(links[13809]),
+        "1259691,1270842 | 1259688,1270893 | 8515,10609,10612 | 8230,8250,10521,15036 | 400573 | 401877,1240848,1240849"
+        .. " | 3355,14308,14309 | 13810", "Read Ley Line to both Energized, Skysight to both Elemental Blessing, a totem to its"
+        .. " buff (not Windfury's moment's extra attack, 8516), Arcane Blast to its stacks, Prayer of Mending to every rank's buff,"
+        .. " the traps to theirs")
+    Equal(Joined(FamilyOf(8076)) .. " | " .. Joined(FamilyOf(19506)) .. " | " .. tostring(Has(FamilyOf(1248406), 1248420, 19709))
+        .. " | " .. tostring(FamilyOf(1259691)) .. " " .. tostring(FamilyOf(1270842)) .. " " .. tostring(FamilyOf(1259688)),
+        "8076,8162,8163,10441,25362 | 19506,20905,20906,1299346,1299348 | true | nil nil nil",
+        "one aura in several IDs: a totem buff's ranks, a talent aura's, Well Fed from any food; never the two Energized"
+        .. " or the two Elemental Blessing")
+    Equal(Joined(FamilyOf(8182)) .. " | " .. Joined(FamilyOf(8185)) .. " | " .. Joined(FamilyOf(10596)),
+        "8182,10476,10477 | 8185,10534,10535 | 10596,10598,10599",
+        "a totem's Frost, Fire and Nature Resistance too, though a hunter's pet's passives hold those names")
+    local only = data.AURA_ONLY
+    Equal(tostring(only[1259691] and only[1270842] and only[1248406] and only[18118]) .. " | " .. tostring(only[1264482]) .. " "
+        .. tostring(only[20925]) .. " " .. tostring(only[17767]) .. " " .. tostring(only[1310786]), "true | nil nil nil nil",
+        "auras no one learns: Energized, Well Fed, Aftermath's debuff; not a bat's Sonic Blast, nor the talents Holy Shield and"
+        .. " Sniper Shot, nor a voidwalker's Consume Shadows")
+    Equal(Joined(data.RANKS.Bite) .. " | " .. Joined(data.RANKS["Furious Howl"]) .. " | " .. tostring(data.SPELL_CLASSES.Bite) .. " "
+        .. tostring(data.SPELL_CLASSES.Dash) .. " | " .. tostring(data.COOLDOWNS[17261]) .. " " .. tostring(data.COOLDOWNS[17268]),
+        "17253,17255,17256,17257,17258,17259,17260,17261 | 24604,24605,24603,24597 | HUNTER DRUID HUNTER | 10 nil",
+        "a pet ability's ranks are the pet's own spells (not the hunter's Beast Training ones), still a hunter's, with their cooldown")
+    Equal(tostring(data.RANKS["Immolation Trap Effect"]) .. " | " .. Joined(data.RANKS["Immolation Trap"]),
+        "nil | 13795,13797,14298,14302,14299,14303,14300,14304,14301,14305",
+        "build 70291 renamed Immolation Trap Effect: its burns are Immolation Trap's now")
+
+    local NAMES = { [2818] = "Deadly Poison", [13218] = "Wound Poison", [13224] = "Wound Poison", [29131] = "Bloodrage",
+        [1259691] = "Energized", [1270842] = "Energized", [1259688] = "Elemental Blessing", [1270893] = "Elemental Blessing",
+        [8076] = "Strength of Earth", [8162] = "Strength of Earth", [25362] = "Strength of Earth", [19506] = "Trueshot Aura",
+        [20906] = "Trueshot Aura", [1248406] = "Well Fed", [1248420] = "Well Fed", [19709] = "Well Fed",
+        [401877] = "Prayer of Mending", [1240849] = "Prayer of Mending", [3355] = "Freezing Trap", [14309] = "Freezing Trap",
+        [8182] = "Frost Resistance", [10477] = "Frost Resistance" }
+    for name, ids in pairs(data.RANKS) do
+        for _, id in ipairs(ids) do NAMES[id] = NAMES[id] or name end
+    end
+    local ns, B, Sp, db
+    local petKnows = {}
+    local function Start(class, saved, racials)
+        Fresh()
+        for _, item in ipairs(racials or {}) do table.insert(book[1].items, item) end
+        local game = C_Spell.GetSpellName
+        C_Spell.GetSpellName = function(id) return NAMES[id] or game(id) end
+        _G.UnitClass = function() return class, class end
+        -- What your pet knows, in the pet's spellbook.
+        _G.Enum.SpellBookSpellBank.Pet = 1
+        C_SpellBook.IsSpellKnown = function(id, bank) return bank == 1 and petKnows[id] == true end
+        ns = Load(saved or { useBars = true, notesSeen = "dev", helpSeen = true })
+        B, Sp, db = ns.Bars, ns.Spells, ForeverEnhancedCooldownManagerDB
+    end
+    local function List(key) return table.concat(ns.BarData(key).spells, ",") end
+    local function Custom(name) return Joined(db.custom and db.custom[name]) end
+    local function IDs(set)
+        local list = {}
+        for id in pairs(set or {}) do list[#list + 1] = id end
+        table.sort(list)
+        return table.concat(list, ",")
+    end
+    -- What each of a bar's container groups that's switched on watches.
+    local function Watched(key)
+        local bar = B:Get(key)
+        local s, out = S[bar.container], {}
+        for i = 1, bar.groups do
+            local group = s.groups["g" .. i]
+            if group.enabled then out[#out + 1] = "g" .. i .. " " .. IDs(group.filters and group.filters.includeSpellIDs) end
+        end
+        return table.concat(out, " | ")
+    end
+    -- The groups that light for these auras, by ID: buffs on you, or your
+    -- debuffs on the target.
+    local function Lit(key, ...)
+        local bar = B:Get(key)
+        local s, auras, out = S[bar.container], {}, {}
+        for _, id in ipairs({ ... }) do auras[#auras + 1] = { id = id, harmful = key == "debuff", mine = key == "debuff" } end
+        s.Update(auras)
+        for i = 1, bar.groups do
+            if #s.groups["g" .. i].active > 0 then out[#out + 1] = "g" .. i end
+        end
+        return table.concat(out, " ")
+    end
+    local function Said(key, text)
+        local ok, message = B:Add(key, text)
+        return tostring(ok) .. " " .. message
+    end
+
+    -- A rogue's poisons, added by name on the Debuffs bar (the page's search
+    -- offers them): each lights for its debuff on the target. Wound Poison's
+    -- later ranks are spells of other names (Wound Poison II...), but their
+    -- debuffs are all called Wound Poison: by name, it lights for every one.
+    Start("ROGUE", nil, { { name = "Vanish", subName = "Rank 1", spellID = 1856, iconID = 1 },
+        { name = "Vanish", subName = "Rank 2", spellID = 1857, iconID = 1 } })
+    Equal(Said("debuff", "Deadly Poison") .. " | " .. Custom("Deadly Poison") .. " | " .. Watched("debuff"),
+        "true Added Deadly Poison to Debuffs. | 2835 | g1 2818,2835,434312", "Deadly Poison by name: it watches its debuff too")
+    Equal(Lit("debuff", 2818) .. " | " .. tostring(Sp:Pin(2818, "debuff")) .. " " .. Said("debuff", "2818") .. " | " .. List("debuff")
+        .. " | " .. Watched("debuff"), "g1 | nil true Added Deadly Poison to Debuffs. | Deadly Poison | g1 2818,2835,434312",
+        "your Deadly Poison on the target lights it; its ID typed after goes in with it, not on an icon of its own")
+    Said("debuff", "Wound Poison")
+    Equal(Custom("Wound Poison") .. " | " .. Watched("debuff") .. " | " .. Lit("debuff", 13224) .. " | " .. Lit("debuff", 13218),
+        "13220 | g1 2818,2835,434312 | g2 13218,13220,13222,13223,13224 | g2 | g2", "Wound Poison by name lights for rank 4's debuff, and rank 1's")
+    -- Vanish's stealth is its own spell too: its buff time on the Cooldowns
+    -- bar watches it, for Vanish and for Vanish fixed at rank 1.
+    B:Assign("Vanish", "cd")
+    B:Assign("Vanish@1", "cd")
+    B:SetOption("cd", "showAuras", true)
+    local slots = S[B:Get("cd").auraContainers.p].slots
+    Equal(IDs(slots.p1.filters.includeSpellIDs) .. " | " .. IDs(slots.p2.filters.includeSpellIDs), "1856,1857,11327,11329 | 1856,11327,11329",
+        "Vanish's buff time watches its stealth, at either rank")
+    Equal(#printed, 0, "no errors")
+
+    -- A warrior's Bloodrage on the Buffs bar, and its buff time over its icon
+    -- on the Cooldowns bar.
+    Start("WARRIOR")
+    Said("buff", "Bloodrage")
+    Equal(Watched("buff") .. " | " .. Lit("buff", 29131) .. " | " .. tostring(Sp:Pin(29131, "buff")) .. " " .. List("buff"),
+        "g1 2687,29131 | g1 | nil Bloodrage", "Bloodrage lights for its rage buff, and that buff's ID isn't pinned beside it")
+    B:Assign("Bloodrage", "cd")
+    B:SetOption("cd", "showAuras", true)
+    local made = B:Get("cd").auraContainers
+    local p1 = made and S[made.p].slots.p1
+    Equal(tostring(p1 and p1.enabled) .. " " .. IDs(p1 and p1.filters.includeSpellIDs), "true 2687,29131",
+        "on the Cooldowns bar its buff time watches the rage buff too")
+    Equal(#printed, 0, "no errors")
+
+    -- Ranks of one aura join one icon, as in 1.5.6: a totem's buff and a
+    -- talent's aura added by one rank's ID light for every rank, and the
+    -- next rank's ID goes in with it. Well Fed from any food the same. The
+    -- two Energized are two spells: the second still goes on as its own.
+    Start("WARRIOR")
+    Equal(Said("buff", "8076") .. " | " .. Custom("Strength of Earth") .. " | " .. Watched("buff") .. " | "
+        .. Lit("buff", 25362), "true Added Strength of Earth to Buffs. | 8076 | g1 8076,8162,8163,10441,25362 | g1",
+        "Strength of Earth by its first rank: lit by every rank")
+    Equal(tostring(Sp:Pin(25362, "buff")) .. " | " .. Said("buff", "25362") .. " | " .. List("buff") .. " | " .. Custom("Strength of Earth")
+        .. " | " .. B:Get("buff").count, "nil | true Added Strength of Earth to Buffs. | Strength of Earth | 8076,25362 | 1",
+        "rank 5 by its ID: not pinned, it joins the one icon")
+    Said("buff", "19506")
+    Equal(tostring(Sp:Pin(20906, "buff")) .. " | " .. Said("buff", "20906") .. " | " .. List("buff") .. " | " .. Lit("buff", 1299346),
+        "nil | true Added Trueshot Aura to Buffs. | Strength of Earth,Trueshot Aura | g2", "Trueshot Aura's ranks the same")
+    Said("buff", "1248406")
+    Equal(tostring(Sp:Pin(1248420, "buff")) .. " | " .. Said("buff", "1248420") .. " | " .. List("buff") .. " | "
+        .. Lit("buff", 19709), "nil | true Added Well Fed to Buffs. | Strength of Earth,Trueshot Aura,Well Fed | g3",
+        "Well Fed from another food joins the one icon, lit by any food's")
+    Said("buff", "1259691")
+    Equal(Said("buff", "1270842") .. " | " .. List("buff") .. " | " .. Sp:Find("Energized#1270842").name,
+        "true Added Energized (ID 1270842) to Buffs. | Strength of Earth,Trueshot Aura,Well Fed,Energized,Energized#1270842"
+        .. " | Energized (ID 1270842)", "the second Energized still goes on as its own icon, named by its ID")
+    Equal(#printed, 0, "no errors")
+
+    -- The totem's Frost Resistance shares its name with a hunter's pet's
+    -- passive, which is what the data's ranks hold under it: its own ranks
+    -- still join one icon.
+    Start("WARRIOR")
+    Equal(Said("buff", "8182") .. " | " .. tostring(Sp:Pin(10477, "buff")) .. " | " .. Said("buff", "10477") .. " | " .. List("buff")
+        .. " | " .. Custom("Frost Resistance") .. " | " .. Lit("buff", 10477) .. " | " .. B:Get("buff").count,
+        "true Added Frost Resistance to Buffs. | nil | true Added Frost Resistance to Buffs. | Frost Resistance | 8182,10477 | g1 | 1",
+        "Frost Resistance by rank 1's ID, then rank 3's: one icon, lit by either")
+    Equal(#printed, 0, "no errors")
+
+    -- Prayer of Mending by name, whoever casts it on you: its casts put no
+    -- aura on anyone, and later ranks name only the first rank's buff.
+    Start("WARRIOR")
+    Said("buff", "Prayer of Mending")
+    Equal(Lit("buff", 401877) .. " | " .. Lit("buff", 1240849), "g1 | g1", "lit by the first rank's buff, and the third's")
+
+    -- The Skyborne's racials in the spellbook, on the Buffs bar: each lights
+    -- for both buffs it gives, and the two Energized still go on one each.
+    Start("DRUID", nil, { { name = "Read Ley Line", subName = "Racial", spellID = 1259705, iconID = 1 },
+        { name = "Skysight", subName = "Racial", spellID = 1259686, iconID = 1 } })
+    B:SetAura("buff", "Read Ley Line", true)
+    B:SetAura("buff", "Skysight", true)
+    Equal(Watched("buff") .. " | " .. Lit("buff", 1270842) .. " | " .. Lit("buff", 1259691) .. " | " .. Lit("buff", 1259688) .. " | "
+        .. Lit("buff", 1270893), "g1 1259691,1259705,1270842 | g2 1259686,1259688,1270893 | g1 | g1 | g2 | g2",
+        "Read Ley Line lights for either Energized, Skysight for either Elemental Blessing")
+    Said("buff", "1259691")
+    Equal(Said("buff", "1270842") .. " | " .. List("buff") .. " | " .. Custom("Energized"),
+        "true Added Energized (ID 1270842) to Buffs. | Read Ley Line,Skysight,Energized,Energized#1270842 | 1259691",
+        "beside them, the two Energized still go on one each")
+    Equal(#printed, 0, "no errors")
+
+    -- A hunter's pet abilities: on the Cooldowns bar each goes by the pet's
+    -- own spell, the one with the cooldown. Added by its ID, that ID; by
+    -- name, the highest rank your pet knows; saved by a Beast Training
+    -- spell before (Bite's 17254), the pet's highest rank.
+    petKnows = { [17261] = true, [14921] = true }
+    Start("HUNTER")
+    Said("cd", "17261")
+    Equal(Custom("Bite") .. " " .. Sp:Find("Bite").spellID .. " | " .. Said("util", "Growl") .. " | " .. Custom("Growl") .. " "
+        .. Sp:Find("Growl").spellID, "17261 17261 | true Added Growl to Utility. | 14921 14921",
+        "pet Bite by its ID goes by that ID; Growl by name, by your pet's (not a druid's 6795)")
+    local calls = {}
+    for _, id in ipairs(cooldownCalls) do calls[id] = true end
+    Equal(tostring(calls[17261]) .. " " .. tostring(calls[14921]) .. " " .. tostring(calls[17268]), "true true nil",
+        "their cooldowns asked of the pet's spells, not a Beast Training one")
+    Said("buff", "Furious Howl")
+    Said("debuff", "Scorpid Poison")
+    Equal(Lit("buff", 24604) .. " | " .. Lit("debuff", 24587) .. " | " .. Custom("Scorpid Poison"),
+        "g1 | g1 | 24587", "by name, Furious Howl lights for its buff and Scorpid Poison for its debuff, every rank")
+    petKnows = {}
+    Start("HUNTER", { useBars = true, notesSeen = "dev", everyone = "Old", custom = { Bite = { 17254 } },
+        profiles = { Old = { cd = { "Bite" }, util = {}, buff = {}, debuff = {}, joins = {} } } })
+    Equal(Sp:Find("Bite").spellID .. " " .. tostring(Sp:ForMe("Bite", "cd")), "17261 true",
+        "Bite saved by its Beast Training spell: the pet's highest rank")
+    -- With no pet out, Growl by name is still the pet's: the data's highest
+    -- rank with a cooldown, not a druid's first.
+    Equal(Said("util", "Growl") .. " | " .. Custom("Growl") .. " " .. Sp:Find("Growl").spellID,
+        "true Added Growl to Utility. | 14921 14921", "Growl by name with the pet away: the pet's top rank")
+    -- Saved by name before (1.5.7 remembered the data's first rank: a
+    -- druid's Growl and Dash, a warrior's Charge), or at a rank the pet out
+    -- now has passed (Bite at rank 4): each goes by the rank the pet knows.
+    petKnows = { [14921] = true, [27685] = true, [23110] = true, [17261] = true }
+    Start("HUNTER", { useBars = true, notesSeen = "dev", everyone = "Old",
+        custom = { Growl = { 6795 }, Charge = { 100 }, Dash = { 1850 }, Bite = { 17257 } },
+        profiles = { Old = { cd = { "Bite" }, util = { "Growl", "Charge", "Dash" }, buff = {}, debuff = {}, joins = {} } } })
+    B:RefreshAll()
+    calls = {}
+    for _, id in ipairs(cooldownCalls) do calls[id] = true end
+    Equal(Sp:Find("Growl").spellID .. " " .. Sp:Find("Charge").spellID .. " " .. Sp:Find("Dash").spellID .. " " .. Sp:Find("Bite").spellID
+        .. " | " .. tostring(calls[14921] and calls[27685] and calls[23110] and calls[17261]) .. " "
+        .. tostring(calls[6795] or calls[100] or calls[1850] or calls[17257]), "14921 27685 23110 17261 | true nil",
+        "saved by a druid's or warrior's rank, or the pet's old one: the pet's own spells, and their cooldowns asked of them")
+    Equal(#printed, 0, "no errors")
+
+    -- Saved by the trap debuffs' old names (build 70291 dropped "Effect"):
+    -- each still watches every rank, and is still a hunter's only.
+    local old = { useBars = true, notesSeen = "dev", everyone = "Old",
+        custom = { ["Immolation Trap Effect"] = { 13797 }, ["Freezing Trap Effect"] = { 3355 } },
+        profiles = { Old = { cd = {}, util = {}, buff = {}, debuff = { "Immolation Trap Effect", "Freezing Trap Effect" }, joins = {} } } }
+    Start("HUNTER", old)
+    local burns, freezes = Sp:Find("Immolation Trap Effect").ids, Sp:Find("Freezing Trap Effect").ids
+    Equal(tostring(Has(burns, 13797, 14298, 14299, 14300, 14301)) .. " " .. tostring(Has(freezes, 3355, 14308, 14309)) .. " | "
+        .. Lit("debuff", 14301) .. " | " .. Lit("debuff", 14309), "true true | g1 | g2",
+        "each lights for its top rank, as for its first")
+    Start("DRUID", old)
+    Equal(tostring(Sp:ForMe("Immolation Trap Effect", "debuff")) .. " " .. B:Get("debuff").count, "false 0",
+        "a druid sharing the profile doesn't see them")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Added where it can't show ------------------------------------------------------------------------
+-- On the Cooldowns and Utility pages a buff's ID (Energized, 1259691) was
+-- offered under Other spells, and ticking it said "Added Energized to
+-- Cooldowns." Then it was gone: the game never says you know a buff, so it
+-- showed for no one, with no row, no icon and no Clear left to take it off,
+-- kept in the profile for good. Another class's spell searched by name (a
+-- druid's Sprint) did the same. Neither is offered now, adding either is
+-- turned away in a drag's words, and Clear takes what was stuck before
+-- (but not another class's spell, which shows for the characters that have
+-- it). Where the game can't say what you know, it goes on as before. (In a
+-- function of its own: this file's main chunk has little room for more locals.)
+;(function()
+    local NAMES = { [1259691] = "Energized", [1270842] = "Energized", [1259705] = "Read Ley Line", [11305] = "Sprint",
+        [19244] = "Spell Lock", [12975] = "Last Stand", [1264482] = "Sonic Blast", [20925] = "Holy Shield", [18118] = "Aftermath" }
+    local ns, B, w, page, db
+    -- A Skyborne druid; with knows, the game says you know your spellbook's
+    -- spells (and nothing else), as it does, and your pet the spells in pet.
+    local function Start(saved, knows, class, pet)
+        Fresh()
+        local game = C_Spell.GetSpellName
+        C_Spell.GetSpellName = function(id) return NAMES[id] or game(id) end
+        if class then _G.UnitClass = function() return class, class end end
+        if knows then
+            local known = {}
+            for _, tab in ipairs(book) do
+                for _, item in ipairs(tab.items) do
+                    if not item.future then known[item.spellID] = true end
+                end
+            end
+            _G.Enum.SpellBookSpellBank.Pet = 1
+            C_SpellBook.IsSpellKnown = function(id, bank)
+                if bank == 1 then return (pet or {})[id] == true end
+                return bank == 0 and known[id] == true
+            end
+        end
+        ns = Load(saved or { useBars = true, notesSeen = "dev", helpSeen = true })
+        B, db = ns.Bars, ForeverEnhancedCooldownManagerDB
+        SlashCmdList.FECM("")
+        w = FECMFrame
+        page = w.pages.bar
+    end
+    local function Search(text)
+        page.search:SetText(text)
+        S[page.search].scripts.OnTextChanged(page.search, true)
+    end
+    -- The list's rows holding the text, ticked, unticked or offered under
+    -- Other spells; or the first heading when there are none.
+    local function Rows(match)
+        local out, heading = {}, nil
+        for _, row in ipairs(page.rows) do
+            if S[row].shown and S[row.check].shown and (S[row.name].text or ""):lower():find(match, 1, true) then
+                out[#out + 1] = S[row.name].text .. " " .. (row.other and "offered" or row.check:GetChecked() and "ticked" or "unticked")
+            elseif S[row].shown and not S[row.check].shown then
+                heading = heading or S[row.header].text
+            end
+        end
+        return #out > 0 and table.concat(out, " | ") or tostring(heading)
+    end
+    local function Note(frame)
+        local hint = frame.hint
+        if type(hint) == "function" then hint = hint(frame) end
+        return hint
+    end
+    local function Said(key, text)
+        local ok, message = B:Add(key, text)
+        return tostring(ok) .. " " .. message
+    end
+    local function List(key) return table.concat(ns.BarData(key).spells, ",") end
+    local function Custom()
+        local out = {}
+        for name, ids in pairs(db.custom or {}) do out[#out + 1] = name .. "=" .. table.concat(ids, ",") end
+        table.sort(out)
+        return table.concat(out, " ")
+    end
+
+    -- Neither offered on the Cooldowns or Utility page, and turned away
+    -- however it's added: by ID, by name, or held over the bar.
+    Start(nil, true)
+    w:Select("cd")
+    Search("1259691")
+    local energized = Rows("energized")
+    Search("sprint")
+    Equal(energized .. " | " .. Rows("sprint"), "NO MATCHES | NO MATCHES",
+        "the Cooldowns page offers neither a buff's ID nor a rogue's spell")
+    Equal(table.concat({ Said("cd", "1259691"), Said("util", "1259691"), Said("cd", "Sprint"), select(2, B:CanAdd("util", "1259691")) }, " | "),
+        "false Energized can't show on the Cooldowns bar for you. | false Energized can't show on the Utility bar for you."
+        .. " | false Sprint can't show on the Cooldowns bar for you. | Energized can't show on the Utility bar for you.",
+        "added anyway: turned away in a drag's words, and held over the bar it says the same")
+    Equal(List("cd") .. "|" .. List("util") .. "|" .. Custom(), "||", "nothing put on, nothing remembered")
+    -- Your own spells still go on, learned or not; the buff still goes on
+    -- the Buffs bar, where it shows.
+    Search("hurric")
+    Equal(Rows("hurricane") .. " | " .. Said("cd", "Hurricane") .. " | " .. table.concat((B:Mine("cd")), ","),
+        "Hurricane offered | true Added Hurricane to Cooldowns. | Hurricane",
+        "a druid spell not learned yet is still offered, and goes on (greyed)")
+    w:Select("buff")
+    Search("1259691")
+    Equal(Rows("energized") .. " | " .. Said("buff", "1259691"), "Energized (ID 1259691) offered | true Added Energized to Buffs.",
+        "on the Buffs page the buff is offered and goes on, as before")
+    Equal(select(2, B:Transfer("buff", "cd", "Energized")), "Energized can't show on the Cooldowns bar for you.",
+        "dragged from there onto the Cooldowns bar: turned away, as it always was")
+    Equal(#printed, 0, "no errors")
+
+    -- Stuck before: Energized by name and pinned on cooldown bars, beside a
+    -- rogue's Sprint in the shared profile. Clear takes the buffs, which
+    -- show for no one, and leaves Sprint for the rogue.
+    local stuck = { useBars = true, notesSeen = "dev", helpSeen = true, everyone = "Old",
+        custom = { Energized = { 1259691 }, Sprint = { 11305 } },
+        profiles = { Old = { cd = { "Energized", "Sprint", "Moonfire" }, util = { "Energized#1270842" }, buff = { "Energized" },
+            debuff = {}, joins = {} } } }
+    Start(stuck, true)
+    Equal(table.concat((B:Mine("cd")), ",") .. " | " .. table.concat(B:Leftovers("cd"), ",") .. " | " .. table.concat(B:Leftovers("util"), ",")
+        .. " | " .. table.concat(B:Leftovers("buff"), ","), "Moonfire | Energized | Energized#1270842 | ",
+        "Moonfire is yours; the two Energized on cooldown bars show for no one; on the Buffs bar it shows")
+    w:Select("util")
+    Equal(S[page.count].text .. " | " .. tostring(S[page.clear].shown) .. " | " .. Note(page.clear),
+        "Empty | true | Take every icon off Utility, and buffs or debuffs added to it that can't show there. It asks for a second"
+        .. " click. (Needs testing)", "nothing of yours on Utility, but Clear shows, and says what it takes")
+    page.clear:Click()
+    page.clear:Click()
+    Equal(List("util") .. " | " .. S[w.note].text .. " | " .. tostring(S[page.clear].shown), " | Utility cleared. | false",
+        "cleared: the pinned Energized gone, and the button with it")
+    w:Select("cd")
+    Equal(Note(page.clear), "Take every icon off Cooldowns, and buffs or debuffs added to it that can't show there. It asks for a"
+        .. " second click. (Needs testing)", "the Cooldowns page's Clear says so too")
+    page.clear:Click()
+    page.clear:Click()
+    Equal(List("cd") .. " | " .. List("buff") .. " | " .. Custom(), "Sprint | Energized | Energized=1259691 Sprint=11305",
+        "Moonfire and Energized cleared; the rogue's Sprint stays, and so does Energized on the Buffs bar")
+    Equal(tostring(S[page.clear].shown) .. " " .. Note(page.clear), "false Take every icon off Cooldowns. It asks for a second click.",
+        "nothing left to take: no Clear, and its note as it was")
+    Start(stuck, true, "ROGUE")
+    Equal(table.concat((B:Mine("cd")), ",") .. " " .. tostring(ns.Spells:ForMe("Sprint", "cd")), "Sprint true", "the rogue still sees Sprint")
+    Equal(#printed, 0, "no errors")
+
+    -- Shared with a hunter and a paladin: the bat's Sonic Blast and the
+    -- talent Holy Shield, kept by ID, are spells someone knows, though the
+    -- data names no class for them, so a druid's Clear leaves them; a debuff
+    -- no one learns (Aftermath's), ticked on Utility before, goes.
+    local shared = { useBars = true, notesSeen = "dev", helpSeen = true, everyone = "Old",
+        custom = { ["Sonic Blast"] = { 1264482 }, ["Holy Shield"] = { 20925 }, Aftermath = { 18118 } },
+        profiles = { Old = { cd = { "Sonic Blast" }, util = { "Holy Shield", "Aftermath" }, buff = {}, debuff = {}, joins = {} } } }
+    Start(shared, true)
+    Equal("[" .. table.concat((B:Mine("cd")), ",") .. "] [" .. table.concat(B:Leftovers("cd"), ",") .. "] ["
+        .. table.concat(B:Leftovers("util"), ",") .. "]", "[] [] [Aftermath]", "none of it the druid's; only Aftermath's debuff a leftover")
+    w:Select("util")
+    Equal(Note(page.clear), "Take every icon off Utility, and buffs or debuffs added to it that can't show there. It asks for a second"
+        .. " click. (Needs testing)", "Clear says it takes debuffs too")
+    page.clear:Click()
+    page.clear:Click()
+    B:Clear("cd")
+    Equal(List("cd") .. " | " .. List("util") .. " | " .. Custom(), "Sonic Blast | Holy Shield | Holy Shield=20925 Sonic Blast=1264482",
+        "cleared: Aftermath's debuff gone; the hunter's Sonic Blast and the paladin's Holy Shield stay")
+    Start(shared, true, "HUNTER", { [1264482] = true })
+    Equal(table.concat((B:Mine("cd")), ",") .. " " .. tostring(ns.Spells:Leftover("Sonic Blast", "cd")), "Sonic Blast false",
+        "the hunter, his bat out, still has it")
+
+    -- What you or your pet don't know yet still goes on the Cooldowns bar,
+    -- shown once known, as before: the felhunter's Spell Lock while a
+    -- warlock's imp is out, Last Stand before a warrior takes the talent.
+    -- The page offers each by its ID.
+    Start(nil, true, "WARLOCK")
+    w:Select("cd")
+    Search("19244")
+    Equal(Rows("spell lock") .. " | " .. Said("cd", "19244") .. " | " .. tostring(ns.Spells:ForMe("Spell Lock", "cd")),
+        "Spell Lock (ID 19244) offered | true Added Spell Lock to Cooldowns. | false",
+        "the felhunter's Spell Lock with the imp out: offered and added, hidden until the felhunter's out")
+    Equal(Said("util", "Spell Lock") .. " | " .. List("cd") .. " | " .. List("util"), "true Added Spell Lock to Utility. |  | Spell Lock",
+        "added again by name on Utility, still hidden: it moves there")
+    Start(db, true, "WARLOCK", { [19244] = true })
+    Equal(table.concat((B:Mine("util")), ","), "Spell Lock", "the felhunter out: it shows")
+    Start(nil, true, "WARRIOR")
+    w:Select("cd")
+    Search("12975")
+    Equal(Rows("last stand") .. " | " .. Said("cd", "12975"), "Last Stand (ID 12975) offered | true Added Last Stand to Cooldowns.",
+        "Last Stand before the talent's taken: offered and added")
+    Equal(#printed, 0, "no errors")
+
+    -- Where the game can't say what you know, a buff's ID goes on the
+    -- Cooldowns bar as before, and shows (ticked, so it can be taken off).
+    Start(nil, false)
+    w:Select("cd")
+    Search("1259691")
+    Equal(Rows("energized") .. " | " .. Said("cd", "1259691") .. " | " .. table.concat((B:Mine("cd")), ","),
+        "Energized (ID 1259691) offered | true Added Energized to Cooldowns. | Energized", "the game can't say: offered and added, and shown")
     Equal(#printed, 0, "no errors")
 end)()
 

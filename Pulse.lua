@@ -644,13 +644,19 @@ end
 -- the list of your spells and items was read again since (or waits to be),
 -- so only the items are looked at again (a healthstone or potion family
 -- moves on to the one you carry, its icon with it), then every watcher fed.
--- Your spells wait for your spellbook to change, or a tick.
+-- Your spells wait for your spellbook to change, or a tick. A family is
+-- moved on here, as Forever Enhanced Cooldown Pulse's pulse does, not left
+-- to your bars: with them off, or the family on none of them, nothing else
+-- would.
 function P:Restock()
     if built == nil or ns.Spells:Changed(built) then return self:Rebuild() end
     for key, watch in pairs(watchers) do
         if watch.itemID and not watch.slot then
             local entry = ns.Spells:Find(key)
-            if entry then watch.icon, watch.itemID = entry.icon, entry.itemID end
+            if entry then
+                if entry.family then ns.Spells:Pick(entry) end
+                watch.icon, watch.itemID = entry.icon, entry.itemID
+            end
         end
     end
     self:Feed()
@@ -678,8 +684,11 @@ end
 -- it's off, the interface is hidden, it's just after a login, reload or
 -- loading screen, this one was only just told, or it's an item you carry
 -- none of now (your bars hide it too; unknown still pulses), or a trinket
--- whose slot pulses for it. Items sharing a cooldown pulse once: the
--- second finds the first showing.
+-- whose slot pulses for it. A bag item no longer listed (the list read
+-- again since its watcher was made, say as your bars were laid out again
+-- after a change to one) is asked about by its own ID, as Forever Enhanced
+-- Cooldown Pulse's is. Items sharing a cooldown pulse once: the second
+-- finds the first showing.
 function P:Done(watch)
     if not (watch and self:On()) then return end
     local now = GetTime()
@@ -687,7 +696,10 @@ function P:Done(watch)
     if watch.last and now - watch.last < self.AGAIN then return end
     watch.last = now
     if UIParent and not UIParent:IsVisible() then return end
-    if watch.itemID and not watch.slot and ns.Spells:Carries(ns.Spells:Find(watch.key)) == false then return end
+    if watch.itemID and not watch.slot
+        and ns.Spells:Carries(ns.Spells:Find(watch.key) or { kind = "item", itemID = watch.itemID }) == false then
+        return
+    end
     if watch.itemID and not watch.slot and SlotWatched(watch.itemID) then return end
     self:Queue(watch.icon, watch.shared and ("cd:" .. watch.shared) or watch.key, nil, self:StyleOf(watch.key))
 end

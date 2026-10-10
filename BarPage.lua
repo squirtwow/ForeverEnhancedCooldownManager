@@ -83,8 +83,14 @@ function ns.BuildBarPage(window, page, width)
     end)
     window:Hint(clear, function()
         local name = ns.BAR_NAMES[state.bar]
-        return state.armed == state.bar and ("Click again to take every icon off " .. name .. ".")
-            or ("Take every icon off " .. name .. ". It asks for a second click.")
+        -- Buffs or debuffs added before they were turned away, which show
+        -- there for no one, go too (B:Leftovers): said only while there are any.
+        local also, untested = "", ""
+        if #B:Leftovers(state.bar) > 0 then
+            also, untested = ", and buffs or debuffs added to it that can't show there", " (Needs testing)"
+        end
+        return state.armed == state.bar and ("Click again to take every icon off " .. name .. also .. "." .. untested)
+            or ("Take every icon off " .. name .. also .. ". It asks for a second click." .. untested)
     end)
     page.clear = clear
 
@@ -615,22 +621,27 @@ function ns.BuildBarPage(window, page, width)
         end
         -- Searching also finds spells outside your spellbook, by name or ID.
         -- Not a passive this bar can't track (Underwater Breathing), which
-        -- would only be turned away. On the Buffs and Debuffs bars, an ID
-        -- for another spell of a name already in your lists (the second
+        -- would only be turned away, nor one that wouldn't show here for you
+        -- (another class's spell, a buff's ID on the Cooldowns page), which
+        -- is turned away too. On the Buffs and Debuffs bars, an ID for
+        -- another spell of a name already in your lists (the second
         -- Energized) is offered too: it goes on pinned to that ID.
         if #text >= 3 or id then
             local others = {}
             if id then
                 local name = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
                 local pinned = type(name) == "string" and ns.Spells:Pin(id, state.bar)
-                if type(name) == "string" and not known[pinned or name] and not ns.Spells:AddNote(text, state.bar) then
+                if type(name) == "string" and not known[pinned or name] and not ns.Spells:AddNote(text, state.bar)
+                    and B:WouldShow(state.bar, text) then
                     local label = name .. " (ID " .. id .. ")"
                     others[1] = { name = pinned and label or name, label = label, lookup = text,
                         icon = C_Spell.GetSpellTexture(id), pinned = pinned or nil }
                 end
             else
-                for _, found in ipairs(ns.Spells:Suggest(text, 8)) do
-                    if not known[found.name] and not ns.Spells:AddNote(found.name, state.bar) then
+                -- Eight at most, from more names, as some may not show here.
+                for _, found in ipairs(ns.Spells:Suggest(text, 24)) do
+                    if #others < 8 and not known[found.name] and not ns.Spells:AddNote(found.name, state.bar)
+                        and B:WouldShow(state.bar, found.name) then
                         others[#others + 1] = { name = found.name, label = found.name, lookup = found.name,
                             icon = found.icon or (found.spellID and C_Spell.GetSpellTexture(found.spellID)) }
                     end
@@ -715,7 +726,9 @@ function ns.BuildBarPage(window, page, width)
         count:SetText(#spells == 0 and "Empty" or (#spells .. " " .. word .. (#spells == 1 and "" or "s")
             .. ", drag to reorder"))
         clear:SetLabel(state.armed == key and "Click again to clear" or ("Clear " .. name))
-        clear:SetShown(#spells > 0 or state.armed == key)
+        -- Also while only buffs that show there for no one are left, so they
+        -- can go (B:Leftovers).
+        clear:SetShown(#spells > 0 or state.armed == key or #B:Leftovers(key) > 0)
         RefreshTray()
         size:Set(data.size)
         spacing:Set(data.spacing)

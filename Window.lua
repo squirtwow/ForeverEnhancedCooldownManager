@@ -372,7 +372,7 @@ local function BuildLook(window, page, width)
     end
     local thick = Choice("Thick edges", "thickEdges", -142,
         "A 2px black edge round your bars instead of 1px (in their own colour for Outline). Your cast bar, swing timer, combo"
-        .. " points, resource display and Tracked Bars, and the icons beside them." .. UNTESTED, Reshade, FACES_X)
+        .. " points, resource display and Tracked Bars, and the icons beside them.", Reshade, FACES_X)
     local darkness = T:Slider(options, "Darkness", ns.BAR_DARKNESS, 5, inner - KEYS_X, function(value)
         ns.Set("barDarkness", value)
         Reshade()
@@ -380,7 +380,7 @@ local function BuildLook(window, page, width)
     end, DARK_LABEL)
     darkness:SetPoint("TOPLEFT", KEYS_X, -176)
     window:Hint(darkness, "How dark the empty part of your bars is: 0 as it's always been, 100 solid black, with Glass's shine"
-        .. " kept to the fill. Your cast bar, swing timer, combo points, resource display and Tracked Bars." .. UNTESTED)
+        .. " kept to the fill. Your cast bar, swing timer, combo points, resource display and Tracked Bars.")
     window.darkness, window.thickEdges = darkness, thick
 
     -- Each Tracked Bar in a colour of its own.

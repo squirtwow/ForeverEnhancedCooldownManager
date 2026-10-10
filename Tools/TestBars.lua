@@ -1931,7 +1931,7 @@ Equal(ns.Spells:Find("item:2698"), nil, "recipes left out")
 Equal(ns.Spells:Resolve("thorns"), "Thorns", "names match whatever the case")
 local key, ids = ns.Spells:Resolve("Power Word: Fortitude")
 Equal(key, "Power Word: Fortitude", "another class's spell found in the game data")
-Equal(ids[1], 1243, "remembered by its ID")
+Equal(ids[1], 10938, "remembered by its ID: its highest rank, as no one here knows one")
 Equal(select(2, ns.Spells:Resolve("99999999")), "No spell has ID 99999999.", "unknown IDs explained")
 Equal(ns.Spells:Resolve("16870"), "Clearcasting", "IDs of listed spells map to them")
 Equal(select(2, ns.Spells:Resolve("   ")), "Type a spell name or ID first.", "empty input explained")
@@ -2094,7 +2094,7 @@ Equal(#printed, 0, "no errors")
 kept = ForeverEnhancedCooldownManagerDB
 Environment(true)
 ns = Load(kept)
-Equal(ns.CustomSpells()["Power Word: Fortitude"][1], 1243, "added spells kept over a reload")
+Equal(ns.CustomSpells()["Power Word: Fortitude"][1], 10938, "added spells kept over a reload")
 Equal(ns.BarData("buff").spells[1], "Power Word: Fortitude", "with their bar")
 Equal(ns.Spells:Find("item:118").name, "Minor Healing Potion", "items on a bar stay listed when your bags run out")
 ns.Bars:SetAura("buff", "Power Word: Fortitude", false)
@@ -3066,11 +3066,19 @@ ns.BUFF_SLOTS = 2
 Equal(tostring(B:SetAura("buff", "Thorns", true)) .. " " .. tostring(B:SetAura("buff", "Mark of the Wild", true))
     .. " " .. tostring(B:SetAura("buff", "Clearcasting", true)), "true true false", "a rogue's buffs don't use up your slots")
 ns.BUFF_SLOTS = 16
--- Added by name, another class's spell stays off your bars too; a buff added by
--- name stays, since it can land on you whoever casts it. A debuff has to be yours.
-B:Add("util", "Sinister Strike")
-B:Add("buff", "Blessing of Might")
-B:Add("debuff", "Garrote")
+-- Added by name, another class's spell would stay off your bars too, so it's
+-- turned away, saying why (it used to go on hidden, with nothing left in the
+-- window to take it off); a buff added by name goes on, since it can land on
+-- you whoever casts it. A debuff has to be yours.
+do
+    local said = {}
+    for _, add in ipairs({ { "util", "Sinister Strike" }, { "buff", "Blessing of Might" }, { "debuff", "Garrote" } }) do
+        local ok, message = B:Add(add[1], add[2])
+        said[#said + 1] = tostring(ok) .. " " .. message
+    end
+    Equal(table.concat(said, " | "), "false Sinister Strike can't show on the Utility bar for you. | true Added Blessing of Might"
+        .. " to Buffs. | false Garrote can't show on the Debuffs bar for you.", "a rogue's spell or debuff turned away; a paladin's buff added")
+end
 Equal(#(B:Mine("util")) .. " " .. B:Get("util").count .. " | " .. tostring(ns.Spells:ForMe("Blessing of Might", "buff"))
     .. " " .. tostring(ns.Spells:ForMe("Garrote", "debuff")) .. " " .. B:Get("debuff").count, "0 0 | true false 0",
     "a rogue's spell or debuff added by name isn't yours; a paladin's buff is")
@@ -3084,7 +3092,7 @@ Equal(tostring(ns.Spells:ForMe("Walk on Air", "cd")) .. " " .. tostring(ns.Spell
     .. " " .. tostring(ns.Spells:ForMe("family:mana", "cd")) .. " " .. tostring(ns.Spells:ForMe("Attack", "cd"))
     .. " " .. tostring(ns.Spells:ForMe("First Aid", "cd")), "true false false false true true true true false",
     "your racial is yours, another race's isn't, on any bar; items and your general spells are; another's profession isn't")
-B:Add("cd", "Blood Fury")
+Equal(select(2, B:Add("cd", "Blood Fury")), "Blood Fury can't show on the Cooldowns bar for you.", "an orc's racial added: turned away")
 Equal(table.concat(B:Mine("cd"), ","):find("Blood Fury", 1, true), nil, "an orc's racial in the profile doesn't show on your bar")
 
 -- A profile shared across races ------------------------------------------------------------
@@ -3420,10 +3428,13 @@ Equal(tostring((Other("20550"))), "nil", "searching Endurance's ID on the Cooldo
 Search("1259918")
 Equal(tostring((Other("1259918"))), "nil", "nor Plainsrunning's")
 Search("expans")
-Equal(tostring((Other("Expansive Mind"))) .. " " .. tostring(Other("Blood Fury") == nil), "nil true",
-    "nor a passive found by name (Expansive Mind), while an active racial (Blood Fury) still is")
+Equal(tostring((Other("Expansive Mind"))), "nil", "nor a passive found by name (Expansive Mind)")
+-- Another race's racial wouldn't show for you, so it isn't offered either
+-- (ticked, it vanished, with nothing left to untick); your own still is.
 Search("blood f")
-Equal(Other("Blood Fury") ~= nil, true, "Blood Fury offered")
+Equal(tostring((Other("Blood Fury"))), "nil", "an orc's Blood Fury isn't offered to a tauren")
+Search("war st")
+Equal(Other("War Stomp") ~= nil, true, "the tauren's own War Stomp, an active racial, is")
 w:Select("buff")
 Search("1259918")
 Equal(Other("1259918") ~= nil, true, "on the Buffs page Plainsrunning is offered: it has a buff of its own")
@@ -3587,9 +3598,10 @@ w:Hide()
 end
 
 -- Totem buffs: the game marks them passive, but they come and go on everyone
--- near the totem. By its ID one goes on the Buffs bar, lit by itself, and
--- the game data decides (the game isn't asked). The Cooldowns bar says where
--- it goes. Saved ones show.
+-- near the totem. By its ID one goes on the Buffs bar, lit by itself and its
+-- other ranks (one aura in several IDs, ns.AURA_FAMILIES), and the game data
+-- decides (the game isn't asked). The Cooldowns bar says where it goes.
+-- Saved ones show.
 Start(2, "WARRIOR")
 says[25362], says[8836], says[5677] = false, false, false
 w:Select("buff")
@@ -3601,8 +3613,8 @@ Equal(tostring((Other("25362"))), "nil", "the Cooldowns page's doesn't")
 Search("")
 ok, said = B:Add("buff", "25362")
 Equal(tostring(ok) .. " " .. said .. " " .. table.concat(ns.Spells:Find("Strength of Earth").ids, ",") .. " "
-    .. tostring((B:Get("buff").slotIDs[1] or {})[25362]) .. " " .. #asks, "true Added Strength of Earth to Buffs. 25362 true 0",
-    "on the Buffs bar, lit by itself")
+    .. tostring((B:Get("buff").slotIDs[1] or {})[25362]) .. " " .. #asks,
+    "true Added Strength of Earth to Buffs. 25362,8076,8162,8163,10441 true 0", "on the Buffs bar, lit by itself and its other ranks")
 ok, said = B:Add("cd", "8836")
 Equal(tostring(ok) .. " " .. said, "false Grace of Air is passive. Only its buff can be tracked, on the Buffs bar.",
     "not on the Cooldowns bar")
@@ -3713,11 +3725,18 @@ B:Changed()
 Equal(tostring(ns.Spells:Find("Quickness")) .. " " .. tostring(ns.Spells:ForMe("Quickness", "util")) .. " "
     .. table.concat((B:Mine("util")), ","), "nil false Starlit Path,Sunlit Path,Dawnlit Path",
     "a night elf's Quickness saved by name alone stays off too")
--- A name the data has active IDs for as well isn't taken for passive: a
--- hunter's Frost Resistance (the pet's teaching spell) saved by name.
+-- A hunter's Frost Resistance is his pet's, a passive: the Beast Training
+-- spell that teaches it no longer stands for it in the data, and had
+-- nothing to track either.
 table.insert(ns.BarData("util").spells, "Frost Resistance")
 B:Changed()
-Equal(tostring(ns.Spells:ForMe("Frost Resistance", "util")), "true", "a hunter's Frost Resistance, passive and active IDs, stays")
+Equal(tostring(ns.Spells:ForMe("Frost Resistance", "util")), "false", "a hunter's Frost Resistance, his pet's passive, stays off")
+-- A name the data has active IDs for as well isn't taken for passive: a
+-- mage's Frostbite (the talent, and the freeze it gives) saved by name.
+_G.UnitClass = function() return "Mage", "MAGE" end
+table.insert(ns.BarData("util").spells, "Frostbite")
+B:Changed()
+Equal(tostring(ns.Spells:ForMe("Frostbite", "util")), "true", "a mage's Frostbite, passive and active IDs, stays")
 w:Hide()
 
 -- Every race-limited spell in the game data, for every race and class: an
@@ -4952,14 +4971,14 @@ end)()
         "your cast bar as it was: today's track, the shine over the whole top half, 1px edges; the preview's track too")
     Equal(tostring(sheen.rest) .. " " .. Shown(bar.inner) .. " " .. Shown(cb.iconInner), "nil none none",
         "and nothing more made while both are off")
-    -- Each says what it does; both need testing.
+    -- Each says what it does; both seen working in game, so no Needs testing.
     S[darkness.track].scripts.OnEnter(darkness.track)
     local darkNote = S[w.note].text
     S[thick].scripts.OnEnter(thick)
     Equal(darkNote .. " | " .. S[w.note].text, "How dark the empty part of your bars is: 0 as it's always been, 100 solid black, with"
-        .. " Glass's shine kept to the fill. Your cast bar, swing timer, combo points, resource display and Tracked Bars. (Needs testing)"
+        .. " Glass's shine kept to the fill. Your cast bar, swing timer, combo points, resource display and Tracked Bars."
         .. " | A 2px black edge round your bars instead of 1px (in their own colour for Outline). Your cast bar, swing timer, combo"
-        .. " points, resource display and Tracked Bars, and the icons beside them. (Needs testing)", "each says what it does on hover")
+        .. " points, resource display and Tracked Bars, and the icons beside them.", "each says what it does on hover, with no Needs testing")
     S[thick].scripts.OnLeave(thick)
 
     -- Dragged: your cast bar and the preview change at once.
@@ -8867,13 +8886,18 @@ end)()
     S[rows.cd].scripts.OnReceiveDrag(rows.cd)
     Equal(Footer() .. " " .. tostring(cursor) .. " " .. table.concat(ns.BarData("cd").spells, ","),
         "Healing Potions is already on Cooldowns. nil Moonfire,family:healing", "dropped: already there, and let go of")
-    -- A name kept without IDs (another character's), given one: it goes on
-    -- with that ID, not "already there".
+    -- A name kept without IDs (another character's), given one: for a
+    -- priest it goes on with that ID, not "already there". A druid is told
+    -- it can't show for him: once on, it would be hidden.
     local util = ns.BarData("util").spells
     util[1] = "Power Word: Fortitude"
     B:Changed()
+    Equal(Over(rows.util, { "spell", 6, "spell", 1243 }), "Power Word: Fortitude can't show on the Utility bar for you.",
+        "a druid given a priest's spell for the Utility bar: turned away, saying why")
+    _G.UnitClass = function() return "Priest", "PRIEST" end
     Equal(Over(rows.util, { "spell", 6, "spell", 1243 }), "Drop to add Power Word: Fortitude to Utility.",
         "a name on the bar with nothing to show it by, given its ID: added")
+    _G.UnitClass = function() return "Druid", "DRUID" end
     util[1] = nil
     B:Changed()
 

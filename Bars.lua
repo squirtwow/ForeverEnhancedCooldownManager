@@ -1326,6 +1326,20 @@ local function Already(key, name)
     return (name:gsub("^%l", string.upper)) .. " is already on " .. ns.BAR_NAMES[key] .. "."
 end
 
+local function Named(name)
+    local entry = ns.Spells:Find(name)
+    return entry and entry.name or name
+end
+
+-- Why an entry can't go on a bar where it wouldn't show for you: a buff added
+-- by name that another class casts on you shows on the Buffs bar only, and
+-- anywhere else it would be hidden with no icon left to drag it back. The
+-- same for a spell added there: another class's, or a buff's ID on the
+-- Cooldowns or Utility bar, which no one ever learns.
+local function Unshown(name, key)
+    return Named(name) .. " can't show on the " .. ns.BAR_NAMES[key] .. " bar for you."
+end
+
 -- What a drop would do, said while it's held over the bar: put the entry on
 -- it, move it there from the other cooldown bar, or nothing, as it's there.
 local function Preview(key, plan)
@@ -1369,7 +1383,12 @@ end
 -- what dropping it does. On the Buffs or Debuffs bar, an ID for another
 -- spell of a name in your lists is kept pinned to that ID (Spells.lua
 -- S:Pin): an entry of its own, with nothing remembered, and the entry of
--- its name left watching what it did.
+-- its name left watching what it did. One that could never show for you
+-- once on (another class's spell, a buff's ID on the Cooldowns bar) is
+-- turned away, as a drag from another bar is: once on, it would be hidden,
+-- with nothing in the window to take it off. Then the third answer is
+-- true. One you or your pet don't know yet (a talent not taken) goes on,
+-- shown once you do.
 local function Vet(key, text)
     -- A debuff on you (Weakened Soul): no bar shows it by name, the Buffs
     -- or Debuffs bar's tick does.
@@ -1385,7 +1404,6 @@ local function Vet(key, text)
     if not fits then return false, why end
     local passive = ns.Spells:AddNote(text, key)
     if passive then return false, passive end
-    if not Space(key, found) then return false, Full(key) end
     local plan = { name = found, shown = entry and entry.name or shown or found }
     if ids and not entry then
         plan.remember = ids
@@ -1400,8 +1418,23 @@ local function Vet(key, text)
             plan.remember, plan.before = merged, entry.added
         end
     end
+    -- Judged as it will be: by what it's remembered by, a new pinned one
+    -- by its ID, one added before by what it was.
+    local remember = plan.remember or (pinned and not entry and { given }) or (entry and entry.added) or nil
+    if not ns.Spells:ForMe(found, key, remember) then return false, Unshown(plan.shown, key), true end
+    if not Space(key, found) then return false, Full(key) end
     plan.there = plan.remember == nil and OnBar(key, found)
     return true, plan
+end
+
+-- Whether a spell, by name or ID, could show on a bar for you once added
+-- (now, or once you or your pet know it): what the bar's page offers under
+-- Other spells (BarPage.lua), so nothing it offers vanishes for good once
+-- ticked. Turned away for anything else (the bar full, say), it's still
+-- offered, and ticking it says why.
+function B:WouldShow(key, text)
+    local ok, _, hidden = Vet(key, text)
+    return ok or not hidden
 end
 
 -- What B:Add would do, changing nothing: true and what (said while a spell
@@ -1598,11 +1631,6 @@ function B:Remove(key, index)
     self:Changed()
 end
 
-local function Named(name)
-    local entry = ns.Spells:Find(name)
-    return entry and entry.name or name
-end
-
 -- An entry dragged off a bar: true and what happened. Named before it goes:
 -- one in no other list (a spell pinned to one ID) leaves your list with it.
 function B:TakeOff(key, name)
@@ -1611,13 +1639,6 @@ function B:TakeOff(key, name)
     local shown = Named(name)
     self:Remove(key, index)
     return true, "Took " .. shown .. " off " .. ns.BAR_NAMES[key] .. "."
-end
-
--- Why an entry can't go on a bar where it wouldn't show for you: a buff added
--- by name that another class casts on you shows on the Buffs bar only, and
--- anywhere else it would be hidden with no icon left to drag it back.
-local function Unshown(name, key)
-    return Named(name) .. " can't show on the " .. ns.BAR_NAMES[key] .. " bar for you."
 end
 
 -- An entry dragged from one bar onto another: true and what happened, or
@@ -1797,11 +1818,24 @@ function B:Relayout(key)
     Layout(bars[key] or NewBar(key))
 end
 
+-- The entries on a bar that show there for no one (Spells.lua S:Leftover:
+-- a buff's ID ticked on the Cooldowns bar before that was turned away).
+function B:Leftovers(key)
+    local names = {}
+    for _, name in ipairs(ns.BarData(key).spells) do
+        if ns.Spells:Leftover(name, key) then names[#names + 1] = name end
+    end
+    return names
+end
+
 -- Empties a bar.
--- Clears what you see on a bar; another class's entries in a shared profile
--- stay for the characters that use them.
+-- Clears what you see on a bar, and what shows there for no one; another
+-- class's entries in a shared profile stay for the characters that use them.
 function B:Clear(key)
-    local _, places = self:Mine(key)
+    local places = {}
+    for i, name in ipairs(ns.BarData(key).spells) do
+        if ns.Spells:ForMe(name, key) or ns.Spells:Leftover(name, key) then places[#places + 1] = i end
+    end
     for n = #places, 1, -1 do Take(key, places[n]) end
     self:Changed()
 end
@@ -1989,6 +2023,9 @@ function B:Start()
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "PLAYER_EQUIPMENT_CHANGED", "BAG_UPDATE_DELAYED" }) do
         watch:RegisterEvent(event)
     end
+    -- Your pet summoned, dismissed or swapped: a hunter's pet abilities and
+    -- a warlock's demon's spells go by what the pet out now knows.
+    watch:RegisterUnitEvent("UNIT_PET", "player")
     watch:SetScript("OnEvent", Listing)
     self.watch = watch
     -- Bars come back in full while Edit Mode is open.

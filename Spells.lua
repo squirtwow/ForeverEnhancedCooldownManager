@@ -46,6 +46,16 @@ local GROUP = {
     ["Blessing of Sanctuary"] = "Greater Blessing of Sanctuary",
 }
 
+-- Names a later build gave a spell: one saved by its old name still counts
+-- as the new one. Build 70291 dropped "Effect" from the trap debuffs' names
+-- (and Grounding Totem's buff's), and "Aura" from Frost Trap's.
+local RENAMED = {
+    ["Immolation Trap Effect"] = "Immolation Trap",
+    ["Freezing Trap Effect"] = "Freezing Trap",
+    ["Frost Trap Aura"] = "Frost Trap",
+    ["Grounding Totem Effect"] = "Grounding Totem",
+}
+
 S.LINES = { procs = "Procs", items = "Items", added = "Added" }
 
 -- Healthstones and potions come in ranks, and you carry whichever you have:
@@ -105,8 +115,8 @@ local function Text(value)
 end
 
 -- Spells pinned to one ID. Two spells can share a name (the Skyborne's
--- racial gives two buffs called Energized, 1259691 for 15 seconds and
--- 1270842 for 15 minutes), and an entry kept by name watches every ID it
+-- racial gives two buffs called Energized, 1270842 for 15 seconds and
+-- 1259691 for 15 minutes), and an entry kept by name watches every ID it
 -- was given. On the Buffs and Debuffs bars, an ID whose name is already in
 -- your lists, for another spell, goes on as an entry of its own, kept as
 -- "Energized#1270842", which watches that ID alone (and the aura of its own
@@ -153,11 +163,31 @@ local function Base(key)
     return (key:gsub("@%d+$", ""):gsub("#%d+$", ""))
 end
 
+-- Each ID of an aura that's one buff in several (ns.AURA_FAMILIES: a totem
+-- buff's ranks, Well Fed from any food), with all of them. Made the first
+-- time it's needed, and again if the list itself changes.
+local families, familyList = {}, nil
+local function Family(id)
+    if ns.AURA_FAMILIES ~= familyList then
+        familyList, families = ns.AURA_FAMILIES, {}
+        for _, ids in ipairs(familyList or {}) do
+            for _, each in ipairs(ids) do families[each] = ids end
+        end
+    end
+    return families[id]
+end
+
 -- Every spell ID a buff of this name can carry: the ranks you know, all ranks
 -- in the game data, and its group version. A passive added by its ID also
 -- carries the aura of its own it gives (Plainsrunning's speed buff), which
--- is what lights it on the Buffs or Debuffs bar. With no name, just the IDs
--- known and their auras (a spell pinned to one ID).
+-- is what lights it on the Buffs or Debuffs bar. Any of them that leads to
+-- an aura with another ID (Bloodrage's rage buff, Vanish's stealth, a
+-- poison's debuff on the target, a totem's buff on everyone near it:
+-- ns.SPELL_AURAS, and by the aura's name ns.NAME_AURAS) carries that too,
+-- and an aura that's one buff in several IDs carries them all (a totem
+-- buff's other ranks, Well Fed from another food). With no name, just the
+-- IDs known and their auras (a spell pinned to one ID). A name a later
+-- build changed counts as the new one too.
 local function BuffIDs(name, known)
     local ids, seen = {}, {}
     local function Add(list)
@@ -169,15 +199,23 @@ local function BuffIDs(name, known)
         end
     end
     Add(known)
-    local ranks = ns.RANKS or {}
+    local ranks, named = ns.RANKS or {}, ns.NAME_AURAS or {}
     if name then
+        local now = RENAMED[name]
         Add(ranks[name])
         if GROUP[name] then Add(ranks[GROUP[name]]) end
+        if now then Add(ranks[now]) end
+        Add(named[name])
+        if now then Add(named[now]) end
     end
     for _, id in ipairs(known or {}) do
         Add(ns.PASSIVE_BUFFS and ns.PASSIVE_BUFFS[id])
         Add(ns.PASSIVE_DEBUFFS and ns.PASSIVE_DEBUFFS[id])
     end
+    -- Only the IDs so far: an aura's own auras aren't followed.
+    local auras = ns.SPELL_AURAS or {}
+    for i = 1, #ids do Add(auras[ids[i]]) end
+    for i = 1, #ids do Add(Family(ids[i])) end
     return ids
 end
 
@@ -382,6 +420,70 @@ local function ScanItems()
     end
 end
 
+-- Whether you or your pet know any of these spells: nil while the game
+-- won't say.
+local function Knows(ids)
+    local book = C_SpellBook
+    if not (book and book.IsSpellKnown) then return nil end
+    local banks = { BANK }
+    local pet = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Pet
+    if pet then banks[2] = pet end
+    local hidden = false
+    for _, id in ipairs(ids or {}) do
+        for _, bank in ipairs(banks) do
+            local known = book.IsSpellKnown(id, bank)
+            if not Open(known) then
+                hidden = true
+            elseif known then
+                return true
+            end
+        end
+    end
+    if hidden then return nil end
+    return false
+end
+
+-- The highest rank of these spells that you or your pet know, or nil: a
+-- hunter typing Growl means his pet's, not a druid's.
+local function HighestKnown(ids)
+    for i = #ids, 1, -1 do
+        if Knows({ ids[i] }) == true then return ids[i] end
+    end
+    return nil
+end
+
+-- The highest rank of these spells with a cooldown of its own (the game
+-- data's, ns.COOLDOWNS), else the highest: what a spell no one knows yet
+-- goes by. Where a druid's or warrior's spell and a pet's share a name
+-- (Growl, Charge), the highest ranks are the pet's; a helper listed after
+-- the spell itself (Frenzied Regeneration's 22845) has no cooldown to show.
+local function Highest(ids)
+    local cooldowns = ns.COOLDOWNS or {}
+    for i = #ids, 1, -1 do
+        if cooldowns[ids[i]] then return ids[i] end
+    end
+    return ids[#ids]
+end
+
+-- The spell an added entry's cooldown, range and tooltip go by: the ID it
+-- was added with (the last, when it was given more), so a hunter's pet
+-- ability goes by the pet's own spell. While you and your pet don't know
+-- that one, the highest rank of its name you do (the pet out now has
+-- another rank, or a druid's Growl was saved by name), else the one added.
+-- One the game data no longer lists under that name (the teaching spell a
+-- pet ability was saved by before) gives way to the data's highest rank.
+local function Tracked(name, added)
+    local id = added[#added]
+    local ranks = ns.RANKS and ns.RANKS[name]
+    if not ranks or Knows({ id }) == true then return id end
+    local known = HighestKnown(ranks)
+    if known then return known end
+    for _, rank in ipairs(ranks) do
+        if rank == id then return id end
+    end
+    return Highest(ranks)
+end
+
 -- Anything on a bar that isn't in your spellbook or bags right now: spells
 -- added by name or ID (each keeping the IDs it was added with, as added),
 -- spells pinned to one ID (watching that one), items you've run out of (the
@@ -411,7 +513,8 @@ local function ScanSaved()
                 elseif custom[saved] then
                     local ids = BuffIDs(saved, custom[saved])
                     Add({ key = saved, name = saved, kind = "spell", line = S.LINES.added, ids = ids,
-                        spellID = ids[#ids], icon = C_Spell.GetSpellTexture(ids[1]), rankText = "", added = custom[saved] })
+                        spellID = Tracked(saved, custom[saved]), icon = C_Spell.GetSpellTexture(ids[1]), rankText = "",
+                        added = custom[saved] })
                 end
             end
         end
@@ -498,29 +601,6 @@ end
 local function Holds(list, mine)
     if not (Open(mine) and (type(mine) == "string" or type(mine) == "number")) then return nil end
     return (" " .. list .. " "):find(" " .. mine .. " ", 1, true) ~= nil
-end
-
--- Whether you or your pet know any of these spells: nil while the game
--- won't say.
-local function Knows(ids)
-    local book = C_SpellBook
-    if not (book and book.IsSpellKnown) then return nil end
-    local banks = { BANK }
-    local pet = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Pet
-    if pet then banks[2] = pet end
-    local hidden = false
-    for _, id in ipairs(ids or {}) do
-        for _, bank in ipairs(banks) do
-            local known = book.IsSpellKnown(id, bank)
-            if not Open(known) then
-                hidden = true
-            elseif known then
-                return true
-            end
-        end
-    end
-    if hidden then return nil end
-    return false
 end
 
 -- Items on a bar by key: a trinket slot, a bag item, or a healthstone or
@@ -660,6 +740,20 @@ function S:SelfDebuffMatch(text)
     return self:SelfDebuffNote(text)
 end
 
+-- Whether every one of these IDs is an aura no one learns as a spell
+-- (Energized from Read Ley Line, Well Fed from food; ns.AURA_ONLY, from the
+-- game data). A pet's ability (a bat's Sonic Blast) or a talent (Holy
+-- Shield) isn't, though no class or race in the data names it: someone
+-- knows it.
+local function OnlyAuras(ids)
+    local auras = ns.AURA_ONLY
+    if not (auras and ids and ids[1]) then return false end
+    for _, id in ipairs(ids) do
+        if not auras[id] then return false end
+    end
+    return true
+end
+
 -- Whether an entry on a bar is for you. One profile can serve every class and
 -- race: each character passes over what only other characters can have, which
 -- stays in the profile for them. Anything in your own spellbook, procs or bags
@@ -673,21 +767,39 @@ end
 -- class spell. A spell neither names (a profession's, another character's
 -- general spell, an all-class one you haven't got) is yours on a cooldown bar
 -- only once you know it. Ammo is only for the classes that use it; items are
--- everyone's (the bars leave off any you don't carry).
-function S:ForMe(key, bar)
+-- everyone's (the bars leave off any you don't carry). A spell saved by a
+-- name a later build changed goes by its new name's classes (a hunter's
+-- Immolation Trap Effect). With remember, the IDs B:Add would remember a
+-- spell by, it's judged as it would be once added, by those IDs, and for
+-- good rather than just now: Bars.lua Vet turns away an add that could
+-- never show for you, with nothing left in the window to take it off
+-- (another class's or race's spell, or on a cooldown bar a buff's ID no one
+-- learns, while the game says you don't know it). One you or your pet don't
+-- know yet (a talent not taken, a demon's spell while another demon is
+-- out) still goes on, and shows once you do, as it always did.
+function S:ForMe(key, bar, remember)
     if type(key) ~= "string" then return false end
     if key == "ammo" then return self:UsesAmmo() end
     Ready()
     local entry = byKey[key]
     if entry and not entry.added then return true end
     if ItemKey(key) then return true end
-    if self:PassiveNote(key, bar) then return false end
     local name = Base(key)
-    local classes = ns.SPELL_CLASSES and ns.SPELL_CLASSES[name]
+    local ids = entry and entry.ids
+    if remember then
+        if Untracked(name, remember, bar) then return false end
+        -- As ScanSaved would watch it: a pinned one by its own ID alone.
+        local _, pinned = Pinned(key)
+        ids = BuffIDs(not pinned and name or nil, remember)
+    elseif self:PassiveNote(key, bar) then
+        return false
+    end
+    local added = entry ~= nil or remember ~= nil
+    local classes = ns.SPELL_CLASSES and (ns.SPELL_CLASSES[name] or RENAMED[name] and ns.SPELL_CLASSES[RENAMED[name]])
     local procs = ProcClasses()[name]
     local races = ns.SPELL_RACES and ns.SPELL_RACES[name]
     local racial = races and not classes and not procs
-    if entry and bar == "buff" and not racial then return true end
+    if added and bar == "buff" and not racial then return true end
     if classes or procs then
         -- While the game won't say your class, it's yours, as it always was.
         local _, class = UnitClass("player")
@@ -704,10 +816,37 @@ function S:ForMe(key, bar)
     -- or ID. On the Buffs or Debuffs bar that stays, as it always did: a
     -- talent's or item's effect (Improved Shadow Bolt's Shadow Vulnerability)
     -- is never a spell you know, and only lights while it's up. On a cooldown
-    -- bar it's yours once you or your pet know it (and while the game won't say).
-    if not entry then return false end
+    -- bar it's yours once you or your pet know it (and while the game won't
+    -- say). About to be added there, only an aura's ID no one ever learns is
+    -- judged by that now: anything else goes on, shown once it's known.
+    if not added then return false end
     if ns.AURA_BARS and ns.AURA_BARS[bar] then return true end
-    return Knows(entry.ids) ~= false
+    if remember and not OnlyAuras(remember) then return true end
+    return Knows(ids) ~= false
+end
+
+-- Whether an entry on a bar shows there for no one, whichever character
+-- uses the profile: on the Cooldowns or Utility bar, a spell no class, race
+-- or proc names, remembered only by auras no one learns as a spell (a
+-- buff's ID ticked there before such an add was turned away). It's hidden
+-- from everyone, with nothing in the window to take it off: Clear takes
+-- these too (Bars.lua B:Clear). A pet's ability or a talent another
+-- character added stays for them.
+function S:Leftover(key, bar)
+    if type(key) ~= "string" or (ns.AURA_BARS and ns.AURA_BARS[bar]) then return false end
+    Ready()
+    local entry = byKey[key]
+    local name = Base(key)
+    if ns.SPELL_CLASSES and (ns.SPELL_CLASSES[name] or RENAMED[name] and ns.SPELL_CLASSES[RENAMED[name]]) then return false end
+    if ProcClasses()[name] or (ns.SPELL_RACES and ns.SPELL_RACES[name]) then return false end
+    return OnlyAuras(entry and entry.added)
+end
+
+-- The auras one spell ID can carry: its own, and those it leads to (BuffIDs,
+-- with no name). For an icon fixed to one rank ("Name@N"), which has no
+-- IDs of its own to go by.
+function S:AuraIDs(id)
+    return BuffIDs(nil, { id })
 end
 
 -- An entry's icon, even for a spell you haven't learned yet (from the game
@@ -775,8 +914,10 @@ function S:Suggest(text, limit)
 end
 
 -- Works out what "Add by name or spell ID" means. Returns the key to store,
--- the spell IDs to remember when it isn't in your spellbook, and the ID given
--- (if one was), or nil and why.
+-- the spell IDs to remember when it isn't in your spellbook (by name, the
+-- game data's: the highest rank you or your pet know, else its highest
+-- with a cooldown, so a hunter's Growl is his pet's even with the pet away),
+-- and the ID given (if one was), or nil and why.
 function S:Resolve(text)
     text = type(text) == "string" and text:match("^%s*(.-)%s*$") or ""
     if text == "" then return nil, "Type a spell name or ID first." end
@@ -792,8 +933,8 @@ function S:Resolve(text)
     for key, entry in pairs(byKey) do
         if entry.name:lower() == lower then return key end
     end
-    for name in pairs(ns.RANKS or {}) do
-        if name:lower() == lower then return name, { ns.RANKS[name][1] } end
+    for name, ids in pairs(ns.RANKS or {}) do
+        if name:lower() == lower then return name, { HighestKnown(ids) or Highest(ids) } end
     end
     local info = C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(text)
     local name = info and Text(info.name)
@@ -811,8 +952,11 @@ end
 -- never changes what that profile's entry watches. Nil when it goes by its
 -- name, as before: a name not in your lists yet, an ID whose aura its entry
 -- watches already (the Flurry talent, whose buff is the Flurry proc's; a
--- mage's Regeneration where a troll's is saved), and any other ID on the
--- Cooldowns and Utility bars.
+-- mage's Regeneration where a troll's is saved; another rank of an aura,
+-- or Well Fed from another food, which an entry watches with the rest:
+-- BuffIDs), and any other ID on the Cooldowns and Utility bars. So ranks
+-- join one icon, as before 1.5.7, and only two different spells of one name
+-- get one each.
 function S:Pin(id, bar)
     if type(id) ~= "number" then return nil end
     local name = C_Spell.GetSpellName and Text(C_Spell.GetSpellName(id))

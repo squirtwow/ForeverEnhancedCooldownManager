@@ -119,14 +119,15 @@ end
 
 -- The spell IDs an icon's aura can have, as the container wants them ({ [id]
 -- = true }), and sorted for comparing: every rank you know, and the buff's
--- own IDs where they differ (ns.Spells). Spells only: items, trinkets and
+-- own IDs where they differ (ns.Spells). A fixed rank's, its own ID's
+-- (Vanish's stealth for Vanish at rank 1). Spells only: items, trinkets and
 -- ammo put no aura of their own.
 local function IDs(icon)
     if not icon or not icon:IsShown() then return nil end
     if icon.kind ~= "spell" and icon.kind ~= "rank" then return nil end
     local entry = ns.Spells:Find(icon.name)
     local set, sorted = {}, {}
-    for _, id in ipairs(entry and entry.ids or { icon.spellID }) do
+    for _, id in ipairs(entry and entry.ids or ns.Spells:AuraIDs(icon.spellID)) do
         if type(id) == "number" and not set[id] then
             set[id] = true
             sorted[#sorted + 1] = id
