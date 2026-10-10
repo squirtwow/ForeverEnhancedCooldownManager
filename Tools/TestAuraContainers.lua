@@ -1707,15 +1707,15 @@ end
         "added as an entry of its own, pinned to its ID; the first keeps its own ID, and nothing more is remembered")
     Equal(Rows(), "Energized (ID 1270842) ticked", "searched again: listed and ticked, not offered again")
     Search("1259691")
-    Equal(Rows(), "Energized [ID 1259691] ticked", "the first, by its ID: ticked, its ID beside it")
+    Equal(Rows(), "Energized (ID 1259691) ticked", "the first, by its ID: ticked, its ID in brackets like the second's")
     Search("")
-    Equal(Rows(), "Energized [ID 1259691] ticked | Energized (ID 1270842) ticked", "the whole list: both, each ticked, told apart")
+    Equal(Rows(), "Energized (ID 1259691) ticked | Energized (ID 1270842) ticked", "the whole list: both, each ticked, told apart alike")
     local bar = B:Get("buff")
     Equal(bar.count .. " | " .. Watched("buff"), "2 | g1 1259691 | g2 1270842", "two icons on the bar, each group watching its own ID")
     Equal(Lit("buff", { ENERGIZED }) .. " | " .. Lit("buff", { LONG }) .. " | " .. Lit("buff", { ENERGIZED, LONG }) .. " | "
         .. Lit("buff", { { id = 1259705 } }), "g1 | g2 | g1 g2 | ", "each lights for its own buff only, both for both, neither for the racial")
-    Equal(page.icons[1].name .. " | " .. page.icons[2].name .. " | " .. Note(page.icons[2]), "Energized | Energized (ID 1270842) | Energized"
-        .. " (ID 1270842). Drag it onto another icon to swap them, or off the bar to take it off.", "the page's tray names them apart")
+    Equal(page.icons[1].name .. " | " .. page.icons[2].name .. " | " .. Note(page.icons[2]), "Energized (ID 1259691) | Energized (ID 1270842) | Energized"
+        .. " (ID 1270842). Drag it onto another icon to swap them, or off the bar to take it off.", "the page's tray names them apart, alike")
     -- Typed or dropped again, each is there already, as before.
     local said = {}
     for _, text in ipairs({ "1270842", "1259691" }) do

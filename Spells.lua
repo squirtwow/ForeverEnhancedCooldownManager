@@ -416,10 +416,13 @@ local function ScanSaved()
             end
         end
     end
+    -- An entry kept by name beside a pinned one of that name is shown the
+    -- same way, its ID in brackets ("Energized (ID 1259691)"), so the two
+    -- read alike; shown is for the window only, the name stays the spell's.
     for _, entry in ipairs(list) do
         local plain = entry.pinned and byKey[entry.baseName]
-        if plain and plain.added and plain.rankText == "" then
-            plain.rankText = (#plain.added > 1 and "IDs " or "ID ") .. table.concat(plain.added, ", ")
+        if plain and plain.added and not plain.shown then
+            plain.shown = ("%s (%s %s)"):format(plain.name, #plain.added > 1 and "IDs" or "ID", table.concat(plain.added, ", "))
         end
     end
 end

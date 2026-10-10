@@ -270,7 +270,7 @@ function ns.BuildBarPage(window, page, width)
         -- One added before the add box turned it away (Weakened Soul) says why it never shows.
         window:Hint(icon, function(self)
             if not self.name then return nil end
-            if ns.Spells:SelfDebuffNote(self.name) then
+            if ns.Spells:SelfDebuffNote(self.spellName or self.name) then
                 -- This page's own tick, or where to find one (one line: 93 letters at most).
                 if SELF_TICK[state.bar] then
                     return self.name .. " can't show here. Tick \"" .. SELF_TICK[state.bar] .. "\" and drag it off the bar."
@@ -562,7 +562,7 @@ function ns.BuildBarPage(window, page, width)
     end
 
     local function Spell(entry, indent, rankText)
-        local row = Entry(entry.icon, indent and entry.rankText or entry.name, rankText, indent)
+        local row = Entry(entry.icon, indent and entry.rankText or entry.shown or entry.name, rankText, indent)
         row.spell, row.other, row.label, row.pinned = entry.key, nil, entry.name, nil
         if ns.AURA_BARS[state.bar] then
             row.check:SetChecked(B:HasAura(state.bar, entry.key))
@@ -662,7 +662,9 @@ function ns.BuildBarPage(window, page, width)
         for n, key in ipairs(names) do
             local icon, i = TrayIcon(n), places[n]
             local entry = ns.Spells:Find(key)
-            icon.index, icon.name = i, entry and entry.name or key
+            -- Named as in the list (two of one name read "Name (ID n)"); the
+            -- self-debuff check below goes by the spell's own name.
+            icon.index, icon.name, icon.spellName = i, entry and (entry.shown or entry.name) or key, entry and entry.name or key
             -- A spell you haven't learned yet shows greyed, in its own icon.
             icon.texture:SetTexture(ns.Spells:Icon(key))
             icon.texture:SetDesaturated(entry == nil)
