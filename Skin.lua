@@ -233,21 +233,31 @@ end
 -- The bar in the design and colour chosen: its own colour when one is chosen
 -- for its spell (at any rank), or the colour for all. As Blizzard gives a
 -- pooled bar a spell (after every relayout), a bar with the same spell,
--- design and colour for all as last time is left as it is; force (a Look
--- page choice, which may be its own colour) draws it again.
+-- design, colour for all, darkness and edges as last time is left as it is;
+-- force (a Look page choice, which may be its own colour) draws it again.
 local function Look(item, parts, force)
     local bar, design, all, id = item.Bar, ns.Get("barStyle"), ns.Get("barColour"), SpellOf(item)
+    local dark, thick = ns.Get("barDarkness"), ns.Get("thickEdges")
     local filled = Fill(bar, parts)
-    if not (force or filled) and parts.drawn and parts.spell == id and parts.design == design and parts.all == all then return end
-    parts.drawn, parts.spell, parts.design, parts.all = true, id, design, all
+    if not (force or filled) and parts.drawn and parts.spell == id and parts.design == design and parts.all == all
+        and parts.dark == dark and parts.thick == thick then
+        return
+    end
+    parts.drawn, parts.spell, parts.design, parts.all, parts.dark, parts.thick = true, id, design, all, dark, thick
     local colour = Style:BarColour(id and ns.BarColourFor(id) or all)
     local glass, split, outline = design == "glass", design == "split", design == "outline"
     bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
-    -- A 1px edge round the bar and the icon: black, or the colour for Outline.
+    if parts.track then parts.track:SetColorTexture(Style:TrackColour()) end
+    -- A 1px edge round the bar and the icon: black, or the colour for Outline;
+    -- with Thick edges, a second pixel inside each.
     local edge = outline and colour or BLACK
     Solid(parts.edge, edge)
-    if parts.iconEdge then Solid(parts.iconEdge, edge) end
-    parts.sheen:SetShown(glass)
+    Style:ShowInnerEdge(parts.inner, edge)
+    if parts.iconEdge then
+        Solid(parts.iconEdge, edge)
+        Style:ShowInnerEdge(parts.iconInner, edge)
+    end
+    Style:ShowSheen(parts.sheen, glass)
     parts.box:SetShown(split)
     parts.divider:SetShown(split)
     -- Only Glass keeps Blizzard's spark where the fill ends.
@@ -286,23 +296,27 @@ local function Bar(item, spec)
         Font(iconFrame.Applications, Style:Count(spec.size))
         parts.iconEdge = iconFrame:CreateTexture(nil, "BACKGROUND", nil, -8)
         Inset(parts.iconEdge, iconFrame.Icon, -1)
+        parts.iconInner = Style:InnerEdge(iconFrame, iconFrame.Icon)
     end
     local bar = item.Bar
     if not bar then return end
     bar:SetHeight(BAR_HEIGHT)
     Fill(bar, parts)
+    -- Blizzard's backing becomes the track (Look colours it).
     if bar.BarBG then
-        bar.BarBG:SetColorTexture(Style.TRACK[1], Style.TRACK[2], Style.TRACK[3], Style.TRACK[4])
+        parts.track = bar.BarBG
         Inset(bar.BarBG, bar, 0)
     end
     parts.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
     Inset(parts.edge, bar, -1)
+    parts.inner = Style:InnerEdge(bar, bar)
     -- Glass: a soft shine across the top.
-    parts.sheen = bar:CreateTexture(nil, "OVERLAY", nil, -8)
-    parts.sheen:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-    parts.sheen:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
-    parts.sheen:SetHeight(math.floor(BAR_HEIGHT * .45))
-    parts.sheen:SetColorTexture(1, 1, 1, .16)
+    local shine, height = bar:CreateTexture(nil, "OVERLAY", nil, -8), math.floor(BAR_HEIGHT * .45)
+    shine:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+    shine:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
+    shine:SetHeight(height)
+    shine:SetColorTexture(1, 1, 1, .16)
+    parts.sheen = Style:Sheen(bar, shine, height)
     -- Split: a dark box at the end for the time.
     parts.box = bar:CreateTexture(nil, "OVERLAY", nil, -7)
     parts.box:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)

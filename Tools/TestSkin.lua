@@ -688,6 +688,115 @@ ns.Set("barColour", "orange")
 ns.Skin:ApplyBarLook()
 Equal(#printed, 0, "no errors while switching")
 
+-- Darkness and thick edges (Look page): the empty part from today's track to
+-- solid black, Glass's shine kept to the fill, and a second pixel inside
+-- each edge. Both off by default, so the bar is as it was: the addon's own
+-- textures, and only cosmetic setters on Blizzard's.
+do
+    local function All(owner, layer, sublevel)
+        local found = {}
+        for _, r in ipairs(S[owner].regions) do
+            if S[r].layer == layer and S[r].sublevel == sublevel then found[#found + 1] = r end
+        end
+        return found
+    end
+    local function Points(region)
+        local out = {}
+        for i, p in ipairs(S[region].points) do
+            local rel = p[2] == bar.Bar and "bar" or p[2] == S[bar.Bar].fill and "fill" or tostring(p[2])
+            out[i] = p[1] .. " " .. rel .. " " .. p[3] .. " " .. p[4] .. " " .. p[5]
+        end
+        return table.concat(out, ", ")
+    end
+    local function Colour(region)
+        local c = S[region].color
+        return string.format("%g %g %g %g", c[1], c[2], c[3], c[4])
+    end
+    local function Shown(ring)
+        local list = {}
+        for i, strip in ipairs(ring) do list[i] = tostring(S[strip].shown) end
+        return table.concat(list, " ")
+    end
+    local over = sheen
+    local function Made() return #All(bar.Bar, "OVERLAY", -8) .. " " .. #All(bar.Bar, "OVERLAY", -5) .. " " .. #All(bar.Icon, "OVERLAY", -5) end
+    Equal(ns.Get("barDarkness") .. " " .. tostring(ns.Get("thickEdges")) .. " | " .. Colour(bar.Bar.BarBG) .. " | " .. Made(),
+        "0 false | 0.08 0.08 0.09 0.85 | 1 0 0", "off by default: today's track and one shine, nothing more made")
+    Equal(Points(over) .. " | " .. S[over].height .. " " .. tostring(S[over].shown), "TOPLEFT bar TOPLEFT 0 0, TOPRIGHT bar TOPRIGHT 0 0 | 11 true",
+        "and today's shine across the whole top, nothing else over the empty part")
+    -- Blizzard's fill, as the game hands it back: nothing is ever called on it.
+    local fill = New("Texture", bar.Bar)
+    Seal(fill)
+    S[bar.Bar].fill = fill
+    ns.Skin:ApplyBarLook()
+    Equal(Points(over) .. " | " .. Made(), "TOPLEFT bar TOPLEFT 0 0, TOPRIGHT bar TOPRIGHT 0 0 | 1 0 0",
+        "with darkness at 0 the fill is never asked about: the shine stays whole")
+    ns.Set("barDarkness", 100)
+    ns.Skin:ApplyBarLook()
+    local rest = All(bar.Bar, "OVERLAY", -8)[2]
+    Equal(Colour(bar.Bar.BarBG) .. " | " .. Made(), "0 0 0 1 | 2 0 0", "darkness 100: Blizzard's backing solid black, and the empty part's shine made")
+    Equal(Points(over) .. " | " .. Points(rest), "TOPLEFT bar TOPLEFT 0 0, TOPRIGHT fill TOPRIGHT 0 0 | TOPLEFT fill TOPRIGHT 0 0, TOPRIGHT bar TOPRIGHT 0 0",
+        "the shine split where the fill ends")
+    Equal(string.format("%g %g %s %g", S[over].color[4], S[rest].color[4], tostring(S[rest].shown), S[rest].height), "0.16 0 true 11",
+        "the fill keeps its shine, the empty part's is gone, the same strip along the top")
+    ns.Set("barDarkness", 50)
+    ns.Skin:ApplyBarLook()
+    Equal(string.format("%g %g %g | %g %g", S[bar.Bar.BarBG].color[1], S[bar.Bar.BarBG].color[3], S[bar.Bar.BarBG].color[4],
+        S[over].color[4], S[rest].color[4]), "0.04 0.045 0.925 | 0.16 0.08", "halfway: halfway to black, half the empty part's shine")
+    -- As Blizzard gives the bar a spell after a relayout: nothing set or
+    -- asked again; a Look page redraw with nothing new doesn't move the shine.
+    local watched = { [over] = true, [rest] = true }
+    local set, asked, SetPoint, SetColor, GetFill = 0, 0, Proto.SetPoint, Proto.SetColorTexture, Proto.GetStatusBarTexture
+    function Proto:SetPoint(...) if watched[self] then set = set + 1 end SetPoint(self, ...) end
+    function Proto:SetColorTexture(...) if watched[self] then set = set + 1 end SetColor(self, ...) end
+    function Proto:GetStatusBarTexture() asked = asked + 1; return GetFill(self) end
+    Blizzard(bar, "OnCooldownIDSet")
+    local relayout = set .. " " .. asked
+    ns.Skin:ApplyBarLook()
+    Equal(relayout .. " | " .. set, "0 0 | 0", "a relayout sets and asks nothing; a redraw leaves the shine and edges as they are")
+    Proto.SetPoint, Proto.SetColorTexture, Proto.GetStatusBarTexture = SetPoint, SetColor, GetFill
+    -- A new fill (a texture picked can bring one): the shine follows it.
+    local newFill = New("Texture", bar.Bar)
+    Seal(newFill)
+    S[bar.Bar].fill = newFill
+    ns.Skin:ApplyBarLook()
+    Equal(S[over].points[2][2] == newFill and S[rest].points[1][2] == newFill, true, "a new fill: the shine split at it")
+    S[bar.Bar].fill = fill
+    ns.Skin:ApplyBarLook()
+    -- Split and Outline have no shine at all.
+    ns.Set("barStyle", "split")
+    ns.Skin:ApplyBarLook()
+    Equal(tostring(S[over].shown) .. " " .. tostring(S[rest].shown), "false false", "Split: no shine, either part")
+    ns.Set("barStyle", "glass")
+    -- Thick edges: a 1px ring just inside the bar's edge and the icon's, over
+    -- the fill, under the text; nothing resized. Made as it's first shown.
+    ns.Set("thickEdges", true)
+    ns.Skin:ApplyBarLook()
+    local ring, iconRing = All(bar.Bar, "OVERLAY", -5), All(bar.Icon, "OVERLAY", -5)
+    Equal(Shown(ring) .. " | " .. Shown(iconRing), "true true true true | true true true true", "thick edges: the bar and its icon")
+    Equal(Colour(ring[1]) .. " | " .. Colour(iconRing[1]), "0 0 0 1 | 0 0 0 1", "black, like their edges")
+    local top, left = S[ring[1]].points, S[ring[3]].points
+    Equal(table.concat({ top[1][1], tostring(top[1][2] == bar.Bar), top[1][3], top[1][4], top[1][5], S[ring[1]].height,
+        left[1][1], left[1][3], left[1][4], left[1][5], S[ring[3]].width }, " "), "BOTTOMLEFT true TOPLEFT 0 -1 1 TOPRIGHT TOPLEFT 1 -1 1",
+        "the second pixel inside the bar, not outside it")
+    Equal(S[iconRing[1]].points[1][2] == bar.Icon.Icon and InsetBy(iconEdge, bar.Icon.Icon, -1) and InsetBy(barEdge, bar.Bar, -1)
+        and S[bar.Bar].height, 26, "round the icon's art; the 1px edges and the bar's height as they were")
+    ns.Set("barStyle", "outline")
+    ns.Set("barColour", "blue")
+    ns.Skin:ApplyBarLook()
+    Equal(S[ring[1]].color[3] .. " " .. S[iconRing[1]].color[3], "0.88 0.88", "Outline: in the bar's colour, like its edges")
+    -- And off again: today's look.
+    ns.Set("barStyle", "glass")
+    ns.Set("barColour", "orange")
+    ns.Set("barDarkness", 0)
+    ns.Set("thickEdges", false)
+    ns.Skin:ApplyBarLook()
+    Equal(Colour(bar.Bar.BarBG) .. " | " .. Points(over) .. " " .. tostring(S[over].shown) .. " " .. tostring(S[rest].shown) .. " | "
+        .. Shown(ring) .. " | " .. Shown(iconRing),
+        "0.08 0.08 0.09 0.85 | TOPLEFT bar TOPLEFT 0 0, TOPRIGHT bar TOPRIGHT 0 0 true false | false false false false | false false false false",
+        "both off: the track, the whole shine and the 1px edges as before")
+    Equal(#printed, 0, "no errors from the darkness or edges")
+end
+
 -- The bar texture picked on the Look page, a cosmetic setter on Blizzard's
 -- bars, only set again when it changes; and the font picked, which the
 -- addon's own fonts take, so Blizzard's countdowns and bar text change with
@@ -844,6 +953,26 @@ ns.Set("barStyle", "glass")
 ns.Set("barColour", "orange")
 ns.Skin:ApplyBarLook()
 Equal(#printed, 0, "no errors with bars of their own colour")
+-- The darkness and thick edges too, its shine split where its fill ends.
+do
+    S[sample.Bar].fill = New("Texture", sample.Bar)
+    ns.Set("barDarkness", 100)
+    ns.Set("thickEdges", true)
+    ns.Skin:ApplyBarLook()
+    local shine, ring = {}, {}
+    for _, r in ipairs(S[sample.Bar].regions) do
+        if S[r].layer == "OVERLAY" and S[r].sublevel == -8 then shine[#shine + 1] = r end
+        if S[r].layer == "OVERLAY" and S[r].sublevel == -5 then ring[#ring + 1] = r end
+    end
+    Equal(string.format("%g %s %s %s", S[sample.Bar.BarBG].color[4], tostring(S[shine[2]].shown),
+        tostring(S[shine[2]].points[1][2] == S[sample.Bar].fill), tostring(S[ring[1]].shown)), "1 true true true",
+        "the preview shows the darkness, the shine split at its fill, and thick edges")
+    ns.Set("barDarkness", 0)
+    ns.Set("thickEdges", false)
+    ns.Skin:ApplyBarLook()
+    Equal(string.format("%g %s %s", S[sample.Bar.BarBG].color[4], tostring(S[shine[2]].shown), tostring(S[ring[1]].shown)),
+        "0.85 false false", "and today's look again")
+end
 
 -- Only hooksecurefunc touched Blizzard's viewers (their keys are kept with
 -- the seal, so nothing at all is on the frame itself).
@@ -1046,6 +1175,64 @@ power = 3
 prd:UpdatePowerBar()
 Equal(S[prd.AlternatePowerBar].height, 20, "at full size in forms too")
 power = 0
+-- Darkness and thick edges on the display's bars: Blizzard's art behind each
+-- is the track, the shine splits where the fill ends, and a second pixel
+-- goes inside the edge. Only cosmetic setters on Blizzard's bars, and
+-- nothing over the empty part but the fading shine, so heal prediction shows.
+do
+    ns.Set("barStyle", "glass")
+    ns.Resource:Apply()
+    local shine, ring
+    local function Find()
+        shine, ring = {}, {}
+        for _, r in ipairs(S[health].regions) do
+            if S[r].layer == "OVERLAY" and S[r].sublevel == -8 then shine[#shine + 1] = r end
+            if S[r].layer == "OVERLAY" and S[r].sublevel == -5 then ring[#ring + 1] = r end
+        end
+    end
+    Find()
+    local over = shine[1]
+    local function At(region, i)
+        local p = S[region].points[i]
+        local rel = p[2] == health and "bar" or p[2] == S[health].fill and "fill" or "?"
+        return p[1] .. " " .. rel .. " " .. p[3]
+    end
+    Equal(#shine .. " " .. #ring .. " | " .. string.format("%g %g", S[healthArt].color[1], S[healthArt].color[4]) .. " | "
+        .. At(over, 1) .. ", " .. At(over, 2) .. " " .. tostring(S[over].shown), "1 0 | 0.08 0.85 | TOPLEFT bar TOPLEFT, BOTTOMRIGHT bar RIGHT true",
+        "off by default: today's track and the shine over the whole top half, nothing more made")
+    local fill = New("Texture", health)
+    Seal(fill)
+    S[health].fill = fill
+    ns.Set("barDarkness", 100)
+    ns.Set("thickEdges", true)
+    ns.Resource:Apply()
+    Find()
+    local rest = shine[2]
+    Equal(string.format("%g %g %g", S[healthArt].color[1], S[healthArt].color[4], S[rest].color[4]) .. " | " .. At(over, 2) .. " | "
+        .. At(rest, 1) .. ", " .. At(rest, 2) .. " " .. tostring(S[rest].shown),
+        "0 1 0 | BOTTOMRIGHT fill RIGHT | TOPLEFT fill TOPRIGHT, BOTTOMRIGHT bar RIGHT true",
+        "darkness 100: the art solid black, the shine kept to the fill")
+    Equal(string.format("%s %s %g %g", tostring(S[ring[1]].shown), tostring(S[ring[4]].shown), S[ring[1]].color[1], S[ring[1]].color[4])
+        .. " " .. tostring(InsetBy(Piece(health, "BACKGROUND", -8), health, -1)), "true true 0 1 true",
+        "thick edges: a black pixel inside the 1px edge, which stays where it was")
+    -- Blizzard recolouring the bar redraws it, but sets the track only when the darkness changes.
+    local set, SetColor = 0, Proto.SetColorTexture
+    function Proto:SetColorTexture(...) if self == healthArt or self == rest then set = set + 1 end SetColor(self, ...) end
+    health:SetStatusBarColor(0, .9, 0)
+    Proto.SetColorTexture = SetColor
+    Equal(set, 0, "Blizzard recolouring the bar: the track and shine left as they are")
+    ns.Set("barStyle", "outline")
+    ns.Resource:Apply()
+    Equal(string.format("%g %g %s %s", S[ring[1]].color[1], S[ring[1]].color[2], tostring(S[over].shown), tostring(S[rest].shown)),
+        "0 0.9 false false", "Outline: the second pixel in the bar's colour, and no shine")
+    ns.Set("barStyle", "glass")
+    ns.Set("barDarkness", 0)
+    ns.Set("thickEdges", false)
+    ns.Resource:Apply()
+    Equal(string.format("%g %g", S[healthArt].color[1], S[healthArt].color[4]) .. " | " .. At(over, 2) .. " " .. tostring(S[over].shown)
+        .. " " .. tostring(S[rest].shown) .. " " .. tostring(S[ring[1]].shown), "0.08 0.85 | BOTTOMRIGHT bar RIGHT true false false",
+        "both off: today's look again")
+end
 Equal(#printed, 0, "no errors")
 
 -- Restyle off: Blizzard's bars untouched, but the repeat mana bar still hides.
@@ -1165,6 +1352,45 @@ Equal(S[row].shown, true, "back in cat form")
 S[prd.AlternatePowerBar].shown = false
 prd:UpdatePowerBar()
 Equal(S[row].points[1][2] == prd.PowerBar, true, "under the energy bar when it's the lowest")
+-- Darkness and thick edges on each segment: its own track, the shine split
+-- where its fill ends, and a second pixel inside its edge, so the segments
+-- and the gaps between them stay as they are.
+do
+    ns.Set("barStyle", "glass")
+    ns.Resource:Apply()
+    local seg = segments[2]
+    local track, edge = Piece(seg, "BACKGROUND", nil), Piece(seg, "BACKGROUND", -8)
+    local shine, ring
+    local function Find()
+        shine, ring = {}, {}
+        for _, r in ipairs(S[seg].regions) do
+            if S[r].layer == "OVERLAY" and S[r].sublevel == -8 then shine[#shine + 1] = r end
+            if S[r].layer == "OVERLAY" and S[r].sublevel == -5 then ring[#ring + 1] = r end
+        end
+    end
+    Find()
+    local over = shine[1]
+    Equal(string.format("%g %g %g", S[track].color[1], S[track].color[4], #S[over].points) .. " " .. tostring(S[over].points[2][2] == seg)
+        .. " " .. #shine .. " " .. #ring, "0.08 0.85 2 true 1 0", "off by default: today's track and shine, nothing more made")
+    for _, bar in ipairs(segments) do S[bar].fill = New("Texture", bar) end
+    ns.Set("barDarkness", 100)
+    ns.Set("thickEdges", true)
+    ns.Resource:Apply()
+    Find()
+    local rest = shine[2]
+    Equal(string.format("%g %g %g", S[track].color[1], S[track].color[4], S[rest].color[4]) .. " "
+        .. tostring(S[over].points[2][2] == S[seg].fill and S[rest].points[1][2] == S[seg].fill and S[rest].shown) .. " "
+        .. tostring(S[ring[1]].shown) .. " " .. tostring(InsetBy(edge, seg, -1)) .. " " .. S[row].height,
+        "0 1 0 true true true 12", "darkness 100 and thick edges: black track, the shine kept to the fill, a pixel inside the edge, the row as tall")
+    ns.Set("barStyle", "outline")
+    ns.Resource:Apply()
+    Equal(S[ring[1]].color[1] == ns.Style:BarColour("blue")[1] and S[ring[3]].shown, true, "Outline: in their colour")
+    ns.Set("barDarkness", 0)
+    ns.Set("thickEdges", false)
+    ns.Resource:Apply()
+    Equal(string.format("%g %g", S[track].color[1], S[track].color[4]) .. " " .. tostring(S[over].points[2][2] == seg) .. " "
+        .. tostring(S[rest].shown) .. " " .. tostring(S[ring[1]].shown), "0.08 0.85 true false false", "both off: as before")
+end
 Equal(#printed, 0, "no errors from the combo points")
 
 -- Your cast bar: Blizzard's own is only made invisible while yours is on,

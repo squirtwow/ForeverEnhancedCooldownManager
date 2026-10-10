@@ -107,6 +107,8 @@ ns.DEFAULTS = {
     pulseY = 0,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
+    barDarkness = 0, -- the empty part of your bars and the restyled ones: 0 as before, 100 solid black (Look page)
+    thickEdges = false, -- their edges 2px instead of 1px
     readyGlow = "proc", -- a ready reactive ability on your bars: Blizzard's proc glow, or a plain gold edge ("edge")
     keybinds = false, -- each Cooldowns/Utility icon's key, from your action bars (Look page)
     keybindPosition = "BOTTOM", -- where on the icon: BOTTOM, TOPLEFT, TOP or TOPRIGHT
@@ -133,6 +135,7 @@ ns.MINIMAP_ANGLE = { 0, 359, 225 }
 ns.MINIMAP_PLACE = { -4000, 4000, 0 }
 ns.KEYBIND_SIZE = { 50, 150, 100 } -- min, max, default (percent)
 ns.BAR_SCALE = { 50, 150, 100 } -- min, max, default (percent)
+ns.BAR_DARKNESS = { 0, 100, 0 } -- percent of the way to black
 ns.RAID_SIZE = { 50, 200, 100 } -- each Raid Timers size (percent)
 ns.RAID_SIZE_ALL = { 50, 150, 100 } -- all of them together, so the biggest is three times Blizzard's
 -- Cooldown pulse.
@@ -144,8 +147,8 @@ ns.PULSE_SEE_THROUGH = { 0, 90, 80 }
 ns.PULSE_GROW = { 100, 160, 135 }
 ns.PULSE_PLACE = { -4000, 4000, 0 }
 local NUMBERS = { castHeight = ns.CAST_HEIGHT, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
-    barScale = ns.BAR_SCALE, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE, warningSize = ns.RAID_SIZE,
-    emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
+    barScale = ns.BAR_SCALE, barDarkness = ns.BAR_DARKNESS, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE,
+    warningSize = ns.RAID_SIZE, emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
     pulseLongSize = ns.PULSE_LONG_SIZE, pulseLongTime = ns.PULSE_LONG_TIME,
     pulseSeeThrough = ns.PULSE_SEE_THROUGH, pulseGrow = ns.PULSE_GROW,
     pulseX = ns.PULSE_PLACE, pulseY = ns.PULSE_PLACE, minimapX = ns.MINIMAP_PLACE, minimapY = ns.MINIMAP_PLACE }
@@ -225,7 +228,7 @@ ns.RELOAD = {
 -- bars, the look on Blizzard's bars or display, the cast bar, swing timer,
 -- combo points, keybinds, the pulse, each Raid Timers part), nor the window's
 -- own (its accent, lists, preview, grow arrows and the minimap button).
-ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "iconShadow", "readyGlow",
+ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
     "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
     "castColour", "castHeight", "castIcon", "castName", "castTime", "swingColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",

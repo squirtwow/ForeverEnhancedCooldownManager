@@ -239,6 +239,111 @@ function S:ShowDecor(decor, border, shadow)
     end
 end
 
+-- Darkness and thick edges ---------------------------------------------------------
+-- Two choices on the Look page for your cast bar and swing timer, combo
+-- points, the resource display and Blizzard's Tracked Bars: how dark the
+-- empty part of each bar is, and a 2px edge instead of 1px. Both off by
+-- default, so the bars look as they always have. The fill never changes.
+local SHEEN = .16 -- Glass's shine
+
+-- How far the empty part goes from today's track (0) to solid black (1).
+function S:Darkness()
+    return ns.Get("barDarkness") / 100
+end
+
+-- The track behind a bar's fill: S.TRACK, that far toward solid black.
+function S:TrackColour()
+    local dark, track = self:Darkness(), S.TRACK
+    local keep = 1 - dark
+    return track[1] * keep, track[2] * keep, track[3] * keep, track[4] + (1 - track[4]) * dark
+end
+
+-- Glass's shine on a bar: `over`, the bar's own shine texture across its top
+-- half (or a strip `height` tall along its top), and while the bars are
+-- darkened `rest` too, so the shine splits where the fill ends: `over` stops
+-- there, and `rest` covers the empty part, fading as the darkness grows, so a
+-- dark bar's empty part stays dark. Nothing else goes over the empty part,
+-- so Blizzard's heal prediction on the health bar still shows. Unsplit,
+-- `over` runs the whole bar as the shine always has.
+local function Span(sheen, fill)
+    local bar, height, over, rest = sheen.bar, sheen.height, sheen.over, sheen.rest
+    local stop = fill or bar
+    over:ClearAllPoints()
+    over:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+    if height then
+        over:SetPoint("TOPRIGHT", stop, "TOPRIGHT", 0, 0)
+    else
+        over:SetPoint("BOTTOMRIGHT", stop, "RIGHT", 0, 0)
+    end
+    if not fill then return end
+    rest:ClearAllPoints()
+    rest:SetPoint("TOPLEFT", fill, "TOPRIGHT", 0, 0)
+    if height then
+        rest:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
+    else
+        rest:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
+    end
+end
+
+-- The shine on bar, from its own texture `over`, placed as it always was.
+-- The empty part's is only made the first time the bars are darkened, so
+-- nothing more is made while darkness stays at 0.
+function S:Sheen(bar, over, height)
+    return { bar = bar, over = over, height = height }
+end
+
+-- Shows the shine for Glass (glass true), split where the fill ends while
+-- the bars are darkened. It's anchored again only when that changes or the
+-- fill does (a new texture can bring a new one), and the empty part's shine
+-- set only when the darkness changes. A bar that can't say where its fill
+-- is keeps the whole shine.
+function S:ShowSheen(sheen, glass)
+    local dark = self:Darkness()
+    local fill = glass and dark > 0 and sheen.bar:GetStatusBarTexture() or nil
+    if fill ~= sheen.fill then
+        sheen.fill = fill
+        if fill and not sheen.rest then
+            sheen.rest = sheen.bar:CreateTexture(nil, "OVERLAY", nil, -8)
+            if sheen.height then sheen.rest:SetHeight(sheen.height) end
+        end
+        Span(sheen, fill)
+    end
+    sheen.over:SetShown(glass)
+    if sheen.rest then sheen.rest:SetShown(fill ~= nil) end
+    if not fill then return end
+    local alpha = SHEEN * (1 - dark)
+    if sheen.alpha ~= alpha then
+        sheen.alpha = alpha
+        sheen.rest:SetColorTexture(1, 1, 1, alpha)
+    end
+end
+
+-- Thick edges: a second pixel just inside region's 1px edge (a bar's, or an
+-- icon's beside one), so every size and gap stays as it is. Over the fill,
+-- the art, Glass's shine and Split's box, under any text. Its four strips
+-- are only made the first time it shows, as the borders' rings are.
+function S:InnerEdge(owner, region)
+    return { owner = owner, region = region, r = 0, g = 0, b = 0, shown = false }
+end
+
+-- Shown while Thick edges is on (and shown isn't false: its icon is
+-- hidden), in colour like the edge it thickens. Only what changed is set.
+function S:ShowInnerEdge(ring, colour, shown)
+    local thick = shown ~= false and ns.Get("thickEdges") == true
+    if thick and not ring[1] then
+        for i, strip in ipairs(Ring(ring.owner, "OVERLAY", -5, 1)) do ring[i] = strip end
+        Place(ring, ring.region, -1)
+    end
+    if thick and (ring.r ~= colour[1] or ring.g ~= colour[2] or ring.b ~= colour[3]) then
+        ring.r, ring.g, ring.b = colour[1], colour[2], colour[3]
+        for _, strip in ipairs(ring) do strip:SetColorTexture(colour[1], colour[2], colour[3], 1) end
+    end
+    if ring.shown ~= thick then
+        ring.shown = thick
+        Show(ring, thick)
+    end
+end
+
 -- Keybinds -------------------------------------------------------------------------
 -- The key that casts an icon's spell, in one corner or along one edge of its
 -- art, sized with the icon. Your bars, Blizzard's icons and the Look page's

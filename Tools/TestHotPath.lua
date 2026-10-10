@@ -1222,6 +1222,23 @@ do
     ns.Set("iconShadow", "off")
     C:Apply()
     Equal(tostring(S[cb.decor.shadow[1][1]].shown), "false", "shadow off: gone at once")
+    -- Darkness and thick edges (Look page): set with the next fit, then
+    -- nothing again per cast, not even where the fill ends.
+    local fill = cb.bar:CreateTexture()
+    rawset(cb.bar, "GetStatusBarTexture", function() return fill end)
+    ns.Set("barDarkness", 60)
+    ns.Set("thickEdges", true)
+    C:Apply()
+    Equal(tostring(S[cb.bar.sheen.rest].shown) .. " " .. tostring(S[cb.bar.inner[1]].shown) .. " "
+        .. tostring(S[cb.iconInner[1]].shown), "true true true", "darkened and thick: the empty part's shine apart, a second pixel inside the edges")
+    casting[7] = "cast-5"
+    game = Measure(function() Fire("UNIT_SPELLCAST_START", "player", "cast-5", 5176) end)
+    Note("a cast starting (darkness and thick edges on)", game)
+    Equal(Counts(game, table.unpack(LOOK)) .. " " .. Counts(game, "GetStatusBarTexture"), "0 0 0 0 0 0 0 0 0 0",
+        "the next cast, darkened and thick: nothing about its look set again, the fill not asked for")
+    ns.Set("barDarkness", 0)
+    ns.Set("thickEdges", false)
+    C:Apply()
     Equal(#printed, 0, "no errors")
 
     -- The swing timer alone.

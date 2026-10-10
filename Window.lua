@@ -55,6 +55,7 @@ local TEXTURE_NOTES = {
 }
 local TEXTURE_USE = " on your cast bar, swing timer and combo points, and the restyled Tracked Bars and resource display."
 local UNTESTED = " (Needs testing)" -- on every choice but today's look
+local DARK_LABEL = 66 -- room for the Darkness slider's label before its track
 -- Ready glow's choices at the foot, and room for its label before them
 -- (about seven units a letter in the game: "Ready glow" needs about 70).
 local GLOW_PILLS, GLOW_LABEL = 160, 80
@@ -361,6 +362,27 @@ local function BuildLook(window, page, width)
     fillChosen:SetPoint("TOPLEFT", FACES_X + #ns.BAR_TEXTURE_KEYS * (FILL_SWATCH[1] + SWATCH_GAP) + 2, -120)
     window.fontChoice, window.fills, window.fillChosen = font, fills, fillChosen
 
+    -- Thick edges under the textures, and how dark the empty part of the bars
+    -- is level with the last tick on the left: both clear of the long ticks
+    -- beside them. The preview above and your bars change at once, as you drag.
+    local function Reshade()
+        if ns.Skin then ns.Skin:ApplyBarLook() end
+        if ns.Resource then ns.Resource:Apply() end
+        if ns.CastBar then ns.CastBar:Apply() end
+    end
+    local thick = Choice("Thick edges", "thickEdges", -142,
+        "A 2px black edge round your bars instead of 1px (in their own colour for Outline). Your cast bar, swing timer, combo"
+        .. " points, resource display and Tracked Bars, and the icons beside them." .. UNTESTED, Reshade, FACES_X)
+    local darkness = T:Slider(options, "Darkness", ns.BAR_DARKNESS, 5, inner - KEYS_X, function(value)
+        ns.Set("barDarkness", value)
+        Reshade()
+        window:Refresh()
+    end, DARK_LABEL)
+    darkness:SetPoint("TOPLEFT", KEYS_X, -176)
+    window:Hint(darkness, "How dark the empty part of your bars is: 0 as it's always been, 100 solid black, with Glass's shine"
+        .. " kept to the fill. Your cast bar, swing timer, combo points, resource display and Tracked Bars." .. UNTESTED)
+    window.darkness, window.thickEdges = darkness, thick
+
     -- Each Tracked Bar in a colour of its own.
     local eachTitle = T:Heading(page, "Each bar")
     eachTitle:SetPoint("TOPLEFT", options, "BOTTOMLEFT", 0, -12)
@@ -579,6 +601,8 @@ local function BuildLook(window, page, width)
             swatch.fill:SetVertexColor(tint[1], tint[2], tint[3])
         end
         fillChosen:SetText(ns.BAR_TEXTURE_NAMES[texture])
+        darkness:Set(ns.Get("barDarkness"))
+        thick:SetChecked(ns.Get("thickEdges"))
         local accent = ns.Get("accent")
         for _, swatch in ipairs(swatches) do
             PaintSwatch(swatch, T.ACCENTS[swatch.key].colour, swatch.key == accent)

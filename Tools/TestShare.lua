@@ -1120,7 +1120,8 @@ end
 do
     character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, barStyle = "split", barColour = "blue",
-        barTexture = "raid", font = "arial", iconBorder = "icon", iconShadow = "bar", readyGlow = "edge", keybindPosition = "TOP",
+        barTexture = "raid", font = "arial", iconBorder = "icon", iconShadow = "bar", barDarkness = 40, thickEdges = true,
+        readyGlow = "edge", keybindPosition = "TOP",
         keybindSize = 120, barScale = 110, prdHideRepeat = false, prdHealth = "green", castHeight = 24, castIcon = false,
         swingColour = "purple", pullColour = "class", warningFont = "morpheus", warningShadow = false, raidSize = 120,
         pulseSize = 300, pulseSound = "bell", pulseMaster = true, pulseX = -120, pulseY = 85.5,
@@ -1177,6 +1178,8 @@ do
         if ns.Get(key) ~= ns.DEFAULTS[key] then look[key] = ns.Get(key) end
     end
     Equal(H.Text(shared.setup.look), H.Text(look), "the look: every shared setting unlike the default, and no other")
+    Equal(tostring(shared.setup.look.barDarkness) .. " " .. tostring(shared.setup.look.thickEdges), "40 true",
+        "the bars' darkness and thick edges among it")
     Equal(tostring(shared.setup.look.accent) .. " " .. tostring(shared.setup.look.keybinds) .. " " .. tostring(shared.setup.look.castBar)
         .. " " .. tostring(shared.setup.look.pulse), "nil nil nil nil", "never the accent, nor a tick that switches a part on")
     local cd, debuff, util = shared.setup.bars.cd, shared.setup.bars.debuff, shared.setup.bars.util
@@ -1211,6 +1214,8 @@ do
         "and this character switched to it")
     Equal(H.ProfileNow(ns2), profile, "every list, join, pulse tick and Long style the same")
     Equal(H.SetupNow(ns2), setup, "the look, every bar's settings and spot, the layout and the colours the same")
+    Equal(ns2.Get("barDarkness") .. " " .. tostring(ns2.Get("thickEdges")) .. " " .. tostring(S[ns2.CastBar.row.bar.inner[1]].shown),
+        "40 true true", "the darkness and thick edges came too, on the cast bar at once")
     Equal(H.Text(ns2.CustomSpells()["Power Word: Fortitude"]), "{[1]=1243}", "the spell added by ID, added here too")
     Equal(H.Text(db.profiles[own]), ownBefore, "the importer's own profile is as it was")
     Equal(ns2.Get("accent") .. " " .. tostring(ns2.Get("keybinds")) .. " " .. tostring(ns2.Get("castBar")) .. " "
@@ -1220,6 +1225,11 @@ do
     Equal(ns2.ProfileShare.Export(), text, "and it shares the very same string back")
     Equal(table.concat((ns2.Bars:Mine("cd")), ","), "Moonfire,Wrath,slot:13,family:healing,Moonfire@1",
         "the bars show it: a druid's own, the warrior's spell left off")
+    -- The Look page shows the darkness and thick edges that came with it.
+    SlashCmdList.FECM("")
+    FECMFrame:Select("look")
+    Equal(tostring(S[FECMFrame.darkness.value].text) .. " " .. tostring(FECMFrame.thickEdges:GetChecked()), "40 true",
+        "and the Look page shows the imported darkness and thick edges")
 end
 
 -- Import makes a new profile, and leaves yours as it is ----------------------------------------------

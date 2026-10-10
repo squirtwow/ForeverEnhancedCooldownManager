@@ -145,22 +145,29 @@ function C:Make(parent)
     frame.iconEdge:SetPoint("TOPLEFT", frame.icon, "TOPLEFT", -EDGE, EDGE)
     frame.iconEdge:SetPoint("BOTTOMRIGHT", frame.icon, "BOTTOMRIGHT", EDGE, -EDGE)
     frame.iconEdge:SetColorTexture(0, 0, 0, 1)
+    -- Thick edges: a second black pixel just inside the icon's edge.
+    frame.iconInner = Style:InnerEdge(frame, frame.icon)
     local bar = CreateFrame("StatusBar", nil, frame)
     bar.fill = Style:BarTexture()
     bar:SetStatusBarTexture(bar.fill)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(0)
-    local track = bar:CreateTexture(nil, "BACKGROUND")
-    track:SetAllPoints()
-    track:SetColorTexture(Style.TRACK[1], Style.TRACK[2], Style.TRACK[3], Style.TRACK[4])
-    -- A 1px edge round the bar, and Glass's shine over its top half.
+    -- The track behind the fill. (Not .track: the tests' layout checks take a
+    -- frame's .track for a slider's, and the Cast bar page shows this one.)
+    bar.background = bar:CreateTexture(nil, "BACKGROUND")
+    bar.background:SetAllPoints()
+    bar.background:SetColorTexture(Style:TrackColour())
+    -- A 1px edge round the bar (and with Thick edges a second pixel inside
+    -- it), and Glass's shine over its top half.
     bar.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
     bar.edge:SetPoint("TOPLEFT", -EDGE, EDGE)
     bar.edge:SetPoint("BOTTOMRIGHT", EDGE, -EDGE)
-    bar.sheen = bar:CreateTexture(nil, "OVERLAY", nil, -8)
-    bar.sheen:SetPoint("TOPLEFT")
-    bar.sheen:SetPoint("BOTTOMRIGHT", bar, "RIGHT")
-    bar.sheen:SetColorTexture(1, 1, 1, .16)
+    bar.inner = Style:InnerEdge(bar, bar)
+    local shine = bar:CreateTexture(nil, "OVERLAY", nil, -8)
+    shine:SetPoint("TOPLEFT")
+    shine:SetPoint("BOTTOMRIGHT", bar, "RIGHT")
+    shine:SetColorTexture(1, 1, 1, .16)
+    bar.sheen = Style:Sheen(bar, shine)
     bar.name = bar:CreateFontString(nil, "OVERLAY")
     bar.name:SetFontObject(Style:Font(10))
     bar.name:SetJustifyH("LEFT")
@@ -181,25 +188,28 @@ end
 local BLACK = { 0, 0, 0 }
 
 -- Sizes a cast bar from your choices: its height, the design, the texture,
--- which parts show and its shadow. A cast or a swing starts every second or
--- two, so it's only done again when one of these has changed since. True
--- when it was done.
+-- the darkness and edges, which parts show and its shadow. A cast or a swing
+-- starts every second or two, so it's only done again when one of these has
+-- changed since. True when it was done.
 local function Fit(frame)
     local height, design, texture = ns.Get("castHeight"), ns.Get("barStyle"), Style:BarTexture()
     local withIcon, withTime, withName = ns.Get("castIcon"), ns.Get("castTime"), ns.Get("castName")
     local shadow, border = ns.Get("iconShadow"), ns.Get("iconBorder")
+    local dark, thick = ns.Get("barDarkness"), ns.Get("thickEdges")
     local fit = frame.fit
     if fit.height == height and fit.design == design and fit.texture == texture and fit.icon == withIcon
-        and fit.time == withTime and fit.name == withName and fit.shadow == shadow and fit.border == border then
+        and fit.time == withTime and fit.name == withName and fit.shadow == shadow and fit.border == border
+        and fit.dark == dark and fit.thick == thick then
         return false
     end
     fit.height, fit.design, fit.texture, fit.icon, fit.time = height, design, texture, withIcon, withTime
-    fit.name, fit.shadow, fit.border = withName, shadow, border
+    fit.name, fit.shadow, fit.border, fit.dark, fit.thick = withName, shadow, border, dark, thick
     local bar = frame.bar
     frame:SetHeight(height)
     frame.icon:SetSize(height, height)
     frame.icon:SetShown(withIcon)
     frame.iconEdge:SetShown(withIcon)
+    Style:ShowInnerEdge(frame.iconInner, BLACK, withIcon)
     bar:ClearAllPoints()
     bar:SetPoint("TOPLEFT", withIcon and height + 3 or 0, 0)
     bar:SetPoint("BOTTOMRIGHT")
@@ -208,7 +218,8 @@ local function Fit(frame)
         bar.fill = texture
         bar:SetStatusBarTexture(texture)
     end
-    bar.sheen:SetShown(design == "glass")
+    bar.background:SetColorTexture(Style:TrackColour())
+    Style:ShowSheen(bar.sheen, design == "glass")
     local font = Style:Font(math.max(9, height * .55))
     bar.name:SetFontObject(font)
     bar.time:SetFontObject(font)
@@ -239,6 +250,7 @@ local function Dress(frame, colour)
     bar:SetStatusBarColor(r, g, b, outline and .45 or 1)
     local edge = outline and colour or BLACK
     bar.edge:SetColorTexture(edge[1], edge[2], edge[3], 1)
+    Style:ShowInnerEdge(bar.inner, edge)
 end
 
 -- A cast's colour: red once it's broken off.

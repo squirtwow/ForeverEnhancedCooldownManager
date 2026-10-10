@@ -46,35 +46,50 @@ local function Fill(bar, state)
     bar:SetStatusBarTexture(texture)
 end
 
+-- The track's darkness chosen on the Look page, set only when it changes.
+local function Track(state)
+    local dark = Style:Darkness()
+    if state.dark == dark then return end
+    state.dark = dark
+    for _, track in ipairs(state.tracks) do track:SetColorTexture(Style:TrackColour()) end
+end
+
 local function Look(bar, state)
     local design, colour = ns.Get("barStyle"), Colour(state)
     local outline = design == "outline"
     Fill(bar, state)
-    state.sheen:SetShown(design == "glass")
+    Track(state)
+    Style:ShowSheen(state.sheen, design == "glass")
     painting[bar] = true
     bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
     painting[bar] = nil
-    -- A 1px edge round the bar: black, or the bar's colour for Outline.
-    Solid(state.edge, outline and colour or { 0, 0, 0 })
+    -- A 1px edge round the bar: black, or the bar's colour for Outline; with
+    -- Thick edges, a second pixel inside it.
+    local edge = outline and colour or { 0, 0, 0 }
+    Solid(state.edge, edge)
+    Style:ShowInnerEdge(state.inner, edge)
 end
 
 local function Restyle(bar, setting)
     if not bar or bars[bar] then return end
-    local state = { setting = setting }
+    local state = { setting = setting, tracks = {} }
     Fill(bar, state)
+    -- Blizzard's art behind the bar becomes its track (Track colours it).
     for _, region in ipairs({ bar:GetRegions() }) do
         if region:GetObjectType() == "Texture" and region:GetAtlas() == BG_ATLAS then
-            Solid(region, Style.TRACK, Style.TRACK[4])
+            state.tracks[#state.tracks + 1] = region
             Inset(region, bar, 0)
         end
     end
     state.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
     Inset(state.edge, bar, -1)
+    state.inner = Style:InnerEdge(bar, bar)
     -- Glass: a soft shine over the top half.
-    state.sheen = bar:CreateTexture(nil, "OVERLAY", nil, -8)
-    state.sheen:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-    state.sheen:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
-    state.sheen:SetColorTexture(1, 1, 1, .16)
+    local shine = bar:CreateTexture(nil, "OVERLAY", nil, -8)
+    shine:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+    shine:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
+    shine:SetColorTexture(1, 1, 1, .16)
+    state.sheen = Style:Sheen(bar, shine)
     local r, g, b = bar:GetStatusBarColor()
     state.blizzard = { r or 1, g or 1, b or 1 }
     bars[bar] = state
@@ -149,11 +164,14 @@ local function ComboLook()
     -- The texture only when it changes, as for the display's own bars.
     local retexture = combo.texture ~= texture
     combo.texture = texture
+    local edge = outline and colour or { 0, 0, 0 }
     for _, bar in ipairs(combo.segments) do
         if retexture then bar:SetStatusBarTexture(texture) end
         bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
-        Solid(bar.edge, outline and colour or { 0, 0, 0 })
-        bar.sheen:SetShown(design == "glass")
+        bar.background:SetColorTexture(Style:TrackColour())
+        Solid(bar.edge, edge)
+        Style:ShowInnerEdge(bar.inner, edge)
+        Style:ShowSheen(bar.sheen, design == "glass")
     end
 end
 
@@ -182,15 +200,17 @@ local function MakeCombo(frame)
         bar:SetStatusBarTexture(combo.texture)
         bar:SetMinMaxValues(i - 1, i)
         bar:SetValue(0)
-        local track = bar:CreateTexture(nil, "BACKGROUND")
-        track:SetAllPoints()
-        Solid(track, Style.TRACK, Style.TRACK[4])
+        -- Its track, coloured by ComboLook with the darkness chosen.
+        bar.background = bar:CreateTexture(nil, "BACKGROUND")
+        bar.background:SetAllPoints()
         bar.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
         Inset(bar.edge, bar, -1)
-        bar.sheen = bar:CreateTexture(nil, "OVERLAY", nil, -8)
-        bar.sheen:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-        bar.sheen:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
-        bar.sheen:SetColorTexture(1, 1, 1, .16)
+        bar.inner = Style:InnerEdge(bar, bar)
+        local shine = bar:CreateTexture(nil, "OVERLAY", nil, -8)
+        shine:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+        shine:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
+        shine:SetColorTexture(1, 1, 1, .16)
+        bar.sheen = Style:Sheen(bar, shine)
         combo.segments[i] = bar
     end
     combo:SetScript("OnSizeChanged", ComboLayout)

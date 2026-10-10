@@ -4884,6 +4884,151 @@ Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
     _G.PersonalResourceDisplayFrame = display
 end)()
 
+-- Darkness and thick edges ----------------------------------------------------------------------
+-- On the Look page, both off by default: the empty part of your bars from
+-- today's track to solid black, with Glass's shine kept to the fill, and a
+-- second pixel inside each bar's 1px edge, so nothing moves or resizes.
+
+-- In a function of its own: the main chunk is near Lua's limit of 200 locals.
+;(function()
+    local display = _G.PersonalResourceDisplayFrame
+    _G.PersonalResourceDisplayFrame = nil
+    local function Fresh(saved)
+        Environment(saved ~= nil)
+        _G.GameFontHighlightSmall = New("Font")
+        _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
+        ns = Load(saved or { useBars = true, notesSeen = "dev", castBar = true })
+        for _, timer in ipairs(timers) do timer() end
+    end
+    Fresh()
+    local C = ns.CastBar
+    local cb = C.row
+    local bar, sheen = cb.bar, cb.bar.sheen
+    -- Where the game's fill ends: the tests' bars have none until given one.
+    local fill = New("Texture", bar)
+    rawset(bar, "GetStatusBarTexture", function() return fill end)
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local darkness, thick, preview = w.darkness, w.thickEdges, w.preview.Bar
+    -- A colour as text, to four places (fengari's %g doesn't round).
+    local function Colour(region)
+        local c, out = S[region].last.SetColorTexture, {}
+        for i = 1, 4 do out[i] = string.format("%g", math.floor(c[i] * 10000 + .5) / 10000) end
+        return table.concat(out, " ")
+    end
+    -- An anchor as text; one with no frame named is on the bar it's in.
+    local function At(region, i)
+        local p = S[region].points[i]
+        local rel = (p[2] == nil or p[2] == bar) and "bar" or p[2] == fill and "fill" or tostring(p[2])
+        return p[1] .. " " .. rel .. " " .. (p[3] or p[1])
+    end
+    -- Each strip of a ring shown or not, or none made yet.
+    local function Shown(ring)
+        local list = {}
+        for i, strip in ipairs(ring) do list[i] = tostring(S[strip].shown) end
+        return #list > 0 and table.concat(list, " ") or "none"
+    end
+    -- No strip of it showing, or none made.
+    local function Hidden(ring)
+        for _, strip in ipairs(ring) do
+            if S[strip].shown then return false end
+        end
+        return true
+    end
+    local function Look()
+        return Colour(bar.background) .. " | " .. At(sheen.over, 1) .. ", " .. At(sheen.over, 2) .. " " .. tostring(S[sheen.over].shown)
+            .. " " .. tostring(sheen.rest ~= nil and S[sheen.rest].shown) .. " | " .. tostring(Hidden(bar.inner)) .. " " .. tostring(Hidden(cb.iconInner))
+    end
+    local TODAY = "0.08 0.08 0.09 0.85 | TOPLEFT bar TOPLEFT, BOTTOMRIGHT bar RIGHT true false | true true"
+
+    Equal(ns.Get("barDarkness") .. " " .. tostring(ns.Get("thickEdges")) .. " | " .. S[darkness.label].text .. " " .. S[darkness.value].text
+        .. " | " .. S[thick.text].text .. " " .. tostring(thick:GetChecked()), "0 false | Darkness 0 | Thick edges false",
+        "on the Look page, both off by default")
+    local p, q = S[darkness].points[1], S[thick].points[1]
+    Equal(table.concat({ p[1], p[2], p[3], S[darkness].width, q[1], q[2], q[3] }, " "), "TOPLEFT 330 -176 276 TOPLEFT 382 -142",
+        "Thick edges under the textures, Darkness across the right-hand column level with the last tick")
+    Equal(Look() .. " || " .. Colour(preview.BarBG), TODAY .. " || 0.08 0.08 0.09 0.85",
+        "your cast bar as it was: today's track, the shine over the whole top half, 1px edges; the preview's track too")
+    Equal(tostring(sheen.rest) .. " " .. Shown(bar.inner) .. " " .. Shown(cb.iconInner), "nil none none",
+        "and nothing more made while both are off")
+    -- Each says what it does; both need testing.
+    S[darkness.track].scripts.OnEnter(darkness.track)
+    local darkNote = S[w.note].text
+    S[thick].scripts.OnEnter(thick)
+    Equal(darkNote .. " | " .. S[w.note].text, "How dark the empty part of your bars is: 0 as it's always been, 100 solid black, with"
+        .. " Glass's shine kept to the fill. Your cast bar, swing timer, combo points, resource display and Tracked Bars. (Needs testing)"
+        .. " | A 2px black edge round your bars instead of 1px (in their own colour for Outline). Your cast bar, swing timer, combo"
+        .. " points, resource display and Tracked Bars, and the icons beside them. (Needs testing)", "each says what it does on hover")
+    S[thick].scripts.OnLeave(thick)
+
+    -- Dragged: your cast bar and the preview change at once.
+    darkness:Choose(50)
+    Equal(ns.Get("barDarkness") .. " " .. S[darkness.value].text .. " | " .. Colour(bar.background) .. " | " .. Colour(preview.BarBG)
+        .. " | " .. At(sheen.over, 2) .. " | " .. At(sheen.rest, 1) .. ", " .. At(sheen.rest, 2) .. " " .. tostring(S[sheen.rest].shown)
+        .. string.format(" %g", S[sheen.rest].last.SetColorTexture[4]),
+        "50 50 | 0.04 0.04 0.045 0.925 | 0.04 0.04 0.045 0.925 | BOTTOMRIGHT fill RIGHT | TOPLEFT fill TOPRIGHT, BOTTOMRIGHT bar RIGHT true 0.08",
+        "dragged to 50: your cast bar and the preview halfway to black, the shine split where the fill ends")
+    darkness:Choose(100)
+    Equal(Colour(bar.background) .. string.format(" | %g %g", S[sheen.over].last.SetColorTexture[4], S[sheen.rest].last.SetColorTexture[4])
+        .. " | " .. Colour(preview.BarBG), "0 0 0 1 | 0.16 0 | 0 0 0 1", "100: solid black, the fill's shine kept, the empty part's gone")
+    w:Select("cast")
+    local cp = w.pages.cast
+    Equal(Colour(cp.sample.bar.background) .. " | " .. Colour(cp.swingSample.bar.background), "0 0 0 1 | 0 0 0 1",
+        "the Cast bar page's previews too")
+    w:Select("look")
+
+    -- Thick edges: a black pixel inside the bar's edge and its icon's.
+    local width, place = S[cb].width, table.concat(S[bar].points[1], " ")
+    thick:Click()
+    Equal(tostring(ns.Get("thickEdges")) .. " " .. tostring(thick:GetChecked()) .. " | " .. Shown(bar.inner) .. " | " .. Shown(cb.iconInner)
+        .. " | " .. Colour(bar.inner[1]) .. " | " .. Colour(cb.iconInner[1]),
+        "true true | true true true true | true true true true | 0 0 0 1 | 0 0 0 1", "ticked: your cast bar and its icon, in black")
+    local top, left = S[bar.inner[1]].points[1], S[cb.iconInner[3]].points[1]
+    Equal(table.concat({ top[1], tostring(top[2] == bar), top[3], top[4], top[5], S[bar.inner[1]].height, left[1], tostring(left[2] == cb.icon),
+        left[3], left[4], left[5], S[cb.iconInner[3]].width }, " "), "BOTTOMLEFT true TOPLEFT 0 -1 1 TOPRIGHT true TOPLEFT 1 -1 1",
+        "a pixel inside each edge, not outside it")
+    Equal(S[cb].height .. " " .. tostring(S[cb].width == width) .. " " .. table.concat(S[bar].points[1], " "), "18 true " .. place,
+        "nothing moved or resized")
+    -- Outline: the bar's in its colour, like its edge; the icon's edge, and so its pixel, stay black.
+    w.barDesign.buttons[3]:Click()
+    C:Apply()
+    Equal(Colour(bar.inner[1]) .. " | " .. Colour(cb.iconInner[1]) .. " | " .. tostring(S[sheen.over].shown) .. " " .. tostring(S[sheen.rest].shown),
+        "1 0.7 0 1 | 0 0 0 1 | false false", "Outline: Blizzard's gold inside the bar's gold edge, the icon's black, no shine")
+    w.barDesign.buttons[1]:Click()
+    ns.Set("castIcon", false)
+    C:Apply()
+    Equal(Shown(cb.iconInner) .. " | " .. Shown(bar.inner), "false false false false | true true true true", "no icon: no pixel where it was")
+    ns.Set("castIcon", true)
+
+    -- Both off again: today's look.
+    thick:Click()
+    darkness:Choose(0)
+    Equal(Look() .. " || " .. Colour(preview.BarBG), TODAY .. " || 0.08 0.08 0.09 0.85", "both off: your cast bar and the preview as they were")
+
+    -- Each kept within its limits, and over a reload.
+    Equal(table.concat({ tostring(ns.Valid("barDarkness", 55)), tostring(ns.Valid("barDarkness", 101)), tostring(ns.Valid("barDarkness", -5)),
+        tostring(ns.Valid("barDarkness", "50")), tostring(ns.Valid("thickEdges", true)), tostring(ns.Valid("thickEdges", 1)) }, " "),
+        "true false false false true false", "darkness from 0 to 100, thick edges on or off")
+    darkness:Choose(35)
+    thick:Click()
+    local saved = ForeverEnhancedCooldownManagerDB
+    Fresh(saved)
+    Equal(ns.Get("barDarkness") .. " " .. tostring(ns.Get("thickEdges")) .. " | " .. Colour(ns.CastBar.row.bar.background) .. " "
+        .. tostring(S[ns.CastBar.row.bar.inner[1]].shown), "35 true | 0.052 0.052 0.0585 0.9025 true",
+        "kept over a reload: your cast bar drawn so from the start")
+    -- The Look page shows what's saved, so one click turns thick edges off.
+    SlashCmdList.FECM("")
+    FECMFrame:Select("look")
+    Equal(tostring(S[FECMFrame.darkness.value].text) .. " " .. tostring(FECMFrame.thickEdges:GetChecked()), "35 true",
+        "and the Look page shows them so after the reload")
+    saved.barDarkness, saved.thickEdges = 150, "yes"
+    Fresh(saved)
+    Equal(ns.Get("barDarkness") .. " " .. tostring(ns.Get("thickEdges")), "0 false", "anything else saved is ignored")
+    Equal(#printed, 0, "no errors from the darkness or edges")
+    _G.PersonalResourceDisplayFrame = display
+end)()
+
 -- Flush against the bars you can see ------------------------------------------------------
 
 Environment()
@@ -5436,12 +5581,13 @@ end)()
         if S[cb.iconEdge].shown then left = math.min(left, (Across(cb.iconEdge))) end
         return string.format("%.2f %.2f", left, right)
     end
-    -- The display you see: the restyle's edge round its power bar.
+    -- The display you see: the restyle's edge round its power bar (its top
+    -- left out past the bar's; Thick edges' strips sit inside the bar).
     local function Restyled()
         local edge
         for _, obj in ipairs(objects) do
             local p = S[obj].parent == prd.PowerBar and S[obj].kind == "Texture" and S[obj].points[1]
-            if p and p[1] == "TOPLEFT" and p[4] < 0 then edge = obj end
+            if p and p[1] == "TOPLEFT" and p[3] == "TOPLEFT" and p[4] < 0 then edge = obj end
         end
         return edge and string.format("%.2f %.2f", Across(edge))
     end
