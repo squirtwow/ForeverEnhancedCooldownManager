@@ -195,6 +195,7 @@ function Proto:RegisterEvent(e) S[self].events[e] = true end
 function Proto:RegisterUnitEvent(e) S[self].events[e] = true end
 function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
+function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
@@ -506,6 +507,22 @@ local function Environment(keepCVars)
     _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return Typed("boolean", hostile) end
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
+    -- Your buffs (PlayerAuras[id] = true, or SECRET for an answer the game
+    -- keeps secret), as GetPlayerAuraBySpellID finds them, each ask counted
+    -- (AuraReads). As on Forever: in a fight it finds none, even with them
+    -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
+    PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    _G.C_UnitAuras = {
+        GetPlayerAuraBySpellID = function(id)
+            assert(type(id) == "number", "a spell ID")
+            AuraReads = AuraReads + 1
+            local aura = PlayerAuras[id]
+            if lockdown or not aura then return nil end
+            if rawequal(aura, SECRET) then return SECRET end
+            return { spellId = id }
+        end,
+    }
+    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end }
     _G.C_CVar = {
         GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end,
         GetCVar = function(name) return cvars[name] end,
@@ -1295,6 +1312,58 @@ do
     game, addon = Measure(function() B:Rebuild() end)
     Equal(Counts(addon, "KeyFor", "ForEntry") .. " " .. tostring(S[moon.key].shown), "0 0 false",
         "keybinds off: no key looked up as the bars are laid out, none shown")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Only show missing: your buffs read as they change, once a frame, never in a fight -------------------
+
+do
+    local ns = Start({ notesSeen = "dev", useBars = true })
+    local B = ns.Bars
+    for _, name in ipairs({ "Thorns", "Clearcasting", "Nature's Grace" }) do B:SetAura("buff", name, true) end
+    local bar = B:Get("buff")
+    local function Burst()
+        for _ = 1, 5 do Fire("UNIT_AURA", "player") end
+        NextFrame(ns)
+        Frames(ns, 60, 1 / 60)
+    end
+    local game, addon = Measure(Burst)
+    Equal(Counts(game, "GetPlayerAuraBySpellID") .. " " .. Counts(addon, "OnEvent", "Missing") .. " "
+        .. tostring(S[B.driver].events.UNIT_AURA), "0 0 0 nil", "off (the default): your buffs changing not heard, nothing read")
+    B:SetOption("buff", "onlyMissing", true)
+    local ids = 0
+    for i = 1, bar.count do
+        for _ in pairs(bar.slotIDs[i]) do ids = ids + 1 end
+    end
+    io.write("Only show missing (3 buffs on the Buffs bar, " .. ids .. " spell IDs):\n")
+    game = Measure(function() Frames(ns, 60, 1 / 60) end)
+    Note("a second of frames, nothing changing", game)
+    Equal(game.all, 0, "on: a second with nothing changing, nothing asked or set (never polled)")
+    -- (Each read goes through pcall, so it's counted by AuraReads, the mock's own count.)
+    local reads = AuraReads
+    game = Measure(Burst)
+    Note("UNIT_AURA x5 and a second, nothing changed", game)
+    Equal((AuraReads - reads) .. " " .. Counts(game, "SetAuraSlotEnabled", "SetShown", "SetPoint") .. " " .. tostring(game.all <= 3 * ids),
+        ids .. " 0 0 0 true", "five changes in a frame: every ID read once (none up), nothing set while nothing changed")
+    PlayerAuras[16870] = true
+    reads = AuraReads
+    game = Measure(Burst)
+    Note("UNIT_AURA x5 and a second, Clearcasting cast", game)
+    Equal(Counts(game, "SetAuraSlotEnabled", "SetPoint") .. " " .. tostring(AuraReads - reads <= ids),
+        "1 2 true", "Clearcasting cast: read once, its slot switched off, the other two placed again")
+    -- A fight: not heard, nothing read; read once as it ends.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    PlayerAuras[16870] = nil
+    reads = AuraReads
+    game, addon = Measure(Burst)
+    Note("UNIT_AURA x5 and a second in a fight", game)
+    Equal(game.all .. " " .. (AuraReads - reads) .. " " .. Counts(addon, "OnEvent", "Missing", "Check"), "0 0 0 0 0",
+        "in a fight: not heard, nothing asked or run")
+    lockdown = false
+    reads = AuraReads
+    game = Measure(function() Fire("PLAYER_REGEN_ENABLED") end)
+    Equal((AuraReads - reads) .. " " .. Counts(game, "SetAuraSlotEnabled"), ids .. " 1", "as it ends: read once, Clearcasting's slot back on")
     Equal(#printed, 0, "no errors")
 end
 

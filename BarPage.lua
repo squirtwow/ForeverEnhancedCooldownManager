@@ -325,21 +325,31 @@ function ns.BuildBarPage(window, page, width)
     window:Hint(across, "How many icons fit across before the next row starts.")
     page.size, page.spacing, page.across = size, spacing, across
 
-    local function Option(label, field, y, note)
+    local function Option(label, field, y, note, x)
         local check = T:Check(options, label, function(self)
             B:SetOption(state.bar, field, self:GetChecked())
             window:Refresh()
         end)
-        check:SetPoint("TOPLEFT", 320, y)
+        check:SetPoint("TOPLEFT", x or 320, y)
         window:Hint(check, note)
         return check
     end
     -- Buffs only show while they're on you, so their bar offers this instead
-    -- of When ready (below), in the same spot.
+    -- of When ready (below), in the same spot. Greyed while Only show missing
+    -- is on, which it doesn't go with; its own choice is kept.
     local showMissing = Option("Show missing buffs greyed", "showMissing", 0, function()
+        if state.bar == "buff" and ns.BarData("buff").onlyMissing then
+            return "Not with Only show missing, which shows only the buffs you're missing."
+        end
         return (state.bar == "debuff" and "Debuffs missing from your target" or "Buffs missing from you")
             .. " show greyed in their spot, instead of hidden."
     end)
+    -- The Buffs bar only: each buff only while it's not on you, under the
+    -- sliders. Not on the Debuffs bar: your target's debuffs change in a
+    -- fight, when the addon can't read them.
+    local onlyMissing = Option("Only show missing", "onlyMissing", -107,
+        "Shows a buff only while it's not on you. The game hides your buffs from addons in a fight, so changes then show"
+            .. " once it ends. (Needs testing)", 0)
     local showNames = Option("Show spell names", "showNames", -22, "Each spell's name under its icon.")
     local showTimer = Option("Show countdown numbers", "showTimer", -44, "The numbers counting down on this bar's icons.")
     -- The cooldown bars only: an icon shows the time left on the buff its
@@ -355,7 +365,7 @@ function ns.BuildBarPage(window, page, width)
                 .. " Not with missing debuffs greyed."
         end
         return "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, after your buffs."
-            .. " Not with missing buffs greyed."
+            .. " Not with missing buffs greyed or Only show missing."
     end)
 
     -- A label and joined buttons for a choice, with the footer explaining it:
@@ -404,7 +414,7 @@ function ns.BuildBarPage(window, page, width)
         "Which way a row grows as icons come and go: from its centre, or from its right or left edge.")
     local wrap = Pills("New rows", 320, -85, 110, ns.WRAP, ns.WRAP_NAMES, "wrap",
         "Where the next row goes when there are more icons than fit across.")
-    page.options = { whenReady = whenReady, showMissing = showMissing, showNames = showNames,
+    page.options = { whenReady = whenReady, showMissing = showMissing, onlyMissing = onlyMissing, showNames = showNames,
         showTimer = showTimer, showAuras = showAuras, showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap }
 
     -- The spell list -------------------------------------------------------------------
@@ -734,7 +744,7 @@ function ns.BuildBarPage(window, page, width)
         spacing:Set(data.spacing)
         across:Set(data.perRow)
         -- Packed buffs are laid out by the game in one row.
-        local oneRow = aura ~= nil and not data.showMissing
+        local oneRow = aura ~= nil and ns.BuffBar:Packed(data)
         across:SetShown(not oneRow)
         wrap:SetShown(not oneRow)
         wrap.label:SetShown(not oneRow)
@@ -750,10 +760,13 @@ function ns.BuildBarPage(window, page, width)
         whenReady.label:SetShown(not aura)
         showMissing:SetShown(aura ~= nil)
         showMissing.text:SetText("Show missing " .. word .. "s greyed")
+        onlyMissing:SetShown(key == "buff")
+        onlyMissing:SetChecked(data.onlyMissing)
         -- Packed buffs have no fixed spot to put a name under.
-        showNames:SetShown(not aura or data.showMissing)
+        showNames:SetShown(not aura or not ns.BuffBar:Packed(data))
         whenReady:SetSelected(data.whenReady)
         showMissing:SetChecked(data.showMissing)
+        showMissing:SetUsable(not data.onlyMissing)
         showNames:SetChecked(data.showNames)
         outOfCombat:SetSelected(data.outOfCombat)
         showTimer:SetChecked(data.showTimer)

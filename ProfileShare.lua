@@ -266,7 +266,7 @@ local BAR_CHECKS = {
     perRow = function(v) return Within(v, ns.BAR_LIMITS.perRow) end,
     whenReady = function(v) return ns.WHEN_READY_NAMES[v] ~= nil end,
     outOfCombat = function(v) return ns.OUT_OF_COMBAT_NAMES[v] ~= nil end,
-    showMissing = Bool, showNames = Bool, showTimer = Bool, showAuras = Bool, selfDebuffs = Bool,
+    showMissing = Bool, onlyMissing = Bool, showNames = Bool, showTimer = Bool, showAuras = Bool, selfDebuffs = Bool,
     grow = function(v) return ns.GROW_NAMES[v] ~= nil end,
     wrap = function(v) return ns.WRAP_NAMES[v] ~= nil end,
     point = function(v) return ns.BAR_POINTS[v] == true end,
@@ -274,8 +274,8 @@ local BAR_CHECKS = {
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], spacing = ns.BAR_LIMITS.spacing[3], perRow = ns.BAR_LIMITS.perRow[3],
-    whenReady = "show", outOfCombat = "show", showMissing = false, showNames = false, showTimer = true, showAuras = false,
-    selfDebuffs = false, grow = "centre", wrap = "down" }
+    whenReady = "show", outOfCombat = "show", showMissing = false, onlyMissing = false, showNames = false, showTimer = true,
+    showAuras = false, selfDebuffs = false, grow = "centre", wrap = "down" }
 -- The layout's own settings; its rows and the bars taken out are lists.
 local LAYOUT_CHECKS = {
     on = Bool, preset = Preset, base = Preset, left = BarKey, right = BarKey,

@@ -15,6 +15,11 @@
 -- * Fixed, with "Show missing ... greyed": one slot per entry, each following
 --   a holder frame of the addon's own that keeps its place and shows the
 --   entry greyed while it's missing.
+-- * Only show missing (the Buffs bar, F:Check): the fixed slots and holders,
+--   but only for the buffs that aren't on you, side by side. Which are on you
+--   is read out of combat only (the game keeps your buffs secret in a fight),
+--   so in a fight the bar stays as it was: a buff cast then draws over its
+--   greyed spot in its slot as usual, and one that drops shows once it's over.
 local _, ns = ...
 
 local F = {}
@@ -37,8 +42,20 @@ function F:Available()
     return CustomAuraContainerSlotDefaultOptions ~= nil
 end
 
+-- Only show missing: the Buffs bar's own (ns.BarData keeps it off on the
+-- Debuffs bar).
+function F:OnlyMissing(data)
+    return data ~= nil and data.onlyMissing == true
+end
+
 function F:Packed(data)
-    return not data.showMissing
+    return not (data.showMissing or self:OnlyMissing(data))
+end
+
+-- Every entry keeping a spot of its own, greyed while missing: with missing
+-- ones greyed, and not with Only show missing, whose spots come and go.
+function F:Fixed(data)
+    return data.showMissing == true and not self:OnlyMissing(data)
 end
 
 -- Sizes an icon's numbers for its size, and shows or hides the countdown.
@@ -135,7 +152,7 @@ end
 
 function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
-    bar.groupParts = {}
+    bar.groupParts, bar.names, bar.up, bar.spots = {}, {}, {}, {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -207,11 +224,107 @@ function F:UpdateTarget(bar)
     if bar.container then bar.container:UpdateAllAuras() end
 end
 
+-- Only show missing ------------------------------------------------------------------
+-- Which of the Buffs bar's entries are on you, read out of combat only:
+-- after the bar is laid out (login, a change of yours, a spell learned), as
+-- your buffs change (UNIT_AURA, at most once a frame, Bars.lua) and as a
+-- fight ends. Never polled: a read the game wouldn't answer is tried again
+-- a moment later a few times at most, and as its restrictions change. In a
+-- fight the game keeps your buffs secret (asked then, it finds none even
+-- with them up), so nothing is read.
+
+-- Whether the game lets the addon see your buffs now: out of combat, while
+-- it doesn't say they're kept secret (a raid encounter, say).
+local function Readable()
+    if InCombatLockdown() then return false end
+    local fighting = UnitAffectingCombat and UnitAffectingCombat("player")
+    if not Open(fighting) or fighting then return false end
+    local secrets = C_Secrets
+    local ask = type(secrets) == "table" and secrets.ShouldAurasBeSecret
+    if type(ask) == "function" then
+        local ok, secret = pcall(ask)
+        if not (ok and Open(secret) and secret == false) then return false end
+    end
+    return true
+end
+
+-- Whether any of an entry's spells is on you: true, false, or nil when the
+-- game won't say (a secret or unreadable answer). Only asks whether one is
+-- there, never what's in it. The IDs are the ones its slot is given: every
+-- rank, and every linked spell's for joined entries.
+local function OnYou(ids)
+    local auras = C_UnitAuras
+    local get = type(auras) == "table" and auras.GetPlayerAuraBySpellID
+    if type(get) ~= "function" then return nil end
+    local unknown = false
+    for id in pairs(ids) do
+        local ok, aura = pcall(get, id)
+        if not ok or not Open(aura) then
+            unknown = true
+        elseif aura ~= nil then
+            return true
+        end
+    end
+    if unknown then return nil end
+    return false
+end
+
+-- Reads which entries are on you (bar.up, by place). One the game won't say
+-- about keeps what it was last (by its names: bar.upBy), and one never read
+-- counts as missing, so it shows. True when any changed. Nothing is read
+-- with Only show missing off, or your bars. bar.unread says the game didn't
+-- answer for one or more (your buffs still secret as a fight ends, say), so
+-- the bars read again a moment later (Bars.lua, Again).
+function F:Check(bar)
+    bar.unread = nil
+    if not (self:OnlyMissing(bar.data) and ns.Bars:Enabled()) then
+        bar.upBy = nil
+        return false
+    end
+    local readable = Readable()
+    local last, now, up, changed = bar.upBy or {}, {}, bar.up, false
+    for i = 1, bar.count do
+        local name, on = bar.names[i], nil
+        if readable then on = OnYou(bar.slotIDs[i]) end
+        if on == nil then on, bar.unread = last[name], true end
+        now[name] = on
+        on = on == true
+        if (up[i] == true) ~= on then changed = true end
+        up[i] = on
+    end
+    for i = bar.count + 1, #up do up[i] = nil end
+    bar.upBy = now
+    return changed
+end
+
+-- Whether entry i has a spot on the bar now: always with missing ones
+-- greyed; with Only show missing, while it's missing, and every one while
+-- the bars are arranged (unlocked, or in Edit Mode), so the bar can be
+-- placed and sized with them all. A missing one's slot stays on, so a buff
+-- cast in a fight draws over its greyed spot.
+local function Spot(bar, i)
+    return not (F:OnlyMissing(bar.data) and bar.up[i]) or ns.Bars:Arranging()
+end
+
+-- Shows the fixed spots that show and hides the rest (all of them while
+-- packed), and lists those shown in your order (bar.spots) for the bar to
+-- place side by side. Out of combat only, as they carry the slots.
+function F:Spots(bar)
+    local fixed, spots = not self:Packed(bar.data), {}
+    for i = 1, bar.count do
+        local holder = bar.holders[i]
+        local shown = fixed and Spot(bar, i)
+        holder:SetShown(shown)
+        if shown then spots[#spots + 1] = holder end
+    end
+    bar.spots = spots
+    return spots
+end
+
 -- Places the holders for the bar's entries and works out each one's spell
 -- IDs; joined entries count as one, with every linked spell's IDs.
 function F:Layout(bar, data)
     local size, spacing = ns.IconSize(data), data.spacing
-    local fixed = not self:Packed(data)
     local count = 0
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
         local ids, entry = {}, nil
@@ -232,16 +345,19 @@ function F:Layout(bar, data)
             holder.label:SetWidth(size + spacing)
             holder.label:SetText(#group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name)
             holder.label:SetShown(data.showNames)
-            holder:SetShown(fixed)
             bar.slotIDs[count] = ids
+            bar.names[count] = table.concat(group, "+")
         end
     end
     for i = count + 1, ns.BUFF_SLOTS do
         bar.holders[i]:Hide()
-        bar.slotIDs[i] = nil
+        bar.slotIDs[i], bar.names[i] = nil, nil
     end
     for _, parts in ipairs(bar.groupParts) do parts.cooldown:SetHideCountdownNumbers(not data.showTimer) end
     bar.count = count
+    -- Which are on you, then the spots that show.
+    self:Check(bar)
+    self:Spots(bar)
     -- Packed icons line up from the bar's centre, or from the edge the bar
     -- grows away from. (Fixed spots are placed in rows by the bar.)
     local side = data.grow == "left" and "RIGHT" or data.grow == "right" and "LEFT" or "CENTER"
@@ -378,6 +494,8 @@ function F:Apply(bar)
     local packed = self:Packed(data)
     for i = 1, ns.BUFF_SLOTS do
         local ids = on and not packed and bar.slotIDs[i] or nil
+        -- Only show missing: a buff on you has no spot, and its slot is off.
+        if ids and not Spot(bar, i) then ids = nil end
         local signature = Signature(ids)
         if bar.applied[i] ~= signature then
             bar.applied[i] = signature

@@ -190,6 +190,7 @@ function Proto:RegisterEvent(e) S[self].events[e] = true end
 function Proto:RegisterUnitEvent(e) S[self].events[e] = true end
 function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
+function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
@@ -501,6 +502,22 @@ local function Environment(keepCVars)
     _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return Typed("boolean", hostile) end
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
+    -- Your buffs (PlayerAuras[id] = true, or SECRET for an answer the game
+    -- keeps secret), as GetPlayerAuraBySpellID finds them, each ask counted
+    -- (AuraReads). As on Forever: in a fight it finds none, even with them
+    -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
+    PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    _G.C_UnitAuras = {
+        GetPlayerAuraBySpellID = function(id)
+            assert(type(id) == "number", "a spell ID")
+            AuraReads = AuraReads + 1
+            local aura = PlayerAuras[id]
+            if lockdown or not aura then return nil end
+            if rawequal(aura, SECRET) then return SECRET end
+            return { spellId = id }
+        end,
+    }
+    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end }
     _G.C_CVar = {
         GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end,
         GetCVar = function(name) return cvars[name] end,
@@ -1532,7 +1549,7 @@ do
     Equal(S[tick.text].text, "Show your debuffs on you", "back on Buffs: its own words")
     w:Select("debuff")
     Equal(buffNote, "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, after your buffs."
-        .. " Not with missing buffs greyed.", "the Buffs one's note as before")
+        .. " Not with missing buffs greyed or Only show missing.", "the Buffs one's note: not with either")
     Equal(Note(), "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, at the end of this bar."
         .. " Not with missing debuffs greyed.", "the Debuffs one's: where they go")
     Equal(tostring(tick:GetChecked()), "false", "unticked at first")
@@ -2352,6 +2369,441 @@ end)()
     Search("1259691")
     Equal(Rows("energized") .. " | " .. Said("cd", "1259691") .. " | " .. table.concat((B:Mine("cd")), ","),
         "Energized (ID 1259691) offered | true Added Energized to Cooldowns. | Energized", "the game can't say: offered and added, and shown")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Only show missing: buffs only while they're not on you ---------------------------------------------
+-- A CurseForge comment asked for the Buffs bar to show a buff only while
+-- it's missing (Fortitude, Inner Fire, Mark of the Wild: any of them). Out of
+-- a fight the addon reads which entries are on you (GetPlayerAuraBySpellID,
+-- each ID the entry's slot is given) and shows only the missing ones, greyed
+-- in their fixed spots, side by side in the bar's room for them all; one on
+-- you has no spot and its slot is off. In a fight the game keeps your buffs
+-- secret, so nothing is read, shown, hidden, moved or told to the container:
+-- a buff cast then lights in its slot over its greyed spot as usual, and the
+-- bar catches up as the fight ends. Unlocked or in Edit Mode every entry
+-- shows, to place the bar. (In a function of its own: this file's main chunk
+-- has little room for more locals.)
+
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    for _, name in ipairs({ "Thorns", "Clearcasting", "Nature's Grace", "Walk on Air" }) do B:SetAura("buff", name, true) end
+    local bar = B:Get("buff")
+    local box = S[bar.container]
+    -- The next frame: the driver's refresh, once.
+    local function NextFrame()
+        local run = S[B.driver].scripts.OnUpdate
+        if run then run(B.driver, 0) end
+    end
+    -- Your buffs changed, as the game says (UNIT_AURA), then the next frame.
+    local function Changed()
+        Fire("UNIT_AURA", "player")
+        NextFrame()
+    end
+    -- The entries showing on the bar, in order, each at its place from the
+    -- bar's left edge. With rows, its place across and up or down too, after
+    -- the corner of the bar they're placed from.
+    local function Showing(rows)
+        local out, corner = {}, nil
+        for i = 1, bar.count do
+            local holder = bar.holders[i]
+            if S[holder].shown then
+                local p = S[holder].points[1]
+                local at = p and (rows and ("%g,%g"):format(p[4], p[5]) or ("%g"):format(p[4])) or "nowhere"
+                corner = corner or p and p[1]
+                out[#out + 1] = S[holder.label].text .. "@" .. at
+            end
+        end
+        return (rows and (tostring(corner) .. ": ") or "") .. table.concat(out, ", ")
+    end
+    -- The container's slots and groups switched on.
+    local function On()
+        local out = {}
+        for i = 1, ns.BUFF_SLOTS do
+            if box.slots["b" .. i].enabled then out[#out + 1] = "b" .. i end
+        end
+        for i = 1, bar.groups do
+            if box.groups["g" .. i].enabled then out[#out + 1] = "g" .. i end
+        end
+        return table.concat(out, " ")
+    end
+    local function Heard() return tostring(S[B.driver].events.UNIT_AURA == true) end
+    -- How many spell IDs the bar's entries watch in all.
+    local function IDs()
+        local n = 0
+        for i = 1, bar.count do
+            for _ in pairs(bar.slotIDs[i]) do n = n + 1 end
+        end
+        return n
+    end
+    local function Size() return S[bar].width .. "x" .. S[bar].height end
+    -- Thorns on you at a rank you don't know (another druid's), and Nature's Grace up.
+    PlayerAuras[9910], PlayerAuras[16886] = true, true
+
+    -- Off (the default): as before, packed or with missing ones greyed, and
+    -- nothing read or heard.
+    Equal(tostring(ns.BarData("buff").onlyMissing) .. " | " .. On() .. " | " .. Showing() .. " | " .. AuraReads .. " " .. Heard(),
+        "false | g1 g2 g3 g4 |  | 0 false", "off at first: packed as before, nothing read, your buffs changing not heard")
+    B:SetOption("buff", "showMissing", true)
+    Equal(On() .. " | " .. Showing() .. " | " .. Size() .. " | " .. AuraReads .. " " .. Heard(),
+        "b1 b2 b3 b4 | Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120 | 156x36 | 0 false",
+        "with missing ones greyed: every entry in its spot, as before, and still nothing read")
+    B:SetOption("buff", "showMissing", false)
+
+    -- On: only the buffs not on you, side by side in your order, in the
+    -- bar's room for all four.
+    B:SetOption("buff", "onlyMissing", true)
+    Equal(On() .. " | " .. Showing() .. " | " .. Size() .. " | " .. Heard(),
+        "b2 b4 | Clearcasting@40, Walk on Air@80 | 156x36 | true",
+        "on: Clearcasting and Walk on Air only, side by side and centred, the bar its size for all four, your buffs heard")
+    local held = bar.holders[2]
+    Equal(tostring(box.slots.b2.filters.includeSpellIDs[16870]) .. " " .. tostring(box.slots.b4.filters.includeSpellIDs[1308663])
+        .. " " .. tostring(S[held.icon].desaturated) .. " " .. S[held.icon].alpha .. " " .. tostring(S[bar.holders[1]].shown)
+        .. " " .. tostring(S[bar.holders[3]].shown), "true true true 0.45 false false",
+        "each missing one watched in its slot and greyed in its spot; Thorns (any rank) and Nature's Grace, on you, have neither")
+    B:SetOption("buff", "grow", "left")
+    local left = Showing()
+    B:SetOption("buff", "grow", "right")
+    Equal(left .. " | " .. Showing(), "Clearcasting@120, Walk on Air@80 | Clearcasting@0, Walk on Air@40",
+        "growing left: from the right edge, the first on the right; growing right: from the left edge")
+    B:SetOption("buff", "grow", "centre")
+
+    -- In rows (two to a row): the bar keeps two rows for all four, and the
+    -- spots showing fill the first row, then the next; a short last row lines
+    -- up as the bar grows, and no box goes round it (the whole bar's, not
+    -- one round the icons in it).
+    B:SetOption("buff", "perRow", 2)
+    local two = Showing(true) .. " | " .. Size()
+    PlayerAuras[16886] = nil
+    Changed()
+    Equal(two .. " || " .. Showing(true) .. " | " .. Size() .. " " .. tostring(bar.short),
+        "TOPLEFT: Clearcasting@0,0, Walk on Air@40,0 | 76x76 || TOPLEFT: Clearcasting@0,0, Nature's Grace@40,0, Walk on Air@20,-40"
+        .. " | 76x76 false", "two missing: both in the first row, the bar two rows high for all four; three: the third centred in the second")
+    B:SetOption("buff", "grow", "left")
+    left = Showing(true)
+    B:SetOption("buff", "grow", "right")
+    Equal(left .. " | " .. Showing(true), "TOPLEFT: Clearcasting@40,0, Nature's Grace@0,0, Walk on Air@40,-40 | TOPLEFT: Clearcasting@0,0,"
+        .. " Nature's Grace@40,0, Walk on Air@0,-40", "growing left or right: the lone one in the second row at that edge")
+    B:SetOption("buff", "grow", "centre")
+    B:SetOption("buff", "wrap", "up")
+    Equal(Showing(true) .. " | " .. Size(), "BOTTOMLEFT: Clearcasting@0,0, Nature's Grace@40,0, Walk on Air@20,40 | 76x76",
+        "new rows above: the first row at the bottom, the second over it")
+    B:SetOption("buff", "wrap", "down")
+    B:SetOption("buff", "showNames", true)
+    Equal(Showing(true) .. " | " .. Size() .. " " .. tostring(S[bar.holders[4].label].shown),
+        "TOPLEFT: Clearcasting@0,0, Nature's Grace@40,0, Walk on Air@20,-54 | 76x90 true",
+        "with spell names: room for them under each row, and the bar taller to match")
+    B:SetOption("buff", "showNames", false)
+    B:SetOption("buff", "perRow", 20)
+    PlayerAuras[16886] = true
+    Changed()
+    Equal(Showing() .. " | " .. Size(), "Clearcasting@40, Walk on Air@80 | 156x36", "back in one row")
+
+    -- Your buffs changing: read on the next frame, once however many came
+    -- at once (every ID of every entry, with none on you).
+    PlayerAuras[9910], PlayerAuras[16886] = nil, nil
+    local reads = AuraReads
+    for _ = 1, 3 do Fire("UNIT_AURA", "player") end
+    local waiting = Showing()
+    NextFrame()
+    Equal(waiting .. " | " .. Showing() .. " | " .. On() .. " | " .. tostring(AuraReads - reads == IDs()),
+        "Clearcasting@40, Walk on Air@80 | Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120 | b1 b2 b3 b4 | true",
+        "Thorns and Nature's Grace gone: three changes, one read on the next frame, and both show in their places")
+    reads = AuraReads
+    for _ = 1, 20 do NextFrame() end
+    Equal(AuraReads - reads, 0, "never polled: with nothing heard, frames go by without a read")
+    PlayerAuras[467] = true
+    Changed()
+    Equal(Showing() .. " | " .. On(), "Clearcasting@20, Nature's Grace@60, Walk on Air@100 | b2 b3 b4",
+        "Thorns cast again, at your own rank: it goes and the rest close up")
+
+    -- Joined: one icon for either, so it's on you while either is.
+    B:SetJoined("buff", 2, true)
+    local joined = Showing() .. " | " .. Size()
+    PlayerAuras[467], PlayerAuras[16870] = nil, true
+    Changed()
+    local either = Showing()
+    PlayerAuras[16870] = nil
+    Changed()
+    Equal(joined .. " | " .. either .. " | " .. Showing(), "Nature's Grace@20, Walk on Air@60 | 116x36 | Nature's Grace@20, Walk on Air@60"
+        .. " | Thorns +1@0, Nature's Grace@40, Walk on Air@80", "Clearcasting joined to Thorns: one entry, up while either is, shown once neither is")
+    B:SetJoined("buff", 2, false)
+
+    -- An answer the game keeps secret, or one that can't be read, keeps
+    -- what that entry was: Thorns, on you, stays hidden though it's gone;
+    -- Nature's Grace, missing, stays shown though it's back.
+    PlayerAuras[467] = true
+    Changed()
+    local before = Showing()
+    local get = C_UnitAuras.GetPlayerAuraBySpellID
+    C_UnitAuras.GetPlayerAuraBySpellID = function(id)
+        if id == 782 then error("can't be read") end
+        return get(id)
+    end
+    PlayerAuras[467], PlayerAuras[16886] = nil, SECRET
+    Changed()
+    Equal(before .. " | " .. Showing(), "Clearcasting@20, Nature's Grace@60, Walk on Air@100 | Clearcasting@20, Nature's Grace@60,"
+        .. " Walk on Air@100", "Thorns unreadable and Nature's Grace secret: each stays as it was")
+    C_UnitAuras.GetPlayerAuraBySpellID = get
+    PlayerAuras[16886] = nil
+    -- While the game says auras are secret out of a fight (a raid encounter),
+    -- nothing is read, and nothing changes.
+    AurasSecret = true
+    reads = AuraReads
+    PlayerAuras[16870] = true
+    Changed()
+    local secret = Showing() .. " | " .. (AuraReads - reads)
+    -- One added then, never read, counts as missing, so it shows.
+    local added = B:Add("buff", "Mark of the Wild")
+    local withMark = Showing()
+    B:SetAura("buff", "Mark of the Wild", false)
+    AurasSecret, PlayerAuras[16870] = false, nil
+    Changed()
+    Equal(secret .. " | " .. tostring(added) .. " " .. withMark .. " | " .. Showing(), "Clearcasting@20, Nature's Grace@60, Walk on Air@100"
+        .. " | 0 | true Clearcasting@20, Nature's Grace@60, Walk on Air@100, Mark of the Wild@140 | Thorns@0, Clearcasting@40,"
+        .. " Nature's Grace@80, Walk on Air@120",
+        "auras kept secret: nothing read or changed, and Mark of the Wild added then shows; all read again once they aren't")
+
+    -- A fight: nothing read, shown, hidden, moved or told to the container.
+    PlayerAuras[467], PlayerAuras[16870], PlayerAuras[16886] = nil, nil, true
+    Changed()
+    watched[bar] = true
+    for _, holder in ipairs(bar.holders) do watched[holder] = true end
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local calls, spots = containerCallsInCombat, Showing()
+    reads = AuraReads
+    local slot = box.slots.b2
+    Equal(spots .. " | " .. Heard() .. " | " .. On() .. " | " .. tostring(S[bar.holders[2]].shown) .. " "
+        .. tostring(Last(slot.button, "SetAllPoints") == bar.holders[2]) .. " " .. tostring(slot.filters.includeSpellIDs[16870]),
+        "Thorns@20, Clearcasting@60, Walk on Air@100 | false | b1 b2 b4 | true true true",
+        "in a fight your buffs aren't heard; a missing one's slot stays on, its icon over the greyed spot, so Clearcasting cast now lights there")
+    PlayerAuras[16870], PlayerAuras[16886] = true, nil
+    Fire("UNIT_AURA", "player")
+    for _ = 1, 5 do NextFrame() end
+    B:SetUnlocked(true)
+    B:SetUnlocked(false)
+    EditModeManagerFrame:Show()
+    EditModeManagerFrame:Hide()
+    local toggled = S[bar].combatToggle == true
+    for _, holder in ipairs(bar.holders) do toggled = toggled or S[holder].combatToggle == true end
+    Equal(Showing() .. " | " .. On() .. " | " .. (containerCallsInCombat - calls) .. " " .. (AuraReads - reads) .. " " .. tostring(toggled),
+        spots .. " | b1 b2 b4 | 0 0 false",
+        "Clearcasting cast and Nature's Grace gone, unlocked, locked and Edit Mode: nothing read, shown, hidden, moved or switched")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Showing() .. " | " .. On() .. " | " .. Heard(), "Thorns@20, Nature's Grace@60, Walk on Air@100 | b1 b3 b4 | true",
+        "as it ends: Clearcasting, cast in the fight, goes; Nature's Grace, gone in it, shows; heard again")
+    watched[bar] = nil
+    for _, holder in ipairs(bar.holders) do watched[holder] = nil end
+    -- A fight with nothing else waiting for its end: the buffs that came
+    -- and went in it are read as it ends all the same.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    PlayerAuras[16870], PlayerAuras[16886] = nil, true
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    local fought = Showing() .. " " .. tostring(bar.pendingLayout)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fought .. " | " .. Showing() .. " | " .. On(), "Thorns@20, Nature's Grace@60, Walk on Air@100 nil | Thorns@20, Clearcasting@60,"
+        .. " Walk on Air@100 | b1 b2 b4", "nothing else waiting: Clearcasting, gone in the fight, and Nature's Grace, cast in it, read as it ends")
+    PlayerAuras[16870], PlayerAuras[16886] = true, nil
+    Changed()
+
+    -- Your buffs still secret as a fight ends (the game slow to say they
+    -- aren't, or an encounter going on after it): nothing changes then, and
+    -- they're read again half a second later, so a buff gone in the fight
+    -- shows without your buffs changing again. Four times at most, so never
+    -- polled, and again once the game's restrictions change.
+    local ran = 0
+    -- Time going by: the timers queued so far, each run once.
+    local function Wait()
+        while ran < #timers do
+            ran = ran + 1
+            timers[ran]()
+        end
+    end
+    Wait()
+    local asks, ask = 0, C_Secrets.ShouldAurasBeSecret
+    C_Secrets.ShouldAurasBeSecret = function()
+        asks = asks + 1
+        return ask()
+    end
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    PlayerAuras[16870] = nil
+    lockdown, AurasSecret = false, true
+    Fire("PLAYER_REGEN_ENABLED")
+    local ended = Showing() .. " " .. asks .. " " .. tostring(bar.unread)
+    AurasSecret = false
+    Wait()
+    NextFrame()
+    Equal(ended .. " | " .. Showing() .. " | " .. On() .. " " .. tostring(bar.unread), "Thorns@20, Nature's Grace@60, Walk on Air@100 1"
+        .. " true | Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120 | b1 b2 b3 b4 nil",
+        "Clearcasting gone in the fight, still secret as it ends: kept as it was, then shown once read again, with no change to your buffs heard")
+    -- Kept secret on: a read again still to come as another fight starts
+    -- does nothing in it; as that one ends, read and four times again, then
+    -- not till the game says its restrictions changed (heard out of a fight
+    -- only), and on the next frame then, not as it says so.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    PlayerAuras[16870] = true
+    local fighting = tostring(S[B.driver].events.ADDON_RESTRICTION_STATE_CHANGED) .. " " .. tostring(S[B.driver].events.ENCOUNTER_END)
+    lockdown, AurasSecret, asks = false, true, 0
+    Fire("PLAYER_REGEN_ENABLED")
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    Wait()
+    NextFrame()
+    local waited = asks .. " " .. tostring(bar.pendingLayout)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    for _ = 1, 10 do
+        Wait()
+        NextFrame()
+    end
+    local tried = asks
+    for _ = 1, 20 do NextFrame() end
+    Wait()
+    local kept = Showing() .. " | " .. waited .. " " .. tried .. " " .. asks .. " | " .. fighting .. " "
+        .. tostring(S[B.driver].events.ADDON_RESTRICTION_STATE_CHANGED) .. " " .. tostring(S[B.driver].events.ENCOUNTER_END)
+    AurasSecret = false
+    Fire("ADDON_RESTRICTION_STATE_CHANGED", 1, 0)
+    local told = Showing()
+    NextFrame()
+    Equal(kept .. " | " .. told .. " | " .. Showing(), "Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120 | 1 nil 6 6 |"
+        .. " nil nil true true | Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120 | Thorns@20, Nature's Grace@60, Walk on Air@100",
+        "Clearcasting cast in a fight, kept secret after it: lit over its spot; nothing in the next fight; read as it ends and four times"
+        .. " again, then only once the game's restrictions change, on the next frame")
+    reads = AuraReads
+    Fire("ENCOUNTER_END")
+    Fire("ADDON_RESTRICTION_STATE_CHANGED", 1, 0)
+    NextFrame()
+    Wait()
+    Equal(AuraReads - reads, 0, "with every buff answered, an encounter ending or the game's restrictions changing reads nothing")
+    C_Secrets.ShouldAurasBeSecret = ask
+
+    -- Arranging the bars: every entry, to place and size the bar by, the
+    -- ones on you lit in their slots.
+    B:SetUnlocked(true)
+    local unlocked = Showing() .. " | " .. On()
+    B:SetUnlocked(false)
+    local locked = Showing() .. " | " .. On()
+    EditModeManagerFrame:Show()
+    local editing = Showing()
+    EditModeManagerFrame:Hide()
+    Equal(unlocked .. " || " .. locked .. " || " .. editing .. " || " .. Showing(),
+        "Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120 | b1 b2 b3 b4 || Thorns@20, Nature's Grace@60, Walk on Air@100"
+        .. " | b1 b3 b4 || Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120 || Thorns@20, Nature's Grace@60, Walk on Air@100",
+        "unlocked or in Edit Mode, all four; locked or out of it, the missing ones")
+    -- The Layout page draws every entry too.
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("layout")
+    local names = {}
+    for _, tile in ipairs(w.pages.layout.rows.buff.tiles) do
+        if S[tile].shown and tile.name then names[#names + 1] = tile.name end
+    end
+    Equal(table.concat(names, ","), "Thorns,Clearcasting,Nature's Grace,Walk on Air", "the Layout page's drawing shows every entry")
+    -- /ccm debug says which it last read as on you.
+    SlashCmdList.FECM("debug")
+    local report = S[FECMDebugFrame.edit].text
+    FECMDebugFrame:Hide()
+    Equal(tostring(report:find("1. Thorns | spells [%d,]+ | on you false\n  2. Clearcasting | spells 16870 | on you true") ~= nil),
+        "true", "the debug report says which it last read as on you")
+    -- Your debuffs on you go with packed buffs only.
+    B:SetOption("buff", "selfDebuffs", true)
+    Equal(tostring(ns.BuffBar:SelfOn(bar)), "false", "not with Only show missing")
+    B:SetOption("buff", "selfDebuffs", false)
+
+    -- The page: the tick on Buffs only, under the sliders; while it's on,
+    -- missing buffs greyed is greyed out, keeping its own choice.
+    local page = w.pages.bar
+    local tick, greyed = page.options.onlyMissing, page.options.showMissing
+    local function Note(frame)
+        local hint = frame.hint
+        if type(hint) == "function" then hint = hint(frame) end
+        return hint
+    end
+    local seen = {}
+    for _, key in ipairs({ "cd", "util", "buff", "debuff" }) do
+        w:Select(key)
+        if tick:IsVisible() then seen[#seen + 1] = key end
+    end
+    w:Select("buff")
+    local at = S[tick].points[1]
+    Equal(table.concat(seen, " ") .. " | " .. S[tick.text].text .. " | " .. at[1] .. " " .. at[2] .. " " .. at[3] .. " | " .. Note(tick),
+        "buff | Only show missing | TOPLEFT 0 -107 | Shows a buff only while it's not on you. The game hides your buffs from addons"
+        .. " in a fight, so changes then show once it ends. (Needs testing)",
+        "on the Buffs page only, under the sliders, saying what it does, its limit in a fight, and that it needs testing")
+    Equal(tostring(tick:GetChecked()) .. " " .. tostring(greyed.usable) .. " " .. S[greyed].alpha .. " " .. tostring(greyed:GetChecked())
+        .. " | " .. Note(greyed) .. " | " .. tostring(page.across:IsVisible() and page.options.wrap:IsVisible()
+        and page.options.showNames:IsVisible()), "true false 0.35 false | Not with Only show missing, which shows only the buffs"
+        .. " you're missing. | true", "ticked: missing buffs greyed greyed out, saying why; icons per row, new rows and names offered")
+    tick:Click()
+    greyed:Click()
+    tick:Click()
+    Equal(tostring(ns.BarData("buff").onlyMissing) .. " " .. tostring(ns.BarData("buff").showMissing) .. " " .. tostring(greyed.usable)
+        .. " " .. tostring(greyed:GetChecked()) .. " " .. S[greyed].alpha, "true true false true 0.35",
+        "unticked, missing buffs greyed ticked, ticked again: greyed out with its own choice kept")
+    greyed:Click()
+    Equal(tostring(ns.BarData("buff").showMissing) .. " " .. tostring(greyed:GetChecked()), "true true", "a click on it while greyed changes nothing")
+    tick:Click()
+    Equal(tostring(ns.BarData("buff").onlyMissing) .. " " .. tostring(greyed.usable) .. " " .. S[greyed].alpha .. " | " .. On() .. " | "
+        .. Showing() .. " | " .. Heard(), "false true 1 | b1 b2 b3 b4 | Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120 | false",
+        "unticked: missing buffs greyed back, as it was, every entry in its spot, your buffs no longer heard")
+    w:Select("debuff")
+    B:SetOption("debuff", "onlyMissing", true)
+    Equal(tostring(ns.BarData("debuff").onlyMissing) .. " " .. tostring(greyed.usable), "false true",
+        "not on the Debuffs bar, where missing debuffs greyed stays its own")
+    B:SetOption("buff", "showMissing", false)
+    w:Select("buff")
+    tick:Click()
+    w:Hide()
+    Equal(tostring(ns.BarData("buff").onlyMissing) .. " " .. On() .. " | " .. Showing(), "true b1 b3 b4 | Thorns@20, Nature's Grace@60,"
+        .. " Walk on Air@100", "ticked again on the page: only the missing ones")
+
+    -- A border round whole bars (Look page): none round this one while its
+    -- spots come and go; with missing ones greyed, as before.
+    ns.Set("iconBorder", "bar")
+    local ring = tostring((B:BarDecorFor("buff")))
+    B:SetOption("buff", "showMissing", true)
+    ring = ring .. " " .. tostring((B:BarDecorFor("buff")))
+    B:SetOption("buff", "onlyMissing", false)
+    ring = ring .. " " .. tostring((B:BarDecorFor("buff")))
+    B:SetOption("buff", "showMissing", false)
+    B:SetOption("buff", "onlyMissing", true)
+    Equal(ring, "false false true", "no border round the whole bar while its spots come and go; with missing ones greyed, as before")
+
+    -- Kept over a reload, read again as you log in; with your bars off,
+    -- nothing read or heard.
+    local saved = ForeverEnhancedCooldownManagerDB
+    Equal(tostring(saved.bars.buff.onlyMissing), "true", "saved with the Buffs bar's settings")
+    Fresh()
+    PlayerAuras[782] = true
+    ns = Load(saved)
+    B = ns.Bars
+    bar = B:Get("buff")
+    box = S[bar.container]
+    Equal(tostring(ns.BarData("buff").onlyMissing) .. " | " .. Showing() .. " | " .. Heard() .. " " .. tostring(AuraReads > 0),
+        "true | Clearcasting@20, Nature's Grace@60, Walk on Air@100 | true true", "after a reload: on, read at login, heard")
+    ns.Set("useBars", false)
+    B:Rebuild()
+    reads = AuraReads
+    PlayerAuras[782] = nil
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    B:SetOption("buff", "onlyMissing", true)
+    Equal(Heard() .. " " .. (AuraReads - reads), "false 0", "your bars off: nothing heard or read")
+    -- Saved before it, or on the Debuffs bar: off.
+    Fresh()
+    ns = Load({ useBars = true, notesSeen = "dev", bars = { buff = { showMissing = true }, debuff = { onlyMissing = true } } })
+    Equal(tostring(ns.BarData("buff").onlyMissing) .. " " .. tostring(ns.BarData("buff").showMissing) .. " "
+        .. tostring(ns.BarData("debuff").onlyMissing) .. " " .. tostring(S[ns.Bars.driver].events.UNIT_AURA),
+        "false true false nil", "saved before it: off, missing buffs greyed as it was; on the Debuffs bar: off")
     Equal(#printed, 0, "no errors")
 end)()
 

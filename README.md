@@ -55,7 +55,8 @@ EraUI.
   Shadow Word: Pain on your target (off by default)
 - Buffs bar: your buffs and class procs with time left and stacks; buffs from
   other players count at any rank. It can also show your debuffs on you, like
-  Weakened Soul (off by default)
+  Weakened Soul, or only the buffs you're missing, so you see what to cast
+  again (both off by default)
 - Debuffs bar: your own debuffs on your target, with a search that lists your
   class's debuffs. It can show your debuffs on you too (off by default)
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag

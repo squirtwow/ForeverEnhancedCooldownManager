@@ -192,6 +192,7 @@ function Proto:RegisterEvent(e) S[self].events[e] = true end
 function Proto:RegisterUnitEvent(e) S[self].events[e] = true end
 function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
+function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
@@ -503,6 +504,22 @@ local function Environment(keepCVars)
     _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return Typed("boolean", hostile) end
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
+    -- Your buffs (PlayerAuras[id] = true, or SECRET for an answer the game
+    -- keeps secret), as GetPlayerAuraBySpellID finds them, each ask counted
+    -- (AuraReads). As on Forever: in a fight it finds none, even with them
+    -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
+    PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    _G.C_UnitAuras = {
+        GetPlayerAuraBySpellID = function(id)
+            assert(type(id) == "number", "a spell ID")
+            AuraReads = AuraReads + 1
+            local aura = PlayerAuras[id]
+            if lockdown or not aura then return nil end
+            if rawequal(aura, SECRET) then return SECRET end
+            return { spellId = id }
+        end,
+    }
+    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end }
     _G.C_CVar = {
         GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end,
         GetCVar = function(name) return cvars[name] end,
@@ -1106,8 +1123,8 @@ do
         for _, f in ipairs(ns.SHARE_BAR_FIELDS) do found = found or f == field end
         if not found then fields[#fields + 1] = field .. " not shared" end
     end
-    Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,outOfCombat,showMissing,showNames,showTimer,showAuras,"
-        .. "selfDebuffs,grow,wrap,point,x,y", "each bar setting shared has its own check, and only those")
+    Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,outOfCombat,showMissing,onlyMissing,showNames,showTimer,"
+        .. "showAuras,selfDebuffs,grow,wrap,point,x,y", "each bar setting shared has its own check, and only those")
 end
 
 -- A full profile, out and back ----------------------------------------------------------------------
@@ -1146,6 +1163,7 @@ do
     B:SetOption("util", "perRow", 6)
     B:SetOption("util", "showNames", true)
     B:SetOption("buff", "showMissing", true)
+    B:SetOption("buff", "onlyMissing", true)
     B:SetOption("buff", "spacing", 2)
     B:SetOption("debuff", "selfDebuffs", true)
     B:SetOption("debuff", "showTimer", false)
@@ -1186,6 +1204,10 @@ do
     Equal(cd.size .. " " .. cd.whenReady .. " " .. cd.outOfCombat .. " " .. tostring(cd.showTimer) .. " " .. tostring(cd.showNames)
         .. " | " .. tostring(debuff.showTimer) .. " " .. tostring(debuff.selfDebuffs), "48 dim fade nil nil | false true",
         "each bar's settings unlike the defaults, and only those")
+    local buff = shared.setup.bars.buff
+    Equal(tostring(buff.onlyMissing) .. " " .. tostring(buff.showMissing) .. " " .. tostring(debuff.onlyMissing) .. " "
+        .. tostring(cd.onlyMissing), "true true nil nil",
+        "the Buffs bar's Only show missing with them, and its missing ones greyed kept beside it")
     Equal(tostring(cd.point) .. " " .. tostring(cd.x) .. " " .. tostring(cd.wrap) .. " " .. tostring(debuff.grow) .. " | "
         .. tostring(util.point == ns.BarData("util").point and util.x == ns.BarData("util").x and util.y == ns.BarData("util").y),
         "nil nil nil nil | true", "no spot or way to grow for a bar the layout places (it works them out again), a bar taken out keeps its spot")
@@ -1216,6 +1238,9 @@ do
     Equal(H.SetupNow(ns2), setup, "the look, every bar's settings and spot, the layout and the colours the same")
     Equal(ns2.Get("barDarkness") .. " " .. tostring(ns2.Get("thickEdges")) .. " " .. tostring(S[ns2.CastBar.row.bar.inner[1]].shown),
         "40 true true", "the darkness and thick edges came too, on the cast bar at once")
+    Equal(tostring(ns2.BarData("buff").onlyMissing) .. " " .. tostring(ns2.BarData("buff").showMissing) .. " "
+        .. tostring(ns2.Bars:Get("buff").spots ~= nil and S[ns2.Bars.driver].events.UNIT_AURA),
+        "true true true", "Only show missing came too, on the Buffs bar at once, hearing your buffs change")
     Equal(H.Text(ns2.CustomSpells()["Power Word: Fortitude"]), "{[1]=1243}", "the spell added by ID, added here too")
     Equal(H.Text(db.profiles[own]), ownBefore, "the importer's own profile is as it was")
     Equal(ns2.Get("accent") .. " " .. tostring(ns2.Get("keybinds")) .. " " .. tostring(ns2.Get("castBar")) .. " "
@@ -1230,6 +1255,38 @@ do
     FECMFrame:Select("look")
     Equal(tostring(S[FECMFrame.darkness.value].text) .. " " .. tostring(FECMFrame.thickEdges:GetChecked()), "40 true",
         "and the Look page shows the imported darkness and thick edges")
+end
+
+-- Only show missing in strings made before it -------------------------------------------------------
+-- The Buffs bar's Only show missing goes with the look and layout like its
+-- other settings. A string made before it (with none) reads as off, and so
+-- does one on the Debuffs bar, which has none; anything but true or false is
+-- left out.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetOption("buff", "onlyMissing", true)
+    local function Lists() return { cd = {}, util = {}, buff = { "Thorns" }, debuff = {} } end
+    -- Made by 1.5.8: missing buffs greyed, and nothing about Only show missing.
+    local old = P.Read(H.String({ a = "1.5.8", l = Lists(), g = { s = {}, b = { buff = { showMissing = true } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. tostring(old.setup.bars.buff.onlyMissing), "|0 nil",
+        "a string from before it reads as it did, with no Only show missing")
+    local ok = P.Import("Old", old, true)
+    Equal(tostring(ok) .. " " .. tostring(ns.BarData("buff").onlyMissing) .. " " .. tostring(ns.BarData("buff").showMissing) .. " "
+        .. tostring(S[B.driver].events.UNIT_AURA), "true false true nil",
+        "imported with its look: Only show missing off, its missing buffs greyed on, your buffs no longer heard")
+    local odd = P.Read(H.String({ l = Lists(), g = { s = {}, b = { buff = { onlyMissing = true }, debuff = { onlyMissing = true } },
+        l = {}, k = {} } }))
+    P.Import("Odd", odd, true)
+    Equal(tostring(ns.BarData("buff").onlyMissing) .. " " .. tostring(ns.BarData("debuff").onlyMissing),
+        "true false", "on the Buffs bar it comes; on the Debuffs bar, which has none, it's off")
+    local bad = P.Read(H.String({ l = Lists(), g = { s = {}, b = { buff = { onlyMissing = "yes" } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.buff.onlyMissing), "|1 nil",
+        "anything but true or false: left out, and counted")
+    Equal(#printed, 0, "no errors")
 end
 
 -- Import makes a new profile, and leaves yours as it is ----------------------------------------------

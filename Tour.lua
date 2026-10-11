@@ -477,6 +477,15 @@ local HELP = {
     },
     {
         page = "cd",
+        bars = { buff = true },
+        title = "Only missing ones",
+        text = "Ticked, a buff shows only while it's not on you, so you see what to cast again."
+            .. " Changes in a fight show once it ends.",
+        target = function(w) return w.pages.bar.options.onlyMissing end,
+        side = "below",
+    },
+    {
+        page = "cd",
         bars = AURA_BARS,
         title = "Join two into one",
         text = "With two on the bar, the + between them in the tray joins them into one icon, lit by whichever is up."
@@ -494,7 +503,7 @@ local HELP = {
                     .. " Not with missing debuffs greyed."
             end
             return "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, after your buffs."
-                .. " Not with missing buffs greyed."
+                .. " Not with missing buffs greyed or Only show missing."
         end,
         target = function(w) return w.pages.bar.options.showSelf end,
         side = "below",

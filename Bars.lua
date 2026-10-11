@@ -434,16 +434,19 @@ end
 -- Rows of up to perRow icons (or aura spots). Each row lines up by the bar's
 -- grow choice: centred, from the right edge (growing left, first icon on the
 -- right) or from the left edge; a new row goes below or above. Icons are at
--- their size on screen (ns.IconSize). Returns the bar's size.
-function B:Arrange(bar, frames, count, data)
+-- their size on screen (ns.IconSize). Returns the bar's size. With room, the
+-- bar keeps its size for that many (the Buffs bar's Only show missing: the
+-- spots showing are fewer than its entries), and the ones there line up in it.
+function B:Arrange(bar, frames, count, data, room)
     local size, spacing = ns.IconSize(data), data.spacing
+    room = math.max(room or count, count)
     -- An empty bar keeps room for three icons so it can still be dragged.
-    if count < 1 then
+    if room < 1 then
         Whole(bar)
         return 3 * size + 2 * spacing, size
     end
-    local across = math.max(1, math.min(data.perRow, count))
-    local rows = math.ceil(count / across)
+    local across = math.max(1, math.min(data.perRow, room))
+    local rows = math.ceil(room / across)
     local step = size + spacing + (data.showNames and NAMES or 0)
     local width = across * size + (across - 1) * spacing
     for i = 1, count do
@@ -465,7 +468,8 @@ function B:Arrange(bar, frames, count, data)
             frame:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -row * step)
         end
     end
-    Outline(bar, frames, count, across, rows, size, step, data)
+    -- (Spots that come and go have no box round them: Steady.)
+    if count < room then Whole(bar) else Outline(bar, frames, count, across, rows, size, step, data) end
     return width, size + (rows - 1) * step
 end
 
@@ -557,12 +561,12 @@ local function Drop(bar)
 end
 
 -- The border and shadow round a whole bar, when chosen, only go round icons
--- that stay put. Packed Buffs and Debuffs and a bar that hides when ready
--- come and go (like Blizzard's Tracked Buffs), so they'd leave an empty box
--- behind, as would the greyed Debuffs spots while there's no enemy. A bar
--- that dims its ready icons keeps them in place, and its box.
+-- that stay put. Packed Buffs and Debuffs, Only show missing and a bar that
+-- hides when ready come and go (like Blizzard's Tracked Buffs), so they'd
+-- leave an empty box behind, as would the greyed Debuffs spots while there's
+-- no enemy. A bar that dims its ready icons keeps them in place, and its box.
 local function Steady(key, data)
-    if ns.AURA_BARS[key] then return not ns.BuffBar:Packed(data) end
+    if ns.AURA_BARS[key] then return ns.BuffBar:Fixed(data) end
     return not HidesReady(data)
 end
 
@@ -756,6 +760,10 @@ local function NewBar(key)
     return bar
 end
 
+-- Your buffs read again a moment later when the game wouldn't answer
+-- (Only show missing; with the driver, below).
+local Again
+
 local function LayoutAuras(bar, data)
     if InCombatLockdown() then
         bar.pendingLayout = true
@@ -767,14 +775,16 @@ local function LayoutAuras(bar, data)
         ns.BuffBar:Create(bar)
     end
     ns.BuffBar:Layout(bar, data)
+    if ns.BuffBar:OnlyMissing(data) then Again(bar) end
     -- Fixed spots go in rows like icons; packed buffs are laid out by the
-    -- game in one row.
+    -- game in one row. With Only show missing the spots showing close up,
+    -- in a bar kept the size of all of them.
     if ns.BuffBar:Packed(data) then
         local slots, size = bar.count > 0 and bar.count or 3, ns.IconSize(data)
         bar:SetSize(slots * size + (slots - 1) * data.spacing, size)
         Whole(bar)
     else
-        bar:SetSize(B:Arrange(bar, bar.holders, bar.count, data))
+        bar:SetSize(B:Arrange(bar, bar.spots, #bar.spots, data, bar.count))
     end
     BarDecor(bar)
     Place(bar)
@@ -871,6 +881,28 @@ local function Relay()
     end
 end
 
+-- The Buffs bar with Only show missing: your buffs read again and, when one
+-- came or went (or with all, as the bars are arranged or put back), its
+-- spots shown or hidden, its slots switched to match and the spots showing
+-- closed up, in the room it keeps for all of them: the bar itself keeps its
+-- size and place. Out of combat only: in a fight it all waits for the end,
+-- as every change to that bar does. Buffs the game wouldn't answer for
+-- are read again a moment later (Again).
+local function Missing(bar, all)
+    if not (bar and bar.holders and B:Enabled() and ns.BuffBar:OnlyMissing(bar.data)) then return end
+    if inCombat or InCombatLockdown() then
+        bar.pendingLayout = true
+        return
+    end
+    if bar.pendingLayout then return Layout(bar) end
+    local changed = ns.BuffBar:Check(bar)
+    Again(bar)
+    if not changed and not all then return end
+    local spots = ns.BuffBar:Spots(bar)
+    ns.BuffBar:Apply(bar)
+    B:Arrange(bar, spots, #spots, bar.data, bar.count)
+end
+
 -- Public ------------------------------------------------------------------------------
 
 function B:Enabled()
@@ -878,12 +910,14 @@ function B:Enabled()
 end
 
 -- One Buffs or Debuffs bar entry for the report: its name and the spell IDs
--- its icon shows. These bars keep their entries in holders, not icons.
+-- its icon shows. These bars keep their entries in holders, not icons. With
+-- Only show missing, whether it was last read as on you.
 local function ReportEntry(bar, i, say)
     local holder, ids = bar.holders and bar.holders[i], {}
     for id in pairs(bar.slotIDs and bar.slotIDs[i] or {}) do ids[#ids + 1] = id end
     table.sort(ids)
-    return ("  %d. %s | spells %s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","))
+    local only = ns.BuffBar:OnlyMissing(bar.data) and (" | on you " .. tostring(bar.up and bar.up[i] == true)) or ""
+    return ("  %d. %s | spells %s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only)
 end
 
 -- For /ccm debug (Debug.lua): each of your bars and the icons on it as they
@@ -990,6 +1024,12 @@ function B:IsUnlocked()
     return unlocked
 end
 
+-- Whether the bars are being arranged: unlocked, or in Edit Mode. Every
+-- icon shows in full then, to be placed and sized.
+function B:Arranging()
+    return unlocked or editMode
+end
+
 -- Bars come back in full in combat, with an enemy targeted, while unlocked
 -- and while Edit Mode is open; otherwise each follows its out-of-combat
 -- choice. A hidden answer about the target counts as an enemy.
@@ -1081,8 +1121,12 @@ function B:SetUnlocked(value)
     if not unlocked then
         for _, bar in pairs(bars) do Drop(bar) end
     end
-    -- Items you carry none of show while unlocked, so they can be placed.
-    if self.started and was ~= unlocked then Relay() end
+    -- Items you carry none of show while unlocked, so they can be placed,
+    -- and so do buffs on you with Only show missing.
+    if self.started and was ~= unlocked then
+        Relay()
+        Missing(bars.buff, true)
+    end
     self:UpdateShown()
     self:RefreshAll()
     -- Unlocked, empty bars show too, so a layout makes room for them.
@@ -1120,6 +1164,7 @@ end
 -- them. They're made the first time the bars are turned on, and kept (hidden)
 -- if they're turned off again.
 local Listen -- the driver's events, with the driver below
+local HearAuras -- and whether it hears your buffs change (Only show missing)
 
 -- Lays the bars out again with your spells and items as they are now. Off,
 -- bars made earlier are laid out with nothing watched and hidden, and none
@@ -1776,6 +1821,8 @@ function B:SetOption(key, field, value)
     if not self.started then return end
     -- None are made while off: that waits for them to be turned on.
     if bars[key] or self:Enabled() then Layout(bars[key] or NewBar(key)) end
+    -- Only show missing ticked or unticked: your buffs changing are heard or not.
+    HearAuras()
     self:UpdateShown()
     self:RefreshAll()
     -- A bar in a layout may now be taller or shorter.
@@ -1901,10 +1948,29 @@ local listening = false
 local DRIVER_EVENTS = { "SPELL_UPDATE_COOLDOWN", "SPELL_UPDATE_USABLE", "PLAYER_TARGET_CHANGED", "PLAYER_REGEN_DISABLED",
     "PLAYER_REGEN_ENABLED", "BAG_UPDATE_COOLDOWN", "BAG_UPDATE_DELAYED", "PLAYER_LEVEL_UP", "PLAYER_LEVEL_CHANGED",
     "GET_ITEM_INFO_RECEIVED", "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW", "SPELL_ACTIVATION_OVERLAY_GLOW_HIDE" }
+-- Your buffs changed (UNIT_AURA), out of combat with Only show missing on:
+-- read once on the next frame, however many came at once.
+local checking = false
+-- Heard with UNIT_AURA: the game's restrictions changing, or an encounter
+-- ending, after which buffs it kept secret may be read (each event the game
+-- lacks is left out).
+local LIFTED = { "ADDON_RESTRICTION_STATE_CHANGED", "ENCOUNTER_END" }
+-- Reads again since the game last answered in full, or since a fight ended
+-- or its restrictions changed (Again), and whether one is on its way.
+local tries, waiting = 0, false
 
 local function OnEvent(_, event, arg)
-    if event == "PLAYER_REGEN_DISABLED" then
+    if event == "UNIT_AURA" then
+        checking = true
+    elseif event == "ADDON_RESTRICTION_STATE_CHANGED" or event == "ENCOUNTER_END" then
+        -- Buffs the game wouldn't answer for may be readable now: read on
+        -- the next frame (not as the event comes, when the game may not
+        -- have caught up yet), and again a few times if still not.
+        if bars.buff and bars.buff.unread then tries, checking = 0, true end
+    elseif event == "PLAYER_REGEN_DISABLED" then
         inCombat = true
+        -- Nothing on the Buffs bar changes in a fight: your buffs aren't heard.
+        HearAuras()
         -- A Buffs or Debuffs bar still being dragged is let go where it
         -- is, just before the fight locks it in place.
         for key in pairs(ns.AURA_BARS) do
@@ -1913,13 +1979,17 @@ local function OnEvent(_, event, arg)
         B:UpdateShown()
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
-        -- Anything the aura bars had to wait for during the fight.
+        -- Anything the aura bars had to wait for during the fight, and the
+        -- buffs that came or went in it (Only show missing: read again a
+        -- few times if the game doesn't answer yet).
+        tries = 0
         for key in pairs(ns.AURA_BARS) do
             local bar = bars[key]
             if bar and bar.pendingLayout then
                 Layout(bar)
-            elseif bar and bar.pending then
-                ns.BuffBar:Apply(bar)
+            elseif bar then
+                Missing(bar)
+                if bar.pending then ns.BuffBar:Apply(bar) end
             end
             if bar and bar.pendingDecor then GroupDecor(bar) end
             if bar then bar.pendingShown = nil end
@@ -1940,7 +2010,8 @@ local function OnEvent(_, event, arg)
         else
             dirty = true
         end
-        -- Turned off during the fight: done now, so the driver rests.
+        -- Turned off during the fight: done now, so the driver rests. Your
+        -- buffs changing are heard again (Only show missing).
         Listen()
     elseif event == "BAG_UPDATE_DELAYED" then
         follow = true
@@ -1983,6 +2054,10 @@ end
 -- just the part that changed. Nothing is asked of the game while nothing
 -- changes; range has its own event (WatchRange).
 local function Tick()
+    if checking then
+        checking = false
+        Missing(bars.buff)
+    end
     if not (dirty or cooling or tinting) then return end
     local part
     if not dirty and not (cooling and tinting) then part = cooling and "cooldown" or "state" end
@@ -1990,10 +2065,50 @@ local function Tick()
     if B.started and B:Enabled() then Each(part) end
 end
 
+-- Your buffs coming and going (UNIT_AURA for you) are heard only while the
+-- Buffs bar shows only missing ones, your bars are on and you're out of a
+-- fight. In one the bar stays as it is (your buffs are secret then), so
+-- nothing is heard; they're read again as it ends.
+local hearing = false
+HearAuras = function()
+    local want = listening and not inCombat and ns.BuffBar:OnlyMissing(ns.BarData("buff")) or false
+    if want == hearing then return end
+    hearing = want
+    if want then
+        driver:RegisterUnitEvent("UNIT_AURA", "player")
+        for _, event in ipairs(LIFTED) do pcall(driver.RegisterEvent, driver, event) end
+    else
+        driver:UnregisterEvent("UNIT_AURA")
+        for _, event in ipairs(LIFTED) do pcall(driver.UnregisterEvent, driver, event) end
+        checking = false
+    end
+end
+
+-- The Buffs bar's last read (Missing, or its layout) left some of your buffs
+-- unanswered: the game still keeps them secret as a fight ends, say, or out
+-- of one in an encounter. Read again half a second later, four times at
+-- most, and only while your buffs are heard (out of a fight, the setting
+-- on); a read answered in full, a fight ending or the game's restrictions
+-- changing start the count again. Never more than that: no polling.
+local AGAIN, TRIES = .5, 4
+Again = function(bar)
+    if not bar.unread then
+        tries = 0
+        return
+    end
+    if waiting or tries >= TRIES then return end
+    tries, waiting = tries + 1, true
+    C_Timer.After(AGAIN, function()
+        waiting = false
+        local buff = bars.buff
+        if hearing and buff and buff.unread then checking = true end
+    end)
+end
+
 -- The driver listens while your bars are on, made the first time they are.
 -- Turned off in a fight, it still hears the fight end, when the Buffs and
 -- Debuffs bars can hide.
-Listen = function()
+local function Switch()
     local on = B:Enabled()
     if on == listening or not on and InCombatLockdown() then return end
     if on and not driver then
@@ -2013,7 +2128,13 @@ Listen = function()
     else
         driver:UnregisterAllEvents()
         driver:SetScript("OnUpdate", nil)
+        hearing, checking = false, false
     end
+end
+
+Listen = function()
+    Switch()
+    HearAuras()
 end
 
 function B:Start()
@@ -2033,9 +2154,11 @@ function B:Start()
     if editor and editor.HookScript then
         editor:HookScript("OnShow", function()
             editMode = true
-            -- Items you carry none of show, to be placed, and a layout makes room.
+            -- Items you carry none of show, to be placed, and a layout makes
+            -- room; buffs on you with Only show missing show too.
             local any = next(absent) ~= nil
             if any then Relay() end
+            Missing(bars.buff, true)
             B:UpdateShown()
             B:RefreshAll()
             if any and ns.Layout then ns.Layout:Stack() end
@@ -2044,6 +2167,7 @@ function B:Start()
         editor:HookScript("OnHide", function()
             editMode = false
             if next(absent) then Relay() end
+            Missing(bars.buff, true)
             B:UpdateShown()
             B:RefreshAll()
             if ns.Layout then ns.Layout:Stack() end

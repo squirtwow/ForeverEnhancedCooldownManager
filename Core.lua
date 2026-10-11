@@ -260,8 +260,8 @@ local POINTS = { CENTER = true, TOP = true, BOTTOM = true, TOPLEFT = true, TOPRI
     BOTTOMLEFT = true, BOTTOMRIGHT = true }
 ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- A bar's settings a shared profile carries (its spells are in the profile).
-ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "outOfCombat", "showMissing", "showNames", "showTimer",
-    "showAuras", "selfDebuffs", "grow", "wrap", "point", "x", "y" }
+ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "outOfCombat", "showMissing", "onlyMissing", "showNames",
+    "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x", "y" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -1330,6 +1330,10 @@ function ns.BarData(key)
     end
     bar.combatOnly = nil
     bar.showMissing = bar.showMissing == true
+    -- The Buffs bar only: a buff shows only while it's not on you, off
+    -- unless ticked. (A target's debuffs change in a fight, when the addon
+    -- can't read them.)
+    bar.onlyMissing = key == "buff" and bar.onlyMissing == true
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked

@@ -194,6 +194,7 @@ function Proto:RegisterEvent(e) S[self].events[e] = true end
 function Proto:RegisterUnitEvent(e) S[self].events[e] = true end
 function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
+function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
@@ -505,6 +506,22 @@ local function Environment(keepCVars)
     _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return Typed("boolean", hostile) end
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
+    -- Your buffs (PlayerAuras[id] = true, or SECRET for an answer the game
+    -- keeps secret), as GetPlayerAuraBySpellID finds them, each ask counted
+    -- (AuraReads). As on Forever: in a fight it finds none, even with them
+    -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
+    PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    _G.C_UnitAuras = {
+        GetPlayerAuraBySpellID = function(id)
+            assert(type(id) == "number", "a spell ID")
+            AuraReads = AuraReads + 1
+            local aura = PlayerAuras[id]
+            if lockdown or not aura then return nil end
+            if rawequal(aura, SECRET) then return SECRET end
+            return { spellId = id }
+        end,
+    }
+    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end }
     _G.C_CVar = {
         GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end,
         GetCVar = function(name) return cvars[name] end,
@@ -2247,7 +2264,7 @@ end
     -- The page help's steps are in no What's new, nor the full tour.
     local all = Titles(Tour:News("0.9.0"))
     local leaked = {}
-    for _, title in ipairs({ "Missing ones greyed", "Join two into one", "Your debuffs on you", "Colours", "Height and parts",
+    for _, title in ipairs({ "Missing ones greyed", "Only missing ones", "Join two into one", "Your debuffs on you", "Colours", "Height and parts",
         "Minimap button", "Help" }) do
         if all:find(title, 1, true) then leaked[#leaked + 1] = title end
     end
@@ -2335,7 +2352,7 @@ end
     local expected = {
         cd = SPELL .. " | cd true",
         util = SPELL .. " | util true",
-        buff = BAR .. ", MISSING ONES GREYED, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 5 | buff true",
+        buff = BAR .. ", MISSING ONES GREYED, ONLY MISSING ONES, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 6 | buff true",
         debuff = BAR .. ", MISSING ONES GREYED, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 5 | debuff true",
         look = "THE LOOK, KEYBINDS ON ICONS, FONT AND BAR TEXTURE, READY GLOW | 4 | look true",
         layout = "LAYOUTS, LIVE PREVIEW, ALL BARS, GROW ARROWS | 4 | layout true",
@@ -2428,7 +2445,7 @@ end)()
     -- Buffs: each of its own steps points at its own part, the box hung from it.
     w:Select("buff")
     help:Click()
-    local parts = { bp.listPanel, bp.optionsArea, bp.options.showMissing, bp.tray, bp.options.showSelf }
+    local parts = { bp.listPanel, bp.optionsArea, bp.options.showMissing, bp.options.onlyMissing, bp.tray, bp.options.showSelf }
     local right = 0
     for i, part in ipairs(parts) do
         local o, p = S[box.outline].points, S[box].points[1]
@@ -2436,10 +2453,17 @@ end)()
         if i == 3 then
             Equal(S[box.text].text, "Ticked, each buff keeps its spot, greyed while it's missing from you. Unticked, only the ones up show, in one row.",
                 "the Buffs bar's missing ones: from you")
+        elseif i == 4 then
+            Equal(S[box.title].text .. " | " .. S[box.text].text, "ONLY MISSING ONES | Ticked, a buff shows only while it's not on you,"
+                .. " so you see what to cast again. Changes in a fight show once it ends.",
+                "then Only show missing, in plain words, with its in-combat limit")
+        elseif i == 6 then
+            Equal(S[box.text].text, "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, after your buffs."
+                .. " Not with missing buffs greyed or Only show missing.", "the Buffs bar's debuffs on you: not with either")
         end
         box.next:Click()
     end
-    Equal(right, 5, "every Buffs step outlines its own part, there to see, the box hung from it")
+    Equal(right, 6, "every Buffs step outlines its own part, there to see, the box hung from it")
     w:Select("debuff")
     help:Click()
     for _ = 1, 2 do box.next:Click() end

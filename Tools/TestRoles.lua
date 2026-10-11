@@ -196,6 +196,7 @@ function Proto:RegisterEvent(e) S[self].events[e] = true end
 function Proto:RegisterUnitEvent(e) S[self].events[e] = true end
 function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
+function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
@@ -507,6 +508,22 @@ local function Environment(keepCVars)
     _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return Typed("boolean", hostile) end
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
+    -- Your buffs (PlayerAuras[id] = true, or SECRET for an answer the game
+    -- keeps secret), as GetPlayerAuraBySpellID finds them, each ask counted
+    -- (AuraReads). As on Forever: in a fight it finds none, even with them
+    -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
+    PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    _G.C_UnitAuras = {
+        GetPlayerAuraBySpellID = function(id)
+            assert(type(id) == "number", "a spell ID")
+            AuraReads = AuraReads + 1
+            local aura = PlayerAuras[id]
+            if lockdown or not aura then return nil end
+            if rawequal(aura, SECRET) then return SECRET end
+            return { spellId = id }
+        end,
+    }
+    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end }
     _G.C_CVar = {
         GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end,
         GetCVar = function(name) return cvars[name] end,

@@ -355,6 +355,26 @@ test("Blizzard's aura containers never run the addon's code while they update", 
   assert.equal(count(buffs, /AddGroup\(container, "/g), 2, 'both kinds of group added through AddGroup');
 });
 
+// The addon reads your buffs in one place only: Buffs.lua's OnYou, for the
+// Buffs bar's Only show missing. Never in a fight (the game keeps them
+// secret then, and finds none even with them up), nor while it says auras
+// are secret; each answer through pcall, and Open() before it's tested, so
+// a secret or unreadable one counts as no answer. Tools/TestAuraContainers.lua
+// checks what it does with them.
+test('your buffs are read only by Only show missing, out of combat, each answer through pcall and Open()', () => {
+  assert.deepEqual(where(/C_UnitAuras|UnitAura\(|UnitBuff\(|UnitDebuff\(|GetAuraDataBy|AuraBySpellID/), ['Buffs.lua'], 'one file reads auras');
+  const buffs = code['Buffs.lua'];
+  assert.equal(count(buffs, /GetPlayerAuraBySpellID/g), 1, 'one ask');
+  assert.match(buffs, /local function Readable\(\)\r?\n\s+if InCombatLockdown\(\) then return false end\r?\n\s+local fighting = UnitAffectingCombat/,
+    'never in a fight');
+  assert.match(buffs, /local ok, secret = pcall\(ask\)\r?\n\s+if not \(ok and Open\(secret\) and secret == false\) then return false end/,
+    'nor while auras are said to be secret');
+  assert.match(buffs, /local ok, aura = pcall\(get, id\)\r?\n\s+if not ok or not Open\(aura\) then\r?\n\s+unknown = true/,
+    'each answer through pcall and Open()');
+  assert.match(buffs, /local readable = Readable\(\)[\s\S]*?if readable then on = OnYou\(bar\.slotIDs\[i\]\) end/, 'read only when readable');
+  assert.equal(count(buffs, /OnYou\(/g), 2, 'OnYou defined once, asked from F:Check only');
+});
+
 // Nothing the addon reads is ever run as code: a shared profile is taken
 // apart a character at a time (ProfileShare.lua). No way of running text is
 // anywhere in what it ships, nor named in a string, and the share strings'
