@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.5.9",
+        sections = {
+            { "Added", {
+                "Only show missing on the Buffs bar: a buff shows only while it's not on you. Changes in a fight show once it ends.",
+            } },
+        },
+    },
+    {
         version = "1.5.8",
         sections = {
             { "Added", {

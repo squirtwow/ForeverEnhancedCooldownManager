@@ -24,7 +24,9 @@ EraUI.
 - Square icons with big, bold countdown numbers
 - Tracked Bars in three designs (Glass, Split and Outline) and six colours, or a
   colour of their own for any bar
-- Optional borders and soft shadows, round each icon or round whole rows
+- Optional borders and soft shadows, round each icon or round whole rows, with
+  Thick edges for a bolder 2px edge, and a Darkness slider for the empty part
+  of your bars, right down to solid black (Look page)
 - Keybinds on the icons, from your action bars (off by default)
 - Visual only: Blizzard still decides what shows and when, and Edit Mode keeps
   positions and sizes
@@ -55,8 +57,8 @@ EraUI.
   Shadow Word: Pain on your target (off by default)
 - Buffs bar: your buffs and class procs with time left and stacks; buffs from
   other players count at any rank. It can also show your debuffs on you, like
-  Weakened Soul, or only the buffs you're missing, so you see what to cast
-  again (both off by default)
+  Weakened Soul, or with Only show missing just the buffs you're missing, so
+  you see what to cast again (both off by default)
 - Debuffs bar: your own debuffs on your target, with a search that lists your
   class's debuffs. It can show your debuffs on you too (off by default)
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag

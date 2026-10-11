@@ -2737,8 +2737,8 @@ end)()
     local at = S[tick].points[1]
     Equal(table.concat(seen, " ") .. " | " .. S[tick.text].text .. " | " .. at[1] .. " " .. at[2] .. " " .. at[3] .. " | " .. Note(tick),
         "buff | Only show missing | TOPLEFT 0 -107 | Shows a buff only while it's not on you. The game hides your buffs from addons"
-        .. " in a fight, so changes then show once it ends. (Needs testing)",
-        "on the Buffs page only, under the sliders, saying what it does, its limit in a fight, and that it needs testing")
+        .. " in a fight, so changes then show once it ends.",
+        "on the Buffs page only, under the sliders, saying what it does and its limit in a fight (seen working in game 2026-10-11)")
     Equal(tostring(tick:GetChecked()) .. " " .. tostring(greyed.usable) .. " " .. S[greyed].alpha .. " " .. tostring(greyed:GetChecked())
         .. " | " .. Note(greyed) .. " | " .. tostring(page.across:IsVisible() and page.options.wrap:IsVisible()
         and page.options.showNames:IsVisible()), "true false 0.35 false | Not with Only show missing, which shows only the buffs"

@@ -349,7 +349,7 @@ function ns.BuildBarPage(window, page, width)
     -- fight, when the addon can't read them.
     local onlyMissing = Option("Only show missing", "onlyMissing", -107,
         "Shows a buff only while it's not on you. The game hides your buffs from addons in a fight, so changes then show"
-            .. " once it ends. (Needs testing)", 0)
+            .. " once it ends.", 0)
     local showNames = Option("Show spell names", "showNames", -22, "Each spell's name under its icon.")
     local showTimer = Option("Show countdown numbers", "showTimer", -44, "The numbers counting down on this bar's icons.")
     -- The cooldown bars only: an icon shows the time left on the buff its
