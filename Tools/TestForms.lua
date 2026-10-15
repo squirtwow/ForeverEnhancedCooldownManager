@@ -1340,8 +1340,8 @@ do
         .. " | " .. at[1] .. " " .. at[2] .. " " .. at[3], "true Swap with my form false false | TOPLEFT 320 -129",
         "the Cooldowns page: the tick, off, under Show buff and debuff time, beside Dim when you can't cast it; no Editing")
     S[tick].scripts.OnEnter(tick)
-    Equal(S[w.note].text, "Each form gets its own icons on this bar, swapped as you change. (experimental)",
-        "its note, marked experimental")
+    Equal(S[w.note].text, "Each form gets its own icons on this bar, swapped as you change.",
+        "its note (no longer marked experimental: seen working in game, 1.6.0)")
     Equal(#S[w.note].text * 5.6 <= 560, true, "on one line of the footer")
     S[tick].scripts.OnLeave(tick)
     tick:Click()
@@ -1446,20 +1446,36 @@ end
 -- No form, no tick ----------------------------------------------------------------------------------
 
 -- The tick's words follow the class (the user, on a rogue: "it should not say form") ---------------------
+-- So does its step in What's new (1.6.0's, numbered before the release):
+-- after 1.5.9, What's new tours Dim on cooldown, then Swap your icons in
+-- the class's words (step).
 
 for _, case in ipairs({
     { "ROGUE", { { "Sinister Strike", 1752, "Rank 1" }, { "Stealth", 1784, "Rank 1" } }, "Swap when in Stealth",
-        "Stealth gets its own icons on this bar, swapped as you go in and out of it. (experimental)",
+        "Stealth gets its own icons on this bar, swapped as you go in and out of it.",
         "Pick Stealth to set up its icons here without using it. Normal is for the rest of the time.",
-        "Not in a fight: your bars follow Stealth until it ends." },
+        "Not in a fight: your bars follow Stealth until it ends.",
+        step = "Ticked, Stealth gets its own icons on this bar, swapped as you go in and out of it, in a fight too."
+            .. " Editing then shows under the tick, to set them up without using Stealth." },
     { "WARRIOR", { { "Heroic Strike", 78, "Rank 1" }, { "Battle Stance", 2457 }, { "Defensive Stance", 71 } },
-        "Swap with my stance", "Each stance gets its own icons on this bar, swapped as you change. (experimental)",
+        "Swap with my stance", "Each stance gets its own icons on this bar, swapped as you change.",
         "Pick a stance to set up its icons here without changing stance. Normal is for no stance.",
-        "Not in a fight: your bars follow your stance until it ends." },
+        "Not in a fight: your bars follow your stance until it ends.",
+        step = "Ticked, each stance gets its own icons on this bar, swapped as you change, in a fight too."
+            .. " Editing then shows under the tick, to set up another stance's without changing stance." },
+    { "DRUID", DRUID, "Swap with my form", "Each form gets its own icons on this bar, swapped as you change.",
+        "Pick a form to set up its icons here without changing form. Normal is for no form.",
+        "Not in a fight: your bars follow your form until it ends.",
+        step = "Ticked, each form gets its own icons on this bar, swapped as you change, in a fight too."
+            .. " Editing then shows under the tick, to set up another form's without changing form." },
     { "PRIEST", { { "Mind Blast", 8092, "Rank 1" }, { "Shadowform", 15473 } }, "Swap when in Shadowform",
-        "Shadowform gets its own icons on this bar, swapped as you go in and out of it. (experimental)" },
+        "Shadowform gets its own icons on this bar, swapped as you go in and out of it.",
+        step = "Ticked, Shadowform gets its own icons on this bar, swapped as you go in and out of it, in a fight too."
+            .. " Editing then shows under the tick, to set them up without using Shadowform." },
     { "SHAMAN", { { "Lightning Bolt", 403, "Rank 1" }, { "Ghost Wolf", 2645 } }, "Swap when in Ghost Wolf",
-        "Ghost Wolf gets its own icons on this bar, swapped as you go in and out of it. (experimental)" },
+        "Ghost Wolf gets its own icons on this bar, swapped as you go in and out of it.",
+        step = "Ticked, Ghost Wolf gets its own icons on this bar, swapped as you go in and out of it, in a fight too."
+            .. " Editing then shows under the tick, to set them up without using Ghost Wolf." },
 }) do
     local class, spells, label, hover, note, fight = case[1], case[2], case[3], case[4], case[5], case[6]
     local ns = Character(class, spells,
@@ -1485,6 +1501,18 @@ for _, case in ipairs({
         lockdown = false
     end
     Equal(ns.SwapWords().label, label, class .. ": SwapWords")
+    local news = ns.Tour:News("1.5.9")
+    Equal(#news .. " " .. news[1].title .. ", " .. news[2].title .. " " .. news[1].version .. " " .. news[2].version, "2 Dim on cooldown, Swap your icons 1.6.0 1.6.0",
+        class .. ": after 1.5.9, What's new has exactly 1.6.0's two steps")
+    ns.ShowNotes("1.5.9")
+    FECMNotes.tour:Click()
+    local box = FECMTour
+    local first = S[box.count].text .. " " .. w.selected .. " " .. S[box.title].text
+    box.next:Click()
+    Equal(first .. " | " .. S[box.count].text .. " " .. w.selected .. " " .. S[box.title].text .. " | " .. S[box.text].text .. " | "
+        .. S[box.next.label].text, "1 of 2 cd DIM ON COOLDOWN | 2 of 2 cd SWAP YOUR ICONS | " .. case.step .. " | Done",
+        class .. ": Show me what's new tours them, Swap your icons in the class's words")
+    box.skip:Click()
     w:Hide()
     Equal(#printed, 0, class .. ": no errors")
 end
@@ -1507,6 +1535,9 @@ do
     until done or #titles > 20
     Equal(tostring(table.concat(titles, ", "):find("SWAP YOUR ICONS", 1, true)) .. " " .. titles[#titles], "nil DIM ON COOLDOWN",
         "and the page's walkthrough leaves its step out")
+    local news = ns.Tour:News("1.5.9")
+    Equal(#news .. " " .. news[1].title .. " " .. news[1].version .. " | " .. #ns.Tour:News(nil), "1 Dim on cooldown 1.6.0 | 1",
+        "and What's new after 1.5.9 too: only Dim on cooldown, by hand the same")
     Equal(#printed, 0, "no errors")
 end
 

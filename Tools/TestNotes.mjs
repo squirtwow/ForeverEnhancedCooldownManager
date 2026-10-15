@@ -4,6 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const read = name => readFile(new URL(`../${name}`, import.meta.url), 'utf8');
 const STRING = '"((?:[^"\\\\]|\\\\.)*)"'; // a Lua string in double quotes
@@ -85,18 +87,72 @@ function compareVersions(a, b) {
   return 0;
 }
 
-// Tour.lua: each step says the version it arrived in, so What's new can tour
-// just an update's steps. A numbered one must be a version with notes; the
-// next update's wait as ns.UNRELEASED until the release gives them its number.
-test('every tour step has the version it arrived in', async () => {
+// The newest numbered notes (past any still "Unreleased").
+const newestNumbered = notes => notes.find(entry => /^\d+(\.\d+)*$/.test(entry.version))?.version;
+
+// Whether version a is the one straight after b: its next patch, minor or
+// major version (after 1.5.9: 1.5.10, 1.6.0 or 2.0.0).
+function nextAfter(a, b) {
+  const [major, minor = 0, patch = 0] = b.split('.').map(Number);
+  return [[major, minor, patch + 1], [major, minor + 1, 0], [major + 1, 0, 0]]
+    .some(next => compareVersions(a, next.join('.')) === 0);
+}
+
+// Tour.lua's numbered steps with no notes yet: the next update's, numbered
+// ahead of its notes.
+async function stepsAhead() {
   const released = new Set(gameNotes(await read('Notes.lua')).map(entry => entry.version));
+  return (await tourSteps()).filter(step => step.versions[0]?.[1] && !released.has(step.versions[0][1]));
+}
+
+// Tour.lua: each step says the version it arrived in, so What's new can tour
+// just an update's steps. A numbered one must be a version with notes, or
+// the next update's number once it's decided (one number, straight after
+// the newest notes; a release shows steps only up to its own number). Until
+// then the next update's wait as ns.UNRELEASED, and the release gives them
+// its number.
+test('every tour step has the version it arrived in', async () => {
+  const notes = gameNotes(await read('Notes.lua'));
+  const released = new Set(notes.map(entry => entry.version));
+  const newest = newestNumbered(notes);
   const steps = await tourSteps();
+  const ahead = new Set();
   for (const step of steps) {
     assert.equal(step.versions.length, 1, `one version on: ${step.title}`);
     const [, number, placeholder] = step.versions[0];
-    if (!placeholder) assert.ok(released.has(number), `"${number}" has notes in Notes.lua`);
+    if (placeholder || released.has(number)) continue;
+    assert.ok(/^\d+\.\d+\.\d+$/.test(number) && nextAfter(number, newest),
+      `"${number}" (${step.title}) has notes in Notes.lua, or is the next update's number, straight after ${newest}`);
+    ahead.add(number);
   }
+  assert.ok(ahead.size <= 1, `steps wait for one next update, not ${[...ahead].join(' and ')}`);
   assert.ok(steps.length >= 19, 'every step checked');
+  assert.equal(nextAfter('1.6.0', '1.5.9') && nextAfter('1.5.10', '1.5.9') && nextAfter('2.0.0', '1.5.9'), true, 'the check works');
+  assert.equal(nextAfter('1.6.1', '1.5.9') || nextAfter('1.7.0', '1.5.9') || nextAfter('1.5.9', '1.5.9'), false, 'only the next');
+});
+
+// Git's release tags, as versions (none without git, or with no tags here).
+function releaseTags() {
+  const root = fileURLToPath(new URL('../', import.meta.url));
+  const run = spawnSync('git', ['tag', '--list'], { cwd: root, encoding: 'utf8' });
+  if (run.status !== 0 || typeof run.stdout !== 'string') return [];
+  return run.stdout.split(/\r?\n/).map(tag => tag.trim().replace(/^v/, '')).filter(tag => /^\d+(\.\d+)*$/.test(tag));
+}
+
+// Steps numbered ahead of the notes wait for a release still to come. Once
+// a release's own notes are written (before it's tagged), steps numbered
+// past them would never show in it: a release numbered other than planned
+// (1.5.10, not 1.6.0) must renumber them. Between releases the newest
+// notes are tagged, and the steps wait. Skipped where git has no tags.
+test('steps numbered ahead of the notes wait for a release still to come', async () => {
+  const ahead = await stepsAhead();
+  const tags = releaseTags();
+  if (ahead.length === 0 || tags.length === 0) return;
+  const newest = newestNumbered(gameNotes(await read('Notes.lua')));
+  const numbers = [...new Set(ahead.map(step => step.versions[0][1]))].join(', ');
+  assert.ok(tags.some(tag => compareVersions(tag, newest) === 0),
+    `${ahead.map(step => step.title).join(', ')} are numbered ${numbers}, but ${newest}'s notes are written and it isn't tagged yet:`
+    + ` if they ship in ${newest}, number them ${newest}`);
 });
 
 // Releases that added no tour steps. Steps written after one of these wait

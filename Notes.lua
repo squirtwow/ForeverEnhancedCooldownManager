@@ -10,6 +10,21 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.6.0",
+        sections = {
+            { "Added", {
+                "On cooldown: Show, Dim or Hide, for each bar. A player's idea.",
+                "Dim when you can't cast it: icons dim while you lack the mana, rage, energy or range.",
+                "Dimmed icons slider: how much of a dimmed icon shows, from 10% to 90%.",
+                "Swap with my form: each form, stance or Stealth gets its own icons on the Cooldowns and Utility bars. A player's idea.",
+                "What's new walks you to the new options.",
+            } },
+            { "Fixed", {
+                "Thistle Tea, and other food and drink with a cooldown, can now go on your bars. A player's report.",
+            } },
+        },
+    },
+    {
         version = "1.5.9",
         sections = {
             { "Added", {

@@ -379,9 +379,9 @@ function ns.BuildBarPage(window, page, width)
     local swapForm = Option("Swap with my form", "swapForm", -129, function()
         local words = ns.SwapWords()
         if words.one then
-            return words.one .. " gets its own icons on this bar, swapped as you go in and out of it. (experimental)"
+            return words.one .. " gets its own icons on this bar, swapped as you go in and out of it."
         end
-        return "Each " .. words.what .. " gets its own icons on this bar, swapped as you change. (experimental)"
+        return "Each " .. words.what .. " gets its own icons on this bar, swapped as you change."
     end)
     -- And with it ticked, under it, Editing: whose icons the tray and the
     -- bar show, to set up another form's without changing form. Your form's
@@ -505,23 +505,21 @@ function ns.BuildBarPage(window, page, width)
     readyPart:SetSize(100 + 156, 20)
     whenReady.part = readyPart
     -- On cooldown, under it: the other way round, each icon in full, dimmed
-    -- or hidden while its spell cools down (a player's idea). Its new
-    -- choices say they're experimental until seen in game.
+    -- or hidden while its spell cools down (a player's idea).
     local onCooldown = Pills("On cooldown", 0, -107, 156, ns.WHEN_READY, ns.WHEN_READY_NAMES, "onCooldown", {
         show = "Every icon shows in full while it cools down.",
         dim = function()
-            return "Each icon dims while it cools down, so the ones ready stand out. (experimental)" .. Both("whenReady", "dim")
+            return "Each icon dims while it cools down, so the ones ready stand out." .. Both("whenReady", "dim")
         end,
         hide = function()
-            return "Each icon hides while it cools down, so only the ready ones show. (experimental)" .. Both("whenReady", "hide")
+            return "Each icon hides while it cools down, so only the ready ones show." .. Both("whenReady", "hide")
         end,
     })
     -- And under that, an icon you can't cast now (blue, grey or red: no
     -- mana, rage or energy, out of range, or not usable yet) dimmed too,
     -- never more than dimmed: one hidden stays hidden. Off unless ticked.
     local dimUnusable = Option("Dim when you can't cast it", "dimUnusable", -129,
-        "Dims an icon while you can't cast it: not enough mana, rage or energy, out of range, or not usable yet."
-            .. " (experimental)", 0)
+        "Dims an icon while you can't cast it: not enough mana, rage or energy, out of range, or not usable yet.", 0)
     -- And under that, how much of a dimmed icon shows (each Dim and the
     -- tick), each bar its own, 40% as it always was. Greyed while nothing
     -- on the bar dims.
@@ -544,7 +542,6 @@ function ns.BuildBarPage(window, page, width)
             return "Nothing on this bar dims yet. Pick Dim on When ready or On cooldown, or tick Dim when you can't cast it."
         end
         return "How much of a dimmed icon shows: lower is fainter. Used by Dim above and by Dim when you can't cast it."
-            .. " (experimental)"
     end)
     -- On cooldown, its tick and Dimmed icons as one part, for the page's walkthrough.
     local cooldownPart = CreateFrame("Frame", nil, options)

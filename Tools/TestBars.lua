@@ -2702,8 +2702,8 @@ do
     cooling.buttons[3]:Click()
     Equal(ns.BarData("cd").onCooldown .. " " .. cooling.selected .. " " .. S[B:Get("cd").icons[1]].alpha, "hide hide 0",
         "Hide instead: gone while it cools down")
-    -- Each says what it does, the new ones that they're experimental; Hide
-    -- on both says the bar then shows nothing, on either one.
+    -- Each says what it does (no longer marked experimental: seen working in
+    -- game, 1.6.0); Hide on both says the bar then shows nothing, on either one.
     local function Notes(pills)
         local said = {}
         for _, button in ipairs(pills.buttons) do
@@ -2714,11 +2714,11 @@ do
         return table.concat(said, " | ")
     end
     Equal(Notes(cooling), "Every icon shows in full while it cools down. | "
-        .. "Each icon dims while it cools down, so the ones ready stand out. (experimental) | "
-        .. "Each icon hides while it cools down, so only the ready ones show. (experimental)", "each choice's note")
+        .. "Each icon dims while it cools down, so the ones ready stand out. | "
+        .. "Each icon hides while it cools down, so only the ready ones show.", "each choice's note")
     ready.buttons[3]:Click()
     Equal(select(3, Notes(cooling):match("^(.-) | (.-) | (.-)$")) .. " / " .. select(3, Notes(ready):match("^(.-) | (.-) | (.-)$")),
-        "Each icon hides while it cools down, so only the ready ones show. (experimental) Both are on Hide, so this bar shows nothing."
+        "Each icon hides while it cools down, so only the ready ones show. Both are on Hide, so this bar shows nothing."
         .. " / Each icon hides while it's ready, so only the ones cooling down show. Both are on Hide, so this bar shows nothing.",
         "both on Hide: each one's Hide says the bar shows nothing")
     -- Dim on both: each one's Dim says every icon is dimmed, and nothing
@@ -2728,7 +2728,7 @@ do
     local readyNotes, coolingNotes = Notes(ready), Notes(cooling)
     Equal(select(2, coolingNotes:match("^(.-) | (.-) | (.-)$")) .. " / " .. select(2, readyNotes:match("^(.-) | (.-) | (.-)$"))
         .. " / " .. tostring(readyNotes:find("Both are on Hide", 1, true)) .. " " .. tostring(coolingNotes:find("Both are on Hide", 1, true)),
-        "Each icon dims while it cools down, so the ones ready stand out. (experimental) Both are on Dim, so every icon is dimmed."
+        "Each icon dims while it cools down, so the ones ready stand out. Both are on Dim, so every icon is dimmed."
         .. " / Each icon dims while it's ready, so the ones cooling down stand out. Both are on Dim, so every icon is dimmed."
         .. " / nil nil", "both on Dim: each one's Dim says every icon is dimmed")
     -- When ready back on Show: On cooldown's notes say nothing of both, and
@@ -2743,8 +2743,8 @@ do
     active = false
     -- The tick: on and off, the bar's own; its note says what it does.
     S[tick].scripts.OnEnter(tick)
-    Equal(S[w.note].text, "Dims an icon while you can't cast it: not enough mana, rage or energy, out of range, or not usable yet."
-        .. " (experimental)", "the tick's note")
+    Equal(S[w.note].text, "Dims an icon while you can't cast it: not enough mana, rage or energy, out of range, or not usable yet.",
+        "the tick's note")
     S[tick].scripts.OnLeave(tick)
     usable[7384] = false
     tick:Click()
@@ -2778,8 +2778,8 @@ do
     ready.buttons[2]:Click()
     Equal(tostring(dim.usable) .. " " .. S[dim].alpha, "true 1", "When ready on Dim: it can be used")
     S[dim].scripts.OnEnter(dim)
-    Equal(S[w.note].text, "How much of a dimmed icon shows: lower is fainter. Used by Dim above and by Dim when you can't cast it."
-        .. " (experimental)", "its note")
+    Equal(S[w.note].text, "How much of a dimmed icon shows: lower is fainter. Used by Dim above and by Dim when you can't cast it.",
+        "its note")
     S[dim].scripts.OnLeave(dim)
     dim:Choose(23)
     Equal(ns.BarData("cd").dimOpacity .. " " .. S[dim.value].text .. " " .. S[B:Get("cd").icons[1]].alpha, "25 25% 0.25",
@@ -6990,17 +6990,22 @@ end)()
         and nextSteps[1].version == "1.2.0", true,
         "1.2.0's steps, Healthstones and potions and Dim when ready among them")
     Equal(Titles(Tour:News("1.0.0")), NEW .. ", " .. NEXT, "from 1.0.0 to this copy: the three new steps, then the next update's")
-    -- The newest steps there are: 1.5.0's. Here only Ready glow, on the Look page: the Cooldown pulse's
-    -- page isn't loaded (Tools/TestPulse.lua tours its steps).
-    local latest = {}
+    -- The newest steps there are: 1.6.0's, numbered before their release. Here only Dim on cooldown,
+    -- on the Cooldowns page: this druid knows no form, so Swap your icons stays out (Tools/TestForms.lua
+    -- and Tools/TestPulse.lua tour it). 1.5.0's before them: here only Ready glow, as the Cooldown
+    -- pulse's page isn't loaded (Tools/TestPulse.lua tours its steps).
+    local latest, pulse = {}, {}
     for _, step in ipairs(nextSteps) do
-        if step.version == "1.5.0" then latest[#latest + 1] = step end
+        if step.version == "1.6.0" then latest[#latest + 1] = step end
+        if step.version == "1.5.0" then pulse[#pulse + 1] = step end
     end
     local LATEST = Titles(latest)
-    Equal(LATEST .. " | " .. tostring(NEXT:sub(-#LATEST) == LATEST), "Ready glow | true", "1.5.0's: Ready glow, the last of them")
-    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.4.4")),
-        LATEST .. "|" .. LATEST .. "|" .. LATEST,
-        "no version seen, or one that isn't: the latest update's, the newest steps there are, as after 1.4.4")
+    Equal(tostring(#ns.KnownForms()) .. " " .. LATEST .. " | " .. Titles(pulse) .. " | " .. tostring(NEXT:sub(-#LATEST) == LATEST)
+        .. " " .. tostring(NEXT:sub(-#LATEST - 12) == "Ready glow, " .. LATEST), "0 Dim on cooldown | Ready glow | true true",
+        "1.6.0's: Dim on cooldown, the last of them, straight after 1.5.0's Ready glow (no form known here)")
+    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News("1.4.4")),
+        LATEST .. "|" .. LATEST .. "|" .. LATEST .. "|Ready glow, " .. LATEST,
+        "no version seen, or one that isn't: the latest update's, the newest steps there are, as after 1.5.9; after 1.4.4 1.5.0's too")
     Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW .. ", " .. NEXT,
         "versions skipped come together: the basics from 1.0.0, then the new ones")
     Equal(Titles(Tour:News("dev")) .. "|" .. Titles(Tour:News(U)), "|", "nothing when nothing is newer than what was seen")
@@ -7036,6 +7041,21 @@ end)()
     local own = Titles(Tour:News(nil))
     Running("1.0.9")
     Equal(own .. "|" .. Titles(Tour:News(nil)), NEW .. "|" .. BASICS, "1.1.0 by hand its own; a release before it never a later one's")
+    -- 1.6.0's steps, numbered before their release: from the source, after
+    -- 1.5.9, just them; 1.5.9 itself (or any release before 1.6.0) never
+    -- shows them; 1.6.0, once released, does, after 1.5.9 and by hand.
+    Running(nil)
+    local fromSource = Titles(Tour:News("1.5.9"))
+    Running("1.5.9")
+    local before = Titles(Tour:News("1.5.8")) .. "|" .. Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("1.4.4"))
+    Running("1.6.0")
+    Equal(fromSource .. "|" .. before .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News(nil)),
+        LATEST .. "||Ready glow|Ready glow|" .. LATEST .. "|" .. LATEST,
+        "after 1.5.9: 1.6.0's steps from the source; 1.5.9 never shows them (by hand its last, 1.5.0's); 1.6.0 shows them, by hand too")
+    Equal(Titles(Tour:News("1.4.4")) .. "|" .. Titles(Tour:News("0.9.0")):sub(-#LATEST - 12), "Ready glow, " .. LATEST .. "|Ready glow, " .. LATEST,
+        "1.6.0 after an older version: 1.5.0's then 1.6.0's, the same at the end of everything")
+    Running("1.6.1")
+    Equal(Titles(Tour:News("1.6.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. LATEST, "1.6.1 after 1.6.0: nothing new; by hand 1.6.0's")
     Running(nil)
 
     -- After an update: What's new offers the tour beside Got it.
@@ -7161,6 +7181,27 @@ end)()
             S[box].scripts.OnUpdate(box, 1)
             Equal(ns.BarData("cd").whenReady .. " " .. S[box.title].text, "dim DIM WHEN READY", "picked: the step stays so the bar can be seen dimming")
             ready.buttons[1]:Click()
+        end
+        -- Dim on cooldown (1.6.0): On cooldown, its tick and Dimmed icons as
+        -- one part on the Cooldowns page, the box under them, inside the page.
+        if S[box.title].text == "DIM ON COOLDOWN" then
+            local cooling = tw.pages.bar.options.onCooldown
+            local o = S[box.outline].points
+            p = S[box].points[1]
+            Equal(tw.selected .. " " .. tostring(o[1][2] == cooling.part and o[2][2] == cooling.part) .. " " .. p[1] .. " "
+                .. tostring(p[2] == cooling.part) .. " " .. p[3] .. " " .. tostring(S[box.text].text:find("Try it: pick Dim.", 1, true) ~= nil)
+                .. " " .. tostring(S[box.text].text:find("Dimmed icons sets how dim.", 1, true) ~= nil),
+                "cd true TOPLEFT true BOTTOMLEFT true true",
+                "Dim on cooldown: outlining On cooldown, its tick and Dimmed icons, the box under them, asking you to pick Dim")
+            Equal(16 + S[cooling.part].points[1][2] + S[box].width <= 638 - 8, true, "the box inside the page's right edge")
+            cooling.buttons[2]:Click()
+            S[box].scripts.OnUpdate(box, 1)
+            Equal(ns.BarData("cd").onCooldown .. " " .. S[box.title].text, "dim DIM ON COOLDOWN", "picked: the step stays so the bar can be seen dimming")
+            box.back:Click()
+            box.next:Click()
+            Equal(tostring(S[box.text].text:find("Cooldowns already dims its icons on cooldown.", 1, true) ~= nil) .. " "
+                .. tostring(S[box.text].text:find("Try it", 1, true)), "true nil", "back to it: it says the bar already dims them")
+            cooling.buttons[1]:Click()
         end
         -- Font and bar texture: both rows on the Look page as one part, the
         -- box under them at their right end, inside the page and below the

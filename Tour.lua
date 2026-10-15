@@ -84,6 +84,14 @@ local function PulseElsewhere()
     return ns.Pulse and ns.Pulse.Elsewhere and ns.Pulse:Elsewhere() or nil
 end
 
+-- Swap with my form's tick, and Editing under it while that shows (once
+-- it's ticked), for its step to outline both.
+local function SwapParts(w)
+    local options = w.pages.bar.options
+    if options.editing:IsShown() then return options.swapForm, options.editing end
+    return options.swapForm
+end
+
 -- How many cooldowns are ticked to pulse, for its Try it.
 local function PulsePicks()
     local count = 0
@@ -226,8 +234,9 @@ local STEPS = {
 }
 
 -- Steps only What's new tours, for what an update added after the basics.
--- The same fields as above. Steps waiting for the next update's number are
--- ns.UNRELEASED; the release gives them that number.
+-- The same fields as above. Steps for the next update have its number once
+-- it's decided, or ns.UNRELEASED until then; a release only ever shows the
+-- steps up to its own number, and a copy from the source shows them all.
 local NEWS = {
     {
         version = "1.1.0",
@@ -455,38 +464,54 @@ local NEWS = {
         side = "above",
         align = "end",
     },
+    {
+        version = "1.6.0",
+        page = "cd",
+        title = "Dim on cooldown",
+        text = "Each icon can dim or hide while its spell cools down, so the ready ones stand out."
+            .. " The tick under it dims one you can't cast now, too, and Dimmed icons sets how dim.",
+        -- No watch: the step stays so the bar can be seen dimming.
+        try = "Try it: pick Dim.",
+        -- The bar showing: Cooldowns, or Utility from its own page.
+        already = function() return ns.BarData(ShownBar()).onCooldown == "dim" end,
+        alreadyText = function() return ns.BAR_NAMES[ShownBar()] .. " already dims its icons on cooldown." end,
+        bars = SPELL_BARS, -- the aura bars have no On cooldown
+        -- On cooldown, its tick and Dimmed icons as one part, the box under them.
+        target = function(w) return w.pages.bar.options.onCooldown.part end,
+        side = "below",
+    },
+    {
+        version = "1.6.0",
+        page = "cd",
+        bars = SPELL_BARS,
+        -- Only for a character who knows a form, as only they see the tick.
+        when = function() return #ns.KnownForms() > 0 end,
+        title = "Swap your icons",
+        -- In the class's words: Stealth on a rogue, stances on a warrior.
+        -- Editing only shows once it's ticked, so the words say it comes then.
+        text = function()
+            local words = ns.SwapWords()
+            if words.one then
+                return "Ticked, " .. words.one .. " gets its own icons on this bar, swapped as you go in and out of it,"
+                    .. " in a fight too. Editing then shows under the tick, to set them up without using " .. words.one .. "."
+            end
+            return "Ticked, each " .. words.what .. " gets its own icons on this bar, swapped as you change, in a fight too."
+                .. " Editing then shows under the tick, to set up another " .. words.what .. "'s without changing "
+                .. words.what .. "."
+        end,
+        -- No Try it: it changes your icons, so it's for those who want it.
+        -- The tick, and Editing under it once ticked; the box under them, at
+        -- Editing's right end, so it covers neither.
+        target = function(w) return SwapParts(w) end,
+        side = "below",
+        align = function(w) return select(2, SwapParts(w)) and "end" or nil end,
+    },
 }
 
 -- Steps only a page's own walkthrough shows (the ? in the title bar), for
 -- pages with little in the tour or What's new: never in either. The same
 -- fields, with no version.
 local HELP = {
-    {
-        page = "cd",
-        bars = SPELL_BARS,
-        title = "Dim on cooldown",
-        text = "Each icon can dim or hide while its spell cools down, so the ready ones stand out."
-            .. " The tick under it dims one you can't cast now, too, and Dimmed icons sets how dim.",
-        -- On cooldown, its tick and Dimmed icons as one part, the box under them.
-        target = function(w) return w.pages.bar.options.onCooldown.part end,
-        side = "below",
-    },
-    {
-        page = "cd",
-        bars = SPELL_BARS,
-        -- Only for a character who knows a form, as only they see the tick.
-        when = function() return #ns.KnownForms() > 0 end,
-        title = "Swap your icons",
-        text = function()
-            local words = ns.SwapWords()
-            if words.one then
-                return "Ticked, " .. words.one .. " gets its own icons on this bar, swapped as you go in and out of it."
-            end
-            return "Ticked, each " .. words.what .. " gets its own icons on this bar, swapped as you change."
-        end,
-        target = function(w) return w.pages.bar.options.swapForm end,
-        side = "below",
-    },
     {
         page = "cd",
         bars = AURA_BARS,
@@ -677,10 +702,15 @@ local function Build()
     -- Closing the window ends the tour.
     window:HookScript("OnHide", function() Tour:Stop() end)
     -- Opening or closing the profile menu moves the box beside it, or back.
-    if window.profilePanel then
-        window.profilePanel:HookScript("OnShow", function() Tour:Repoint() end)
-        window.profilePanel:HookScript("OnHide", function() Tour:Repoint() end)
+    -- So does Editing showing or going under Swap with my form, as that's
+    -- ticked or unticked.
+    local function Moves(part)
+        if not part then return end
+        part:HookScript("OnShow", function() Tour:Repoint() end)
+        part:HookScript("OnHide", function() Tour:Repoint() end)
     end
+    Moves(window.profilePanel)
+    Moves(window.pages.bar and window.pages.bar.options.editing)
 end
 
 local function Ready()

@@ -71,6 +71,13 @@ EraUI.
 - Per bar: icon size, spacing, icons per row, which way it grows, show, dim or
   hide when ready, spell names, countdown numbers, and show, fade or hide out of
   combat
+- On cooldown: show, dim or hide each icon while it cools down, on the
+  Cooldowns and Utility bars. With Dim when you can't cast it, icons dim while
+  you lack the mana, rage, energy or range, and Dimmed icons sets how dim (off
+  by default)
+- Swap with my form: each form, stance or Stealth gets its own icons on the
+  Cooldowns and Utility bars, swapped as you change, in a fight too (off by
+  default)
 - Your choice of font and bar texture on the Look page
 
 ## Layouts

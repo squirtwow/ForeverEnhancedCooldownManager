@@ -2235,11 +2235,12 @@ function BoxFits(page)
 end
 
 -- What's new for the Cooldown pulse, and the ? on every page ------------------------------------
--- What's new tours the next update's steps: the Cooldown pulse page's four
--- (turn it on, pick your cooldowns, Quick and Long, where it shows) and the
--- Look page's Ready glow, never the page help's. The ? walks through the
--- page showing: every step about it, on it, each box on the page and clear
--- of what it points at, and changes nothing.
+-- What's new tours an update's steps: 1.5.0's, the Cooldown pulse page's
+-- four (turn it on, pick your cooldowns, Quick and Long, where it shows) and
+-- the Look page's Ready glow, then 1.6.0's, the Cooldowns page's Dim on
+-- cooldown and Swap your icons; never the page help's. The ? walks through
+-- the page showing: every step about it, once, on it, each box on the page
+-- and clear of what it points at, and changes nothing.
 
 ;(function()
     Environment()
@@ -2257,10 +2258,14 @@ end
         return table.concat(titles, ", ")
     end
     local NEW = "Turn it on, Pick your cooldowns, Quick and Long, Where it shows, Ready glow"
-    local waiting = true
-    for _, step in ipairs(Tour:News("1.4.4")) do waiting = waiting and step.version == "1.5.0" end
-    Equal(Titles(Tour:News("1.4.4")) .. " | " .. tostring(waiting) .. " | " .. Titles(Tour:News(nil)), NEW .. " | true | " .. NEW,
-        "after 1.4.4: the Cooldown pulse's four steps, then Ready glow, all 1.5.0's; by hand the same")
+    local SIX = "Dim on cooldown, Swap your icons"
+    local versions = {}
+    for _, step in ipairs(Tour:News("1.4.4")) do versions[#versions + 1] = step.version end
+    Equal(Titles(Tour:News("1.4.4")) .. " | " .. table.concat(versions, " ") .. " | " .. Titles(Tour:News(nil)),
+        NEW .. ", " .. SIX .. " | 1.5.0 1.5.0 1.5.0 1.5.0 1.5.0 1.6.0 1.6.0 | " .. SIX,
+        "after 1.4.4: the Cooldown pulse's four steps and Ready glow, 1.5.0's, then 1.6.0's two; by hand 1.6.0's, the newest")
+    Equal(Titles(Tour:News("1.5.9")) .. " | " .. Titles(Tour:News("1.6.0")), SIX .. " | ",
+        "after 1.5.9: exactly 1.6.0's two (a druid with Bear Form); after 1.6.0 nothing more")
     -- Plain and short: no em dash, none longer than the basics' steps.
     local basics, long = 0, {}
     for _, step in ipairs(Tour:News("0.9.0")) do
@@ -2295,16 +2300,16 @@ end
         return S[box.count].text .. " " .. w.selected .. " " .. S[box.title].text
     end
     Equal(Step() .. " | " .. tostring(S[box.outline].points[1][2] == pulse.master) .. " " .. BoxFits(pulse) .. "|"
-        .. tostring(S[box.text].text:find("Try it: tick it.", 1, true) ~= nil), "1 of 5 pulse TURN IT ON | true |true",
+        .. tostring(S[box.text].text:find("Try it: tick it.", 1, true) ~= nil), "1 of 7 pulse TURN IT ON | true |true",
         "the first: the Cooldown pulse page's on tick, the box under it on the page, asking you to tick it")
     pulse.master:Click()
     S[box].scripts.OnUpdate(box, 1)
     Equal(Step() .. " | " .. tostring(S[box.outline].points[1][2] == pulse.panel) .. " " .. BoxFits(pulse) .. "|"
-        .. tostring(S[box.text].text:find("Try it: tick one.", 1, true) ~= nil), "2 of 5 pulse PICK YOUR COOLDOWNS | true |true",
+        .. tostring(S[box.text].text:find("Try it: tick one.", 1, true) ~= nil), "2 of 7 pulse PICK YOUR COOLDOWNS | true |true",
         "ticked: on to the list of cooldowns, the box above it")
     box.next:Click()
     Equal(Step() .. " | " .. tostring(S[box.outline].points[1][2] == pulse.styles) .. " " .. BoxFits(pulse) .. "|"
-        .. tostring(S[box.text].text:find("Try it: pick Long, then Preview.", 1, true) ~= nil), "3 of 5 pulse QUICK AND LONG | true |true",
+        .. tostring(S[box.text].text:find("Try it: pick Long, then Preview.", 1, true) ~= nil), "3 of 7 pulse QUICK AND LONG | true |true",
         "then Edit and what follows it, the box beside them")
     -- The box sits over the look both styles share, clear of Edit, Size, Shows for and Sound.
     local edge = select(3, Placed(pulse.styles))
@@ -2316,34 +2321,74 @@ end
     pulse.edit.buttons[2]:Click()
     pulse.previewButton:Click()
     S[box].scripts.OnUpdate(box, 1)
-    Equal(Step(), "3 of 5 pulse QUICK AND LONG", "Long picked and previewed: the step stays")
+    Equal(Step(), "3 of 7 pulse QUICK AND LONG", "Long picked and previewed: the step stays")
     Finish(tns.Pulse)
     pulse.edit.buttons[1]:Click()
     box.next:Click()
     local o = S[box.outline].points
     Equal(Step() .. " | " .. tostring(o[1][2] == pulse.move and o[2][2] == pulse.reset) .. " " .. BoxFits(pulse) .. "|"
-        .. tostring(S[box.text].text:find("Try it", 1, true)), "4 of 5 pulse WHERE IT SHOWS | true |nil",
+        .. tostring(S[box.text].text:find("Try it", 1, true)), "4 of 7 pulse WHERE IT SHOWS | true |nil",
         "then Move and Reset, the box under them, no Try it (Move puts the window away)")
     box.next:Click()
     Equal(Step() .. " | " .. tostring(S[box.outline].points[1][2] == w.readyGlow.part) .. " " .. BoxFits(w.pages.look) .. "| "
-        .. S[box.next.label].text, "5 of 5 look READY GLOW | true | Done", "and Ready glow on the Look page, the last")
+        .. S[box.next.label].text, "5 of 7 look READY GLOW | true | Next", "and Ready glow on the Look page, the last of 1.5.0's")
+    -- Then 1.6.0's, on the Cooldowns page: On cooldown, its tick and Dimmed
+    -- icons as one part, then Swap with my form.
+    local bp = w.pages.bar
+    box.next:Click()
+    o = S[box.outline].points
+    Equal(Step() .. " | " .. tostring(o[1][2] == bp.options.onCooldown.part and o[2][2] == bp.options.onCooldown.part) .. " "
+        .. BoxFits(bp) .. "|" .. tostring(S[box.text].text:find("Try it: pick Dim.", 1, true) ~= nil) .. " " .. S[box.next.label].text,
+        "6 of 7 cd DIM ON COOLDOWN | true |true Next", "then 1.6.0's Dim on cooldown, the box under the part, asking you to pick Dim")
+    box.next:Click()
+    local tick, editing = bp.options.swapForm, bp.options.editing
+    o = S[box.outline].points
+    local p = S[box].points[1]
+    Equal(Step() .. " | " .. S[box.text].text .. " | " .. tostring(o[1][2] == tick and o[2][2] == tick) .. " " .. p[1] .. " "
+        .. tostring(p[2] == tick) .. " " .. p[3] .. " " .. BoxFits(bp) .. "|" .. tostring(S[box.text].text:find("Try it", 1, true)) .. " "
+        .. tostring(S[editing].shown) .. " " .. S[box.next.label].text,
+        "7 of 7 cd SWAP YOUR ICONS | Ticked, each form gets its own icons on this bar, swapped as you change, in a fight too."
+        .. " Editing then shows under the tick, to set up another form's without changing form. | true TOPLEFT true BOTTOMLEFT |nil false Done",
+        "and Swap with my form, the last: its tick outlined, the box under it, no Try it")
+    -- Ticked while it shows, Editing comes under the tick: the outline takes
+    -- it in, and the box moves under it, at its right end, covering neither.
+    tick:Click()
+    o, p = S[box.outline].points, S[box].points[1]
+    Equal(tostring(tns.BarData("cd").swapForm) .. " " .. tostring(S[editing].shown) .. " " .. tostring(o[1][2] == tick and o[2][2] == editing)
+        .. " " .. p[1] .. " " .. tostring(p[2] == editing) .. " " .. p[3] .. " " .. BoxFits(bp) .. "|"
+        .. tostring(select(2, Placed(box)) >= select(4, Placed(editing)) + 14),
+        "true true true TOPRIGHT true BOTTOMRIGHT |true", "ticked: Editing outlined too, the box under it at its right end")
+    tick:Click()
+    o, p = S[box.outline].points, S[box].points[1]
+    Equal(tostring(S[editing].shown) .. " " .. tostring(o[2][2] == tick) .. " " .. p[1] .. " " .. tostring(p[2] == tick),
+        "false true TOPLEFT true", "unticked: back under the tick")
     box.next:Click()
     Equal(tostring(S[box].shown) .. " " .. S[w.note].text, "false That's what's new. See it again any time from What's new, or with /ccm new.",
         "Done ends it")
-    Equal(tostring(tns.Get("pulse")) .. " " .. tns.Get("readyGlow"), "true proc", "the tour only changed what you did yourself")
+    Equal(tostring(tns.Get("pulse")) .. " " .. tns.Get("readyGlow") .. " " .. tns.BarData("cd").onCooldown .. " "
+        .. tostring(tns.BarData("cd").swapForm), "true proc show false", "the tour only changed what you did yourself")
     tns.Set("pulse", false)
     tns.Pulse:Apply()
 
     -- The ? on every page: that page's steps only, on it, each box fitting.
     local help = w.help
-    local problems = {}
+    local problems, twice = {}, {}
     local function Walk(key)
         w:Select(key)
+        -- Each step once: a What's new step that was page help before (Dim
+        -- on cooldown, Swap your icons) is in one list only.
+        local once = {}
+        for _, step in ipairs(Tour:Page(key)) do
+            if once[step] or once[step.title] then twice[#twice + 1] = key .. " " .. step.title end
+            once[step], once[step.title] = true, true
+        end
         help:Click()
         local page = w.pages[key] or w.pages.bar
-        local titles, shown, outlined, count = {}, {}, true, S[box.count].text
+        local titles, shown, outlined, count, showed = {}, {}, true, S[box.count].text, {}
         local done
         repeat
+            if showed[S[box.title].text] then twice[#twice + 1] = key .. " " .. S[box.title].text .. " (shown)" end
+            showed[S[box.title].text] = true
             titles[#titles + 1] = S[box.title].text
             shown[w.selected] = true
             if not (S[box.outline].shown and S[box.arrow].shown) then outlined = false end
@@ -2386,6 +2431,7 @@ end
         .. " the four bars share their page's steps, but Buffs and Debuffs skip the spell bars' Show items, When ready, On cooldown"
         .. " and Swap with your form (a druid with Bear Form)")
     Equal(table.concat(problems, "; "), "", "on every page, each box inside the page and clear of the part it points at")
+    Equal(table.concat(twice, "; "), "", "no page's walkthrough has a step twice")
     local after = {}
     for key in pairs(tns.DEFAULTS) do after[#after + 1] = key .. "=" .. tostring(tns.Get(key)) end
     table.sort(after)
@@ -2456,17 +2502,26 @@ end)()
     box.next:Click()
     Equal(w.selected .. " " .. S[box.title].text .. " " .. tostring(S[box.outline].shown), "util DIM WHEN READY true",
         "Next brings it back to Utility")
-    -- Then On cooldown, its tick and Dimmed icons as one part, the box under them.
+    -- Then On cooldown, its tick and Dimmed icons as one part, the box under
+    -- them: 1.6.0's What's new step, with its Try it, in the walkthrough once.
     box.next:Click()
     do
         local part, o, p = bp.options.onCooldown.part, S[box.outline].points, S[box].points[1]
+        local accent = "\n\n|cff" .. hns.Theme:Hex(hns.Theme:Accent())
         Equal(S[box.title].text .. " | " .. S[box.text].text .. " | " .. tostring(o[1][2] == part and o[2][2] == part) .. " "
             .. tostring(p[2] == part) .. " " .. p[1] .. " " .. p[3] .. " " .. tostring(S[bp.options.onCooldown].shown
             and S[bp.options.dimUnusable].shown and S[bp.options.dimOpacity].shown) .. " " .. S[box.next.label].text,
             "DIM ON COOLDOWN | Each icon can dim or hide while its spell cools down, so the ready ones stand out."
             .. " The tick under it dims one you can't cast now, too, and Dimmed icons sets how dim."
-            .. " | true true TOPLEFT BOTTOMLEFT true Next",
-            "then On cooldown: outlining it, its tick and Dimmed icons, the box under them")
+            .. accent .. "Try it: pick Dim.|r | true true TOPLEFT BOTTOMLEFT true Next",
+            "then On cooldown: outlining it, its tick and Dimmed icons, the box under them, asking you to pick Dim")
+        -- Utility's own choice: Dim already there, it says so.
+        hns.Bars:SetOption("util", "onCooldown", "dim")
+        box.back:Click()
+        box.next:Click()
+        Equal(S[box.title].text .. " " .. tostring(S[box.text].text:find(accent .. "Utility already dims its icons on cooldown.|r", 1, true) ~= nil),
+            "DIM ON COOLDOWN true", "on Utility, with Dim picked there, it says Utility already dims them")
+        hns.Bars:SetOption("util", "onCooldown", "show")
     end
     -- Then the last: Swap with my form, the box under its tick.
     box.next:Click()
@@ -2474,7 +2529,8 @@ end)()
         local tick, o, p = bp.options.swapForm, S[box.outline].points, S[box].points[1]
         Equal(S[box.title].text .. " | " .. S[box.text].text .. " | " .. tostring(o[1][2] == tick and o[2][2] == tick) .. " "
             .. tostring(p[2] == tick) .. " " .. p[1] .. " " .. p[3] .. " " .. tostring(S[tick].shown) .. " " .. S[box.next.label].text,
-            "SWAP YOUR ICONS | Ticked, each form gets its own icons on this bar, swapped as you change."
+            "SWAP YOUR ICONS | Ticked, each form gets its own icons on this bar, swapped as you change, in a fight too."
+            .. " Editing then shows under the tick, to set up another form's without changing form."
             .. " | true true TOPLEFT BOTTOMLEFT true Done",
             "then Swap with my form: outlining its tick, the box under it, the walkthrough's last step")
     end
