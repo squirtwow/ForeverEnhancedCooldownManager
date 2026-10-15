@@ -244,7 +244,11 @@ ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs", debuff = "D
 ns.AURA_BARS = {
     buff = { unit = "player", filter = "HELPFUL", word = "buff" },
     debuff = { unit = "target", filter = "HARMFUL", mine = true, word = "debuff" },
-}ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 }, perRow = { 1, 20, 20 } } -- min, max, default
+}
+-- min, max, default. dimOpacity: how much of a dimmed icon shows, in percent
+-- (When ready's and On cooldown's Dim, and Dim when you can't cast it); 40
+-- is how dim they always were.
+ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 }, perRow = { 1, 20, 20 }, dimOpacity = { 10, 90, 40 } }
 ns.ROW_GAP = { 0, 20, 0 } -- a layout's space between rows: touching unless you want room
 ns.ICON_GAP = { 0, 20, 0 } -- and between the icons in its rows
 ns.BAR_MAX_SPELLS = 40
@@ -260,14 +264,15 @@ local POINTS = { CENTER = true, TOP = true, BOTTOM = true, TOPLEFT = true, TOPRI
     BOTTOMLEFT = true, BOTTOMRIGHT = true }
 ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- A bar's settings a shared profile carries (its spells are in the profile).
-ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "outOfCombat", "showMissing", "onlyMissing", "showNames",
-    "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x", "y" }
+ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "swapForm", "outOfCombat",
+    "showMissing", "onlyMissing", "showNames", "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x", "y" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
 ns.OUT_OF_COMBAT_NAMES = { show = "Show", fade = "Fade", hide = "Hide" }
 -- While its spell is ready an icon shows in full, dims or hides, so the ones
--- cooling down stand out.
+-- cooling down stand out. The same three choices for while it cools down
+-- (On cooldown), so the ready ones stand out instead.
 ns.WHEN_READY = { "show", "dim", "hide" }
 ns.WHEN_READY_NAMES = { show = "Show", dim = "Dim", hide = "Hide" }
 ns.BUFF_SLOTS = 16 -- the Buffs bar has one secure slot per buff
@@ -331,6 +336,35 @@ end
 -- to Long (-> "long"; the rest are Quick).
 local PULSE_LISTS = { pulsePick = true, pulseStyle = "long" }
 
+-- Swap with my form (below): whether a form has a list of its own, the one
+-- the forms sharing it go by (ns.FORM_LISTS: Bear Form's, for Dire Bear
+-- Form too). Its lists are kept under it in a profile.
+local function OwnList(form)
+    local lists = ns.FORM_LISTS
+    return type(form) == "number" and lists ~= nil and lists[form] == form
+end
+ns.OwnFormList = OwnList
+
+-- A profile's form lists (profile.forms[form][bar], for the Cooldowns and
+-- Utility bars), each repaired as a bar's list is; anything else goes. Left
+-- as they are while the forms aren't known (Forms.lua not loaded).
+local function RepairForms(profile)
+    if profile.forms == nil or not ns.FORM_LISTS then return end
+    if type(profile.forms) ~= "table" then
+        profile.forms = nil
+        return
+    end
+    for form, lists in pairs(profile.forms) do
+        if not OwnList(form) or type(lists) ~= "table" then
+            profile.forms[form] = nil
+        else
+            for key, list in pairs(lists) do
+                if not ns.BAR_NAMES[key] or ns.AURA_BARS[key] or type(list) ~= "table" then lists[key] = nil else Repair(list) end
+            end
+        end
+    end
+end
+
 -- A profile's lists, repaired in place, with their joins: on the Buffs and
 -- Debuffs bars, the names joined to the entry just before them.
 local function Lists(profile)
@@ -358,6 +392,7 @@ local function Lists(profile)
             if type(key) ~= "string" or key == "" or value ~= keep then profile[field][key] = nil end
         end
     end
+    RepairForms(profile)
     -- Positions per profile: its spots and sizes, repaired as they're used.
     if profile.place ~= nil and type(profile.place) ~= "table" then profile.place = nil end
     return profile
@@ -428,16 +463,260 @@ local function RepairProfiles()
     RepairRoles(profiles)
 end
 
--- The list a bar shows: this character's profile, or a stand-in until the
--- character is known.
-function ns.ActiveList(key)
-    local profile = active and db and Profiles()[active]
-    if profile then
-        if type(profile[key]) ~= "table" then profile[key] = {} end
-        return profile[key]
+-- Swap with my form ------------------------------------------------------------
+-- Ticked on a Cooldowns or Utility bar (swapForm; a player's idea: other
+-- cooldowns in bear form than in cat form), the bar keeps a list of its own
+-- for each form you take, in your profile beside the normal ones
+-- (profile.forms[form][bar], under the form's list in ns.FORM_LISTS), and
+-- shows the one for the form you're in: the normal one ("Normal") in no
+-- form, or in a form no class's list is for. Only the icons change: every
+-- other setting is the bar's own in every form. A form's list starts, the
+-- first time it's wanted, as the normal one without what that form can't
+-- cast (Forms.lua's rules, Spells.lua S:FormCasts); after that each list is
+-- its own. Unticked, the form lists stay for when it's ticked again. The
+-- bar's page can set up another form's list without changing form
+-- (Editing), out of a fight.
+local formNow = 0 -- the list the bars follow: 0 for Normal, else a form's own (OwnList)
+local formEditing -- the list the bar's page is setting up (0 for Normal), or nil: your form's
+local STEALTH = 30 -- the game's form for a rogue's Stealth (ROGUE_STEALTH)
+
+-- Whether a bar swaps with your form: ticked, on a bar that can.
+local function Swaps(key)
+    local bar = db and ns.BAR_NAMES[key] and not ns.AURA_BARS[key] and type(db.bars) == "table" and db.bars[key]
+    return type(bar) == "table" and rawget(bar, "swapForm") == true
+end
+
+function ns.Swaps(key)
+    return Swaps(key)
+end
+
+-- Whether any bar does.
+function ns.AnySwaps()
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if Swaps(key) then return true end
     end
-    scratch[key] = scratch[key] or {}
-    return scratch[key]
+    return false
+end
+
+-- Whether you know a form: one of the spells that put you in it is in your spellbook.
+local function KnowsForm(form)
+    local givers = ns.FORM_GIVERS and ns.FORM_GIVERS[form]
+    if not (givers and ns.Spells) then return false end
+    for _, id in ipairs(givers) do
+        if ns.Spells:KnowsID(id) then return true end
+    end
+    return false
+end
+
+-- The forms you know, each list once, in the game's order: { form = its
+-- list, name = the form's }. Two forms sharing a list (Bear Form and Dire
+-- Bear Form) are named for the later one you know.
+function ns.KnownForms()
+    local forms, lists, order, known, at = ns.FORMS or {}, ns.FORM_LISTS or {}, {}, {}, {}
+    for form in pairs(forms) do order[#order + 1] = form end
+    table.sort(order)
+    for _, form in ipairs(order) do
+        local list = lists[form]
+        if list and KnowsForm(form) then
+            if not at[list] then
+                known[#known + 1] = { form = list }
+                at[list] = known[#known]
+            end
+            at[list].name = forms[form]
+        end
+    end
+    return known
+end
+
+-- How Swap with my form names what it swaps with, for the classes that only
+-- take one (a rogue's Stealth, a priest's Shadowform, a shaman's Ghost Wolf)
+-- or take stances (a warrior): the user, on a rogue, "it should not say
+-- form". label: the tick's; one: the form's own name, or nil; what: the word
+-- for one of them ("form", "stance").
+local ONE_FORM = { [30] = true, [28] = true, [16] = true }
+local STANCES = { [17] = true, [18] = true, [19] = true }
+function ns.SwapWords()
+    local known = ns.KnownForms()
+    for _, k in ipairs(known) do
+        if STANCES[k.form] then return { label = "Swap with my stance", what = "stance" } end
+    end
+    if #known == 1 and ONE_FORM[known[1].form] and known[1].name then
+        return { label = "Swap when in " .. known[1].name, one = known[1].name, what = "form" }
+    end
+    return { label = "Swap with my form", what = "form" }
+end
+
+-- A list's name: Normal, or the form's (Bear Form's for Bear Form and Dire
+-- Bear Form: the later one you know, as the page names it).
+function ns.FormName(form)
+    if form == 0 then return "Normal" end
+    for _, known in ipairs(ns.KnownForms()) do
+        if known.form == form then return known.name end
+    end
+    return ns.FORMS and ns.FORMS[form] or "Normal"
+end
+
+local function Open(value)
+    return not (issecretvalue and issecretvalue(value))
+end
+
+-- The list your form calls for, as the game says: 0 (Normal) for no form or
+-- one no list is for (a quest's disguise, a paladin's aura); stealthed with
+-- no form, Stealth's for a rogue, should the game not call it a form. Nil
+-- when the game won't say (a secret answer, or no way to ask): the bars
+-- keep the list they show.
+local function GameForm()
+    if not GetShapeshiftFormID then return nil end
+    local form = GetShapeshiftFormID()
+    if not Open(form) then return nil end
+    if type(form) == "number" and form ~= 0 then return (ns.FORM_LISTS or {})[form] or 0 end
+    local hidden = IsStealthed and IsStealthed()
+    if not Open(hidden) then return nil end
+    if hidden == true and KnowsForm(STEALTH) then return STEALTH end
+    return 0
+end
+
+-- Reads your form again, while a bar swaps with it: the bars follow it from
+-- now on. True when the list they follow changed. Never read otherwise.
+function ns.FollowForm()
+    if not ns.AnySwaps() then return false end
+    local form = GameForm()
+    if form == nil or form == formNow then return false end
+    formNow = form
+    return true
+end
+
+-- The list your form calls for, as last read (0 for Normal).
+function ns.FormNow()
+    return formNow
+end
+
+-- The list the bar's page is setting up (0 for Normal), or nil while the
+-- bars follow your form. Set to a form you know (or 0), or nil to follow
+-- your form again; the caller lays the bars out again.
+function ns.EditingForm()
+    return formEditing
+end
+
+function ns.SetEditingForm(form)
+    if form ~= nil and form ~= 0 and not OwnList(form) then return end
+    formEditing = form
+end
+
+-- The list a bar shows now (0 for Normal): the one the bar's page is
+-- setting up, out of a fight, or your form's. Normal unless it swaps.
+function ns.ShownForm(key)
+    if not Swaps(key) then return 0 end
+    if formEditing ~= nil and not InCombatLockdown() then return formEditing end
+    return formNow
+end
+
+-- The two cooldown bars: a spell sits on one of them at a time, in each form.
+local OTHER = { cd = "util", util = "cd" }
+
+-- A form's list for a bar, in a profile (or the stand-in lists), made the
+-- first time it's wanted from the normal one, without what that form can't
+-- cast, nor what the other cooldown bar shows in that form (its own list
+-- for it, once made, or its normal one if it doesn't swap).
+local function FormList(store, form, key)
+    if type(store.forms) ~= "table" then store.forms = {} end
+    local lists = store.forms[form]
+    if type(lists) ~= "table" then
+        lists = {}
+        store.forms[form] = lists
+    end
+    if type(lists[key]) ~= "table" then
+        local other, beside, theirs = OTHER[key], {}, nil
+        if other and Swaps(other) then theirs = lists[other] elseif other then theirs = store[other] end
+        for _, name in ipairs(type(theirs) == "table" and theirs or {}) do beside[name] = true end
+        local list = {}
+        for _, name in ipairs(type(store[key]) == "table" and store[key] or {}) do
+            if not beside[name] and (not ns.Spells or ns.Spells:FormCasts(name, form)) then list[#list + 1] = name end
+        end
+        lists[key] = list
+    end
+    return lists[key]
+end
+
+-- A bar's list that shows in a form (0 for Normal) as the bars are ticked
+-- now, once made: its own for that form, or its normal one. Nil if not made.
+local function ShownIn(store, key, form)
+    if form ~= 0 and Swaps(key) then
+        local lists = type(store.forms) == "table" and store.forms[form]
+        return type(lists) == "table" and type(lists[key]) == "table" and lists[key] or nil
+    end
+    return type(store[key]) == "table" and store[key] or nil
+end
+
+-- The list a bar shows: this character's profile's, or a stand-in until the
+-- character is known; with Swap with my form, the form's (ns.ShownForm).
+function ns.ActiveList(key)
+    local store = ns.ProfileLists()
+    local form = ns.ShownForm(key)
+    if form ~= 0 then return FormList(store, form, key) end
+    if type(store[key]) ~= "table" then store[key] = {} end
+    return store[key]
+end
+
+-- This character's profile (or the stand-in lists) as it is, its normal
+-- lists and each form's alike: for sharing it (ProfileShare.lua).
+function ns.ProfileLists()
+    return active and db and Profiles()[active] or scratch
+end
+
+-- Every list a bar has there, as they are (none made): the normal one, then
+-- each form's. For what looks through them all (the items and added spells
+-- on them).
+function ns.BarLists(key)
+    local store = ns.ProfileLists()
+    local lists, forms = { type(store[key]) == "table" and store[key] or {} }, {}
+    for form, own in pairs(type(store.forms) == "table" and store.forms or {}) do
+        if type(form) == "number" and type(own) == "table" and type(own[key]) == "table" then forms[#forms + 1] = form end
+    end
+    table.sort(forms)
+    for _, form in ipairs(forms) do lists[#lists + 1] = store.forms[form][key] end
+    return lists
+end
+
+-- The other cooldown bar's lists that show beside a bar's list for a form
+-- (0 for Normal), as the bars are ticked now: what a spell put on this one
+-- comes off (Bars.lua B:Assign). Every list it has, for a bar that doesn't
+-- swap (its list shows in every form); else the one it shows in that form,
+-- once made. (One kept while it's unticked gives way as it's ticked again:
+-- ns.KeepApart.)
+function ns.BesideLists(key, form)
+    local other = OTHER[key]
+    if not other then return {} end
+    if not Swaps(key) then return ns.BarLists(other) end
+    return { ShownIn(ns.ProfileLists(), other, form) }
+end
+
+-- Keeps each spell on one of the two cooldown bars in every form, as they're
+-- ticked now: where the lists both bars show in a form have it, it stays on
+-- keep's ("cd" or "util"; Cooldowns' unless given, as a spell on both shows
+-- on Cooldowns: Bars.lua B:Find). For lists a tick brings in or out, a
+-- profile switched to, or one made from a string; a move between the bars
+-- keeps them apart as it goes (B:Assign). True when any list changed.
+function ns.KeepApart(keep)
+    if not OTHER[keep] then keep = "cd" end
+    local store, forms, changed = ns.ProfileLists(), { 0 }, false
+    for form in pairs(type(store.forms) == "table" and store.forms or {}) do
+        if OwnList(form) then forms[#forms + 1] = form end
+    end
+    for _, form in ipairs(forms) do
+        local mine, theirs = ShownIn(store, keep, form), ShownIn(store, OTHER[keep], form)
+        if mine and theirs then
+            local on = {}
+            for _, name in ipairs(mine) do on[name] = true end
+            for i = #theirs, 1, -1 do
+                if on[theirs[i]] then
+                    table.remove(theirs, i)
+                    changed = true
+                end
+            end
+        end
+    end
+    return changed
 end
 
 -- This character's joins for an aura bar.
@@ -622,10 +901,30 @@ function ns.UseProfile(name)
     return true, "Now using " .. name .. "."
 end
 
--- A copy of a profile's lists: its bars', their joins and the Cooldown
--- pulse's ticks, sharing nothing with it.
+-- A profile's form lists (Swap with my form), copied: each form's, each
+-- bar's in it, sharing nothing with them. Nil for none.
+local function CopyForms(forms)
+    if type(forms) ~= "table" then return nil end
+    local copy = {}
+    for form, lists in pairs(forms) do
+        if type(lists) == "table" then
+            copy[form] = {}
+            for key, list in pairs(lists) do
+                if type(list) == "table" then
+                    local own = {}
+                    for i, spell in ipairs(list) do own[i] = spell end
+                    copy[form][key] = own
+                end
+            end
+        end
+    end
+    return copy
+end
+
+-- A copy of a profile's lists: its bars' (each form's too), their joins and
+-- the Cooldown pulse's ticks, sharing nothing with it.
 local function Duplicate(from)
-    local profile = { joins = {} }
+    local profile = { joins = {}, forms = CopyForms(from.forms) }
     for _, key in ipairs(ns.BAR_KEYS) do
         local list = {}
         for i, spell in ipairs(type(from[key]) == "table" and from[key] or {}) do list[i] = spell end
@@ -922,13 +1221,17 @@ local function UseSetup(setup)
     ns.BarColours()
 end
 
--- Every name on a bar in any profile, in the lists used before the character
--- is known, and in bars saved before profiles (name -> true).
+-- Every name on a bar in any profile (each form's lists too), in the lists
+-- used before the character is known, and in bars saved before profiles
+-- (name -> true).
 local function NamesInUse()
     local used = {}
     local function Mark(lists)
         for _, key in ipairs(ns.BAR_KEYS) do
             for _, spell in ipairs(type(lists[key]) == "table" and lists[key] or {}) do used[spell] = true end
+        end
+        for _, own in pairs(type(lists.forms) == "table" and lists.forms or {}) do
+            if type(own) == "table" then Mark(own) end
         end
     end
     for _, profile in pairs(Profiles()) do
@@ -958,7 +1261,9 @@ function ns.ImportProfile(text, shared, withLook)
     local name, problem = CleanName(text)
     if not name then return false, problem end
     name = FreeName(name)
-    local profile = { joins = {}, pulsePick = CopySet(shared.pick), pulseStyle = CopySet(shared.style) }
+    -- Each form's lists too (Swap with my form), checked as the bars' are.
+    local profile = { joins = {}, pulsePick = CopySet(shared.pick), pulseStyle = CopySet(shared.style),
+        forms = CopyForms(shared.forms) }
     for _, key in ipairs(ns.BAR_KEYS) do profile[key] = CopyList(shared.lists[key]) end
     for key in pairs(ns.AURA_BARS) do
         local joins = type(shared.joins) == "table" and shared.joins[key]
@@ -1324,6 +1629,20 @@ function ns.BarData(key)
         bar.whenReady = bar.hideReady == true and "hide" or "show"
     end
     bar.hideReady = nil
+    -- While its spell cools down: in full unless you choose otherwise, as
+    -- before this choice existed. And dimmed while you can't cast it (no
+    -- mana, out of range, not usable now), off unless ticked.
+    if not ns.WHEN_READY_NAMES[bar.onCooldown] then bar.onCooldown = "show" end
+    bar.dimUnusable = bar.dimUnusable == true
+    -- How much of a dimmed icon shows: 40% unless you choose, as dim as
+    -- they were before you could.
+    bar.dimOpacity = Limit(bar.dimOpacity, ns.BAR_LIMITS.dimOpacity)
+    -- The Cooldowns and Utility bars only: Swap with my form, a list of
+    -- icons for each form you take, off unless ticked. (The Buffs and
+    -- Debuffs bars show auras, which no form changes.) Only show what your
+    -- form can use, which it replaced, was never released: its tick goes.
+    bar.swapForm = ns.AURA_BARS[key] == nil and bar.swapForm == true
+    bar.onlyForm = nil
     -- Bars set to "only in combat" before this choice existed hide.
     if not ns.OUT_OF_COMBAT_NAMES[bar.outOfCombat] then
         bar.outOfCombat = bar.combatOnly == true and "hide" or "show"

@@ -37,6 +37,8 @@ test('the .toc loads every file once, each after what it needs', () => {
   assert.ok(at('Spells.lua') < at('Pulse.lua') && at('Bars.lua') < at('Pulse.lua'), 'Pulse.lua after Spells.lua and Bars.lua');
   // A share string's keys are checked with Spells.lua's own reading of a pinned key.
   assert.ok(at('Spells.lua') < at('ProfileShare.lua'), 'ProfileShare.lua after Spells.lua');
+  // The bars read which forms can cast what (Forms.lua's data) as they load.
+  assert.ok(at('Forms.lua') >= 0 && at('Forms.lua') < at('Bars.lua'), 'Forms.lua before Bars.lua');
   assert.ok(at('RaidTimersPage.lua') < at('PulsePage.lua') && at('PulsePage.lua') < at('Window.lua'),
     'PulsePage.lua after RaidTimersPage.lua, before Window.lua');
   assert.equal(at('Core.lua'), 0, 'Core.lua first');
@@ -216,7 +218,8 @@ test("the game's settings change only through ns.TurnOn and ns.TurnOff, from you
 // GetMacroItem, C_ActionBar's questions).
 const SECRET_ANSWERS = ['GetInventoryItemCooldown', 'C_Item.GetItemCooldown', 'C_Item.GetItemCount', 'C_Item.IsUsableItem',
   'C_Item.IsEquippedItem', 'C_Spell.IsSpellUsable', 'C_Spell.IsSpellInRange', 'C_Spell.SpellHasRange', 'UnitCanAttack',
-  'IsSpellOverlayed', 'UnitCastingInfo', 'UnitChannelInfo', 'GetInventoryItemCount', 'UnitPower', 'Call'];
+  'IsSpellOverlayed', 'UnitCastingInfo', 'UnitChannelInfo', 'GetInventoryItemCount', 'UnitPower', 'GetShapeshiftFormID', 'IsStealthed',
+  'Call'];
 // Answers the game's events hand on, which can be secret too: the cast bar's
 // cast ID and who broke the channel (UNIT_SPELLCAST_*, secret when the
 // unit's casts are), and the swing's time and hand (PLAYER_SWING).

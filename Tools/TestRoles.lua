@@ -493,6 +493,11 @@ local function Environment(keepCVars)
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
+    -- Your form (Form: its ID, nil for none, or SECRET) and whether you're
+    -- stealthed, as the game says; each ask counted (FormReads).
+    Form, Stealthed, FormReads = nil, false, 0
+    _G.GetShapeshiftFormID = function() FormReads = FormReads + 1; return Typed("number", Form) end
+    _G.IsStealthed = function() return Typed("boolean", Stealthed) end
     -- A Skyborne, so Walk on Air (in the spellbook) is your own racial.
     _G.UnitRace = function(unit) assert(unit == "player"); return "Skyborne", "Skyborne", 96 end
     _G.UnitPower = function() return 0 end
@@ -757,7 +762,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -797,7 +802,7 @@ local function BlizzardFrames()
 end
 
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
-local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Spells.lua",
+local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
     "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua",
     "Window.lua", "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }

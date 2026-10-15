@@ -491,6 +491,11 @@ local function Environment(keepCVars)
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
+    -- Your form (Form: its ID, nil for none, or SECRET) and whether you're
+    -- stealthed, as the game says; each ask counted (FormReads).
+    Form, Stealthed, FormReads = nil, false, 0
+    _G.GetShapeshiftFormID = function() FormReads = FormReads + 1; return Typed("number", Form) end
+    _G.IsStealthed = function() return Typed("boolean", Stealthed) end
     -- A Skyborne, so Walk on Air (in the spellbook) is your own racial.
     _G.UnitRace = function(unit) assert(unit == "player"); return "Skyborne", "Skyborne", 96 end
     _G.UnitPower = function() return 0 end
@@ -755,7 +760,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -853,7 +858,7 @@ local function PulseGame()
 end
 
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
-local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Spells.lua",
+local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
     "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
     "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
@@ -2109,6 +2114,11 @@ end
     Equal(Keys(), "slot:13,slot:14,family:healing,item:118", "on a bar by itself: listed")
     tns.Bars:Assign("item:118", nil)
     Equal(Keys(), "slot:13,slot:14,family:healing", "off the bar: once again")
+    -- Or on a form's own list of a bar (Swap with my form), any form.
+    local profile = ForeverEnhancedCooldownManagerDB.profiles[tns.ProfileName()]
+    profile.forms = { [5] = { util = { "item:118" } } }
+    Equal(Keys(), "slot:13,slot:14,family:healing,item:118", "on bear form's Utility list by itself: listed")
+    profile.forms = nil
     -- A class without mana has no Mana Potions row: one carried shows on its own.
     _G.UnitClass = function() return "Warrior", "WARRIOR" end
     bagItems[1] = { itemID = 2455, hyperlink = "|cffffffff|Hitem:2455::|h[Minor Mana Potion]|h|r", iconFileID = 888 }
@@ -2235,6 +2245,9 @@ end
     Environment()
     BlizzardFrames()
     PulseGame()
+    -- A druid with Bear Form, so Swap with my form (only for a character
+    -- who knows a form) and its step show.
+    table.insert(book[2].items, { name = "Bear Form", spellID = 5487, iconID = 132276 })
     _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
     local tns = LoadAll({ useBars = true, notesSeen = "1.4.4" })
     local Tour = tns.Tour
@@ -2348,7 +2361,7 @@ end
     for key in pairs(tns.DEFAULTS) do before[#before + 1] = key .. "=" .. tostring(tns.Get(key)) end
     table.sort(before)
     local BAR = "ADD SPELLS, THIS BAR'S OPTIONS"
-    local SPELL = BAR .. ", HEALTHSTONES AND POTIONS, DIM WHEN READY | 4"
+    local SPELL = BAR .. ", HEALTHSTONES AND POTIONS, DIM WHEN READY, DIM ON COOLDOWN, SWAP YOUR ICONS | 6"
     local expected = {
         cd = SPELL .. " | cd true",
         util = SPELL .. " | util true",
@@ -2370,7 +2383,8 @@ end
     end
     Equal(table.concat(pages, ",") .. " | " .. table.concat(wrong, "; "), "buff,cast,cd,debuff,general,layout,look,pulse,raid,util | ",
         "every page in the list has a walkthrough of two steps or more, its own steps only, staying on it, each part outlined:"
-        .. " the four bars share their page's steps, but Buffs and Debuffs skip the spell bars' Show items and When ready")
+        .. " the four bars share their page's steps, but Buffs and Debuffs skip the spell bars' Show items, When ready, On cooldown"
+        .. " and Swap with your form (a druid with Bear Form)")
     Equal(table.concat(problems, "; "), "", "on every page, each box inside the page and clear of the part it points at")
     local after = {}
     for key in pairs(tns.DEFAULTS) do after[#after + 1] = key .. "=" .. tostring(tns.Get(key)) end
@@ -2398,6 +2412,8 @@ end)()
     Environment()
     BlizzardFrames()
     PulseGame()
+    -- A druid with Bear Form: Swap with my form's step shows (Tools/TestForms.lua: not without a form).
+    table.insert(book[2].items, { name = "Bear Form", spellID = 5487, iconID = 132276 })
     _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
     local hns = LoadAll({ useBars = true, notesSeen = "dev" })
     for _, timer in ipairs(timers) do timer() end
@@ -2440,6 +2456,28 @@ end)()
     box.next:Click()
     Equal(w.selected .. " " .. S[box.title].text .. " " .. tostring(S[box.outline].shown), "util DIM WHEN READY true",
         "Next brings it back to Utility")
+    -- Then On cooldown, its tick and Dimmed icons as one part, the box under them.
+    box.next:Click()
+    do
+        local part, o, p = bp.options.onCooldown.part, S[box.outline].points, S[box].points[1]
+        Equal(S[box.title].text .. " | " .. S[box.text].text .. " | " .. tostring(o[1][2] == part and o[2][2] == part) .. " "
+            .. tostring(p[2] == part) .. " " .. p[1] .. " " .. p[3] .. " " .. tostring(S[bp.options.onCooldown].shown
+            and S[bp.options.dimUnusable].shown and S[bp.options.dimOpacity].shown) .. " " .. S[box.next.label].text,
+            "DIM ON COOLDOWN | Each icon can dim or hide while its spell cools down, so the ready ones stand out."
+            .. " The tick under it dims one you can't cast now, too, and Dimmed icons sets how dim."
+            .. " | true true TOPLEFT BOTTOMLEFT true Next",
+            "then On cooldown: outlining it, its tick and Dimmed icons, the box under them")
+    end
+    -- Then the last: Swap with my form, the box under its tick.
+    box.next:Click()
+    do
+        local tick, o, p = bp.options.swapForm, S[box.outline].points, S[box].points[1]
+        Equal(S[box.title].text .. " | " .. S[box.text].text .. " | " .. tostring(o[1][2] == tick and o[2][2] == tick) .. " "
+            .. tostring(p[2] == tick) .. " " .. p[1] .. " " .. p[3] .. " " .. tostring(S[tick].shown) .. " " .. S[box.next.label].text,
+            "SWAP YOUR ICONS | Ticked, each form gets its own icons on this bar, swapped as you change."
+            .. " | true true TOPLEFT BOTTOMLEFT true Done",
+            "then Swap with my form: outlining its tick, the box under it, the walkthrough's last step")
+    end
     box.skip:Click()
     Equal(tostring(S[box].shown) .. " " .. S[w.note].text, "false Click ? any time to see it again.", "Skip tour ends it, saying the same")
     -- Buffs: each of its own steps points at its own part, the box hung from it.

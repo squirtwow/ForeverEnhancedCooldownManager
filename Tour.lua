@@ -463,6 +463,32 @@ local NEWS = {
 local HELP = {
     {
         page = "cd",
+        bars = SPELL_BARS,
+        title = "Dim on cooldown",
+        text = "Each icon can dim or hide while its spell cools down, so the ready ones stand out."
+            .. " The tick under it dims one you can't cast now, too, and Dimmed icons sets how dim.",
+        -- On cooldown, its tick and Dimmed icons as one part, the box under them.
+        target = function(w) return w.pages.bar.options.onCooldown.part end,
+        side = "below",
+    },
+    {
+        page = "cd",
+        bars = SPELL_BARS,
+        -- Only for a character who knows a form, as only they see the tick.
+        when = function() return #ns.KnownForms() > 0 end,
+        title = "Swap your icons",
+        text = function()
+            local words = ns.SwapWords()
+            if words.one then
+                return "Ticked, " .. words.one .. " gets its own icons on this bar, swapped as you go in and out of it."
+            end
+            return "Ticked, each " .. words.what .. " gets its own icons on this bar, swapped as you change."
+        end,
+        target = function(w) return w.pages.bar.options.swapForm end,
+        side = "below",
+    },
+    {
+        page = "cd",
         bars = AURA_BARS,
         title = "Missing ones greyed",
         text = function()
@@ -725,7 +751,7 @@ local function Show(i)
     if step.try then
         text = text .. "\n\n|cff" .. T:Hex(T:Accent()) .. (already and Value(step.alreadyText, window) or step.try) .. "|r"
     end
-    box.title:SetText(step.title:upper())
+    box.title:SetText(Value(step.title, window):upper())
     box.count:SetText(i .. " of " .. #steps)
     box.count:Show()
     box.text:SetText(text)

@@ -14,6 +14,7 @@ Resource.lua
 CastBar.lua
 RaidTimers.lua
 Ranks.lua
+Forms.lua
 Spells.lua
 Keybinds.lua
 Buffs.lua

@@ -104,7 +104,9 @@ end
 -- the game hides your bags in a fight, or once you carry none.
 local shown = {}
 
-local list, byKey = {}, {}
+-- The entries, by key, and every spell ID in your spellbook (which forms you
+-- know, Core.lua's Swap with my form).
+local list, byKey, knownIDs = {}, {}, {}
 
 local function Open(value)
     return not (issecretvalue and issecretvalue(value))
@@ -245,6 +247,7 @@ local function ScanSpellbook()
                         local entry = byKey[name] or Add({ key = name, name = name, kind = "spell",
                             line = info.name or "", known = {}, byRank = {}, rank = -1 })
                         entry.known[#entry.known + 1] = spellID
+                        knownIDs[spellID] = true
                         if rank > 0 then entry.byRank[rank] = { spellID = spellID, icon = item.iconID } end
                         if rank >= entry.rank then
                             entry.spellID, entry.icon, entry.rank = spellID, item.iconID, rank
@@ -363,12 +366,28 @@ local function AddFamily(family)
     return entry
 end
 
--- Food, drink and recipes can be used but never have a cooldown to show.
+-- Food, drink and recipes can be used but have no cooldown to show: food
+-- and drink only wait out the game's short shared one (1 second; 10 for
+-- alcohol). But for these Food & Drink items, whose own item data sets a
+-- cooldown of their own (ItemEffect CoolDownMSec or CategoryCoolDownMSec
+-- over the 1.5 second global cooldown), each with a name in ItemSparse, in
+-- Blizzard's game tables for Forever build 1.60.1.70374 (read from the
+-- installed game client) and 1.60.1.70245 alike. A player's report:
+-- Thistle Tea couldn't be added. Tools/TestFoodCooldowns.mjs checks this
+-- list against those tables.
+local COOLDOWN_FOOD = {
+    [1072] = true, -- Full Moonshine: 120 s, the potions' category (4)
+    [6522] = true, -- Deviate Fish: 10 s of its own
+    [6657] = true, -- Savory Deviate Delight: 10 s of its own
+    [7676] = true, -- Thistle Tea: 300 s of its own, 120 s on category 1153
+    [11951] = true, -- Whipper Root Tuber: 120 s on category 1153
+}
 local RECIPE, CONSUMABLE, FOOD_AND_DRINK = 9, 0, 5
 local function NoCooldown(itemID)
     if not (C_Item and C_Item.GetItemInfoInstant) then return false end
     local _, _, _, _, _, classID, subclassID = C_Item.GetItemInfoInstant(itemID)
-    return classID == RECIPE or (classID == CONSUMABLE and subclassID == FOOD_AND_DRINK)
+    if classID == RECIPE then return true end
+    return classID == CONSUMABLE and subclassID == FOOD_AND_DRINK and not COOLDOWN_FOOD[itemID]
 end
 
 -- Your two trinket slots, whatever is in them, your ammunition for its
@@ -491,31 +510,37 @@ end
 -- equipped, and Mana Potions kept on a bar by a class without mana (a
 -- profile shared with one that has it). An added spell with one of its name
 -- pinned beside it shows its own IDs in the list, so the two read apart.
+-- Every list a bar has counts: each form's too (Swap with my form), so a
+-- form's own show as you change into it.
 local function ScanSaved()
     local custom = ns.CustomSpells and ns.CustomSpells() or {}
+    local saves = {}
     for _, key in ipairs(ns.BAR_KEYS) do
-        for _, saved in ipairs(ns.BarData(key).spells) do
-            if not byKey[saved] then
-                local itemID = tonumber(saved:match("^item:(%d+)$"))
-                if saved == "ammo" then
-                    -- None equipped now: shown empty, to a class that uses it.
-                    if S:UsesAmmo() then AddAmmo(nil) end
-                elseif familyByKey[saved] then
-                    AddFamily(familyByKey[saved])
-                elseif itemID then
-                    AddItem(itemID)
-                elseif Pinned(saved) then
-                    -- Its own ID only: not its name's other ranks or group version.
-                    local name, id = Pinned(saved)
-                    Add({ key = saved, name = PinName(name, id), baseName = name, kind = "spell", line = S.LINES.added,
-                        ids = BuffIDs(nil, { id }), spellID = id, icon = C_Spell.GetSpellTexture(id), rankText = "",
-                        added = { id }, pinned = id })
-                elseif custom[saved] then
-                    local ids = BuffIDs(saved, custom[saved])
-                    Add({ key = saved, name = saved, kind = "spell", line = S.LINES.added, ids = ids,
-                        spellID = Tracked(saved, custom[saved]), icon = C_Spell.GetSpellTexture(ids[1]), rankText = "",
-                        added = custom[saved] })
-                end
+        for _, spells in ipairs(ns.BarLists(key)) do
+            for _, saved in ipairs(spells) do saves[#saves + 1] = saved end
+        end
+    end
+    for _, saved in ipairs(saves) do
+        if not byKey[saved] then
+            local itemID = tonumber(saved:match("^item:(%d+)$"))
+            if saved == "ammo" then
+                -- None equipped now: shown empty, to a class that uses it.
+                if S:UsesAmmo() then AddAmmo(nil) end
+            elseif familyByKey[saved] then
+                AddFamily(familyByKey[saved])
+            elseif itemID then
+                AddItem(itemID)
+            elseif Pinned(saved) then
+                -- Its own ID only: not its name's other ranks or group version.
+                local name, id = Pinned(saved)
+                Add({ key = saved, name = PinName(name, id), baseName = name, kind = "spell", line = S.LINES.added,
+                    ids = BuffIDs(nil, { id }), spellID = id, icon = C_Spell.GetSpellTexture(id), rankText = "",
+                    added = { id }, pinned = id })
+            elseif custom[saved] then
+                local ids = BuffIDs(saved, custom[saved])
+                Add({ key = saved, name = saved, kind = "spell", line = S.LINES.added, ids = ids,
+                    spellID = Tracked(saved, custom[saved]), icon = C_Spell.GetSpellTexture(ids[1]), rankText = "",
+                    added = custom[saved] })
             end
         end
     end
@@ -540,6 +565,7 @@ function S:Scan()
     stale, reads = false, reads + 1
     wipe(list)
     wipe(byKey)
+    wipe(knownIDs)
     ScanSpellbook()
     ScanProcs()
     ScanItems()
@@ -580,6 +606,38 @@ end
 function S:Find(key)
     Ready()
     return byKey[key]
+end
+
+-- Whether a spell ID is in your spellbook (any rank you know is).
+function S:KnowsID(id)
+    Ready()
+    return knownIDs[id] == true
+end
+
+-- Swap with my form: whether a bar entry can be cast in a form (that form's
+-- list, ns.FORM_LISTS: Bear Form's counts for Dire Bear Form too), by the
+-- game's own rules (Forms.lua), for a new form's list made from your normal
+-- one. Items, ammo and any spell the rules don't name cast in every form. A
+-- spell goes by its ID (the rank you know, a fixed rank's, a pinned one's),
+-- else by its name's ranks in the game data (another character's, in a
+-- shared profile). A rule that needs stealth too goes by its forms (Pounce
+-- in Cat Form, Ambush in Stealth): a list is for a form, stealthed or not.
+function S:FormCasts(key, form)
+    local spells, rules, lists = ns.FORM_SPELLS, ns.FORM_RULES, ns.FORM_LISTS
+    if not (spells and rules and lists and type(key) == "string") then return true end
+    local entry = self:Find(key) -- an item's has no spell
+    local _, pinned = Pinned(key)
+    local ids = entry and entry.spellID and { entry.spellID } or pinned and { pinned } or ns.RANKS and ns.RANKS[Base(key)] or {}
+    for _, id in ipairs(ids) do
+        local rule = spells[id] and rules[spells[id]]
+        if rule then
+            for _, at in ipairs(rule) do
+                if lists[at] == form then return true end
+            end
+            return false
+        end
+    end
+    return true
 end
 
 -- The classes whose talents give each proc, by the proc's name.

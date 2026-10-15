@@ -497,8 +497,11 @@ end
 -- user). Each is on once you tick it.
 function P:Items()
     local found, seen, picks, onBar = {}, {}, ns.PulsePicks(), {}
+    -- On any of a bar's lists: each form's too (Swap with my form).
     for _, bar in ipairs(ITEM_BARS) do
-        for _, key in ipairs(ns.BarData(bar).spells) do onBar[key] = true end
+        for _, spells in ipairs(ns.BarLists(bar)) do
+            for _, key in ipairs(spells) do onBar[key] = true end
+        end
     end
     local function Take(entry)
         if not (entry and entry.itemID) or seen[entry.key] then return end

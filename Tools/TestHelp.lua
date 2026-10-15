@@ -489,6 +489,11 @@ local function Environment(keepCVars)
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
+    -- Your form (Form: its ID, nil for none, or SECRET) and whether you're
+    -- stealthed, as the game says; each ask counted (FormReads).
+    Form, Stealthed, FormReads = nil, false, 0
+    _G.GetShapeshiftFormID = function() FormReads = FormReads + 1; return Typed("number", Form) end
+    _G.IsStealthed = function() return Typed("boolean", Stealthed) end
     -- A Skyborne, so Walk on Air (in the spellbook) is your own racial.
     _G.UnitRace = function(unit) assert(unit == "player"); return "Skyborne", "Skyborne", 96 end
     _G.UnitPower = function() return 0 end
@@ -753,7 +758,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -807,7 +812,7 @@ local function BlizzardFrames()
 end
 
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
-local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Spells.lua",
+local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
     "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
     "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
@@ -1432,6 +1437,43 @@ end)()
     Equal(tostring(bp.options.onlyMissing:IsVisible()) .. " " .. tostring(bp.across:IsVisible()) .. " "
         .. tostring(bp.options.wrap:IsVisible()) .. " " .. tostring(bp.options.showNames:IsVisible()),
         "true true true true", "(the tick, Icons per row, New rows and Show spell names all checked there)")
+    -- Cooldowns with Swap with my form ticked (a druid with Bear Form): the
+    -- tick, and Editing under it on the longest name it shows.
+    table.insert(book[2].items, { name = "Bear Form", spellID = 5487, iconID = 132276 })
+    ns.Spells:Stale()
+    ns.Bars:SetOption("cd", "swapForm", true)
+    w:Select("cd")
+    ns.SetEditingForm(18)
+    Check("cd", "cd with Swap with my form")
+    Equal(tostring(bp.options.swapForm:IsVisible()) .. " " .. tostring(bp.options.editing:IsVisible()) .. " "
+        .. S[bp.options.editing.name].text, "true true Defensive Stance", "(the tick and Editing, on its longest name, checked there)")
+    ns.SetEditingForm(nil)
+    -- A full bar (40 icons): the Cooldowns tray takes three rows, closer
+    -- than an aura bar's, so under its taller options the spell list still
+    -- shows two rows and more; the Buffs tray four, under its shorter ones.
+    local profile = ForeverEnhancedCooldownManagerDB.profiles[ns.ProfileName()]
+    local rows = {}
+    for _, key in ipairs({ "cd", "buff" }) do
+        local full = {}
+        for i = 1, ns.BAR_MAX_SPELLS do full[i] = "item:" .. (20000 + i) end
+        profile[key] = full
+        ns.Bars:Changed()
+        w:Select(key)
+        Check(key, key .. " full")
+        local shown, lowest = 0, 0
+        for _, icon in ipairs(bp.icons) do
+            if icon:IsVisible() then
+                shown = shown + 1
+                lowest = math.max(lowest, select(4, Fit.Rect(icon)))
+            end
+        end
+        local _, top, _, bottom = Fit.Rect(bp.list)
+        local _, trayTop, _, trayBottom = Fit.Rect(bp.tray)
+        rows[#rows + 1] = key .. " " .. shown .. " icons in " .. tostring(lowest <= trayBottom) .. " " .. math.floor((bottom - top) / 22)
+            .. " rows"
+    end
+    Equal(table.concat(rows, ", "), "cd 40 icons in true 2 rows, buff 40 icons in true 2 rows",
+        "a full bar: every icon in its tray, and two rows of the spell list showing")
     Equal(table.concat(found, " | "), "", "on every page and in every state, each label clear of the next control, all inside the page")
     Equal(#printed, 0, "no errors")
 end)()

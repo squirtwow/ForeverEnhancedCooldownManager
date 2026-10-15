@@ -265,6 +265,9 @@ local BAR_CHECKS = {
     spacing = function(v) return Within(v, ns.BAR_LIMITS.spacing) end,
     perRow = function(v) return Within(v, ns.BAR_LIMITS.perRow) end,
     whenReady = function(v) return ns.WHEN_READY_NAMES[v] ~= nil end,
+    onCooldown = function(v) return ns.WHEN_READY_NAMES[v] ~= nil end,
+    dimUnusable = Bool, swapForm = Bool,
+    dimOpacity = function(v) return Within(v, ns.BAR_LIMITS.dimOpacity) end,
     outOfCombat = function(v) return ns.OUT_OF_COMBAT_NAMES[v] ~= nil end,
     showMissing = Bool, onlyMissing = Bool, showNames = Bool, showTimer = Bool, showAuras = Bool, selfDebuffs = Bool,
     grow = function(v) return ns.GROW_NAMES[v] ~= nil end,
@@ -274,8 +277,9 @@ local BAR_CHECKS = {
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], spacing = ns.BAR_LIMITS.spacing[3], perRow = ns.BAR_LIMITS.perRow[3],
-    whenReady = "show", outOfCombat = "show", showMissing = false, onlyMissing = false, showNames = false, showTimer = true,
-    showAuras = false, selfDebuffs = false, grow = "centre", wrap = "down" }
+    whenReady = "show", onCooldown = "show", dimUnusable = false, dimOpacity = ns.BAR_LIMITS.dimOpacity[3], swapForm = false,
+    outOfCombat = "show", showMissing = false, onlyMissing = false, showNames = false, showTimer = true, showAuras = false,
+    selfDebuffs = false, grow = "centre", wrap = "down" }
 -- The layout's own settings; its rows and the bars taken out are lists.
 local LAYOUT_CHECKS = {
     on = Bool, preset = Preset, base = Preset, left = BarKey, right = BarKey,
@@ -286,9 +290,10 @@ local LAYOUT_FIELDS = { "on", "preset", "base", "left", "right", "gap", "spacing
 local LOOK = {}
 for _, key in ipairs(ns.SHARE_LOOK) do LOOK[key] = true end
 -- What a string's top table holds: its name (n), the addon's version (a),
--- the bars' lists (l), joins (j), Cooldown pulse ticks (p) and Long ones
--- (q), spells added by name or ID (c), and the look and layout (g).
-local KNOWN = { n = true, a = true, l = true, j = true, p = true, q = true, c = true, g = true }
+-- the bars' lists (l), each form's lists (f: Swap with my form, form ->
+-- bar -> list), joins (j), Cooldown pulse ticks (p) and Long ones (q),
+-- spells added by name or ID (c), and the look and layout (g).
+local KNOWN = { n = true, a = true, l = true, f = true, j = true, p = true, q = true, c = true, g = true }
 
 -- Reading ----------------------------------------------------------------------------------------
 
@@ -364,7 +369,7 @@ local function Clean(data)
     for key in pairs(data) do
         if not KNOWN[key] then Skip() end
     end
-    local shared = { lists = {}, joins = {}, pick = {}, style = {}, added = {}, count = 0, picks = 0 }
+    local shared = { lists = {}, forms = {}, joins = {}, pick = {}, style = {}, added = {}, count = 0, picks = 0 }
     -- Each bar's entries, each once and at most the bars' limit; a spell
     -- sits on the Cooldowns or the Utility bar, not both.
     local lists, cooldown, listed = Table(data.l), {}, {}
@@ -385,6 +390,38 @@ local function Clean(data)
         end
         shared.lists[key] = list
         shared.count = shared.count + #list
+    end
+    -- Each form's own lists for the Cooldowns and Utility bars (Swap with my
+    -- form), only the ones it has, each checked as a bar's is: an entry on
+    -- one of a form's two bars, not both.
+    if data.f ~= nil and type(data.f) ~= "table" then Skip() end
+    for form, own in pairs(Table(data.f)) do
+        if ns.OwnFormList(form) and type(own) == "table" then
+            local kept, cooldown = {}, {}
+            for key, values in pairs(own) do
+                if not (BarKey(key) and not ns.AURA_BARS[key] and type(values) == "table") then Skip() end
+            end
+            for _, key in ipairs(ns.BAR_KEYS) do
+                if not ns.AURA_BARS[key] and type(own[key]) == "table" then
+                    local list = {}
+                    for _, value in ipairs(own[key]) do
+                        local entry = Entry(value)
+                        if entry and not cooldown[entry] and #list < ns.BAR_MAX_SPELLS then
+                            list[#list + 1] = entry
+                            cooldown[entry], listed[entry] = true, true
+                        else
+                            Skip()
+                        end
+                    end
+                    -- Not counted with the bars' entries: each starts as a
+                    -- copy of a bar's own (P.Describe counts the forms).
+                    kept[key] = list
+                end
+            end
+            shared.forms[form] = kept
+        else
+            Skip()
+        end
     end
     -- On the Buffs and Debuffs bars, names joined to the entry before them.
     for key, joins in pairs(Table(data.j)) do
@@ -435,8 +472,8 @@ local function Clean(data)
     return shared
 end
 
--- A pasted string's profile: { name, lists, joins, pick, style, added,
--- setup (or nil), count (entries on its bars), picks, skipped }; or nil
+-- A pasted string's profile: { name, lists, forms, joins, pick, style,
+-- added, setup (or nil), count (entries on its bars), picks, skipped }; or nil
 -- and why not (nil only, for an empty box). The string is read from its
 -- "FECM1:" wherever that is, so a whole chat message pasted (words or a
 -- code block's mark before it) still reads, up to the last letter Base64
@@ -465,11 +502,19 @@ function P.Read(text)
 end
 
 -- What a string holds, in a line: "Holds 12 bar entries and 3 pulse ticks,
--- with its look and layout."
+-- with icons for 2 forms and its look and layout." Bar entries are the
+-- bars' own lists; the forms are those with lists of their own (Swap with
+-- my form), whose entries would count each spell again.
 function P.Describe(shared)
     local text = ("Holds %d bar %s"):format(shared.count, shared.count == 1 and "entry" or "entries")
     if shared.picks > 0 then text = text .. (" and %d pulse %s"):format(shared.picks, shared.picks == 1 and "tick" or "ticks") end
-    text = text .. (shared.setup and ", with its look and layout." or ".")
+    local forms, with = 0, {}
+    for _, lists in pairs(shared.forms or {}) do
+        if next(lists) then forms = forms + 1 end
+    end
+    if forms > 0 then with[#with + 1] = ("icons for %d %s"):format(forms, forms == 1 and "form" or "forms") end
+    if shared.setup then with[#with + 1] = "its look and layout" end
+    text = text .. (#with > 0 and (", with " .. table.concat(with, " and ")) or "") .. "."
     if shared.skipped > 0 then
         text = text .. (" %d left out, as this version doesn't use %s."):format(shared.skipped, shared.skipped == 1 and "it" or "them")
     end
@@ -541,15 +586,31 @@ end
 function P.Export()
     if not ns.ProfileName() then return nil, "Your profile hasn't loaded yet." end
     local data = { a = ns.Version(), l = {}, g = SetupNow() }
-    local custom, added, joins = ns.CustomSpells(), {}, {}
-    for _, key in ipairs(ns.BAR_KEYS) do
-        data.l[key] = Entries(ns.ActiveList(key))
-        for _, entry in ipairs(data.l[key]) do
+    local custom, added, joins, forms = ns.CustomSpells(), {}, {}, {}
+    -- A list's entries that read back, and the IDs of those added by name or ID.
+    local function Listed(list)
+        local out = Entries(list)
+        for _, entry in ipairs(out) do
             if not ns.Spells:Pinned(entry) and type(custom[entry]) == "table" and #IDs(custom[entry]) > 0 then
                 added[entry] = IDs(custom[entry])
             end
         end
+        return out
     end
+    -- Each bar's normal list (whatever the form you're in), then each
+    -- form's own lists (Swap with my form), as they are.
+    local store = ns.ProfileLists()
+    for _, key in ipairs(ns.BAR_KEYS) do data.l[key] = Listed(Table(store[key])) end
+    for form, own in pairs(Table(store.forms)) do
+        if ns.OwnFormList(form) and type(own) == "table" then
+            local lists = {}
+            for _, key in ipairs(ns.BAR_KEYS) do
+                if not ns.AURA_BARS[key] and type(own[key]) == "table" then lists[key] = Listed(own[key]) end
+            end
+            if next(lists) then forms[form] = lists end
+        end
+    end
+    if next(forms) then data.f = forms end
     for key in pairs(ns.AURA_BARS) do
         local set = Picks(ns.Joins(key), true)
         if next(set) then joins[key] = set end

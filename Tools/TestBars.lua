@@ -483,6 +483,11 @@ local function Environment(keepCVars)
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
+    -- Your form (Form: its ID, nil for none, or SECRET) and whether you're
+    -- stealthed, as the game says; each ask counted (FormReads).
+    Form, Stealthed, FormReads = nil, false, 0
+    _G.GetShapeshiftFormID = function() FormReads = FormReads + 1; return Typed("number", Form) end
+    _G.IsStealthed = function() return Typed("boolean", Stealthed) end
     -- A Skyborne, so Walk on Air (in the spellbook) is your own racial.
     _G.UnitRace = function(unit) assert(unit == "player"); return "Skyborne", "Skyborne", 96 end
     _G.UnitPower = function() return 0 end
@@ -747,7 +752,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -882,8 +887,8 @@ Equal(Last(moon.cooldown, "SetCooldownFromDurationObject") ~= nil, true, "sweep 
 Equal(S[moon].alpha .. " " .. ns.BarData("cd").whenReady, "1 show", "shown in full while ready unless you choose otherwise")
 B:SetOption("cd", "whenReady", "hide")
 moon = cd.icons[2]
-Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf, "secret nil nil",
-    "hide when ready also uses the secret state as it is, with the game's own 0 while ready")
+Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf, "secret 1 0",
+    "hide when ready also uses the secret state as it is: 1 while cooling down, 0 while ready")
 -- While the bars are being arranged, every icon shows.
 S[moon].alpha, S[moon].alphaFrom = nil, nil
 B:SetUnlocked(true)
@@ -919,6 +924,171 @@ EditModeManagerFrame:Hide()
 Equal(S[moon].alpha, .4, "and dimmed once Edit Mode closes")
 B:SetOption("cd", "whenReady", "show")
 Equal(S[moon].alpha, 1, "Show: in full again")
+
+-- On cooldown: the other way round, each icon in full, dimmed or hidden
+-- while it cools down (the global cooldown left out, as for the grey), by
+-- the same secret state handed on as it is.
+Equal(ns.BarData("cd").onCooldown .. " " .. tostring(ns.BarData("cd").dimUnusable), "show false",
+    "in full while cooling down, and nothing dimmed for being unusable, unless you choose otherwise")
+active = SECRET
+S[moon].alpha, S[moon].alphaFrom = nil, nil
+B:SetOption("cd", "onCooldown", "dim")
+moon = cd.icons[2]
+Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf .. " " .. tostring(S[moon].alpha), "secret 0.4 1 nil",
+    "On cooldown Dim: the secret state goes to the game as it is, 0.4 while cooling down and 1 while ready")
+Equal(ns.BarData("util").onCooldown .. " " .. cooldownCalls[#cooldownCalls], "show 8924",
+    "each bar has its own choice, and the global cooldown is still left out (the mock asks for that)")
+active = true
+B:RefreshAll()
+Equal(S[moon].alpha, .4, "a spell cooling down dims")
+active = false
+B:RefreshAll()
+Equal(S[moon].alpha, 1, "and is in full once it's ready")
+active = true
+B:SetOption("cd", "onCooldown", "hide")
+Equal(S[moon].alpha .. " " .. S[moon].alphaIf, "0 0 1", "Hide: gone while it cools down, in full while ready")
+B:SetUnlocked(true)
+Equal(S[moon].alpha, 1, "unlocked: in full even while it cools down, to see while moving it")
+B:SetUnlocked(false)
+Equal(S[moon].alpha, 0, "locked again: hidden while it cools down")
+EditModeManagerFrame:Show()
+Equal(S[moon].alpha, 1, "in Edit Mode too")
+EditModeManagerFrame:Hide()
+Equal(S[moon].alpha, 0, "and hidden again once Edit Mode closes")
+-- With When ready too: each state its own choice, the game picking.
+B:SetOption("cd", "whenReady", "dim")
+Equal(S[moon].alpha .. " " .. S[moon].alphaIf, "0 0 0.4", "Hide on cooldown, Dim when ready: gone while cooling down, dimmed while ready")
+-- The same choice both ways needs no answer: set as it is.
+S[moon].alphaFrom = nil
+B:SetOption("cd", "onCooldown", "dim")
+Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alpha, "nil 0.4", "Dim both ways: dimmed, with nothing handed to the game")
+active = SECRET
+B:RefreshAll()
+Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alpha, "nil 0.4", "even with the cooldown secret, in a fight")
+B:SetOption("cd", "whenReady", "show")
+B:SetOption("cd", "onCooldown", "show")
+active = false
+B:RefreshAll()
+Equal(S[moon].alpha, 1, "both on Show: in full again")
+
+-- Dim when you can't cast it: an icon tinted blue, grey or red (the game's
+-- open answers, read as they change) is never more than dimmed.
+do
+    local function State() return S[moon].alpha .. " " .. tostring(S[moon].alphaFrom) end
+    usable[8924], noMana[8924] = false, false
+    B:RefreshAll()
+    Equal(S[moon].alpha, 1, "unticked: a spell you can't cast stays in full")
+    B:SetOption("cd", "dimUnusable", true)
+    moon = cd.icons[2]
+    Equal(S[moon].alpha, .4, "ticked: not usable now, dimmed")
+    noMana[8924] = true
+    B:RefreshAll()
+    Equal(S[moon].alpha, .4, "short of mana, dimmed")
+    usable[8924], noMana[8924] = nil, nil
+    B:RefreshAll()
+    Equal(S[moon].alpha, 1, "castable again: in full")
+    target, range[8924] = true, false
+    B:RefreshAll()
+    Equal(S[moon].alpha, .4, "out of range of your target, dimmed")
+    range[8924] = true
+    B:RefreshAll()
+    Equal(S[moon].alpha, 1, "back in range: in full")
+    -- A hidden answer counts as castable, never read.
+    usable[8924], noMana[8924], range[8924] = SECRET, SECRET, SECRET
+    B:RefreshAll()
+    Equal(S[moon].alpha, 1, "the game hiding its answers: in full, nothing read")
+    usable[8924], noMana[8924], range[8924], target = false, false, nil, false
+    -- While cooling down too, and with the cooldown secret: both dimmed, set as it is.
+    active = SECRET
+    S[moon].alphaFrom = nil
+    B:RefreshAll()
+    Equal(State(), "0.4 nil", "can't cast it and the cooldown secret: dimmed either way, nothing handed to the game")
+    -- Never more than dimmed: what's hidden stays hidden, what's dimmed stays dimmed.
+    B:SetOption("cd", "onCooldown", "hide")
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf, "secret 0 0.4",
+        "Hide on cooldown: still gone while cooling down, dimmed while ready")
+    B:SetOption("cd", "onCooldown", "show")
+    B:SetOption("cd", "whenReady", "hide")
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf, "secret 0.4 0",
+        "Hide when ready: still gone while ready, dimmed while cooling down")
+    B:SetOption("cd", "whenReady", "show")
+    S[moon].alphaFrom = nil
+    B:SetUnlocked(true)
+    Equal(State(), "1 nil", "unlocked: in full, to see while moving it")
+    B:SetUnlocked(false)
+    Equal(S[moon].alpha, .4, "locked again: dimmed")
+    -- /ccm debug says so: each icon last read as one you can't cast, and
+    -- under each cooldown bar how it shows them.
+    local report = ns.DebugReport()
+    Equal(tostring(report:match("Moonfire | spell 8924 | [^\n]*")):match("usable false.*| can't cast true$") ~= nil
+        and tostring(report:match("Overpower | spell 7384 | [^\n]*")):match("| can't cast false$") ~= nil
+        and report:find("\n  when ready show, on cooldown show, dim when you can't cast it true, dimmed icons 40%\nutil bar:", 1, true)
+            ~= nil, true,
+        "/ccm debug: Moonfire read as one you can't cast, Overpower not, and the Cooldowns bar's choices under its icons")
+    -- Only the bar it's ticked on.
+    B:Assign("Wrath", "util")
+    local wrath = B:Get("util").icons[1]
+    usable[5176] = false
+    B:RefreshAll()
+    Equal(S[wrath].alpha .. " " .. tostring(ns.BarData("util").dimUnusable), "1 false", "Utility, unticked: in full")
+    B:Assign("Wrath", nil)
+    usable[5176] = nil
+    B:SetOption("cd", "dimUnusable", false)
+    Equal(S[moon].alpha, 1, "unticked again: in full")
+    usable[8924], noMana[8924], active = nil, nil, false
+    B:RefreshAll()
+end
+
+-- Dimmed icons: how much of every dimmed icon shows (Dim when ready, Dim on
+-- cooldown, one you can't cast), each bar its own; 40% unless chosen, as
+-- dim as they always were.
+do
+    Equal(ns.BarData("cd").dimOpacity .. " " .. ns.BarData("util").dimOpacity, "40 40", "40% on every bar unless chosen")
+    B:SetOption("cd", "dimOpacity", 25)
+    B:SetOption("cd", "whenReady", "dim")
+    moon = cd.icons[2]
+    Equal(S[moon].alpha, .25, "When ready Dim: a ready icon at the bar's 25%")
+    B:SetUnlocked(true)
+    Equal(S[moon].alpha, 1, "unlocked: in full, to see while moving it")
+    B:SetUnlocked(false)
+    Equal(S[moon].alpha, .25, "locked again: at 25%")
+    -- On cooldown Dim in a fight: the bar's amount handed to the game with the secret state.
+    B:SetOption("cd", "whenReady", "show")
+    active = SECRET
+    S[moon].alphaFrom = nil
+    B:SetOption("cd", "onCooldown", "dim")
+    moon = cd.icons[2]
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf, "secret 0.25 1",
+        "On cooldown Dim: 25% while cooling down and 1 while ready, the secret state handed on as it is")
+    B:SetOption("cd", "dimOpacity", 90)
+    Equal(S[moon].alphaIf, "0.9 1", "up to 90%")
+    -- Can't cast it: never more than the bar's amount; hidden stays hidden.
+    B:SetOption("cd", "dimOpacity", 10)
+    B:SetOption("cd", "onCooldown", "hide")
+    B:SetOption("cd", "dimUnusable", true)
+    usable[8924] = false
+    B:RefreshAll()
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf, "secret 0 0.1",
+        "ticked, at 10%: gone while cooling down, at 10% while ready and not castable")
+    -- Only the bar it's set on: Utility dims at its own 40%.
+    B:SetOption("util", "whenReady", "dim")
+    B:Assign("Wrath", "util")
+    local wrath = B:Get("util").icons[1]
+    active = false
+    B:RefreshAll()
+    Equal(S[wrath].alpha .. " " .. S[moon].alpha, "0.4 0.1", "Utility's ready icon at its own 40%, Cooldowns' at its 10%")
+    B:Assign("Wrath", nil)
+    B:SetOption("util", "whenReady", "show")
+    -- /ccm debug says how dim.
+    Equal(ns.DebugReport():find("\n  when ready show, on cooldown hide, dim when you can't cast it true, dimmed icons 10%\nutil bar:",
+        1, true) ~= nil, true, "/ccm debug: the Cooldowns bar's Dimmed icons with its choices")
+    usable[8924] = nil
+    B:SetOption("cd", "dimUnusable", false)
+    B:SetOption("cd", "onCooldown", "show")
+    B:SetOption("cd", "dimOpacity", 40)
+    moon = cd.icons[2]
+    Equal(S[moon].alpha, 1, "all back: in full")
+end
 
 usable[8924], noMana[8924] = false, true
 B:RefreshAll()
@@ -1115,13 +1285,28 @@ do
     -- Anything unexpected in the saved settings is put right at load.
     Environment()
     ns = Load({ useBars = true, bars = { cd = { size = 9999, spells = { "A", 7, "", "B" }, x = "nope", y = 3, hideReady = "maybe" },
-        util = { whenReady = "fade" }, evil = { size = 3 } } })
+        util = { whenReady = "fade", onCooldown = "fade", dimUnusable = "yes", dimOpacity = "dim" },
+        debuff = { onCooldown = 2, dimUnusable = 1, dimOpacity = 0 / 0 }, buff = { dimOpacity = 300 }, evil = { size = 3 } } })
     local data = ns.BarData("cd")
+    Equal(data.dimOpacity .. " " .. ns.BarData("util").dimOpacity .. " " .. ns.BarData("debuff").dimOpacity .. " "
+        .. ns.BarData("buff").dimOpacity, "40 40 40 90", "Dimmed icons: missing or not a number, 40% as before; too much, 90%")
     Equal(data.size, 64, "bad sizes clamped")
     Equal(table.concat(data.spells, ","), "A,B", "only names kept in a list")
     Equal(data.x, nil, "bad positions dropped")
     Equal(data.whenReady .. " " .. ns.BarData("util").whenReady, "show show", "bad flags and choices off")
+    Equal(data.onCooldown .. " " .. tostring(data.dimUnusable) .. " | " .. ns.BarData("util").onCooldown .. " "
+        .. tostring(ns.BarData("util").dimUnusable) .. " | " .. ns.BarData("debuff").onCooldown .. " "
+        .. tostring(ns.BarData("debuff").dimUnusable), "show false | show false | show false",
+        "On cooldown and Dim when you can't cast it: missing or bad, in full and off, as before they were there")
     Equal(ns.BarData("evil"), nil, "unknown bars ignored")
+    -- Chosen, they're kept over a reload.
+    Environment()
+    ns = Load({ useBars = true, bars = { cd = { onCooldown = "hide", dimUnusable = true, dimOpacity = 65 },
+        util = { onCooldown = "dim", dimOpacity = 5 }, buff = { dimOpacity = 42.4 } } })
+    Equal(ns.BarData("cd").onCooldown .. " " .. tostring(ns.BarData("cd").dimUnusable) .. " " .. ns.BarData("util").onCooldown .. " "
+        .. tostring(ns.BarData("util").dimUnusable), "hide true dim false", "each bar's own choices kept")
+    Equal(ns.BarData("cd").dimOpacity .. " " .. ns.BarData("util").dimOpacity .. " " .. ns.BarData("buff").dimOpacity, "65 10 42",
+        "each bar's Dimmed icons kept, too little raised to 10%, a fraction rounded")
 
     -- Hide when ready was a tick before Dim joined it: a bar that hid its
     -- ready icons still does, and the old setting goes.
@@ -1604,6 +1789,12 @@ B:Assign("ammo", "util")
 local quiver = B:Get("util").icons[1]
 Equal(S[quiver.count].text, 200, "its count shown")
 Equal(S[quiver.texture].desaturated, false, "in colour while you have some")
+-- Icons are reused by place: one a spell or item left as "can't cast" is
+-- cleared once it shows your ammo, so /ccm debug doesn't say so of it.
+quiver.cantCast = true
+B:RefreshAll()
+Equal(tostring(quiver.cantCast) .. " " .. tostring(ns.DebugReport():match("| ammo [^\n]*| can't cast (%a+)")), "false false",
+    "ammo in a place that held one you couldn't cast: not called can't cast, in /ccm debug either")
 ammoCount = 0
 B:RefreshAll()
 Equal(S[quiver.texture].desaturated, true, "greyed when you run out")
@@ -1944,6 +2135,40 @@ Equal(ns.Spells:Find("item:118") and ns.Spells:Find("item:118").name, "Minor Hea
 Equal(ns.Spells:Find("item:2589"), nil, "items without a use left out")
 Equal(ns.Spells:Find("item:117"), nil, "food and drink left out: no cooldown")
 Equal(ns.Spells:Find("item:2698"), nil, "recipes left out")
+-- But Thistle Tea, Food & Drink with a cooldown of its own (Spells.lua
+-- COOLDOWN_FOOD, checked against the game's tables by
+-- Tools/TestFoodCooldowns.mjs), is listed and goes on a bar; ordinary food
+-- beside it still doesn't (a player's report: it couldn't be added).
+do
+    local spell, instant, carried = _G.C_Item.GetItemSpell, _G.C_Item.GetItemInfoInstant, bagItems
+    _G.C_Item.GetItemSpell = function(id)
+        if id == 7676 then return "Restore Energy" end
+        return spell(id)
+    end
+    _G.C_Item.GetItemInfoInstant = function(id)
+        if id == 7676 then return id, nil, nil, "", nil, 0, 5 end -- Consumable, Food & Drink
+        return instant(id)
+    end
+    bagItems = { carried[3], { itemID = 7676, hyperlink = "|cffffffff|Hitem:7676|h[Thistle Tea]|h|r" } }
+    itemCount[7676] = 2
+    ns.Spells:Stale()
+    local tea = ns.Spells:Find("item:7676")
+    Equal(tostring(tea and tea.name) .. " " .. tostring(tea and tea.line) .. " " .. tostring(ns.Spells:Find("item:117")),
+        "Thistle Tea Items nil", "Thistle Tea listed under Items, the Tough Jerky beside it still left out")
+    local ok, said = B:CanAddItem("util", 7676)
+    local no, why = B:CanAddItem("util", 117)
+    Equal(tostring(ok) .. " " .. tostring(said) .. " | " .. tostring(no) .. " " .. tostring(why),
+        "true Drop to add Thistle Tea to Utility. | false That item has no cooldown to show.",
+        "Thistle Tea can go on a bar; the jerky is turned away")
+    ok, said = B:AddItem("util", 7676)
+    Equal(tostring(ok) .. " " .. tostring(said) .. " " .. tostring((B:Find("item:7676"))), "true Added Thistle Tea to Utility. util",
+        "added")
+    B:Assign("item:7676", nil)
+    _G.C_Item.GetItemSpell, _G.C_Item.GetItemInfoInstant, bagItems, itemCount[7676] = spell, instant, carried, nil
+    ns.Spells:Stale()
+    Equal(tostring((B:Find("item:7676"))) .. " " .. tostring((ns.Spells:Find("item:7676"))), "nil nil",
+        "taken off again, and out of the bags")
+end
 
 Equal(ns.Spells:Resolve("thorns"), "Thorns", "names match whatever the case")
 local key, ids = ns.Spells:Resolve("Power Word: Fortitude")
@@ -1993,6 +2218,33 @@ B:RefreshAll()
 Equal(S[cdBar.icons[1]].alpha, .4, "ready again: dimmed")
 B:SetOption("cd", "whenReady", "show")
 Equal(S[cdBar.icons[1]].alpha, 1, "Show: in full")
+-- On cooldown for items too: dimmed or hidden while one cools down, in full
+-- once it's ready; and, ticked, dimmed while it can't be used.
+trinketCooldown = { 100, 120, 1 }
+B:SetOption("cd", "onCooldown", "dim")
+Equal(S[cdBar.icons[1]].alpha, .4, "a trinket cooling down dims when asked")
+B:SetOption("cd", "dimOpacity", 70)
+Equal(S[cdBar.icons[1]].alpha, .7, "to the bar's Dimmed icons")
+B:SetOption("cd", "dimOpacity", 40)
+B:SetOption("cd", "onCooldown", "hide")
+Equal(S[cdBar.icons[1]].alpha, 0, "or hides")
+trinketCooldown = { 0, 0, 1 }
+B:RefreshAll()
+Equal(S[cdBar.icons[1]].alpha, 1, "in full once it's ready")
+B:SetOption("cd", "onCooldown", "show")
+do
+    local use = _G.C_Item.IsUsableItem
+    _G.C_Item.IsUsableItem = function() return false, false end
+    B:RefreshAll()
+    Equal(S[cdBar.icons[1]].alpha, 1, "an item you can't use now stays in full, unticked")
+    B:SetOption("cd", "dimUnusable", true)
+    Equal(S[cdBar.icons[1]].alpha .. " " .. S[cdBar.icons[1].texture].tint[1], "0.4 0.4", "ticked: greyed, and dimmed")
+    _G.C_Item.IsUsableItem = function() return SECRETS.boolean, SECRETS.boolean end
+    B:RefreshAll()
+    Equal(S[cdBar.icons[1]].alpha, 1, "the game hiding its answer: in full")
+    _G.C_Item.IsUsableItem = use
+    B:SetOption("cd", "dimUnusable", false)
+end
 
 B:Assign("Moonfire", "util")
 local moonIcon = B:Get("util").icons[1]
@@ -2393,12 +2645,13 @@ do
     local ready = page.options.whenReady
     Equal(tostring(S[ready].shown and S[ready.label].shown and not S[page.options.showMissing].shown) .. " " .. S[ready.label].text
         .. " " .. ready.selected, "true When ready show", "cooldown bars offer When ready, showing the bar's choice")
-    -- Show, Dim or Hide, one at a time, in the spot the Hide when ready tick had.
+    -- Show, Dim or Hide, one at a time, under the sliders (Out of combat's
+    -- old spot), with On cooldown under it.
     local labels = {}
     for _, button in ipairs(ready.buttons) do labels[#labels + 1] = S[button.label].text end
     local at = S[ready].points[1]
-    Equal(table.concat(labels, " ") .. " | " .. at[1] .. " " .. at[2] .. " " .. at[3], "Show Dim Hide | TOPLEFT 420 0",
-        "three choices, beside the options' first tick row")
+    Equal(table.concat(labels, " ") .. " | " .. at[1] .. " " .. at[2] .. " " .. at[3], "Show Dim Hide | TOPLEFT 100 -85",
+        "three choices, under the sliders")
     -- The label and its choices as one part for the tour, from the label's
     -- start to the buttons' end and level with the buttons, top and bottom
     -- (the label alone ends above them).
@@ -2406,7 +2659,11 @@ do
     local pt = part.points[1]
     Equal(pt[1] .. " " .. pt[2] .. " " .. pt[3] .. " " .. tostring(pt[2] == lt[2] and pt[2] + part.width == at[2] + S[ready].width
         and pt[3] == at[3] and pt[3] - part.height == at[3] - S[ready].height and #part.points == 1),
-        "TOPLEFT 320 0 true", "one part round When ready and its choices, for the tour")
+        "TOPLEFT 0 -85 true", "one part round When ready and its choices, for the tour")
+    -- Out of combat moved up to the top of the other column, where When ready was.
+    local combat = page.options.outOfCombat
+    Equal(table.concat(S[combat].points[1], " ", 1, 3) .. " " .. table.concat(S[combat.label].points[1], " ", 1, 3),
+        "TOPLEFT 420 0 TOPLEFT 320 -4", "Out of combat at the top of the other column")
     ready.buttons[2]:Click()
     Equal(ns.BarData("cd").whenReady .. " " .. ready.selected .. " " .. S[B:Get("cd").icons[1]].alpha, "dim dim 0.4",
         "clicking Dim sets it, shows it, and a ready icon on the bar dims")
@@ -2419,13 +2676,143 @@ do
         notes[#notes + 1] = S[w.note].text
         S[button].scripts.OnLeave(button)
     end
-    Equal(table.concat(notes, " | "), "Every icon shows in full, ready or cooling down. | "
+    Equal(table.concat(notes, " | "), "Each icon shows in full while it's ready. | "
         .. "Each icon dims while it's ready, so the ones cooling down stand out. | "
         .. "Each icon hides while it's ready, so only the ones cooling down show.", "each choice's note")
+    -- On cooldown, right under it: the same three choices, the other way round.
+    local cooling, tick = page.options.onCooldown, page.options.dimUnusable
+    local cat, tat = S[cooling].points[1], S[tick].points[1]
+    labels = {}
+    for _, button in ipairs(cooling.buttons) do labels[#labels + 1] = S[button.label].text end
+    Equal(tostring(S[cooling].shown and S[cooling.label].shown and S[tick].shown) .. " " .. S[cooling.label].text .. " | "
+        .. table.concat(labels, " ") .. " | " .. cooling.selected .. " " .. cat[1] .. " " .. cat[2] .. " " .. cat[3] .. " | "
+        .. S[tick.text].text .. " " .. tostring(tick:GetChecked()) .. " " .. tat[1] .. " " .. tat[2] .. " " .. tat[3],
+        "true On cooldown | Show Dim Hide | show TOPLEFT 100 -107 | Dim when you can't cast it false TOPLEFT 0 -129",
+        "On cooldown under When ready, at the bar's choice (Show), and its tick under it, off")
+    Equal(S[page.optionsArea].height, 178, "the options two rows taller for them")
+    -- On cooldown, its tick and Dimmed icons as one part, for the page's walkthrough.
+    local cpart = S[cooling.part]
+    Equal(table.concat(cpart.points[1], " ", 1, 3) .. " " .. cpart.width .. "x" .. cpart.height, "TOPLEFT 0 -107 280x64",
+        "one part round On cooldown, its choices, its tick and Dimmed icons")
     ready.buttons[1]:Click()
+    active = true
+    cooling.buttons[2]:Click()
+    Equal(ns.BarData("cd").onCooldown .. " " .. cooling.selected .. " " .. S[B:Get("cd").icons[1]].alpha, "dim dim 0.4",
+        "clicking Dim sets it, shows it, and an icon cooling down on the bar dims")
+    cooling.buttons[3]:Click()
+    Equal(ns.BarData("cd").onCooldown .. " " .. cooling.selected .. " " .. S[B:Get("cd").icons[1]].alpha, "hide hide 0",
+        "Hide instead: gone while it cools down")
+    -- Each says what it does, the new ones that they're experimental; Hide
+    -- on both says the bar then shows nothing, on either one.
+    local function Notes(pills)
+        local said = {}
+        for _, button in ipairs(pills.buttons) do
+            S[button].scripts.OnEnter(button)
+            said[#said + 1] = S[w.note].text
+            S[button].scripts.OnLeave(button)
+        end
+        return table.concat(said, " | ")
+    end
+    Equal(Notes(cooling), "Every icon shows in full while it cools down. | "
+        .. "Each icon dims while it cools down, so the ones ready stand out. (experimental) | "
+        .. "Each icon hides while it cools down, so only the ready ones show. (experimental)", "each choice's note")
+    ready.buttons[3]:Click()
+    Equal(select(3, Notes(cooling):match("^(.-) | (.-) | (.-)$")) .. " / " .. select(3, Notes(ready):match("^(.-) | (.-) | (.-)$")),
+        "Each icon hides while it cools down, so only the ready ones show. (experimental) Both are on Hide, so this bar shows nothing."
+        .. " / Each icon hides while it's ready, so only the ones cooling down show. Both are on Hide, so this bar shows nothing.",
+        "both on Hide: each one's Hide says the bar shows nothing")
+    -- Dim on both: each one's Dim says every icon is dimmed, and nothing
+    -- else does (Hide's notes are back to their own).
+    ready.buttons[2]:Click()
+    cooling.buttons[2]:Click()
+    local readyNotes, coolingNotes = Notes(ready), Notes(cooling)
+    Equal(select(2, coolingNotes:match("^(.-) | (.-) | (.-)$")) .. " / " .. select(2, readyNotes:match("^(.-) | (.-) | (.-)$"))
+        .. " / " .. tostring(readyNotes:find("Both are on Hide", 1, true)) .. " " .. tostring(coolingNotes:find("Both are on Hide", 1, true)),
+        "Each icon dims while it cools down, so the ones ready stand out. (experimental) Both are on Dim, so every icon is dimmed."
+        .. " / Each icon dims while it's ready, so the ones cooling down stand out. Both are on Dim, so every icon is dimmed."
+        .. " / nil nil", "both on Dim: each one's Dim says every icon is dimmed")
+    -- When ready back on Show: On cooldown's notes say nothing of both, and
+    -- When ready's Dim (as its Hide does for Hide) says so before it's picked.
+    ready.buttons[1]:Click()
+    local show, dim, hide = Notes(ready):match("^(.-) | (.-) | (.-)$")
+    Equal(tostring(Notes(cooling):find("Both are", 1, true)) .. " " .. tostring(show:find("Both are", 1, true)) .. " "
+        .. tostring(hide:find("Both are", 1, true)) .. " | " .. dim,
+        "nil nil nil | Each icon dims while it's ready, so the ones cooling down stand out. Both are on Dim, so every icon is dimmed.",
+        "When ready on Show: none of On cooldown's notes say both; When ready's Dim warns, before it's picked")
+    cooling.buttons[1]:Click()
+    active = false
+    -- The tick: on and off, the bar's own; its note says what it does.
+    S[tick].scripts.OnEnter(tick)
+    Equal(S[w.note].text, "Dims an icon while you can't cast it: not enough mana, rage or energy, out of range, or not usable yet."
+        .. " (experimental)", "the tick's note")
+    S[tick].scripts.OnLeave(tick)
+    usable[7384] = false
+    tick:Click()
+    Equal(tostring(ns.BarData("cd").dimUnusable) .. " " .. tostring(tick:GetChecked()) .. " " .. S[B:Get("cd").icons[2]].alpha .. " "
+        .. tostring(ns.BarData("util").dimUnusable), "true true 0.4 false", "ticked: Overpower, not usable now, dims; Utility's own stays off")
+    -- Each bar's page shows that bar's own: Utility's tick off and On
+    -- cooldown on Show while Cooldowns' are on Hide and ticked.
+    cooling.buttons[3]:Click()
+    w:Select("util")
+    local there = tostring(tick:GetChecked()) .. " " .. cooling.selected
+    w:Select("cd")
+    Equal(there .. " | " .. tostring(tick:GetChecked()) .. " " .. cooling.selected, "false show | true hide",
+        "Utility's page shows Utility's own, and Cooldowns' its own again")
+    cooling.buttons[1]:Click()
+    tick:Click()
+    Equal(tostring(ns.BarData("cd").dimUnusable) .. " " .. S[B:Get("cd").icons[2]].alpha, "false 1", "unticked: in full again")
+    usable[7384] = nil
+    -- Dimmed icons, under the tick: how much of a dimmed icon shows, 40% as
+    -- before, each bar its own. Greyed, saying why, while nothing on the
+    -- bar dims, and a click on it then does nothing.
+    local dim = page.options.dimOpacity
+    Equal(tostring(S[dim].shown) .. " " .. S[dim.label].text .. " " .. S[dim.value].text .. " "
+        .. table.concat(S[dim].points[1], " ", 1, 3) .. " " .. tostring(dim.usable) .. " " .. S[dim].alpha,
+        "true Dimmed icons 40% TOPLEFT 0 -151 false 0.35", "Dimmed icons under the tick at 40%, greyed with nothing on the bar dimming")
+    S[dim].scripts.OnEnter(dim)
+    Equal(S[w.note].text, "Nothing on this bar dims yet. Pick Dim on When ready or On cooldown, or tick Dim when you can't cast it.",
+        "its note says why it's greyed")
+    S[dim].scripts.OnLeave(dim)
+    S[dim.track].scripts.OnMouseDown(dim.track)
+    Equal(ns.BarData("cd").dimOpacity, 40, "a click on it does nothing")
+    ready.buttons[2]:Click()
+    Equal(tostring(dim.usable) .. " " .. S[dim].alpha, "true 1", "When ready on Dim: it can be used")
+    S[dim].scripts.OnEnter(dim)
+    Equal(S[w.note].text, "How much of a dimmed icon shows: lower is fainter. Used by Dim above and by Dim when you can't cast it."
+        .. " (experimental)", "its note")
+    S[dim].scripts.OnLeave(dim)
+    dim:Choose(23)
+    Equal(ns.BarData("cd").dimOpacity .. " " .. S[dim.value].text .. " " .. S[B:Get("cd").icons[1]].alpha, "25 25% 0.25",
+        "set in steps of 5, shown as a share, and a ready icon on the bar at 25% at once")
+    S[dim].scripts.OnMouseWheel(dim, 1)
+    Equal(ns.BarData("cd").dimOpacity, 30, "the wheel steps by 5")
+    dim:Choose(200)
+    there = ns.BarData("cd").dimOpacity
+    dim:Choose(0)
+    Equal(there .. " " .. ns.BarData("cd").dimOpacity, "90 10", "from 10% to 90%")
+    -- Each bar its own: Utility's at 40%, greyed with nothing dimming there.
+    w:Select("util")
+    there = S[dim.value].text .. " " .. tostring(dim.usable)
+    w:Select("cd")
+    Equal(there .. " | " .. S[dim.value].text .. " " .. tostring(dim.usable) .. " " .. ns.BarData("util").dimOpacity,
+        "40% false | 10% true 40", "Utility's page shows Utility's own, and Cooldowns' its own again")
+    -- On cooldown's Dim, or the tick, alone makes it usable too.
+    ready.buttons[1]:Click()
+    cooling.buttons[2]:Click()
+    there = tostring(dim.usable)
+    cooling.buttons[1]:Click()
+    tick:Click()
+    there = there .. " " .. tostring(dim.usable)
+    tick:Click()
+    Equal(there .. " " .. tostring(dim.usable), "true true false", "On cooldown's Dim or the tick make it usable; neither, greyed")
+    B:SetOption("cd", "dimOpacity", 40)
     w:Select("buff")
     Equal(S[page.options.showMissing].shown and not S[ready].shown and not S[ready.label].shown, true,
         "the Buffs bar offers missing buffs greyed there instead")
+    local mat = S[page.options.showMissing].points[1]
+    Equal(tostring(S[cooling].shown or S[cooling.label].shown or S[tick].shown or S[dim].shown) .. " " .. S[page.optionsArea].height
+        .. " " .. table.concat(mat, " ", 1, 3), "false 134 TOPLEFT 0 -85",
+        "but no On cooldown, its tick or Dimmed icons, nor their rows: missing buffs greyed in When ready's spot, under the sliders")
 end
 Equal(page.options.showTimer:GetChecked(), true, "each bar keeps its own countdown choice")
 Equal(page.size.current, 36, "and its own size")
@@ -5778,6 +6165,21 @@ do
     Equal(Shown(cd.decor.border) .. " " .. Shown((cd.decor.shadow or {})[1]), "true true", "a bar that dims them keeps them in place, and its box")
     B:SetOption("cd", "whenReady", "show")
     Equal(Shown(cd.decor.border), "true", "and it's back with Hide when ready off")
+    -- On cooldown the same: hiding them as they cool down, they come and go.
+    B:SetOption("cd", "onCooldown", "hide")
+    Equal(Shown(cd.decor.border) .. " " .. Shown((cd.decor.shadow or {})[1]), "false false",
+        "nor a bar that hides its icons while they cool down")
+    Equal(table.concat({ tostring(select(1, B:BarDecorFor("cd"))), tostring(select(2, B:BarDecorFor("cd"))) }, " "), "false false",
+        "nor the Layout page's drawing of it")
+    B:SetUnlocked(true)
+    Equal(Shown(cd.decor.border), "true", "unless every icon shows, unlocked")
+    B:SetUnlocked(false)
+    B:SetOption("cd", "onCooldown", "dim")
+    Equal(Shown(cd.decor.border), "true", "dimming them while they cool down keeps them in place, and its box")
+    B:SetOption("cd", "dimUnusable", true)
+    Equal(Shown(cd.decor.border), "true", "and so does dimming the ones you can't cast: it never hides one")
+    B:SetOption("cd", "onCooldown", "show")
+    B:SetOption("cd", "dimUnusable", false)
     B:SetOption("buff", "showMissing", true)
     Equal(Shown(buff.decor.border), "true", "fixed Buffs spots always show, so they get it")
     target, hostile = false, true

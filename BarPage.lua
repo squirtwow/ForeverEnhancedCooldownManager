@@ -5,7 +5,14 @@ local _, ns = ...
 local T = ns.Theme
 
 local ICON, GAP = 32, 12 -- icons in the tray; the gap fits the join button
+-- The gap on the Cooldowns and Utility bars' trays, which have no join
+-- buttons: a full bar (40) takes three rows there, so with their taller
+-- options the spell list under them still shows two rows and more.
+local TIGHT = 8
 local ROW, HEADER_ROW = 22, 20 -- spell list rows
+-- The options' height: the Buffs and Debuffs bars', and two rows more on the
+-- Cooldowns and Utility bars, for On cooldown's tick and Dimmed icons.
+local OPTIONS, OPTIONS_TALL = 134, 178
 local EMPTY = {
     cd = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook or bags.",
     util = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook or bags.",
@@ -27,6 +34,7 @@ function ns.BuildBarPage(window, page, width)
     local state = { bar = "cd", search = "" }
     local inner = width - 32
     local perRow = math.floor((inner - 12 + GAP) / (ICON + GAP))
+    local perRowTight = math.floor((inner - 12 + TIGHT) / (ICON + TIGHT)) -- the Cooldowns and Utility trays'
 
     -- Title row -------------------------------------------------------------------
     local title = T:Heading(page, "")
@@ -198,8 +206,7 @@ function ns.BuildBarPage(window, page, width)
         local icon = page.icons[i]
         if icon then return icon end
         icon = CreateFrame("Button", nil, tray)
-        icon:SetSize(ICON, ICON)
-        icon:SetPoint("TOPLEFT", 8 + ((i - 1) % perRow) * (ICON + GAP), -8 - math.floor((i - 1) / perRow) * (ICON + GAP))
+        icon:SetSize(ICON, ICON) -- placed on refresh: each bar's tray has its own gap
         icon.texture = icon:CreateTexture(nil, "ARTWORK")
         icon.texture:SetAllPoints()
         ns.Style:Zoom(icon.texture)
@@ -290,9 +297,13 @@ function ns.BuildBarPage(window, page, width)
     end
 
     -- Options ------------------------------------------------------------------------
+    -- Two columns: the sliders with how the icons show under them on the
+    -- left, Out of combat, the ticks and which way rows grow on the right.
+    -- The Cooldowns and Utility bars' pages are two rows taller, for On
+    -- cooldown's tick and how dim (OPTIONS_TALL, set on refresh).
     local options = CreateFrame("Frame", nil, page)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
-    options:SetSize(inner, 134)
+    options:SetSize(inner, OPTIONS_TALL)
     page.optionsArea = options
     -- Room before each slider's track for the longest label, Icons per row.
     local sliderLabel = 108
@@ -335,15 +346,16 @@ function ns.BuildBarPage(window, page, width)
         return check
     end
     -- Buffs only show while they're on you, so their bar offers this instead
-    -- of When ready (below), in the same spot. Greyed while Only show missing
-    -- is on, which it doesn't go with; its own choice is kept.
-    local showMissing = Option("Show missing buffs greyed", "showMissing", 0, function()
+    -- of When ready (below), in the same spot under the sliders. Greyed while
+    -- Only show missing (under it) is on, which it doesn't go with; its own
+    -- choice is kept.
+    local showMissing = Option("Show missing buffs greyed", "showMissing", -85, function()
         if state.bar == "buff" and ns.BarData("buff").onlyMissing then
             return "Not with Only show missing, which shows only the buffs you're missing."
         end
         return (state.bar == "debuff" and "Debuffs missing from your target" or "Buffs missing from you")
             .. " show greyed in their spot, instead of hidden."
-    end)
+    end, 0)
     -- The Buffs bar only: each buff only while it's not on you, under the
     -- sliders. Not on the Debuffs bar: your target's debuffs change in a
     -- fight, when the addon can't read them.
@@ -357,6 +369,80 @@ function ns.BuildBarPage(window, page, width)
     local showAuras = Option("Show buff and debuff time", "showAuras", -107,
         "While the buff a spell put on you, or its debuff on your target (like Shadow Word: Pain), is up,"
             .. " its icon shows the time left with a gold edge.")
+    -- The cooldown bars only, under that: Swap with my form (a player's
+    -- idea), a list of icons for each form you take, in the row On
+    -- cooldown's tick makes on the left. Only for a character who knows a
+    -- form (not a mage, hunter, warlock or paladin, nor a druid before Bear
+    -- Form).
+    -- Its words follow the class (ns.SwapWords): "Swap when in Stealth" on a
+    -- rogue, "Swap with my stance" on a warrior.
+    local swapForm = Option("Swap with my form", "swapForm", -129, function()
+        local words = ns.SwapWords()
+        if words.one then
+            return words.one .. " gets its own icons on this bar, swapped as you go in and out of it. (experimental)"
+        end
+        return "Each " .. words.what .. " gets its own icons on this bar, swapped as you change. (experimental)"
+    end)
+    -- And with it ticked, under it, Editing: whose icons the tray and the
+    -- bar show, to set up another form's without changing form. Your form's
+    -- unless you pick one; leaving the page, closing the window or a fight
+    -- goes back to it. The arrows step through Normal and the forms you know.
+    local editing = CreateFrame("Frame", nil, options, "BackdropTemplate")
+    editing:SetSize(156, 20)
+    editing:SetPoint("TOPLEFT", 420, -151)
+    T:Flat(editing, T.FIELD, T.CONTROL_BORDER)
+    editing.label = T:Text(options, "GameFontHighlight")
+    editing.label:SetPoint("TOPLEFT", 320, -155)
+    editing.label:SetText("Editing")
+    local function EditingNote()
+        local words = ns.SwapWords()
+        local follow = words.one or ("your " .. words.what)
+        if InCombatLockdown() then return "Not in a fight: your bars follow " .. follow .. " until it ends." end
+        if words.one then
+            return "Pick " .. words.one .. " to set up its icons here without using it. Normal is for the rest of the time."
+        end
+        return "Pick a " .. words.what .. " to set up its icons here without changing " .. words.what
+            .. ". Normal is for no " .. words.what .. "."
+    end
+    -- In a fight the arrows say why they do nothing (they aren't greyed:
+    -- nothing would ungrey them as it ends).
+    local function StepForm(by)
+        if InCombatLockdown() then
+            window:Say(EditingNote())
+            return window:Refresh()
+        end
+        local choices, now, at = { 0 }, ns.ShownForm(state.bar), 1
+        for _, known in ipairs(ns.KnownForms()) do choices[#choices + 1] = known.form end
+        for i, form in ipairs(choices) do
+            if form == now then at = i end
+        end
+        ns.SetEditingForm(choices[(at - 1 + by) % #choices + 1])
+        B:FormChanged()
+        window:Refresh()
+    end
+    editing.back = T:Square(editing, "<")
+    editing.back:SetPoint("LEFT", 1, 0)
+    editing.back:SetScript("OnClick", function() StepForm(-1) end)
+    editing.next = T:Square(editing, ">")
+    editing.next:SetPoint("RIGHT", -1, 0)
+    editing.next:SetScript("OnClick", function() StepForm(1) end)
+    -- The form's name between them, which says what the arrows do too.
+    editing.show = CreateFrame("Button", nil, editing)
+    editing.show:SetSize(156 - 2 * 18 - 8, 18)
+    editing.show:SetPoint("CENTER")
+    editing.name = T:Text(editing.show, "GameFontHighlightSmall")
+    editing.name:SetPoint("CENTER")
+    editing.name:SetJustifyH("CENTER")
+    editing.show:EnableMouse(true)
+    for _, part in ipairs({ editing.back, editing.show, editing.next }) do window:Hint(part, EditingNote) end
+    -- A form picked there lets go as you leave the page or pick another
+    -- bar: the bars follow your form again.
+    local function FollowAgain()
+        if ns.EditingForm() == nil then return end
+        ns.SetEditingForm(nil)
+        B:FormChanged()
+    end
+    page:HookScript("OnHide", FollowAgain)
     -- The Buffs and Debuffs bars, in the same spot, each its own (its label
     -- set on refresh: SELF_LABEL).
     local showSelf = Option(SELF_LABEL.buff, "selfDebuffs", -107, function()
@@ -389,33 +475,94 @@ function ns.BuildBarPage(window, page, width)
         pills:SetPoint("TOPLEFT", x + 100, y)
         for _, button in ipairs(pills.buttons) do
             local own = type(note) == "table" and note[button.key] or note
-            window:Hint(button, function() return pills.held and "Your layout sets this. Change it on the Layout page." or own end)
+            window:Hint(button, function()
+                if pills.held then return "Your layout sets this. Change it on the Layout page." end
+                if type(own) == "function" then return own() end
+                return own
+            end)
         end
         pills.label = text
         return pills
     end
+    -- The same choice on both When ready and On cooldown: Hide leaves the bar
+    -- with nothing showing, Dim every icon dimmed, so nothing stands out.
+    -- Each one's note says so while the other is on it too.
+    local function Both(other, choice)
+        if ns.BarData(state.bar)[other] ~= choice then return "" end
+        return choice == "hide" and " Both are on Hide, so this bar shows nothing." or " Both are on Dim, so every icon is dimmed."
+    end
     -- When ready: each icon in full, dimmed or hidden while its spell is
-    -- ready. Dim is new, so its note says it needs testing.
-    local whenReady = Pills("When ready", 320, 0, 156, ns.WHEN_READY, ns.WHEN_READY_NAMES, "whenReady", {
-        show = "Every icon shows in full, ready or cooling down.",
-        dim = "Each icon dims while it's ready, so the ones cooling down stand out.",
-        hide = "Each icon hides while it's ready, so only the ones cooling down show.",
+    -- ready, under the sliders.
+    local whenReady = Pills("When ready", 0, -85, 156, ns.WHEN_READY, ns.WHEN_READY_NAMES, "whenReady", {
+        show = "Each icon shows in full while it's ready.",
+        dim = function() return "Each icon dims while it's ready, so the ones cooling down stand out." .. Both("onCooldown", "dim") end,
+        hide = function() return "Each icon hides while it's ready, so only the ones cooling down show." .. Both("onCooldown", "hide") end,
     })
     -- The label and its choices as one part, for the tour to outline: the
     -- label ends above the buttons, so a box hung from it sat too high.
     local readyPart = CreateFrame("Frame", nil, options)
-    readyPart:SetPoint("TOPLEFT", 320, 0)
+    readyPart:SetPoint("TOPLEFT", 0, -85)
     readyPart:SetSize(100 + 156, 20)
     whenReady.part = readyPart
+    -- On cooldown, under it: the other way round, each icon in full, dimmed
+    -- or hidden while its spell cools down (a player's idea). Its new
+    -- choices say they're experimental until seen in game.
+    local onCooldown = Pills("On cooldown", 0, -107, 156, ns.WHEN_READY, ns.WHEN_READY_NAMES, "onCooldown", {
+        show = "Every icon shows in full while it cools down.",
+        dim = function()
+            return "Each icon dims while it cools down, so the ones ready stand out. (experimental)" .. Both("whenReady", "dim")
+        end,
+        hide = function()
+            return "Each icon hides while it cools down, so only the ready ones show. (experimental)" .. Both("whenReady", "hide")
+        end,
+    })
+    -- And under that, an icon you can't cast now (blue, grey or red: no
+    -- mana, rage or energy, out of range, or not usable yet) dimmed too,
+    -- never more than dimmed: one hidden stays hidden. Off unless ticked.
+    local dimUnusable = Option("Dim when you can't cast it", "dimUnusable", -129,
+        "Dims an icon while you can't cast it: not enough mana, rage or energy, out of range, or not usable yet."
+            .. " (experimental)", 0)
+    -- And under that, how much of a dimmed icon shows (each Dim and the
+    -- tick), each bar its own, 40% as it always was. Greyed while nothing
+    -- on the bar dims.
+    local dimOpacity = T:Slider(options, "Dimmed icons", ns.BAR_LIMITS.dimOpacity, 5, 280, function(value)
+        B:SetOption(state.bar, "dimOpacity", value)
+    end, sliderLabel)
+    dimOpacity:SetPoint("TOPLEFT", 0, -151)
+    -- Its value as a share, "40%", with room for it up to the track.
+    dimOpacity.value:SetWidth(36)
+    local setDim = dimOpacity.Set
+    function dimOpacity:Set(value)
+        setDim(self, value)
+        self.value:SetText(value .. "%")
+    end
+    local function Dims(data)
+        return data.whenReady == "dim" or data.onCooldown == "dim" or data.dimUnusable == true
+    end
+    window:Hint(dimOpacity, function()
+        if not Dims(ns.BarData(state.bar)) then
+            return "Nothing on this bar dims yet. Pick Dim on When ready or On cooldown, or tick Dim when you can't cast it."
+        end
+        return "How much of a dimmed icon shows: lower is fainter. Used by Dim above and by Dim when you can't cast it."
+            .. " (experimental)"
+    end)
+    -- On cooldown, its tick and Dimmed icons as one part, for the page's walkthrough.
+    local cooldownPart = CreateFrame("Frame", nil, options)
+    cooldownPart:SetPoint("TOPLEFT", 0, -107)
+    cooldownPart:SetSize(280, 151 - 107 + 20)
+    onCooldown.part = cooldownPart
     -- Out of combat: show, fade or hide. The footer explains when bars come back.
-    local outOfCombat = Pills("Out of combat", 0, -85, 156, ns.OUT_OF_COMBAT, ns.OUT_OF_COMBAT_NAMES, "outOfCombat",
+    local outOfCombat = Pills("Out of combat", 320, 0, 156, ns.OUT_OF_COMBAT, ns.OUT_OF_COMBAT_NAMES, "outOfCombat",
         "Out of combat. Bars come back in full in combat, with an enemy targeted, while unlocked, and in Edit Mode.")
     local grow = Pills("Grow", 320, -63, 156, ns.GROW, ns.GROW_NAMES, "grow",
         "Which way a row grows as icons come and go: from its centre, or from its right or left edge.")
     local wrap = Pills("New rows", 320, -85, 110, ns.WRAP, ns.WRAP_NAMES, "wrap",
         "Where the next row goes when there are more icons than fit across.")
-    page.options = { whenReady = whenReady, showMissing = showMissing, onlyMissing = onlyMissing, showNames = showNames,
-        showTimer = showTimer, showAuras = showAuras, showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap }
+    page.options = { whenReady = whenReady, onCooldown = onCooldown, dimUnusable = dimUnusable, dimOpacity = dimOpacity,
+        showMissing = showMissing,
+        onlyMissing = onlyMissing, showNames = showNames, showTimer = showTimer, showAuras = showAuras, swapForm = swapForm,
+        editing = editing,
+        showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap }
 
     -- The spell list -------------------------------------------------------------------
     local listPanel = CreateFrame("Frame", nil, page, "BackdropTemplate")
@@ -680,8 +827,12 @@ function ns.BuildBarPage(window, page, width)
         local aura = ns.AURA_BARS[state.bar] ~= nil
         -- Your own entries: another class's, in a shared profile, stay hidden.
         local names, places = B:Mine(state.bar)
+        -- Closer on the Cooldowns and Utility bars (TIGHT), with no join buttons.
+        local cols, gap = aura and perRow or perRowTight, aura and GAP or TIGHT
         for n, key in ipairs(names) do
             local icon, i = TrayIcon(n), places[n]
+            icon:ClearAllPoints()
+            icon:SetPoint("TOPLEFT", 8 + ((n - 1) % cols) * (ICON + gap), -8 - math.floor((n - 1) / cols) * (ICON + gap))
             local entry = ns.Spells:Find(key)
             -- Named as in the list (two of one name read "Name (ID n)"); the
             -- self-debuff check below goes by the spell's own name.
@@ -697,7 +848,7 @@ function ns.BuildBarPage(window, page, width)
             local colour = joined and T:Accent() or T.MUTED
             icon.link.label:SetTextColor(colour[1], colour[2], colour[3])
             -- An icon starting a new row has its partner at the end of the row above.
-            icon.bridge:SetShown(joined and (n - 1) % perRow ~= 0)
+            icon.bridge:SetShown(joined and (n - 1) % cols ~= 0)
             icon:Show()
         end
         -- Icons not in use go, with their join button and line: those sit on
@@ -708,8 +859,8 @@ function ns.BuildBarPage(window, page, width)
             icon.link:Hide()
             icon.bridge:Hide()
         end
-        local lines = math.max(1, math.ceil(#names / perRow))
-        local trayHeight = 16 + lines * ICON + (lines - 1) * GAP
+        local lines = math.max(1, math.ceil(#names / cols))
+        local trayHeight = 16 + lines * ICON + (lines - 1) * gap
         tray:SetHeight(trayHeight)
         empty:SetShown(#names == 0)
         empty:SetText(EMPTY[state.bar])
@@ -719,7 +870,11 @@ function ns.BuildBarPage(window, page, width)
         if key ~= state.bar then
             state.bar, state.armed = key, nil
             scroll:ScrollTo(0)
+            FollowAgain()
         end
+        -- A bar swapping with your form shows the form you're in now, even
+        -- with your bars off (when nothing hears it change).
+        if ns.Swaps(key) and ns.FollowForm() then B:FormChanged() end
         local data = ns.BarData(key)
         local spells = B:Mine(key)
         local name = ns.BAR_NAMES[key]
@@ -756,8 +911,16 @@ function ns.BuildBarPage(window, page, width)
         end
         grow:SetSelected(data.grow)
         wrap:SetSelected(data.wrap)
-        whenReady:SetShown(not aura)
-        whenReady.label:SetShown(not aura)
+        -- When ready, On cooldown, its tick and Dimmed icons: the cooldown
+        -- bars only, two rows taller for them.
+        for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity }) do
+            part:SetShown(not aura)
+        end
+        options:SetHeight(aura and OPTIONS or OPTIONS_TALL)
+        onCooldown:SetSelected(data.onCooldown)
+        dimUnusable:SetChecked(data.dimUnusable)
+        dimOpacity:Set(data.dimOpacity)
+        dimOpacity:SetUsable(Dims(data))
         showMissing:SetShown(aura ~= nil)
         showMissing.text:SetText("Show missing " .. word .. "s greyed")
         onlyMissing:SetShown(key == "buff")
@@ -772,6 +935,22 @@ function ns.BuildBarPage(window, page, width)
         showTimer:SetChecked(data.showTimer)
         showAuras:SetShown(not aura)
         showAuras:SetChecked(data.showAuras)
+        -- Swap with my form, for a character who knows a form; Editing
+        -- with it ticked, naming whose icons show.
+        local forms = not aura and #ns.KnownForms() > 0
+        swapForm:SetShown(forms)
+        swapForm:SetChecked(data.swapForm)
+        if forms then
+            local label = ns.SwapWords().label
+            if swapForm.text:GetText() ~= label then
+                swapForm.text:SetText(label)
+                swapForm:SetWidth(18 + (swapForm.text:GetStringWidth() or 0)) -- the label is its click area
+            end
+        end
+        local picking = forms and data.swapForm
+        editing:SetShown(picking)
+        editing.label:SetShown(picking)
+        if picking then editing.name:SetText(ns.FormName(ns.ShownForm(key))) end
         showSelf:SetShown(aura ~= nil)
         showSelf:SetChecked(data.selfDebuffs)
         if aura then

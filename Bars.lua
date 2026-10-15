@@ -1,8 +1,8 @@
 -- The addon's own bars: rows of square frameless icons for the spells you
 -- pick. Cooldowns are secret in combat, so each icon hands the game's
--- duration object straight to its sweep, greying and dim or hide when ready
--- without ever reading it; only the open "usable" and range checks are read
--- here.
+-- duration object straight to its sweep, greying and its dim or hide (when
+-- ready, or on cooldown) without ever reading it; only the open "usable" and
+-- range checks are read here.
 -- The icons never take the mouse, so they can't get in the way in combat.
 local _, ns = ...
 
@@ -31,23 +31,36 @@ local unlocked, inCombat, editMode = false, false, false
 -- colour and glow (tinting: usable, in range, lit by the game).
 local dirty, cooling, tinting = false, false, false
 local FADE = .3 -- a faded bar's opacity out of combat
-local DIM = .4 -- a ready icon's opacity on a bar that dims them
-local READY_ALPHA = { show = 1, dim = DIM, hide = 0 }
+-- A dimmed icon's opacity in percent (When ready, On cooldown, or one you
+-- can't cast), unless its bar says otherwise: each bar has its own.
+local DIM = ns.BAR_LIMITS.dimOpacity[3]
+local SHOWN = { show = 1, hide = 0 } -- each choice's opacity, and Dim the bar's own
 
 local function Open(value)
     return not (issecretvalue and issecretvalue(value))
 end
 
--- How a ready icon shows: "show", "dim" or "hide". Dimming and hiding wait
--- while the bars are being arranged (unlocked, or in Edit Mode), so every
--- icon on them can be seen in full.
-local function WhenReady(data)
-    if unlocked or editMode then return "show" end
-    return data.whenReady
+-- An icon's opacity while its spell cools down and while it's ready: in
+-- full (1), dimmed (the bar's Dimmed icons, 40% unless chosen) or hidden
+-- (0), as its bar's On cooldown and When ready say. On a bar that dims what
+-- you can't cast, one you can't cast now (blue, grey or red) is never more
+-- than dimmed; a hidden one stays hidden. Dimming and hiding wait while the
+-- bars are being arranged (unlocked, or in Edit Mode), so every icon on
+-- them can be seen in full.
+local function Alphas(data, cantCast)
+    if unlocked or editMode then return 1, 1 end
+    local dim = (type(data.dimOpacity) == "number" and data.dimOpacity or DIM) / 100
+    local cooling = data.onCooldown == "dim" and dim or SHOWN[data.onCooldown] or 1
+    local ready = data.whenReady == "dim" and dim or SHOWN[data.whenReady] or 1
+    if cantCast and data.dimUnusable then return math.min(cooling, dim), math.min(ready, dim) end
+    return cooling, ready
 end
 
-local function HidesReady(data)
-    return WhenReady(data) == "hide"
+-- Whether a bar hides its icons while ready or while cooling down, so they
+-- come and go.
+local function Hides(data)
+    local cooling, ready = Alphas(data, false)
+    return cooling == 0 or ready == 0
 end
 
 -- Bag items, healthstones and potions you carry none of, by their key on the
@@ -61,16 +74,19 @@ local function Absent(name)
     return absent[name] == true and not (unlocked or editMode)
 end
 
--- Reads again which of the items on your cooldown bars you carry none of.
--- Anything the game won't say keeps what was known. True when any changed.
+-- Reads again which of the items on your cooldown bars you carry none of
+-- (on any of their lists: each form's too, Swap with my form). Anything the
+-- game won't say keeps what was known. True when any changed.
 local function Recount()
     if InCombatLockdown() then return false end
     local now, changed = {}, false
     for _, key in ipairs(ns.BAR_KEYS) do
         if not ns.AURA_BARS[key] then
-            for _, name in ipairs(ns.BarData(key).spells) do
-                local have = ns.Spells:Carries(ns.Spells:Find(name))
-                if have == nil then now[name] = absent[name] else now[name] = not have or nil end
+            for _, spells in ipairs(ns.BarLists(key)) do
+                for _, name in ipairs(spells) do
+                    local have = ns.Spells:Carries(ns.Spells:Find(name))
+                    if have == nil then now[name] = absent[name] else now[name] = not have or nil end
+                end
             end
         end
     end
@@ -205,7 +221,7 @@ local function NewIcon(bar)
     icon.cooldown:SetDrawEdge(false)
     icon.cooldown:SetDrawBling(false)
     -- Events arrive when a cooldown starts, not when it ends; this catches the
-    -- end, so the icon ungreys (or dims or hides when ready) on time.
+    -- end, so the icon ungreys (and dims, hides or shows again, as chosen) on time.
     icon.cooldown:SetScript("OnCooldownDone", function() cooling = true end)
     -- Item counts and the keybind sit above the sweep.
     local top = CreateFrame("Frame", nil, icon)
@@ -260,23 +276,35 @@ local function Tint(icon, tint)
 end
 
 -- The icon's opacity when it's a plain number, only set when it changes.
--- Dim or Hide when ready hands the game a secret answer instead (Fade), and
--- the next plain one is set again after it.
+-- One that differs while cooling down and while ready (When ready, On
+-- cooldown) hands the game a secret answer instead (Fade), and the next
+-- plain one is set again after it.
 local function Alpha(icon, alpha)
     if icon.alpha == alpha then return end
     icon.alpha = alpha
     icon:SetAlpha(alpha)
 end
 
-local function Fade(icon, active, dim)
+-- The game picks: cooling while active, ready while not.
+local function Fade(icon, active, cooling, ready)
     icon.alpha = nil
-    if dim then icon:SetAlphaFromBoolean(active, 1, DIM) else icon:SetAlphaFromBoolean(active) end
+    icon:SetAlphaFromBoolean(active, cooling, ready)
 end
 
 -- Trinkets and bag items. Their cooldowns come back as plain numbers; if the
 -- game ever hides them in combat, the icon simply keeps its last state.
+-- Whether one can be used now is read first: on a bar that dims what you
+-- can't use, it goes into the opacity too.
 local function RefreshItem(icon, data, follows)
     if follows and icon.kind == "family" then Follow(icon) end
+    local usable, noMana = C_Item.IsUsableItem(icon.itemID)
+    local tint = TINT.ready
+    if Open(usable) and usable == false then
+        tint = Open(noMana) and noMana and TINT.mana or TINT.unusable
+    end
+    Tint(icon, tint)
+    icon.cantCast = tint ~= TINT.ready
+    SetGlow(icon, false)
     local start, duration
     if icon.kind == "slot" then
         start, duration = GetInventoryItemCooldown("player", icon.slot)
@@ -287,7 +315,8 @@ local function RefreshItem(icon, data, follows)
         local active = start > 0 and duration > 1.5
         if active then icon.cooldown:SetCooldown(start, duration) else icon.cooldown:Clear() end
         icon.texture:SetDesaturated(active)
-        Alpha(icon, active and 1 or READY_ALPHA[WhenReady(data)])
+        local cooling, ready = Alphas(data, icon.cantCast)
+        Alpha(icon, active and cooling or ready)
     end
     local count
     if icon.kind == "item" or icon.kind == "family" then
@@ -297,13 +326,6 @@ local function RefreshItem(icon, data, follows)
             if count == 0 then icon.texture:SetDesaturated(true) end
         end
     end
-    local usable, noMana = C_Item.IsUsableItem(icon.itemID)
-    local tint = TINT.ready
-    if Open(usable) and usable == false then
-        tint = Open(noMana) and noMana and TINT.mana or TINT.unusable
-    end
-    Tint(icon, tint)
-    SetGlow(icon, false)
 end
 
 -- Your ammunition: how many you carry, greyed when you're out.
@@ -318,6 +340,9 @@ local function RefreshAmmo(icon)
     icon.cooldown:Clear()
     Alpha(icon, 1)
     Tint(icon, TINT.ready)
+    -- Ammo is never "can't cast". Icons are reused by place, so this clears
+    -- what a spell or item there before left for the debug report.
+    icon.cantCast = false
     SetGlow(icon, false)
 end
 
@@ -325,7 +350,10 @@ end
 local ITEM_KINDS = { item = true, slot = true, family = true, ammo = true }
 
 -- A spell's cooldown: on the sweep, grey while it cools down, and in full,
--- dimmed or hidden while it's ready. Redone as cooldowns start or end.
+-- dimmed or hidden while it cools down and while it's ready, as chosen.
+-- Redone as cooldowns start or end. The global cooldown is left out (as for
+-- the grey), so a cast never dims or hides the rest for a moment; a spell
+-- with charges cools down, as the game says, only with none left.
 local function SpellCooldown(icon, data)
     local id = icon.spellID
     local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(id, true)
@@ -334,12 +362,14 @@ local function SpellCooldown(icon, data)
         -- Secret in combat: passed to the game as it is, never tested here.
         local active = duration:IsActive()
         icon.texture:SetDesaturated(active)
-        -- In full while it cools down; dimmed or hidden while it's ready.
-        local ready = WhenReady(data)
-        if ready == "show" or not icon.SetAlphaFromBoolean then
-            Alpha(icon, 1)
+        -- The same either way is set as it is; otherwise the game picks.
+        local cooling, ready = Alphas(data, icon.cantCast)
+        if cooling == ready then
+            Alpha(icon, ready)
+        elseif icon.SetAlphaFromBoolean then
+            Fade(icon, active, cooling, ready)
         else
-            Fade(icon, active, ready == "dim")
+            Alpha(icon, 1)
         end
     else
         icon.cooldown:Clear()
@@ -350,7 +380,10 @@ end
 
 -- A spell's colour and glow: whether it can be used, has the mana, reaches
 -- your target, and is lit by the game. Redone as the game says one of these
--- changed (usable, in or out of range, a glow, a new target).
+-- changed (usable, in or out of range, a glow, a new target). These answers
+-- are open in a fight (only the cooldown is secret); one the game hides
+-- counts as castable. True when whether you can cast it changed: the icon is
+-- tinted (blue, grey or red) now and wasn't, or the other way round.
 local function SpellState(icon, hasTarget)
     local id = icon.spellID
     local usable, noMana = C_Spell.IsSpellUsable(id)
@@ -366,15 +399,21 @@ local function SpellState(icon, hasTarget)
     -- Lit when the game lights it on your action bars, or, for a reactive
     -- ability the game doesn't light (Overpower after a dodge), once usable.
     SetGlow(icon, Overlayed(id) or (icon.reactive and Open(usable) and usable == true) or false)
+    local cantCast = tint ~= TINT.ready
+    if icon.cantCast == cantCast then return false end
+    icon.cantCast = cantCast
+    return true
 end
 
 -- One icon: all of it, or just its cooldown ("cooldown") or its colour and
--- glow ("state"). Items and ammo are few, so read in full either way.
+-- glow ("state"). Items and ammo are few, so read in full either way. The
+-- colour goes first: on a bar that dims what you can't cast, a change there
+-- sets the icon's opacity again, with its cooldown.
 local function RefreshIcon(icon, data, hasTarget, follows, part)
     if icon.kind == "ammo" then return RefreshAmmo(icon) end
     if ITEM_KINDS[icon.kind] then return RefreshItem(icon, data, follows) end
-    if part ~= "state" then SpellCooldown(icon, data) end
-    if part ~= "cooldown" then SpellState(icon, hasTarget) end
+    local changed = part ~= "cooldown" and SpellState(icon, hasTarget)
+    if part ~= "state" or (changed and data.dimUnusable) then SpellCooldown(icon, data) end
 end
 
 -- Range: the game says when a spell on your bars goes in or out of range of
@@ -562,12 +601,13 @@ end
 
 -- The border and shadow round a whole bar, when chosen, only go round icons
 -- that stay put. Packed Buffs and Debuffs, Only show missing and a bar that
--- hides when ready come and go (like Blizzard's Tracked Buffs), so they'd
--- leave an empty box behind, as would the greyed Debuffs spots while there's
--- no enemy. A bar that dims its ready icons keeps them in place, and its box.
+-- hides when ready or on cooldown come and go (like Blizzard's Tracked
+-- Buffs), so they'd leave an empty box behind, as would the greyed Debuffs
+-- spots while there's no enemy. A bar that dims its icons keeps them in
+-- place, and its box.
 local function Steady(key, data)
     if ns.AURA_BARS[key] then return ns.BuffBar:Fixed(data) end
-    return not HidesReady(data)
+    return not Hides(data)
 end
 
 local function BarDecor(bar)
@@ -835,7 +875,12 @@ local function Layout(bar)
     follow = true
     local size, spacing = ns.IconSize(data), data.spacing
     local count, on = 0, B:Enabled()
-    for _, name in ipairs(data.spells) do
+    -- The list it's laid out from: with Swap with my form, your form's, so a
+    -- change of form (or of the list the bar's page sets up) lays it out
+    -- again only when that list isn't this one (B:FormChanged).
+    local spells = data.spells
+    bar.list = spells
+    for _, name in ipairs(spells) do
         local entry = ns.Spells:Find(name)
         if entry and ns.Spells:ForMe(name, bar.key) and not Absent(name) then
             count = count + 1
@@ -922,8 +967,10 @@ end
 
 -- For /ccm debug (Debug.lua): each of your bars and the icons on it as they
 -- are now: what each is, whether it's reactive, the game's usable answer,
--- and its glow; on the Buffs and Debuffs bars, each entry's spells. say
--- turns a secret answer into "secret".
+-- its glow and whether it was last read as one you can't cast; on the Buffs
+-- and Debuffs bars, each entry's spells. Under a cooldown bar's icons, how
+-- they show when ready and on cooldown (a player asking why theirs are
+-- faded). say turns a secret answer into "secret".
 function B:Report(add, say)
     add("Use my bars: " .. tostring(self:Enabled()))
     for _, key in ipairs(ns.BAR_KEYS) do
@@ -940,10 +987,23 @@ function B:Report(add, say)
                     if icon.spellID and C_Spell.IsSpellUsable then usable, noMana = C_Spell.IsSpellUsable(icon.spellID) end
                     local glow = icon.glow
                     local loop = glow.proc and (", loop " .. tostring(glow.ProcLoop:IsPlaying())) or ""
-                    add(("  %d. %s | %s %s | reactive %s | usable %s, no mana %s | glow %s (%s%s) | size %s | range watched %s"):format(i,
-                        say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID), tostring(icon.reactive), say(usable), say(noMana),
-                        tostring(glow:IsShown()), glow.proc and "proc" or "edge", loop, say(icon:GetWidth()), tostring(icon.ranged == true)))
+                    add(("  %d. %s | %s %s | reactive %s | usable %s, no mana %s | glow %s (%s%s) | size %s | range watched %s"
+                        .. " | can't cast %s"):format(i, say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID),
+                        tostring(icon.reactive), say(usable), say(noMana), tostring(glow:IsShown()), glow.proc and "proc" or "edge", loop,
+                        say(icon:GetWidth()), tostring(icon.ranged == true), tostring(icon.cantCast == true)))
                 end
+            end
+            if not aura then
+                local data = bar.data
+                -- Swap with my form: the game's answers now, and whose list
+                -- the bar shows (one picked on its page says so).
+                if data.swapForm then
+                    add(("  swap with my form: form %s, stealthed %s, showing %s%s"):format(
+                        say(GetShapeshiftFormID and GetShapeshiftFormID()), say(IsStealthed and IsStealthed()),
+                        ns.FormName(ns.ShownForm(key)), ns.ShownForm(key) ~= ns.FormNow() and " (picked on its page)" or ""))
+                end
+                add(("  when ready %s, on cooldown %s, dim when you can't cast it %s, dimmed icons %s%%"):format(
+                    tostring(data.whenReady), tostring(data.onCooldown), tostring(data.dimUnusable), tostring(data.dimOpacity)))
             end
         end
     end
@@ -1165,12 +1225,17 @@ end
 -- if they're turned off again.
 local Listen -- the driver's events, with the driver below
 local HearAuras -- and whether it hears your buffs change (Only show missing)
+local HearForms -- and your form (Swap with my form)
 
--- Lays the bars out again with your spells and items as they are now. Off,
--- bars made earlier are laid out with nothing watched and hidden, and none
--- are made.
+-- Lays the bars out again with your spells and items as they are now (and
+-- the form you're in, for a bar swapping with it). Off, bars made earlier
+-- are laid out with nothing watched and hidden, and none are made.
 local function Rebuild()
     Listen()
+    -- A spell on both cooldown bars in a form (in a profile switched to, or
+    -- one made from a string) stays on Cooldowns.
+    ns.KeepApart()
+    ns.FollowForm()
     if B:Enabled() or next(bars) then
         ns.Spells:Fresh()
         Recount()
@@ -1264,7 +1329,7 @@ end
 -- slots are for your own icons, one per joined group; its list has room for
 -- more. B:Assign and B:SetAura go by it, and so do the checks before a drop.
 local function Space(key, name)
-    if OnBar(key, name) then return true end
+    if OnBar(key, name) or IndexOf(key, name) then return true end
     if #ns.BarData(key).spells >= ns.BAR_MAX_SPELLS then return false end
     return not ns.AURA_BARS[key] or B:SlotsUsed(key) < ns.BUFF_SLOTS
 end
@@ -1330,16 +1395,31 @@ local function Take(key, index)
     return name
 end
 
+-- Takes an entry off the other cooldown bar's lists that show beside this
+-- bar's list now (ns.BesideLists): with Swap with my form the two bars'
+-- lists can differ by form, and a spell sits on one of the two in each.
+local function Apart(key, name)
+    for _, list in ipairs(ns.BesideLists(key, ns.ShownForm(key))) do
+        for i = #list, 1, -1 do
+            if list[i] == name then table.remove(list, i) end
+        end
+    end
+end
+
 -- Puts a spell on the Cooldowns or Utility bar, or takes it off with no bar;
--- it sits on one of the two at a time. Returns false when the bar is full.
+-- it sits on one of the two at a time, in every form. Never twice on a list.
+-- Returns false when the bar is full.
 function B:Assign(name, key)
     local current, index = self:Find(name)
     if current == key then return true end
     if key and not Space(key, name) then return false end
     if current then Take(current, index) end
     if key then
-        local spells = ns.BarData(key).spells
-        spells[#spells + 1] = name
+        if not IndexOf(key, name) then
+            local spells = ns.BarData(key).spells
+            spells[#spells + 1] = name
+        end
+        Apart(key, name)
     end
     self:Changed()
     return true
@@ -1804,11 +1884,17 @@ function B:Trade(from, name, to, other)
     end
     ns.BarData(from).spells[a], ns.BarData(to).spells[b] = other, name
     -- Neither is joined to anything, and nor is either in its new place.
+    -- Between the two cooldown bars each leaves the other's lists in the
+    -- forms its new place shows in (B:Assign).
     for _, key in ipairs({ from, to }) do
         if ns.AURA_BARS[key] then
             local joins = ns.Joins(key)
             joins[name], joins[other] = nil, nil
         end
+    end
+    if not (ns.AURA_BARS[from] or ns.AURA_BARS[to]) then
+        Apart(to, name)
+        Apart(from, other)
     end
     self:Changed()
     return true, Swapped(name, other)
@@ -1818,11 +1904,23 @@ end
 -- the size slider sends a change for every step it's dragged.
 function B:SetOption(key, field, value)
     ns.BarData(key)[field] = value
+    -- Swap with my form ticked or unticked: the lists that show beside each
+    -- other from now on keep a spell off both cooldown bars. Ticked, this
+    -- bar's form lists kept from before give way to the other bar's;
+    -- unticked, its normal list (now in every form) keeps what's on it. Any
+    -- change there lays every bar out again.
+    local apart = field == "swapForm" and ns.KeepApart(value and (key == "cd" and "util" or "cd") or key)
     if not self.started then return end
+    if apart then return self:Rebuild() end
+    -- Swap with my form ticked: the form you're in now, read before the bar
+    -- shows its list.
+    ns.FollowForm()
     -- None are made while off: that waits for them to be turned on.
     if bars[key] or self:Enabled() then Layout(bars[key] or NewBar(key)) end
-    -- Only show missing ticked or unticked: your buffs changing are heard or not.
+    -- Only show missing ticked or unticked: your buffs changing are heard or
+    -- not; and the same for your form, with Swap with my form.
     HearAuras()
+    HearForms()
     self:UpdateShown()
     self:RefreshAll()
     -- A bar in a layout may now be taller or shorter.
@@ -1863,6 +1961,28 @@ end
 function B:Relayout(key)
     if not (self.started and (bars[key] or self:Enabled())) then return end
     Layout(bars[key] or NewBar(key))
+end
+
+-- Swap with my form: each Cooldowns or Utility bar whose list changed (your
+-- form, or the one its page sets up) laid out again with the new one, at
+-- once and in a fight too: the addon's own icons only, as for an item
+-- running out (Relay). Its spot, size and every other setting stay. True
+-- when any bar was.
+function B:FormChanged()
+    if not self.started then return false end
+    local changed = false
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = bars[key]
+        if bar and bar.kind == "cooldown" and ns.ActiveList(key) ~= bar.list then
+            Layout(bar)
+            changed = true
+        end
+    end
+    if not changed then return false end
+    self:UpdateShown()
+    self:RefreshAll()
+    if ns.Layout then ns.Layout:Stack() end
+    return true
 end
 
 -- The entries on a bar that show there for no one (Spells.lua S:Leftover:
@@ -1958,10 +2078,17 @@ local LIFTED = { "ADDON_RESTRICTION_STATE_CHANGED", "ENCOUNTER_END" }
 -- Reads again since the game last answered in full, or since a fight ended
 -- or its restrictions changed (Again), and whether one is on its way.
 local tries, waiting = 0, false
+-- Your form, stance or stealth changing, heard only while a bar swaps with
+-- your form (each event the game lacks is left out): the bars follow on the
+-- next frame, however many came at once.
+local FORM_EVENTS = { UPDATE_SHAPESHIFT_FORM = true, UPDATE_SHAPESHIFT_FORMS = true, UPDATE_STEALTH = true }
+local shifting = false
 
 local function OnEvent(_, event, arg)
     if event == "UNIT_AURA" then
         checking = true
+    elseif FORM_EVENTS[event] then
+        shifting = true
     elseif event == "ADDON_RESTRICTION_STATE_CHANGED" or event == "ENCOUNTER_END" then
         -- Buffs the game wouldn't answer for may be readable now: read on
         -- the next frame (not as the event comes, when the game may not
@@ -1975,6 +2102,13 @@ local function OnEvent(_, event, arg)
         -- is, just before the fight locks it in place.
         for key in pairs(ns.AURA_BARS) do
             if bars[key] then Drop(bars[key]) end
+        end
+        -- Another form's list picked on the bar's page (Swap with my form)
+        -- lets go: in a fight your bars follow your form.
+        if ns.EditingForm() ~= nil then
+            ns.SetEditingForm(nil)
+            B:FormChanged()
+            if ns.window and ns.window:IsShown() then ns.window:Refresh() end
         end
         B:UpdateShown()
     elseif event == "PLAYER_REGEN_ENABLED" then
@@ -2010,6 +2144,9 @@ local function OnEvent(_, event, arg)
         else
             dirty = true
         end
+        -- Your form read again on the next frame (Swap with my form): one
+        -- the game kept secret in the fight shows now.
+        shifting = true
         -- Turned off during the fight: done now, so the driver rests. Your
         -- buffs changing are heard again (Only show missing).
         Listen()
@@ -2058,6 +2195,12 @@ local function Tick()
         checking = false
         Missing(bars.buff)
     end
+    -- Your form changed: read once, and each bar swapping with it shows that
+    -- form's list (B:FormChanged), when it's another; so does /ccm, open.
+    if shifting then
+        shifting = false
+        if ns.FollowForm() and B:FormChanged() and ns.window and ns.window:IsShown() then ns.window:Refresh() end
+    end
     if not (dirty or cooling or tinting) then return end
     local part
     if not dirty and not (cooling and tinting) then part = cooling and "cooldown" or "state" end
@@ -2082,6 +2225,19 @@ HearAuras = function()
         for _, event in ipairs(LIFTED) do pcall(driver.UnregisterEvent, driver, event) end
         checking = false
     end
+end
+
+-- Your form changing is heard only while your bars are on and a bar swaps
+-- with your form: in a fight too, as that's when you change form most.
+local forming = false
+HearForms = function()
+    local want = listening and ns.AnySwaps() or false
+    if want == forming then return end
+    forming = want
+    for event in pairs(FORM_EVENTS) do
+        if want then pcall(driver.RegisterEvent, driver, event) else pcall(driver.UnregisterEvent, driver, event) end
+    end
+    if not want then shifting = false end
 end
 
 -- The Buffs bar's last read (Missing, or its layout) left some of your buffs
@@ -2128,13 +2284,14 @@ local function Switch()
     else
         driver:UnregisterAllEvents()
         driver:SetScript("OnUpdate", nil)
-        hearing, checking = false, false
+        hearing, checking, forming, shifting = false, false, false, false
     end
 end
 
 Listen = function()
     Switch()
     HearAuras()
+    HearForms()
 end
 
 function B:Start()

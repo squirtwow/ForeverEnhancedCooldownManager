@@ -492,6 +492,11 @@ local function Environment(keepCVars)
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
+    -- Your form (Form: its ID, nil for none, or SECRET) and whether you're
+    -- stealthed, as the game says; each ask counted (FormReads).
+    Form, Stealthed, FormReads = nil, false, 0
+    _G.GetShapeshiftFormID = function() FormReads = FormReads + 1; return Typed("number", Form) end
+    _G.IsStealthed = function() return Typed("boolean", Stealthed) end
     -- A Skyborne, so Walk on Air (in the spellbook) is your own racial.
     _G.UnitRace = function(unit) assert(unit == "player"); return "Skyborne", "Skyborne", 96 end
     _G.UnitPower = function() return 0 end
@@ -756,7 +761,7 @@ end
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
-    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
+    for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
         "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
@@ -797,7 +802,7 @@ local function BlizzardFrames()
 end
 
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
-local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Spells.lua",
+local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
     "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
     "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
@@ -1021,6 +1026,53 @@ do
     Equal(Tint(moon), "1 1 1", "a hidden range answer, and an event with hidden values, never read")
     range[8924] = nil
 
+    -- Dim when you can't cast it: only a change in whether you can feeds a
+    -- spell's cooldown again (its opacity takes both), that spell's alone;
+    -- nothing while nothing changes, and nothing at all unticked.
+    B:SetOption("cd", "dimUnusable", true)
+    game = Measure(function()
+        Fire("SPELL_UPDATE_USABLE")
+        NextFrame(ns)
+    end)
+    Equal(Counts(game, "GetSpellCooldownDuration", "SetAlpha", "SetAlphaFromBoolean"), "0 0 0",
+        "ticked, nothing changed: no cooldown read, no opacity set")
+    usable[8924], noMana[8924] = false, true
+    game = Measure(function()
+        Fire("SPELL_UPDATE_USABLE")
+        NextFrame(ns)
+    end)
+    Equal(S[moon].alpha .. " | " .. Counts(game, "GetSpellCooldownDuration", "SetAlpha"), "0.4 | 1 1",
+        "out of mana: Moonfire alone fed again, and dimmed")
+    game = Measure(function()
+        Fire("SPELL_UPDATE_USABLE")
+        NextFrame(ns)
+    end)
+    Equal(Counts(game, "GetSpellCooldownDuration", "SetAlpha"), "0 0", "still out of mana: nothing again")
+    range[8924] = false
+    game = Measure(function()
+        Fire("SPELL_RANGE_CHECK_UPDATE", 8924, false, true)
+        NextFrame(ns)
+    end)
+    Equal(Tint(moon) .. " " .. S[moon].alpha .. " | " .. Counts(game, "GetSpellCooldownDuration", "SetAlpha"), "0.64 0.15 0.15 0.4 | 0 0",
+        "out of range as well: red now, still can't cast it, so its opacity is left as it is")
+    usable[8924], noMana[8924], range[8924] = nil, nil, nil
+    game = Measure(function()
+        Fire("SPELL_RANGE_CHECK_UPDATE", 8924, true, true)
+        NextFrame(ns)
+    end)
+    Equal(S[moon].alpha .. " | " .. Counts(game, "GetSpellCooldownDuration", "SetAlpha"), "1 | 1 1", "castable again: in full, fed once")
+    B:SetOption("cd", "dimUnusable", false)
+    usable[8924], noMana[8924] = false, true
+    game = Measure(function()
+        Fire("SPELL_UPDATE_USABLE")
+        NextFrame(ns)
+    end)
+    Equal(S[moon].alpha .. " | " .. Counts(game, "GetSpellCooldownDuration", "SetAlpha"), "1 | 0 0",
+        "unticked: out of mana reads no cooldown, and it stays in full")
+    usable[8924], noMana[8924] = nil, nil
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame(ns)
+
     -- A new target: colours and glows (range, Execute's usable), no cooldowns.
     game = Measure(function()
         target = false
@@ -1070,6 +1122,16 @@ do
     Fire("SPELL_UPDATE_USABLE")
     NextFrame(ns)
     Equal(tostring(S[moon].alphaFrom) .. " " .. Tint(moon), "secret 1 1 1", "in a fight: secrets handed on to the game or left unread")
+    -- On cooldown and Dim when you can't cast it too: the cooldown handed
+    -- on, a hidden usable answer taken as castable.
+    B:SetOption("cd", "onCooldown", "hide")
+    B:SetOption("cd", "dimUnusable", true)
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame(ns)
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf .. " " .. Tint(moon), "secret 0 0.4 1 1 1",
+        "in a fight: hidden while cooling down, dimmed while ready, by the game; nothing dimmed for a hidden answer")
+    B:SetOption("cd", "onCooldown", "show")
+    B:SetOption("cd", "dimUnusable", false)
     B:SetOption("cd", "whenReady", "show")
     active, usable[8924], range[8924] = false, nil, nil
     lockdown = false
