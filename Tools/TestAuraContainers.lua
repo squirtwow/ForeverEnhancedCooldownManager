@@ -1604,7 +1604,7 @@ do
 end
 
 -- Two spells of one name: GitHub issue 1 ------------------------------------------------------------
--- The Skyborne's Read Ley Line gives two buffs both called Energized: 1270842
+-- The Skyborne's Read Leyline gives two buffs both called Energized: 1270842
 -- (15 seconds) and 1259691 (15 minutes). With 1259691 on the Buffs bar, the
 -- page's search found no 1270842 ("No matches"), and adding it by ID only
 -- gave the first entry a second ID: one icon lit by either. Now it goes on
@@ -1618,7 +1618,7 @@ end
     Fresh()
     local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
     local B, Sp = ns.Bars, ns.Spells
-    local NAMES = { [1259691] = "Energized", [1270842] = "Energized", [1259705] = "Read Ley Line" }
+    local NAMES = { [1259691] = "Energized", [1270842] = "Energized", [1259705] = "Read Leyline" }
     local function Named()
         local game = C_Spell.GetSpellName
         C_Spell.GetSpellName = function(id) return NAMES[id] or game(id) end
@@ -1917,7 +1917,7 @@ end)()
 -- show: a rogue's poison is made by one spell and put on the target by
 -- another of its name (Deadly Poison 2835 makes it, 2818 is the debuff),
 -- Bloodrage's rage buff is 29131, a totem's buff on everyone near it is
--- its own spell, and the Skyborne's Read Ley Line and Skysight set off
+-- its own spell, and the Skyborne's Read Leyline and Skysight set off
 -- Energized and Elemental Blessing. The game data links each spell to those
 -- auras (Ranks.lua ns.SPELL_AURAS, and by the aura's name ns.NAME_AURAS),
 -- so its entry lights for them on the Buffs and Debuffs bars and in the
@@ -1945,7 +1945,7 @@ end)()
         end
         return nil
     end
-    -- From the game data (build 70338).
+    -- From the game data (build 70425).
     local links = data.SPELL_AURAS
     Equal(Joined(links[2835]) .. " | " .. Joined(links[13220]) .. " | " .. Joined(links[3421]) .. " | " .. Joined(links[2687]) .. " | "
         .. Joined(links[1856]) .. " | " .. Joined(links[1238122]) .. " | " .. Joined(links[5246]) .. " | " .. Joined(links[11129]),
@@ -1955,7 +1955,7 @@ end)()
     Equal(Joined(links[1259705]) .. " | " .. Joined(links[1259686]) .. " | " .. Joined(links[8512]) .. " | " .. Joined(links[8227])
         .. " | " .. Joined(links[400574]) .. " | " .. Joined(links[1240827]) .. " | " .. Joined(links[1499]) .. " | " .. Joined(links[13809]),
         "1259691,1270842 | 1259688,1270893 | 8515,10609,10612 | 8230,8250,10521,15036 | 400573 | 401877,1240848,1240849"
-        .. " | 3355,14308,14309 | 13810", "Read Ley Line to both Energized, Skysight to both Elemental Blessing, a totem to its"
+        .. " | 3355,14308,14309 | 13810", "Read Leyline to both Energized, Skysight to both Elemental Blessing, a totem to its"
         .. " buff (not Windfury's moment's extra attack, 8516), Arcane Blast to its stacks, Prayer of Mending to every rank's buff,"
         .. " the traps to theirs")
     Equal(Joined(FamilyOf(8076)) .. " | " .. Joined(FamilyOf(19506)) .. " | " .. tostring(Has(FamilyOf(1248406), 1248420, 19709))
@@ -2117,16 +2117,16 @@ end)()
 
     -- The Skyborne's racials in the spellbook, on the Buffs bar: each lights
     -- for both buffs it gives, and the two Energized still go on one each.
-    Start("DRUID", nil, { { name = "Read Ley Line", subName = "Racial", spellID = 1259705, iconID = 1 },
+    Start("DRUID", nil, { { name = "Read Leyline", subName = "Racial", spellID = 1259705, iconID = 1 },
         { name = "Skysight", subName = "Racial", spellID = 1259686, iconID = 1 } })
-    B:SetAura("buff", "Read Ley Line", true)
+    B:SetAura("buff", "Read Leyline", true)
     B:SetAura("buff", "Skysight", true)
     Equal(Watched("buff") .. " | " .. Lit("buff", 1270842) .. " | " .. Lit("buff", 1259691) .. " | " .. Lit("buff", 1259688) .. " | "
         .. Lit("buff", 1270893), "g1 1259691,1259705,1270842 | g2 1259686,1259688,1270893 | g1 | g1 | g2 | g2",
-        "Read Ley Line lights for either Energized, Skysight for either Elemental Blessing")
+        "Read Leyline lights for either Energized, Skysight for either Elemental Blessing")
     Said("buff", "1259691")
     Equal(Said("buff", "1270842") .. " | " .. List("buff") .. " | " .. Custom("Energized"),
-        "true Added Energized (ID 1270842) to Buffs. | Read Ley Line,Skysight,Energized,Energized#1270842 | 1259691",
+        "true Added Energized (ID 1270842) to Buffs. | Read Leyline,Skysight,Energized,Energized#1270842 | 1259691",
         "beside them, the two Energized still go on one each")
     Equal(#printed, 0, "no errors")
 
@@ -2187,6 +2187,90 @@ end)()
     Equal(tostring(Sp:ForMe("Immolation Trap Effect", "debuff")) .. " " .. B:Get("debuff").count, "false 0",
         "a druid sharing the profile doesn't see them")
     Equal(#printed, 0, "no errors")
+
+    -- Build 70425 renamed the Skyborne's Read Ley Line (Read Leyline) and
+    -- the paladin's Blessing of Salvation and Greater Blessing of Salvation
+    -- (Salvation and Mass Salvation), keeping their IDs; and brought Frost
+    -- Blast, Revoke, a fourth Mana Tide Totem (its buff one of the Mana Tide
+    -- family) and Reckoning's buff.
+    Equal(tostring(data.RANKS["Read Ley Line"]) .. " " .. Joined(data.RANKS["Read Leyline"]) .. " " .. tostring(data.SPELL_RACES["Read Leyline"])
+        .. " | " .. tostring(data.RANKS["Blessing of Salvation"]) .. " " .. tostring(data.RANKS["Greater Blessing of Salvation"]) .. " "
+        .. Joined(data.RANKS.Salvation) .. " " .. Joined(data.RANKS["Mass Salvation"]) .. " " .. tostring(data.SPELL_CLASSES["Mass Salvation"]),
+        "nil 1259705 95 | nil nil 1038 25895 PALADIN", "the new names, the same IDs")
+    Equal(Joined(data.RANKS["Frost Blast"]) .. " " .. tostring(Has(data.DEBUFFS.MAGE, "Frost Blast")) .. " | " .. Joined(data.RANKS.Revoke)
+        .. " " .. tostring(data.SPELL_CLASSES.Revoke) .. " | " .. Joined(data.RANKS["Mana Tide Totem"]) .. " " .. Joined(FamilyOf(1325257))
+        .. " | " .. Joined(data.PASSIVE_BUFFS[20177]), "1326053,1326054,1326055 true | 1325499 PALADIN | 16190,17354,17359,1325256"
+        .. " 16191,17355,17360,1325257 | 1326084", "Frost Blast (a mage's debuff), Revoke, Mana Tide's fourth rank, Reckoning's buff")
+    NAMES[16191], NAMES[1325257], NAMES[20177] = "Mana Tide", "Mana Tide", "Reckoning"
+    Start("SHAMAN")
+    Equal(Said("buff", "16191") .. " | " .. Lit("buff", 1325257) .. " | " .. tostring(Sp:AddNote("20177", "buff")) .. " | "
+        .. tostring(Sp:AddNote("20177", "cd")), "true Added Mana Tide to Buffs. | g1 | nil | Reckoning is passive. Only its buff"
+        .. " can be tracked, on the Buffs bar.", "Mana Tide lights for the fourth totem's; Reckoning goes on the Buffs bar now")
+
+    -- Saved by the old names: every profile's keys move over as it loads
+    -- (each bar's list and each form's, joins, the pulse's ticks and Long, a
+    -- pinned one's name), and so do spells added by those names (merged with
+    -- the new name's, each ID once). A list holding both keeps the first,
+    -- with its join. A paladin's Salvation lights for Mass Salvation too.
+    local function Renamed()
+        return { useBars = true, notesSeen = "dev", helpSeen = true, everyone = "Old",
+            custom = { ["Blessing of Salvation"] = { 25895, 1038 }, Salvation = { 1038 }, ["Read Ley Line"] = { 1259705 } },
+            profiles = {
+                Old = { cd = { "Read Ley Line" }, util = {}, buff = { "Blessing of Salvation" }, debuff = {}, joins = {},
+                    forms = { [5] = { cd = { "Read Ley Line" } } },
+                    pulsePick = { ["Read Ley Line"] = true, Barkskin = true }, pulseStyle = { ["Read Ley Line"] = "long" } },
+                Other = { cd = {}, util = { "Read Ley Line#1259705" }, debuff = {},
+                    buff = { "Arcane Intellect", "Blessing of Salvation", "Salvation", "Greater Blessing of Salvation" },
+                    joins = { buff = { ["Blessing of Salvation"] = true, ["Greater Blessing of Salvation"] = true } } } } }
+    end
+    local function Keys(set)
+        local keys = {}
+        for key, value in pairs(set or {}) do keys[#keys + 1] = key .. "=" .. (type(value) == "table" and Joined(value) or tostring(value)) end
+        table.sort(keys)
+        return table.concat(keys, " ")
+    end
+    NAMES[1038], NAMES[25895], NAMES[1259705] = "Salvation", "Mass Salvation", "Read Leyline"
+    Start("PALADIN", Renamed(), { { name = "Salvation", spellID = 1038, iconID = 1 } })
+    local mine, other = db.profiles.Old, db.profiles.Other
+    Equal(table.concat(mine.cd, ",") .. " " .. table.concat(mine.forms[5].cd, ",") .. " " .. table.concat(mine.buff, ",") .. " | "
+        .. Keys(mine.pulsePick) .. " | " .. Keys(mine.pulseStyle), "Read Leyline Read Leyline Salvation | Barkskin=true Read Leyline=true"
+        .. " | Read Leyline=long", "your profile: each list, each form's, the pulse's ticks and Long")
+    Equal(table.concat(other.buff, ",") .. " | " .. Keys(other.joins.buff) .. " | " .. table.concat(other.util, ","),
+        "Arcane Intellect,Salvation,Mass Salvation | Mass Salvation=true Salvation=true | Read Leyline#1259705",
+        "another profile too: the second Salvation gone, the joins kept, a pinned one under its new name")
+    Equal(Keys(db.custom), "Read Leyline=1259705 Salvation=1038,25895", "spells added by those names, merged with the new name's")
+    Equal(Lit("buff", 1038) .. " | " .. Lit("buff", 25895), "g1 | g1", "a paladin's Salvation lights for Salvation and Mass Salvation")
+    Start("PALADIN", db)
+    Equal(table.concat(db.profiles.Old.cd, ",") .. " | " .. Keys(db.custom), "Read Leyline | Read Leyline=1259705 Salvation=1038,25895",
+        "loaded again: nothing left to move")
+
+    -- Should an old name turn up after all (nothing saves one now), it still
+    -- counts as the new one: Blessing of Salvation lights for Mass Salvation
+    -- too, and Read Ley Line is still a Skyborne's racial, for them and kept
+    -- by Clear.
+    db.profiles.Old.buff[2], db.profiles.Old.cd[2] = "Blessing of Salvation", "Read Ley Line"
+    db.custom["Blessing of Salvation"], db.custom["Read Ley Line"], db.custom.Energized = { 1038 }, { 1259691 }, { 1259691 }
+    db.profiles.Old.cd[3] = "Energized"
+    Sp:Stale()
+    local race = _G.UnitRace
+    _G.UnitRace = function() return "Skyborne", "Skyborne", 95 end
+    local skyborne = tostring(Sp:ForMe("Read Ley Line", "cd"))
+    _G.UnitRace = function() return "Human", "Human", 1 end
+    Equal(tostring(Has(Sp:Find("Blessing of Salvation").ids, 25895)) .. " | " .. skyborne .. " " .. tostring(Sp:ForMe("Read Ley Line", "cd"))
+        .. " | " .. tostring(Sp:Leftover("Read Ley Line", "cd")) .. " " .. tostring(Sp:Leftover("Energized", "cd")),
+        "true | true false | false true", "an old name goes by the new one's group version, races and Clear")
+    _G.UnitRace = race
+    -- A profile shared from before the new names comes in under them, and so
+    -- do the spells it added by name.
+    Start("WARRIOR")
+    local ok = ns.ImportProfile("Shared", { lists = { cd = { "Read Ley Line" }, util = {}, buff = { "Greater Blessing of Salvation" },
+        debuff = {} }, joins = {}, pick = { ["Read Ley Line"] = true }, style = {},
+        added = { ["Greater Blessing of Salvation"] = { 25895 } } }, false)
+    local shared = db.profiles.Shared
+    Equal(tostring(ok) .. " " .. table.concat(shared.cd, ",") .. " " .. table.concat(shared.buff, ",") .. " | " .. Keys(shared.pulsePick)
+        .. " | " .. Keys(db.custom) .. " | " .. Lit("buff", 25895), "true Read Leyline Mass Salvation | Read Leyline=true"
+        .. " | Mass Salvation=25895 | g1", "a profile shared under the old names comes in under the new ones")
+    Equal(#printed, 0, "no errors")
 end)()
 
 -- Added where it can't show ------------------------------------------------------------------------
@@ -2201,7 +2285,7 @@ end)()
 -- it). Where the game can't say what you know, it goes on as before. (In a
 -- function of its own: this file's main chunk has little room for more locals.)
 ;(function()
-    local NAMES = { [1259691] = "Energized", [1270842] = "Energized", [1259705] = "Read Ley Line", [11305] = "Sprint",
+    local NAMES = { [1259691] = "Energized", [1270842] = "Energized", [1259705] = "Read Leyline", [11305] = "Sprint",
         [19244] = "Spell Lock", [12975] = "Last Stand", [1264482] = "Sonic Blast", [20925] = "Holy Shield", [18118] = "Aftermath" }
     local ns, B, w, page, db
     -- A Skyborne druid; with knows, the game says you know your spellbook's

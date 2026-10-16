@@ -41,20 +41,47 @@ local GROUP = {
     ["Blessing of Might"] = "Greater Blessing of Might",
     ["Blessing of Wisdom"] = "Greater Blessing of Wisdom",
     ["Blessing of Kings"] = "Greater Blessing of Kings",
-    ["Blessing of Salvation"] = "Greater Blessing of Salvation",
+    ["Salvation"] = "Mass Salvation",
     ["Blessing of Light"] = "Greater Blessing of Light",
     ["Blessing of Sanctuary"] = "Greater Blessing of Sanctuary",
 }
 
 -- Names a later build gave a spell: one saved by its old name still counts
 -- as the new one. Build 70291 dropped "Effect" from the trap debuffs' names
--- (and Grounding Totem's buff's), and "Aura" from Frost Trap's.
+-- (and Grounding Totem's buff's), and "Aura" from Frost Trap's. Build 70425
+-- renamed the Skyborne's Read Ley Line and the paladin's two Salvations
+-- (same spell IDs).
 local RENAMED = {
     ["Immolation Trap Effect"] = "Immolation Trap",
     ["Freezing Trap Effect"] = "Freezing Trap",
     ["Frost Trap Aura"] = "Frost Trap",
     ["Grounding Totem Effect"] = "Grounding Totem",
+    ["Read Ley Line"] = "Read Leyline",
+    ["Blessing of Salvation"] = "Salvation",
+    ["Greater Blessing of Salvation"] = "Mass Salvation",
 }
+
+-- Of those, the ones whose saved keys move over to the new name as the
+-- profiles load (Core.lua): a spell from your spellbook is kept by its name
+-- alone, so one kept under its old name matched nothing, and its icon and
+-- pulse tick were gone. The trap names stay as they were saved, still
+-- counting as the new ones.
+local MOVED = { ["Read Ley Line"] = true, ["Blessing of Salvation"] = true, ["Greater Blessing of Salvation"] = true }
+
+-- A saved key's name now, for a spell that moved: a fixed rank's "@N" or a
+-- pinned ID's "#ID" stays after it. Nil for any other key.
+function S:NewName(key)
+    if type(key) ~= "string" then return nil end
+    local name, after = key:match("^([^#@]+)(.*)$")
+    local now = name and MOVED[name] and RENAMED[name]
+    return now and now .. after or nil
+end
+
+-- A table's entry for a spell's name, or for the name a later build gave it.
+local function ByName(map, name)
+    if not map then return nil end
+    return map[name] or RENAMED[name] and map[RENAMED[name]]
+end
 
 S.LINES = { procs = "Procs", items = "Items", added = "Added" }
 
@@ -207,6 +234,7 @@ local function BuffIDs(name, known)
         Add(ranks[name])
         if GROUP[name] then Add(ranks[GROUP[name]]) end
         if now then Add(ranks[now]) end
+        if now and GROUP[now] then Add(ranks[GROUP[now]]) end
         Add(named[name])
         if now then Add(named[now]) end
     end
@@ -799,7 +827,7 @@ function S:SelfDebuffMatch(text)
 end
 
 -- Whether every one of these IDs is an aura no one learns as a spell
--- (Energized from Read Ley Line, Well Fed from food; ns.AURA_ONLY, from the
+-- (Energized from Read Leyline, Well Fed from food; ns.AURA_ONLY, from the
 -- game data). A pet's ability (a bat's Sonic Blast) or a talent (Holy
 -- Shield) isn't, though no class or race in the data names it: someone
 -- knows it.
@@ -826,15 +854,16 @@ end
 -- general spell, an all-class one you haven't got) is yours on a cooldown bar
 -- only once you know it. Ammo is only for the classes that use it; items are
 -- everyone's (the bars leave off any you don't carry). A spell saved by a
--- name a later build changed goes by its new name's classes (a hunter's
--- Immolation Trap Effect). With remember, the IDs B:Add would remember a
--- spell by, it's judged as it would be once added, by those IDs, and for
--- good rather than just now: Bars.lua Vet turns away an add that could
--- never show for you, with nothing left in the window to take it off
--- (another class's or race's spell, or on a cooldown bar a buff's ID no one
--- learns, while the game says you don't know it). One you or your pet don't
--- know yet (a talent not taken, a demon's spell while another demon is
--- out) still goes on, and shows once you do, as it always did.
+-- name a later build changed goes by its new name's classes and races (a
+-- hunter's Immolation Trap Effect). With remember, the IDs B:Add would
+-- remember a spell by, it's judged as it would be once added, by those
+-- IDs, and for good rather than just now: Bars.lua Vet turns away an add
+-- that could never show for you, with nothing left in the window to take
+-- it off (another class's or race's spell, or on a cooldown bar a buff's
+-- ID no one learns, while the game says you don't know it). One you or
+-- your pet don't know yet (a talent not taken, a demon's spell while
+-- another demon is out) still goes on, and shows once you do, as it
+-- always did.
 function S:ForMe(key, bar, remember)
     if type(key) ~= "string" then return false end
     if key == "ammo" then return self:UsesAmmo() end
@@ -853,9 +882,9 @@ function S:ForMe(key, bar, remember)
         return false
     end
     local added = entry ~= nil or remember ~= nil
-    local classes = ns.SPELL_CLASSES and (ns.SPELL_CLASSES[name] or RENAMED[name] and ns.SPELL_CLASSES[RENAMED[name]])
+    local classes = ByName(ns.SPELL_CLASSES, name)
     local procs = ProcClasses()[name]
-    local races = ns.SPELL_RACES and ns.SPELL_RACES[name]
+    local races = ByName(ns.SPELL_RACES, name)
     local racial = races and not classes and not procs
     if added and bar == "buff" and not racial then return true end
     if classes or procs then
@@ -895,8 +924,8 @@ function S:Leftover(key, bar)
     Ready()
     local entry = byKey[key]
     local name = Base(key)
-    if ns.SPELL_CLASSES and (ns.SPELL_CLASSES[name] or RENAMED[name] and ns.SPELL_CLASSES[RENAMED[name]]) then return false end
-    if ProcClasses()[name] or (ns.SPELL_RACES and ns.SPELL_RACES[name]) then return false end
+    if ByName(ns.SPELL_CLASSES, name) then return false end
+    if ProcClasses()[name] or ByName(ns.SPELL_RACES, name) then return false end
     return OnlyAuras(entry and entry.added)
 end
 

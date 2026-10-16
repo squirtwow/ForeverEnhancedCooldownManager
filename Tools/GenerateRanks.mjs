@@ -10,18 +10,19 @@
 // another ID a spell leads to, and the auras that are one buff in several
 // IDs, so the Buffs and Debuffs bars light for them, and which of those no
 // one learns as a spell, which no one sees on a cooldown bar.
-// Reads Blizzard's own game tables for build 1.60.1.70338 (wago.tools db2
+// Reads Blizzard's own game tables for build 1.60.1.70425 (wago.tools db2
 // exports of SpellName, Spell, SpellEffect, SpellMisc, SkillLineAbility,
 // ChrRaces, SpellAuraRestrictions, SpellPower, SpellCooldowns,
 // TraitDefinition, Item, ItemEffect and ItemXItemEffect).
-// Pass a cache directory; missing tables are downloaded into it. No addon
-// code or data is an input.
+// Pass a cache directory; missing tables are downloaded into it. A table
+// already there is used whatever its build, so give each build a new, empty
+// one. No addon code or data is an input.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70338';
+const BUILD = '1.60.1.70425';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = process.argv[2];
 assert(cache, 'Pass a cache directory');
@@ -373,7 +374,7 @@ const linkLines = bar => [...auraLinks[bar].keys()].sort((a, b) => a - b)
 // PERSISTENT_AREA_AURA: Frost Trap's ice, Hurricane's slow). A totem's
 // aura is its buff on everyone near it, not the moment's extra attack its
 // description names too (Windfury). A spell that does nothing but set off a
-// buff (the Skyborne's Read Ley Line and Skysight) is that buff, whatever its
+// buff (the Skyborne's Read Leyline and Skysight) is that buff, whatever its
 // name, with the other spells of the buff's name its description names (the
 // other Energized). Each aura brings its other ranks (below): Prayer of
 // Mending's later ranks name only the first rank's buff. By the ID of every

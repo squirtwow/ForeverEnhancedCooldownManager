@@ -28,24 +28,25 @@
 //   row: Tiger's Fury, Cat Form's) needs that form, and one that can't be
 //   cast with a form's aura on you (Penance, Shadowform's) not in that form.
 //
-// Reads Blizzard's own game tables for build 1.60.1.70374 (wago.tools db2
+// Reads Blizzard's own game tables for build 1.60.1.70425 (wago.tools db2
 // exports of SpellName, Spell, SpellMisc, SpellShapeshift,
 // SpellShapeshiftForm, SpellAuraRestrictions, SpellEffect, SkillLine,
 // SkillLineAbility and TraitDefinition). No addon code or data is an input.
 //
 //   node Tools/GenerateForms.mjs [cache folder] [--out file]
 //
-// The cache folder (C:\AddonDev\_Toolchain\gamedata\forever-70374 when none
-// is given) holds the tables as CSV; any missing is downloaded into it.
+// The cache folder (C:\AddonDev\_Toolchain\gamedata\forever-70425 when none
+// is given) holds the tables as CSV; any missing is downloaded into it. A
+// table already there is used whatever its build: one folder per build.
 // Tools/TestForms.mjs checks Forms.lua is exactly what this makes.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70374';
+const BUILD = '1.60.1.70425';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-export const DEFAULT_CACHE = join(root, '..', '_Toolchain', 'gamedata', 'forever-70374');
+export const DEFAULT_CACHE = join(root, '..', '_Toolchain', 'gamedata', 'forever-70425');
 const args = process.argv.slice(2);
 let out = join(root, 'Forms.lua'), cache = DEFAULT_CACHE;
 for (let i = 0; i < args.length; i++) {

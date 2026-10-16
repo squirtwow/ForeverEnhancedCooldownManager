@@ -4169,10 +4169,12 @@ for _, name in ipairs(names) do
         if data.PASSIVE_BUFFS[first[name]] then buffed[#buffed + 1] = name end
     end
 end
-Equal(table.concat(passives, ","), "Axe Specialization,Beast Slaying,Big Game Hunter,Elemental Insight,"
+-- Build 70425 renamed the weapon specializations: Axe to Savage, Mace to
+-- Earth Fury, Sword to Ruthless.
+Equal(table.concat(passives, ","), "Beast Slaying,Big Game Hunter,Earth Fury,Elemental Insight,"
     .. "Engineering Specialization,Expansive Mind,Galestrider Riding,Gnomish,Hardiness,Horse Riding,Kodo Riding,"
-    .. "Mace Specialization,Mechanostrider Piloting,Plainsrunning,Quickness,Quickness Passive,Ram Riding,Raptor Riding,"
-    .. "Sword Specialization,The Human Spirit,Tiger Riding,Touch of the Grave,Undead Horsemanship,Underwater Breathing,"
+    .. "Mechanostrider Piloting,Plainsrunning,Quickness,Quickness Passive,Ram Riding,Raptor Riding,Ruthless,Savage,"
+    .. "The Human Spirit,Tiger Riding,Touch of the Grave,Undead Horsemanship,Underwater Breathing,"
     .. "Wind Blessed,Wisp Spirit,Wolf Riding", "the race-limited passives in the game data")
 Equal(table.concat(buffed, ","), "Plainsrunning", "of which only Plainsrunning gives a buff of its own")
 -- A bar holds 40, so the first 40 go on Cooldowns and Buffs, the rest on

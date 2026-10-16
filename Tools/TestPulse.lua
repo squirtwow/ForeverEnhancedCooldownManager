@@ -844,7 +844,7 @@ local function PulseGame()
     local itemSpell = C_Item.GetItemSpell
     C_Item.GetItemSpell = function(id) if id == 9999 then return "Lucky", 1 end return itemSpell(id) end
     -- A druid with a few long cooldowns: Barkskin and Bash (a minute each),
-    -- and Walk on Air, a racial (two minutes).
+    -- and Walk on Air, a racial (a minute and a half since build 70425).
     table.insert(book[2].items, { name = "Barkskin", spellID = 22812, iconID = 136097 })
     table.insert(book[2].items, { name = "Bash", subName = "Rank 1", spellID = 5211, iconID = 132114 })
     S[UIParent].width, S[UIParent].height = 1366, 768
@@ -1012,7 +1012,7 @@ do
         "in the middle of the screen")
     Equal(S[page.status].text, "Off. Tick the box below to start.", "the title row says how to start")
     Equal(select(1, P:Watchers()) .. " " .. tostring(P.holder) .. " " .. #asked, "0 nil 0", "off: nothing watched, nothing asked of the game")
-    Equal(Rows(page), "SPELLS | [ ] Barkskin 1 min Quick | [ ] Bash 1 min Quick | [ ] Overpower 5s Quick | [ ] Walk on Air 2 min Quick",
+    Equal(Rows(page), "SPELLS | [ ] Barkskin 1 min Quick | [ ] Bash 1 min Quick | [ ] Overpower 5s Quick | [ ] Walk on Air 1.5 min Quick",
         "every spell you know with a cooldown of its own, by name, each unticked and Quick, with its cooldown; Moonfire and Attack (none) left out")
     Equal(tostring(page.add) .. " " .. tostring(page.slider.pulseMin) .. " " .. tostring(ns.Get("pulseMin")) .. " " .. tostring(P.Add),
         "nil nil nil nil", "no Cooldowns from slider, and no box to add a spell by name")
@@ -1050,7 +1050,7 @@ do
     for _, key in ipairs({ "Barkskin", "Bash", "Walk on Air" }) do RowFor(page, key).check:Click() end
     Equal(Saved("pulsePick") .. " | " .. S[page.status].text, "Barkskin,Bash,Walk on Air | 3 cooldowns pulse when they're ready.",
         "three ticked: saved by name, and counted")
-    Equal(Rows(page), "SPELLS | [x] Barkskin 1 min Quick | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 2 min Quick",
+    Equal(Rows(page), "SPELLS | [x] Barkskin 1 min Quick | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 1.5 min Quick",
         "ticked on the page")
     Equal(S[RowFor(page, "Overpower").style].alpha .. " " .. S[RowFor(page, "Bash").style].alpha, "1 1",
         "every row's switch at full strength, ticked or not: it can be set first")
@@ -1272,7 +1272,7 @@ do
     Switch(bark, "long")
     Equal(Note(bark.style.buttons[1]):sub(1, 39), "Barkskin pulses Long. Click for Quick. ", "switched: says Long, and Quick goes back")
     Equal(Saved("pulseStyle") .. " " .. Profile("pulseStyle").Barkskin .. " | " .. Rows(page),
-        "Barkskin long | SPELLS | [x] Barkskin 1 min Long | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 2 min Quick",
+        "Barkskin long | SPELLS | [x] Barkskin 1 min Long | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 1.5 min Quick",
         "switched to Long: saved, the rest stay Quick")
     Equal(select(1, P:Watchers()), 3, "the same three watched")
     -- Its pulse: Long's own size, time and sound.
@@ -1368,7 +1368,7 @@ do
     P:Apply()
     w:Refresh()
     Equal(tostring(watchers["slot:13"]) .. " " .. tostring(watchers["family:healing"]) .. " | " .. Rows(page),
-        "nil nil | SPELLS | [x] Barkskin 1 min Quick | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 2 min Quick"
+        "nil nil | SPELLS | [x] Barkskin 1 min Quick | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 1.5 min Quick"
         .. " | ITEMS | [ ] Trinket 1: Lucky Charm trinket Quick | [ ] Healing Potions on your bars Quick",
         "a trinket with a use put on, and a potion on your Cooldowns bar: listed under Items, unticked to start, so not watched")
     RowFor(page, "slot:13").check:Click()
@@ -1520,7 +1520,7 @@ do
     w:Refresh()
     page.items:Click()
     Equal(tostring(watchers["slot:13"]) .. " " .. tostring(watchers["family:healing"]) .. " | " .. Rows(page),
-        "nil nil | SPELLS | [x] Barkskin 1 min Quick | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 2 min Quick",
+        "nil nil | SPELLS | [x] Barkskin 1 min Quick | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 1.5 min Quick",
         "Trinkets and potions too unticked: spells only")
     page.items:Click()
 end
@@ -1879,7 +1879,7 @@ do
     local made = ns.NewProfile("Empty")
     w:Refresh()
     Equal(tostring(made) .. " " .. select(1, P:Watchers()) .. " [" .. Saved("pulsePick") .. "] " .. Rows(page),
-        "true 0 [] SPELLS | [ ] Barkskin 1 min Quick | [ ] Bash 1 min Quick | [ ] Overpower 5s Quick | [ ] Walk on Air 2 min Quick"
+        "true 0 [] SPELLS | [ ] Barkskin 1 min Quick | [ ] Bash 1 min Quick | [ ] Overpower 5s Quick | [ ] Walk on Air 1.5 min Quick"
         .. " | ITEMS | [ ] Trinket 1: Lucky Charm trinket Quick | [ ] Healing Potions in your bags Quick | [ ] Mana Potions in your bags Quick",
         "a new, empty profile: nothing ticked, all Quick, nothing watched; its bars are empty, so the potions show from your bags")
     ns.UseProfile(own)

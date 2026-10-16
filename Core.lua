@@ -365,6 +365,65 @@ local function RepairForms(profile)
     end
 end
 
+-- Spells a later build renamed (Spells.lua S:NewName: Read Ley Line is Read
+-- Leyline since build 70425): a key saved under the old name moves over to
+-- the new one, in each list (each form's too), its joins and the pulse's
+-- ticks and Long. A list holding both (the new name added again since)
+-- keeps the first, with that one's join. Once moved, nothing is left to move.
+local function NewName(key)
+    return ns.Spells and ns.Spells.NewName and ns.Spells:NewName(key) or nil
+end
+
+local function RenameList(list, joins)
+    local names, moved = {}, nil
+    for i, key in ipairs(list) do
+        local now = NewName(key)
+        if now then
+            moved = moved or {}
+            moved[now] = true
+        end
+        names[i] = now or key
+    end
+    if not moved then return end
+    local kept, seen, joined = {}, {}, {}
+    for i, key in ipairs(list) do
+        local now = names[i]
+        if not (moved[now] and seen[now]) then
+            seen[now] = true
+            kept[#kept + 1] = now
+            if joins and joined[now] == nil then joined[now] = joins[key] end
+        end
+        if joins then joins[key] = nil end
+    end
+    for i = 1, #list do list[i] = kept[i] end
+    for key, on in pairs(joined) do joins[key] = on end
+end
+
+local function RenameSet(set)
+    local moves
+    for key in pairs(set) do
+        local now = NewName(key)
+        if now then
+            moves = moves or {}
+            moves[key] = now
+        end
+    end
+    for key, now in pairs(moves or {}) do
+        if set[now] == nil then set[now] = set[key] end
+        set[key] = nil
+    end
+end
+
+local function RenameSpells(profile)
+    for _, key in ipairs(ns.BAR_KEYS) do RenameList(profile[key], profile.joins[key]) end
+    for _, lists in pairs(type(profile.forms) == "table" and profile.forms or {}) do
+        for _, list in pairs(type(lists) == "table" and lists or {}) do
+            if type(list) == "table" then RenameList(list) end
+        end
+    end
+    for field in pairs(PULSE_LISTS) do RenameSet(profile[field]) end
+end
+
 -- A profile's lists, repaired in place, with their joins: on the Buffs and
 -- Debuffs bars, the names joined to the entry just before them.
 local function Lists(profile)
@@ -393,6 +452,7 @@ local function Lists(profile)
         end
     end
     RepairForms(profile)
+    RenameSpells(profile)
     -- Positions per profile: its spots and sizes, repaired as they're used.
     if profile.place ~= nil and type(profile.place) ~= "table" then profile.place = nil end
     return profile
@@ -1271,8 +1331,11 @@ function ns.ImportProfile(text, shared, withLook)
     end
     local custom, yours = ns.CustomSpells(), NamesInUse()
     Profiles()[name] = Lists(profile)
+    -- One shared from before a spell's new name goes by the new one, as its
+    -- keys on the bars now do (Lists).
     for spell, ids in pairs(type(shared.added) == "table" and shared.added or {}) do
-        if type(spell) == "string" and custom[spell] == nil and not yours[spell] then custom[spell] = CopyList(ids) end
+        local now = NewName(spell) or spell
+        if type(now) == "string" and custom[now] == nil and not yours[now] then custom[now] = CopyList(ids) end
     end
     ns.CustomSpells()
     if withLook and type(shared.setup) == "table" then
@@ -1824,6 +1887,31 @@ function ns.AddCustom(name, ids)
     ns.CustomSpells()[name] = ids
 end
 
+-- An added spell under a name a later build changed goes under the new one,
+-- as its keys on the bars do (RenameSpells), its IDs joined to any the new
+-- name has already, each once.
+local function RenameCustom()
+    local custom, moves = ns.CustomSpells(), nil
+    for name in pairs(custom) do
+        local now = NewName(name)
+        if now then
+            moves = moves or {}
+            moves[name] = now
+        end
+    end
+    for name, now in pairs(moves or {}) do
+        local ids, seen = custom[now] or {}, {}
+        for _, id in ipairs(ids) do seen[id] = true end
+        for _, id in ipairs(custom[name]) do
+            if not seen[id] then
+                seen[id] = true
+                ids[#ids + 1] = id
+            end
+        end
+        custom[now], custom[name] = ids, nil
+    end
+end
+
 -- Forgets added spells once they're on no bar in any profile.
 function ns.PruneCustom()
     if not db then return end
@@ -1998,7 +2086,7 @@ local function Load()
     RepairProfiles()
     for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key) end
     ns.LayoutData()
-    ns.CustomSpells()
+    RenameCustom()
     ns.BarColours()
     ns.ResolveProfile()
     ListenTalents()
