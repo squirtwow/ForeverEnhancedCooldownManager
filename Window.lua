@@ -503,13 +503,21 @@ local function BuildLook(window, page, width)
         "Square icons, bold numbers and these bars. Needs a reload. Countdown numbers: Edit Mode, click a bar, untick its timer.")
     local personal = Choice("Apply this look to the Personal Resource Display", "prdSkin", -138,
         "Blizzard's health and power bars under you (Options > Combat). Needs a reload.")
-    local repeatMana = Choice("Extra mana bar: hide in caster form, half size in forms", "prdHideRepeat", -160,
-        "The second mana bar some specs get, under your main bar.",
+    local repeatMana = Choice("Tidy extra mana bar", "prdHideRepeat", -160,
+        "The second mana bar some specs get, under your main bar: hidden in caster form, half size in forms.",
         function() if ns.Resource then ns.Resource:Apply() end end)
     local combo = Choice("Combo points under your energy bar", "prdCombo", -182,
         "Five segments as wide as the display, for rogues and druids in cat form. The game's own combo points go see-through while these show.",
         function() if ns.Resource then ns.Resource:Apply() end end)
+    -- Druids only: their energy in other forms, beside the extra mana bar's
+    -- tick (both their form bars on one row) and clear of Thick edges.
+    local energyTick = Choice("Show energy bar in other forms", "prdEnergy", -160,
+        "Your energy under the display in caster, bear and your other forms. In cat form it's your main bar as usual. (experimental)",
+        function() if ns.Resource then ns.Resource:Apply() end end, 176)
+    local _, myClass = UnitClass("player")
+    energyTick:SetShown(myClass == "DRUID")
     window.look, window.personal, window.repeatMana, window.combo = look, personal, repeatMana, combo
+    window.energyTick = energyTick
 
     -- Keybinds on the icons, in the right-hand column clear of the rows on
     -- the left: the tick, then where on each icon (level with Colour) and how
@@ -827,6 +835,7 @@ local function BuildLook(window, page, width)
         personal:SetChecked(ns.Get("prdSkin"))
         repeatMana:SetChecked(ns.Get("prdHideRepeat"))
         combo:SetChecked(ns.Get("prdCombo"))
+        energyTick:SetChecked(ns.Get("prdEnergy"))
         textRow:Refresh()
         design:SetSelected(ns.Get("barStyle"))
         border:SetSelected(ns.Get("iconBorder"))

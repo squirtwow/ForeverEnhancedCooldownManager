@@ -62,6 +62,7 @@ ns.DEFAULTS = {
     prdMatch = true, -- while a layout holds your bars, the display is as wide as your widest row
     prdCombo = false, -- the addon's own combo points under the display
     prdComboColour = "default", -- their colour: the addon's red, or a bar colour
+    prdEnergy = false, -- druids: an energy bar under the display out of cat form
     -- The addon's own text on the display's health and power bars (Look page,
     -- Set up; Resource.lua): off unless ticked.
     prdText = false,
@@ -266,7 +267,7 @@ ns.RELOAD = {
 -- bars, the restyled bars, your cast bar, Raid Timers and the Cooldown pulse
 -- look, and where they sit. Never a tick that switches a part on or off (your
 -- bars, the look on Blizzard's bars or display, the cast bar, swing timer,
--- combo points, the display's text, keybinds, the pulse, each Raid Timers
+-- combo points, the druid energy bar, the display's text, keybinds, the pulse, each Raid Timers
 -- part), nor the window's own (its accent, lists, preview, grow arrows and
 -- the minimap button), nor the update notice.
 ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",

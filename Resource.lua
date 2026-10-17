@@ -317,22 +317,45 @@ local function ComboColour()
     return COMBO_RED
 end
 
+-- One of the addon's own bars on the display (a combo segment, the energy
+-- bar): its track, edges and shine, coloured by OwnLook.
+local function MakeOwn(parent, texture)
+    local bar = CreateFrame("StatusBar", nil, parent)
+    bar:SetStatusBarTexture(texture)
+    -- Its track, coloured by OwnLook with the darkness chosen.
+    bar.background = bar:CreateTexture(nil, "BACKGROUND")
+    bar.background:SetAllPoints()
+    bar.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
+    Inset(bar.edge, bar, -1)
+    bar.inner = Style:InnerEdge(bar, bar)
+    local shine = bar:CreateTexture(nil, "OVERLAY", nil, -8)
+    shine:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+    shine:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
+    shine:SetColorTexture(1, 1, 1, .16)
+    bar.sheen = Style:Sheen(bar, shine)
+    return bar
+end
+
+-- The design chosen, in this colour; the texture only when it changes
+-- (retexture), as for the display's own bars.
+local function OwnLook(bar, colour, texture, retexture)
+    local design = ns.Get("barStyle")
+    local outline = design == "outline"
+    local edge = outline and colour or { 0, 0, 0 }
+    if retexture then bar:SetStatusBarTexture(texture) end
+    bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
+    bar.background:SetColorTexture(Style:TrackColour())
+    Solid(bar.edge, edge)
+    Style:ShowInnerEdge(bar.inner, edge)
+    Style:ShowSheen(bar.sheen, design == "glass")
+end
+
 local function ComboLook()
     if not combo then return end
-    local design, colour, texture = ns.Get("barStyle"), ComboColour(), Style:BarTexture()
-    local outline = design == "outline"
-    -- The texture only when it changes, as for the display's own bars.
+    local colour, texture = ComboColour(), Style:BarTexture()
     local retexture = combo.texture ~= texture
     combo.texture = texture
-    local edge = outline and colour or { 0, 0, 0 }
-    for _, bar in ipairs(combo.segments) do
-        if retexture then bar:SetStatusBarTexture(texture) end
-        bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
-        bar.background:SetColorTexture(Style:TrackColour())
-        Solid(bar.edge, edge)
-        Style:ShowInnerEdge(bar.inner, edge)
-        Style:ShowSheen(bar.sheen, design == "glass")
-    end
+    for _, bar in ipairs(combo.segments) do OwnLook(bar, colour, texture, retexture) end
 end
 
 -- The segments share the row's width, whatever it is now.
@@ -356,21 +379,9 @@ local function MakeCombo(frame)
     combo.segments = {}
     combo.texture = Style:BarTexture()
     for i = 1, COMBO_MAX do
-        local bar = CreateFrame("StatusBar", nil, combo)
-        bar:SetStatusBarTexture(combo.texture)
+        local bar = MakeOwn(combo, combo.texture)
         bar:SetMinMaxValues(i - 1, i)
         bar:SetValue(0)
-        -- Its track, coloured by ComboLook with the darkness chosen.
-        bar.background = bar:CreateTexture(nil, "BACKGROUND")
-        bar.background:SetAllPoints()
-        bar.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
-        Inset(bar.edge, bar, -1)
-        bar.inner = Style:InnerEdge(bar, bar)
-        local shine = bar:CreateTexture(nil, "OVERLAY", nil, -8)
-        shine:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-        shine:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
-        shine:SetColorTexture(1, 1, 1, .16)
-        bar.sheen = Style:Sheen(bar, shine)
         combo.segments[i] = bar
     end
     combo:SetScript("OnSizeChanged", ComboLayout)
@@ -389,19 +400,20 @@ local function ComboWanted()
     return power == ENERGY
 end
 
--- Under the lowest bar that shows, Blizzard's own padding apart, as tall as
--- the power bar.
-local function ComboPlace(frame)
+-- A row under the lowest bar that shows, Blizzard's own padding apart, as
+-- tall as the power bar (or half, as the extra mana bar is in forms).
+local function Underneath(row, frame, half)
     local below = frame.PowerBar
     local extra = frame.AlternatePowerBar
     if extra and extra:IsShown() and not extraHidden then below = extra end
     if not (below and below:IsShown()) then below = frame.HealthBarsContainer or frame end
     local padding = type(frame.GetBarPadding) == "function" and frame:GetBarPadding() or 4
-    combo:ClearAllPoints()
-    combo:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -padding)
-    combo:SetPoint("TOPRIGHT", below, "BOTTOMRIGHT", 0, -padding)
+    row:ClearAllPoints()
+    row:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -padding)
+    row:SetPoint("TOPRIGHT", below, "BOTTOMRIGHT", 0, -padding)
     local height = frame.PowerBar and frame.PowerBar:GetHeight()
-    combo:SetHeight(type(height) == "number" and height > 0 and height or 8)
+    height = type(height) == "number" and height > 0 and height or 8
+    row:SetHeight(half and math.max(2, math.floor(height / 2 + .5)) or height)
 end
 
 -- Your points now, handed straight to the segments.
@@ -454,7 +466,7 @@ local function ComboUpdate()
     local frame = _G.PersonalResourceDisplayFrame
     if not (frame and combo) then return end
     local want = ComboWanted()
-    if want then ComboPlace(frame) end
+    if want then Underneath(combo, frame) end
     MuteClassFrame(frame, want)
     combo:SetShown(want)
     ComboPoints()
@@ -464,9 +476,87 @@ local function ComboUpdate()
     if changed then Restack() end
 end
 
--- The row while it shows, so a layout counts it as part of the display.
+-- Energy out of cat form ---------------------------------------------------------
+-- For druids who want their energy in sight in their other forms: one bar in
+-- the combo points' spot (free outside cat form), half as tall as the power
+-- bar like the extra mana bar in forms, in the Tracked Bars design
+-- and texture and the game's energy colour. In cat form energy is the
+-- display's main bar, so this one hides. The game fills it: your energy goes
+-- to it as it is, never read.
+local ENERGY_YELLOW = { 1, 1, 0 }
+local energy -- the bar, made for druids once the display is there
+local energyShown = false
+local energyEvents -- its listener
+local energyHearing -- "off", "on" or "shown", as for combo points
+
+local function EnergyLook()
+    if not energy then return end
+    local info = type(PowerBarColor) == "table" and PowerBarColor.ENERGY
+    local colour = type(info) == "table" and type(info.r) == "number" and { info.r, info.g, info.b } or ENERGY_YELLOW
+    local texture = Style:BarTexture()
+    local retexture = energy.texture ~= texture
+    energy.texture = texture
+    OwnLook(energy, colour, texture, retexture)
+end
+
+local function MakeEnergy(frame)
+    energy = MakeOwn(frame, Style:BarTexture())
+    energy.texture = Style:BarTexture()
+    energy:SetMinMaxValues(0, 100)
+    energy:SetValue(0)
+    energy:Hide()
+    EnergyLook()
+end
+
+-- While it's ticked and your power isn't energy. A power type the game won't
+-- say keeps things as they were.
+local function EnergyWanted()
+    if not ns.Get("prdEnergy") then return false end
+    local power = UnitPowerType("player")
+    if issecretvalue and issecretvalue(power) then return energyShown end
+    return power ~= ENERGY
+end
+
+local function EnergyFill()
+    if not (energy and energy:IsShown()) then return end
+    energy:SetMinMaxValues(0, UnitPowerMax("player", ENERGY))
+    energy:SetValue(UnitPower("player", ENERGY))
+end
+
+-- Nothing while it's off; while it's on, your form and power type; while it
+-- shows, your energy too.
+local function EnergyListen()
+    if not energyEvents then return end
+    local want = not ns.Get("prdEnergy") and "off" or energyShown and "shown" or "on"
+    if want == energyHearing then return end
+    energyHearing = want
+    energyEvents:UnregisterAllEvents()
+    if want == "off" then return end
+    energyEvents:RegisterUnitEvent("UNIT_DISPLAYPOWER", "player")
+    for _, event in ipairs(COMBO_EVENTS) do energyEvents:RegisterEvent(event) end
+    if want == "shown" then
+        energyEvents:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
+        energyEvents:RegisterUnitEvent("UNIT_MAXPOWER", "player")
+    end
+end
+
+local function EnergyUpdate()
+    local frame = _G.PersonalResourceDisplayFrame
+    if not (frame and energy) then return end
+    local want = EnergyWanted()
+    if want then Underneath(energy, frame, true) end
+    energy:SetShown(want)
+    EnergyFill()
+    local changed = want ~= energyShown
+    energyShown = want
+    EnergyListen()
+    if changed then Restack() end
+end
+
+-- The row under the display while it shows (combo points or energy, never
+-- both), so a layout counts it as part of the display.
 function R:ComboRow()
-    return comboShown and combo or nil
+    return comboShown and combo or energyShown and energy or nil
 end
 
 -- Text on the display's bars -------------------------------------------------------
@@ -815,11 +905,20 @@ local function Hook()
             if event == "UNIT_POWER_FREQUENT" or event == "PLAYER_TARGET_CHANGED" then ComboPoints() else ComboUpdate() end
         end)
     end
+    -- Energy in other forms, for druids: silent too until ticked.
+    if class == "DRUID" then
+        MakeEnergy(frame)
+        energyEvents = CreateFrame("Frame")
+        energyEvents:SetScript("OnEvent", function(_, event)
+            if event == "UNIT_POWER_FREQUENT" or event == "UNIT_MAXPOWER" then EnergyFill() else EnergyUpdate() end
+        end)
+    end
     -- Your power changing, and Edit Mode setting the bars' height, padding
     -- and which show.
     local function Changed(self)
         ExtraMana(self)
         ComboUpdate()
+        EnergyUpdate()
         -- Blizzard has just tinted the spent flash again, setting the power
         -- bar up, and what a cast will cost if your power type changed.
         local power = Part(self, "PowerBar")
@@ -854,6 +953,8 @@ function R:Apply()
     ExtraMana(_G.PersonalResourceDisplayFrame)
     ComboLook()
     ComboUpdate()
+    EnergyLook()
+    EnergyUpdate()
     TryText()
 end
 

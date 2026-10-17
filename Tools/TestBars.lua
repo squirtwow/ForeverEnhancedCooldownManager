@@ -2962,7 +2962,7 @@ w:Select("look")
 Equal(S[w.pages.look].shown and not S[page].shown, true, "Look page shown")
 Equal(w.look:GetChecked(), true, "restyle shown as on")
 Equal(S[w.look.text].text .. "|" .. S[w.personal.text].text .. "|" .. S[w.repeatMana.text].text,
-    "Apply this look to the Cooldown Manager|Apply this look to the Personal Resource Display|Extra mana bar: hide in caster form, half size in forms",
+    "Apply this look to the Cooldown Manager|Apply this look to the Personal Resource Display|Tidy extra mana bar",
     "the ticks say what they apply to")
 Equal(S[w.off].shown, false, "no Cooldown Manager warning while it is on")
 Equal(S[w.reload].shown, false, "no reload needed yet")

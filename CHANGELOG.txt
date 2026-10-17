@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2
+
+### Added
+- Druids can show an energy bar in their other forms, on the Look page (experimental).
+
 ## 1.7.1
 
 ### Added

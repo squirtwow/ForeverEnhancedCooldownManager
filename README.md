@@ -40,6 +40,8 @@ EraUI.
   by default, experimental)
 - Combo points under your energy bar for rogues and druids in cat form, which
   Forever's display leaves out (off by default)
+- Druids: your energy bar under it in your other forms too (off by default,
+  experimental)
 - Your own cast bar right under it, with the spell's icon, name and time left
   (off by default)
 - A swing timer in the same spot: your main hand and ranged swings (Auto Shot

@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.7.2",
+        sections = {
+            { "Added", {
+                "Druids can show an energy bar in their other forms, on the Look page (experimental).",
+            } },
+        },
+    },
+    {
         version = "1.7.1",
         sections = {
             { "Added", {

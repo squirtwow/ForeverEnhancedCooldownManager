@@ -1589,6 +1589,20 @@ end)()
         tostring(S[w.lookOptions].height) }, " "), "true true true true true 0.00 198",
         "in the right-hand column, under Darkness and Thick edges, level with the combo points' tick, Set up beside it and"
         .. " level with it, both inside the choices, which are as tall as before the tick")
+    -- A druid's energy in other forms: beside the extra mana bar's tick and
+    -- level with it, clear of Thick edges, the choices no taller.
+    local energyTick = w.energyTick
+    local energyLeft, energyTop, energyRight = Fit.Rect(energyTick)
+    local _, manaTop, manaRight = Fit.Rect(w.repeatMana)
+    local thickLeft = Fit.Rect(w.thickEdges)
+    Equal(tostring(energyTick:IsVisible()) .. " " .. tostring(energyTick:GetChecked()) .. " " .. S[energyTick.text].text
+        .. " | " .. Note(energyTick) .. " | " .. S[w.repeatMana.text].text .. " | " .. Note(w.repeatMana) .. " | "
+        .. tostring(energyLeft > manaRight and math.abs(energyTop - manaTop) <= 1 and energyRight < thickLeft),
+        "true false Show energy bar in other forms | Your energy under the display in caster, bear and your other forms. In cat"
+        .. " form it's your main bar as usual. (experimental) | Tidy extra mana bar | The second mana bar some specs get, under"
+        .. " your main bar: hidden in caster form, half size in forms. | true",
+        "for a druid, the energy tick, off by default, its note quietly experimental, beside the extra mana bar's shorter tick and"
+        .. " level with it, clear of Thick edges")
 
     setUp:Click()
     local panel = w.textPanel

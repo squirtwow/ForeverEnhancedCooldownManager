@@ -343,10 +343,12 @@ test("the display's text hands your health and power straight to the game's own 
     assert.equal(resource.split(returned).length - 1, 1, `${ask} returned as it comes`);
   }
   // Every other ask of the game's numbers in the file: the combo points'
-  // count, handed straight to its segments, and Number()'s two writers.
+  // count, handed straight to its segments, a druid's energy straight to its
+  // bar, and Number()'s two writers.
   const others = [...resource.matchAll(/\b(UnitHealth\w*|UnitPower(?:Max|Percent)?|BreakUpLargeNumbers|AbbreviateNumbers)\(/g)]
     .map(match => lineAt(match.index)).filter(line => !Object.values(asks).some(returned => line.includes(returned)));
   assert.deepEqual([...new Set(others)], ['local points = UnitPower("player", COMBO)',
+    'energy:SetMinMaxValues(0, UnitPowerMax("player", ENERGY))', 'energy:SetValue(UnitPower("player", ENERGY))',
     'if AbbreviateNumbers and ns.Get("prdTextNumbers") == "short" then return AbbreviateNumbers(value) end',
     'if BreakUpLargeNumbers then return BreakUpLargeNumbers(value) end']);
   assert.match(resource, /local points = UnitPower\("player", COMBO\)\r?\n\s+for _, bar in ipairs\(combo\.segments\) do bar:SetValue\(points\) end/);
@@ -372,7 +374,7 @@ test("the display's text hands your health and power straight to the game's own 
   // your power's only once both are checked plain words.
   assert.match(resource, /local function Update\(holder\)\r?\n/);
   assert.match(resource, /holder:SetScript\("OnEvent", kind == "power" and PowerEvent or Update\)/);
-  assert.equal(count(resource, /:SetScript\("OnEvent"/g), 3, 'the holders, the combo listener and the load watcher');
+  assert.equal(count(resource, /:SetScript\("OnEvent"/g), 4, 'the holders, the combo and energy listeners and the load watcher');
   assert.match(resource, /local function Plain\(word\)\r?\n\s+return type\(word\) == "string" and not \(issecretvalue and issecretvalue\(word\)\)\r?\nend/);
   const powerEvent = resource.match(/local function PowerEvent\(holder, event, _, token\)\r?\n([\s\S]*?)\r?\nend/)[1];
   assert.equal(powerEvent.replace(/\s+/g, ' ').trim(), 'if POWER_CHANGES[event] and Plain(token) then local _, current = UnitPowerType("player") '
