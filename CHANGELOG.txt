@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.7.0
+
+### Added
+- Text on your resource display's health and power bars: layout, format, size and font (experimental).
+- Keep them greyed with no target, on the Debuffs bar (experimental).
+
+### Changed
+- Spell data updated for Forever's latest patch.
+- The minimap button starts in a new spot, clear of our other addons' buttons. A spot you dragged it to stays.
+- The Look page says it restyles your resource display too.
+- Untested options are marked "(experimental)".
+
+### Fixed
+- The mana a spell will cost now uses your bar texture and colour.
+- Swap with my form is set per profile, so ticking it on one character no longer changes your others.
+- Read Leyline, Salvation and Mass Salvation stay on your bars after the game renamed them.
+- Saving over a role profile no longer moves its bars when Positions per profile is on.
+- Cooldown pulse: a potion you've run out of says "none left".
+- Dark Inspiration can go on the Buffs bar by name.
+- Show missing debuffs greyed can be clicked along its whole label.
+
 ## 1.6.0
 
 ### Added

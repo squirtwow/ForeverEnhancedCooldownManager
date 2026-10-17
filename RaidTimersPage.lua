@@ -14,7 +14,7 @@ local SIZE_LABEL = 84 -- and before a size slider's track
 local SIZE_STEP = 5
 local PULL_SECONDS = 12 -- the preview's countdown bar runs this long, then starts again
 local CAST_SECONDS = 2.5 -- and its boss cast
-local UNTESTED = " (Needs testing)"
+local UNTESTED = " (experimental)"
 local IN_A_FIGHT = "Edit Mode can't open in a fight. Try again once it's over."
 local AGAIN = "Click Edit Mode again to open it, or type /editmode."
 

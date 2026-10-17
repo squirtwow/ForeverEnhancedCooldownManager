@@ -95,7 +95,7 @@ local FORBIDDEN = {
     GetAuraDataCached = true, RefreshLayout = true, RefreshData = true, Layout = true,
     SetTexture = true, SetFrameLevel = true,
     -- A bar's values and a line's text: Blizzard's, and secret in a fight.
-    SetValue = true, SetMinMaxValues = true, SetText = true, ClearText = true, SetTextHeight = true,
+    SetValue = true, SetMinMaxValues = true, SetText = true, SetFormattedText = true, ClearText = true, SetTextHeight = true,
     SetMaxLines = true, GetNumLines = true, GetStringWidth = true, GetStringHeight = true,
     -- Every other way to size one, besides SetScale, SetSize, SetWidth and SetHeight.
     SetTextScale = true, SetFontHeight = true, SetIgnoreParentScale = true,
@@ -285,8 +285,26 @@ function Proto:RegisterEvent(e) S[self].events[e] = true end
 function Proto:RegisterUnitEvent(e, unit) S[self].events[e] = unit end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:UnregisterAllEvents() S[self].events = {} end
-function Proto:SetText(t) S[self].text = t end
+function Proto:SetText(t) S[self].text, S[self].format, S[self].args = t, nil, nil end
 function Proto:GetText() return S[self].text end
+-- Text from a format, as the game's own code would take it: what it was
+-- handed is kept as it was, a secret too, and never looked at here.
+-- Like the game, the addon's own text needs its font first.
+function Proto:SetFormattedText(format, ...)
+    local s = S[self]
+    if not s.blizzard and s.kind == "FontString" and s.font == nil then error("FontString:SetFormattedText(): Font not set", 2) end
+    s.text, s.format, s.args = nil, format, table.pack(...)
+    s.writes = (s.writes or 0) + 1
+end
+-- Like the game: shown, and so is everything it sits in.
+function Proto:IsVisible()
+    local at = self
+    while at and S[at] do
+        if not S[at].shown then return false end
+        at = S[at].parent
+    end
+    return true
+end
 function Proto:SetChecked(v) S[self].checked = v end
 function Proto:GetChecked() return S[self].checked end
 function Proto:GetFont() return "font", 12, "" end
@@ -296,7 +314,9 @@ function Proto:GetBaseSpellID() return S[self].baseSpell end
 -- and boss cast bars, where each part allows it.
 function Proto:GetDrawLayer() return S[self].layer end
 function Proto:GetStatusBarTexture() return S[self].fill end
-function Proto:SetVertexColor(r, g, b) S[self].tint = { r, g, b } end
+function Proto:SetVertexColor(r, g, b, a) S[self].tint, S[self].tintAlpha = { r, g, b }, a end
+-- A texture's file, where a part allows it to be set.
+function Proto:SetTexture(file) S[self].file = file end
 function Proto:SetDesaturated(v) S[self].desaturated = v end
 function Proto:SetTextColor(r, g, b) S[self].textColour = { r, g, b } end
 function Proto:SetShadowOffset(x, y) S[self].shadowOffset = x .. "," .. y end
@@ -1076,7 +1096,70 @@ local function PRDBar(colour)
     S[bar].barColour = colour
     return bar, art
 end
-local function PRD()
+local UI_STATUSBAR, BAR_FILL = "Interface\\TargetingFrame\\UI-StatusBar", "Interface/TargetingFrame/UI-TargetingFrame-BarFill"
+-- The pieces Blizzard draws beside the bars' fills (bare: a display without
+-- them), and its own text on each bar (Edit Mode's Show Bar Text).
+local function PRDPieces(frame, container, health)
+    local power = frame.PowerBar
+    -- What a cast will cost, at the end of the mana bar: Blizzard's file, in its prediction blue.
+    local cost = New("Texture", power)
+    S[cost].file, S[cost].tint, S[cost].layer = UI_STATUSBAR, { 0, .447, 1 }, "ARTWORK"
+    power.ManaCostPredictionBar = cost
+    -- The flash of power just spent, on a frame of its own over the bar.
+    local feedback = New("Frame", power)
+    feedback.BarTexture = New("Texture", feedback)
+    S[feedback.BarTexture].file = UI_STATUSBAR
+    power.FeedbackFrame = feedback
+    -- Heals on the way, and the shield's stripes and glow, which keep Blizzard's own art.
+    for _, key in ipairs({ "myHealPrediction", "otherHealPrediction", "totalAbsorb", "totalAbsorbOverlay", "overAbsorbGlow" }) do
+        health[key] = New("Texture", health)
+        S[health[key]].layer = "BORDER"
+    end
+    S[health.myHealPrediction].file, S[health.otherHealPrediction].file = BAR_FILL, BAR_FILL
+    -- The health bar's lost max health, a bar of its own at level 100.
+    container.TempMaxHealthLoss = New("StatusBar", container)
+    S[container.TempMaxHealthLoss].level = 100
+    -- The power bar's full-power pulse: a frame a level above the bar, its
+    -- spike and glow frames a level above that.
+    local pulse = New("Frame", power)
+    S[pulse].level = 2
+    for _, key in ipairs({ "SpikeFrame", "PulseFrame" }) do
+        pulse[key] = New("Frame", pulse)
+        S[pulse[key]].level = 3
+    end
+    power.FullPowerFrame = pulse
+end
+local function PRDText(...)
+    for _, bar in ipairs({ ... }) do
+        for _, key in ipairs({ "TextString", "LeftText", "RightText" }) do bar[key] = New("FontString", bar) end
+    end
+end
+-- Once sealed: the pieces the restyle may set, and the shield's art, which it may not.
+local function PRDAllow(frame, health)
+    local power = frame.PowerBar
+    if not rawget(power, "ManaCostPredictionBar") then return end
+    S[power.ManaCostPredictionBar].allow = { SetTexture = true, SetVertexColor = true }
+    S[power.FeedbackFrame.BarTexture].allow = { SetTexture = true, SetVertexColor = true }
+    S[health.myHealPrediction].allow, S[health.otherHealPrediction].allow = { SetTexture = true }, { SetTexture = true }
+    for _, key in ipairs({ "totalAbsorb", "totalAbsorbOverlay", "overAbsorbGlow" }) do
+        S[health[key]].deny = { SetTexture = true, SetAlpha = true, SetVertexColor = true, SetAtlas = true, SetColorTexture = true,
+            SetBlendMode = true }
+    end
+end
+-- Blizzard's colours for what a cast will cost, which the game loads from its
+-- own data: mana's (the display's own default), and one for energy here.
+local function PredictionColour(r, g, b) return { r = r, g = g, b = b, a = 1, GetRGBA = function(c) return c.r, c.g, c.b, c.a end } end
+_G.POWERBAR_PREDICTION_COLOR_MANA = PredictionColour(0, .447, 1)
+_G.PowerBarColor = { MANA = { r = 0, g = 0, b = 1, predictionColor = _G.POWERBAR_PREDICTION_COLOR_MANA },
+    ENERGY = { r = 1, g = 1, b = 0, predictionColor = PredictionColour(1, .85, .4) } }
+_G.PowerBarColor[0], _G.PowerBarColor[3] = _G.PowerBarColor.MANA, _G.PowerBarColor.ENERGY
+-- Like the game, a secret can't look anything up: one used as a key here is a misuse.
+setmetatable(_G.PowerBarColor, { __index = function(_, key)
+    for _, secret in pairs(SECRETS) do
+        if rawequal(key, secret) then SecretMisuse[#SecretMisuse + 1] = "PowerBarColor looked up with a secret" end
+    end
+end })
+local function PRD(bare)
     local frame = New("Frame")
     local container = New("Frame", frame)
     frame.HealthBarsContainer = container
@@ -1085,7 +1168,29 @@ local function PRD()
     frame.PowerBar = PRDBar({ 0, 0, 1, 1 })
     frame.AlternatePowerBar = PRDBar({ 0, 0, 1, 1 })
     frame.AlternatePowerBar.powerName = "MANA"
-    frame.UpdatePowerBar = function() end
+    if not bare then
+        PRDPieces(frame, container, health)
+        PRDText(health, frame.PowerBar, frame.AlternatePowerBar)
+    end
+    -- Blizzard sets the power bar up: its spent flash tinted like the bar
+    -- again (BuilderSpenderFrame's Initialize), in its mana blue here, and,
+    -- as your power type changes, what a cast will cost in its colour for
+    -- that power (or mana's).
+    local token0
+    frame.UpdatePowerBar = function(self)
+        local feedback = rawget(self.PowerBar, "FeedbackFrame")
+        if not feedback then return end
+        local was = blizzardCalling
+        blizzardCalling = true
+        feedback.BarTexture:SetVertexColor(0, 0, 1)
+        local _, token = UnitPowerType("player")
+        if token ~= token0 then
+            token0 = token
+            local info = PowerBarColor[token]
+            self.PowerBar.ManaCostPredictionBar:SetVertexColor((info and info.predictionColor or POWERBAR_PREDICTION_COLOR_MANA):GetRGBA())
+        end
+        blizzardCalling = was
+    end
     frame.UpdateAlternatePowerBar = function() end
     -- The room Blizzard leaves between its bars: a getter the addon may read.
     frame.GetBarPadding = function() return 4 end
@@ -1109,12 +1214,13 @@ local function PRD()
     end
     for _, part in ipairs({ container, frame.PowerBar, frame.AlternatePowerBar }) do S[part].readable = true end
     for _, part in ipairs({ frame, health, frame.PowerBar, frame.AlternatePowerBar }) do Seal(part) end
+    PRDAllow(frame, health)
     return frame, healthArt
 end
 local power = 0 -- the main bar's power: 0 mana, 3 energy
 Environment()
 Viewers(0)
-_G.UnitPowerType = function() return power end
+_G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
 local prd, healthArt = PRD()
 _G.PersonalResourceDisplayFrame = prd
 ns = Load(nil)
@@ -1124,7 +1230,24 @@ Equal(S[healthArt].color[1] == .08 and S[healthArt].color[4], .85, "its art swap
 Equal(InsetBy(healthArt, health, 0), true, "fitted to the bar")
 Equal(S[Piece(health, "BACKGROUND", -8)].color[1] == 0 and S[Piece(health, "OVERLAY", -8)].shown, true, "Glass: a black edge and a shine")
 Equal(S[health].barColour[2] == 1 and S[health].barColour[1], 0, "Blizzard's green kept by default")
-Equal(S[prd.AlternatePowerBar].alpha, 0, "the second mana bar hides while the main bar is mana")
+-- Blizzard's pieces beside the fills take the texture too: what a cast will
+-- cost, heals on the way and the flash of power just spent. Only their
+-- texture, alpha and the flash's tint (and the cost's, on a colour of yours:
+-- below); the shield's art is left alone.
+do
+    local cost, flash = prd.PowerBar.ManaCostPredictionBar, prd.PowerBar.FeedbackFrame.BarTexture
+    Equal(S[cost].file .. " " .. S[health.myHealPrediction].file .. " " .. S[health.otherHealPrediction].file .. " " .. S[flash].file,
+        FLAT .. " " .. FLAT .. " " .. FLAT .. " " .. FLAT, "what a cast will cost, heals on the way and the spent flash: flat like the bars")
+    Equal(table.concat(S[cost].tint, ",") .. " " .. S[cost].alpha .. " " .. S[health.myHealPrediction].alpha, "0,0.447,1 1 1",
+        "the cost still in Blizzard's own blue, and nothing see-through")
+    local untouched = true
+    for _, key in ipairs({ "totalAbsorb", "totalAbsorbOverlay", "overAbsorbGlow" }) do
+        local s = S[health[key]]
+        if s.file or s.alpha ~= 1 or s.tint or next(s.calls) then untouched = false end
+    end
+    Equal(untouched, true, "the shield's stripes and glow keep Blizzard's own art")
+    Equal(table.concat(S[flash].tint, ",") .. " " .. tostring(S[flash].tintAlpha), "0,0,1 1", "the flash in the bar's own blue")
+end
 Equal(ns.Resource:ExtraHidden(), true, "a layout leaves no room for it then")
 power = 3
 prd:UpdatePowerBar()
@@ -1139,15 +1262,261 @@ Equal(S[prd.AlternatePowerBar].alpha == 0 and S[prd.AlternatePowerBar].height, 2
 -- Blizzard recolours the power bar as your power changes; Default follows it.
 prd.PowerBar:SetStatusBarColor(1, 1, 0)
 Equal(S[prd.PowerBar].barColour[1] == 1 and S[prd.PowerBar].barColour[2], 1, "Blizzard's energy yellow kept")
+-- Blizzard sets the bar up again, tinting the spent flash in its own blue:
+-- tinted again after, in the colour it gave the bar.
+prd:UpdatePowerBar()
+Equal(table.concat(S[prd.PowerBar.FeedbackFrame.BarTexture].tint, ","), "1,1,0", "the spent flash follows Blizzard's colour for the bar")
 ns.Set("prdPower", "purple")
 ns.Resource:Apply()
 Equal(S[prd.PowerBar].barColour[1] == .6 and S[prd.AlternatePowerBar].barColour[1], .6, "your own colour instead, on both power bars")
 prd.PowerBar:SetStatusBarColor(0, 0, 1)
 Equal(S[prd.PowerBar].barColour[1], .6, "and it stays when Blizzard recolours")
+prd:UpdatePowerBar()
+Equal(string.format("%g %g", S[prd.PowerBar.FeedbackFrame.BarTexture].tint[1], S[prd.PowerBar.FeedbackFrame.BarTexture].tintAlpha), "0.6 1",
+    "the spent flash in your colour too, tinted again after Blizzard sets the bar up")
 ns.Set("barStyle", "outline")
 ns.Resource:Apply()
 Equal(S[prd.PowerBar].barColour[4], .45, "Outline: a see-through fill")
 Equal(S[Piece(prd.PowerBar, "BACKGROUND", -8)].color[1], .6, "inside an edge in its colour")
+do
+    local cost, flash = prd.PowerBar.ManaCostPredictionBar, prd.PowerBar.FeedbackFrame.BarTexture
+    local function Alphas()
+        return string.format("%g %g %g %g", S[cost].alpha, S[health.myHealPrediction].alpha, S[health.otherHealPrediction].alpha,
+            S[flash].tintAlpha)
+    end
+    Equal(Alphas() .. " " .. string.format("%.3f,%.3f,%.3f %g", S[cost].tint[1], S[cost].tint[2], S[cost].tint[3], S[cost].tintAlpha),
+        "0.45 0.45 0.45 0.45 0.690,0.558,0.930 1",
+        "Outline: what a cast will cost, heals on the way and the spent flash as see-through as the fill (the cost in a lighter purple, see-through by its alpha alone)")
+    prd:UpdatePowerBar()
+    Equal(string.format("%g", S[flash].tintAlpha), "0.45", "the flash still see-through after Blizzard sets the bar up")
+    ns.Set("barStyle", "glass")
+    ns.Resource:Apply()
+    Equal(Alphas(), "1 1 1 1", "Glass: solid again")
+    ns.Set("barStyle", "outline")
+    ns.Resource:Apply()
+end
+-- What a cast will cost, on a colour you picked for the bar: a lighter shade
+-- of it, as Blizzard's own cost colour is of its bar; set again each time
+-- Blizzard sets its own (as your power type changes); and on Blizzard's
+-- colours, Blizzard's own again, for the power you have. Only a cosmetic
+-- setter on Blizzard's piece, and the maths only on the addon's own colours.
+do
+    local cost = prd.PowerBar.ManaCostPredictionBar
+    local function Tint()
+        local s = S[cost]
+        return string.format("%.3f,%.3f,%.3f %g", s.tint[1], s.tint[2], s.tint[3], s.tintAlpha or 1)
+    end
+    -- Who set its colour, in order: Blizzard's own code or the addon.
+    local who, SetTint = {}, Proto.SetVertexColor
+    function Proto:SetVertexColor(...)
+        if self == cost then who[#who + 1] = blizzardCalling and "Blizzard" or "addon" end
+        return SetTint(self, ...)
+    end
+    local function Who()
+        local list = table.concat(who, " ")
+        who = {}
+        return list
+    end
+    local PURPLE = "0.690,0.558,0.930 1"
+    local bar = S[prd.PowerBar].barColour
+    Equal(Tint() .. " " .. tostring(S[cost].tint[1] > bar[1] and S[cost].tint[2] > bar[2] and S[cost].tint[3] > bar[3]), PURPLE .. " true",
+        "your purple: the cost lighter than the bar in every channel")
+    -- Your power type changes: Blizzard sets its own colour for it, and yours goes back on after.
+    power = 3
+    prd:UpdatePowerBar()
+    Equal(Tint() .. " | " .. Who(), PURPLE .. " | Blizzard addon", "Blizzard sets its energy colour, then the lighter purple goes back on")
+    prd.PowerBar:SetStatusBarColor(1, 1, 0)
+    prd:UpdatePowerBar()
+    Equal(Tint(), PURPLE, "and stays as Blizzard recolours the bar and sets it up with no change of power")
+    power = 0
+    prd:UpdatePowerBar()
+    Equal(Tint() .. " | " .. Who(), PURPLE .. " | addon addon Blizzard addon", "back to mana: the same")
+    -- Glass: still solid; your class colour: its own lighter shade.
+    ns.Set("barStyle", "glass")
+    ns.Set("prdPower", "class")
+    ns.Resource:Apply()
+    Equal(Tint() .. " " .. S[cost].alpha, "1.000,0.605,0.256 1 1", "Glass and your druid orange: a lighter orange, solid")
+    -- The shade is Blizzard's own: its mana bar on this display (0.1, 0.25, 1)
+    -- taken the same way comes out as light to the eye as its cost blue (0, 0.447, 1).
+    do
+        local blue = ns.Style.BAR_COLOURS.blue
+        ns.Style.BAR_COLOURS.blue = { .1, .25, 1 }
+        ns.Set("prdPower", "blue")
+        ns.Resource:Apply()
+        ns.Style.BAR_COLOURS.blue = blue
+        local function Linear(c) return c <= .04045 and c / 12.92 or ((c + .055) / 1.055) ^ 2.4 end
+        local function Light(r, g, b) return .2126 * Linear(r) + .7152 * Linear(g) + .0722 * Linear(b) end
+        local t = S[cost].tint
+        local shade, blizzard = Light(t[1], t[2], t[3]), Light(0, .447, 1)
+        Equal(math.abs(shade - blizzard) < .001 and shade > Light(.1, .25, 1), true,
+            "Blizzard's mana bar in the same shade: lighter, and as light as Blizzard's own cost colour")
+    end
+    -- On white (a priest's class colour, which has no lighter shade) or a
+    -- colour nearly as light, the lighter shade wouldn't show: the cost goes
+    -- the same step darker (each channel x .775) instead. Every other colour
+    -- keeps the lighter one. The edge: the lighter shade standing out from the
+    -- bar by a contrast of 1.1 (a grey of .829).
+    do
+        local function Linear(c) return c <= .04045 and c / 12.92 or ((c + .055) / 1.055) ^ 2.4 end
+        local function Light(r, g, b) return .2126 * Linear(r) + .7152 * Linear(g) + .0722 * Linear(b) end
+        -- Which way the cost went from the bar's colour, and whether it stands out (a contrast of 1.1 or more).
+        local function Way(colour)
+            local t, up, down = S[cost].tint, 0, 0
+            for i = 1, 3 do
+                if t[i] > colour[i] + 1e-9 then up = up + 1 elseif t[i] < colour[i] - 1e-9 then down = down + 1 end
+            end
+            local a, b = Light(t[1], t[2], t[3]), Light(colour[1], colour[2], colour[3])
+            local standout = (math.max(a, b) + .05) / (math.min(a, b) + .05) >= 1.1
+            return (up > 0 and down == 0 and "lighter" or down > 0 and up == 0 and "darker" or "mixed")
+                .. (standout and "" or " (doesn't stand out)")
+        end
+        local blue = ns.Style.BAR_COLOURS.blue
+        -- A colour of yours on the palette's Blue spot; returns which way the cost went.
+        local function On(colour)
+            ns.Style.BAR_COLOURS.blue = colour
+            ns.Set("prdPower", "blue")
+            ns.Resource:Apply()
+            ns.Style.BAR_COLOURS.blue = blue
+            return Way(colour)
+        end
+        -- A priest on the Class colour: white.
+        local UnitClass0, priest = _G.UnitClass, { 1, 1, 1 }
+        _G.UnitClass = function() return "Priest", "PRIEST" end
+        _G.RAID_CLASS_COLORS.PRIEST = { r = 1, g = 1, b = 1 }
+        ns.Set("prdPower", "class")
+        ns.Resource:Apply()
+        Equal(Tint() .. " " .. Way(priest), "0.775,0.775,0.775 1 darker", "a priest on the Class colour: the cost a darker white (grey), solid")
+        -- Kept through a change of power, as the lighter shade is.
+        Who()
+        power = 3
+        prd:UpdatePowerBar()
+        Equal(Tint() .. " | " .. Who(), "0.775,0.775,0.775 1 | Blizzard addon", "Blizzard sets its energy colour, then the darker white goes back on")
+        power = 0
+        prd:UpdatePowerBar()
+        Equal(Tint(), "0.775,0.775,0.775 1", "back to mana: still the darker white")
+        -- Outline: the region's alpha as for the lighter shade, the tint still solid.
+        ns.Set("barStyle", "outline")
+        ns.Resource:Apply()
+        Equal(Tint() .. " " .. S[cost].alpha, "0.775,0.775,0.775 1 0.45", "Outline on white: the darker white, see-through by its alpha alone like the fill")
+        ns.Set("barStyle", "glass")
+        ns.Resource:Apply()
+        Equal(Tint() .. " " .. S[cost].alpha, "0.775,0.775,0.775 1 1", "Glass on white: solid again")
+        -- A rogue's pale yellow on the Class colour: its lighter shade barely shows, so darker too.
+        _G.UnitClass = function() return "Rogue", "ROGUE" end
+        _G.RAID_CLASS_COLORS.ROGUE = { r = 1, g = .96, b = .41 }
+        ns.Resource:Apply()
+        Equal(Tint() .. " " .. Way({ 1, .96, .41 }), "0.775,0.744,0.318 1 darker", "a rogue's pale yellow: the cost darker")
+        -- The lightest class colour that still keeps the lighter shade: hunter green.
+        _G.UnitClass = function() return "Hunter", "HUNTER" end
+        _G.RAID_CLASS_COLORS.HUNTER = { r = .67, g = .83, b = .45 }
+        ns.Resource:Apply()
+        Equal(Tint() .. " " .. Way({ .67, .83, .45 }), "0.744,0.868,0.574 1 lighter", "hunter green: the lighter shade, as before")
+        -- Every class colour Forever has (its class table, build 70425): only
+        -- the rogue's and the priest's go darker, and each stands out 1.1 or
+        -- more (the mage's 1.16 and the hunter's 1.13 the least).
+        do
+            local colours0, classes = _G.RAID_CLASS_COLORS, {}
+            _G.RAID_CLASS_COLORS = {}
+            for _, class in ipairs({ { "WARRIOR", .776, .608, .427 }, { "PALADIN", .957, .549, .729 },
+                { "HUNTER", .667, .827, .447 }, { "ROGUE", 1, .957, .408 }, { "PRIEST", 1, 1, 1 }, { "SHAMAN", 0, .439, .867 },
+                { "MAGE", .247, .780, .922 }, { "WARLOCK", .529, .533, .933 }, { "DRUID", 1, .486, .039 } }) do
+                local token = class[1]
+                _G.RAID_CLASS_COLORS[token] = { r = class[2], g = class[3], b = class[4] }
+                _G.UnitClass = function() return token, token end
+                ns.Resource:Apply()
+                classes[#classes + 1] = token:lower() .. " " .. Way({ class[2], class[3], class[4] })
+            end
+            _G.RAID_CLASS_COLORS = colours0
+            Equal(table.concat(classes, ", "), "warrior lighter, paladin lighter, hunter lighter, rogue darker, priest darker, "
+                .. "shaman lighter, mage lighter, warlock lighter, druid lighter", "every class colour: only the rogue's and the priest's go darker, each standing out")
+        end
+        _G.UnitClass, _G.RAID_CLASS_COLORS.PRIEST, _G.RAID_CLASS_COLORS.ROGUE, _G.RAID_CLASS_COLORS.HUNTER = UnitClass0, nil, nil, nil
+        ns.Resource:Apply()
+        Equal(Tint(), "1.000,0.605,0.256 1", "back to the druid: its lighter orange")
+        -- Near-white colours of yours: darker.
+        local near = {}
+        for _, colour in ipairs({ { 1, 1, 1 }, { .95, .95, .95 }, { .9, .9, .92 }, { 1, 1, .8 }, { .9, 1, 1 } }) do
+            near[#near + 1] = On(colour)
+        end
+        Equal(table.concat(near, ", "), "darker, darker, darker, darker, darker", "white and near-white colours: the cost darker")
+        Equal((On({ .95, .95, .95 }) and Tint()), "0.736,0.736,0.736 1", "a near-white .95 grey: .95 x .775")
+        -- Every palette colour, and Blizzard's own blue, keep the lighter shade.
+        local normal = {}
+        for _, key in ipairs({ "orange", "charcoal", "blue", "green", "purple" }) do
+            normal[#normal + 1] = key .. " " .. On(ns.Style.BAR_COLOURS[key])
+        end
+        normal[#normal + 1] = "Blizzard's " .. On({ .1, .25, 1 })
+        Equal(table.concat(normal, ", "),
+            "orange lighter, charcoal lighter, blue lighter, green lighter, purple lighter, Blizzard's lighter",
+            "every palette colour, and Blizzard's own bar blue: the lighter shade, as before")
+        -- The edge: a grey of .82 (its lighter shade stands out 1.106) keeps
+        -- it; .83 (1.099) goes darker, to .83 x .775.
+        Equal(On({ .82, .82, .82 }) .. " | " .. On({ .83, .83, .83 }) .. " " .. Tint(), "lighter | darker 0.643,0.643,0.643 1",
+            "the edge: a .82 grey keeps the lighter shade, a .83 grey goes darker")
+        -- Saturated ones whose lighter shade only lifts a weak channel (magenta): darker, and standing out.
+        Equal(On({ 1, 0, 1 }), "darker", "magenta, whose lighter shade barely shows: darker, and it stands out")
+        -- Blizzard's own colours are never shaded: a white bar of Blizzard's keeps its own cost colour.
+        ns.Set("prdPower", "default")
+        ns.Resource:Apply()
+        Who()
+        prd.PowerBar:SetStatusBarColor(1, 1, 1)
+        ns.Resource:Apply()
+        prd:UpdatePowerBar()
+        Equal(Tint() .. " | " .. Who(), "0.000,0.447,1.000 1 | ", "a white bar on Blizzard's colours: its own cost blue, nothing set by the addon")
+        prd.PowerBar:SetStatusBarColor(1, 1, 0)
+    end
+    -- Back on Blizzard's colours: its own cost colour for the power you have
+    -- now (energy's), then left to Blizzard.
+    ns.Set("prdPower", "purple")
+    ns.Resource:Apply()
+    power = 3
+    prd:UpdatePowerBar()
+    Who()
+    ns.Set("prdPower", "default")
+    ns.Resource:Apply()
+    Equal(Tint() .. " | " .. Who(), "1.000,0.850,0.400 1 | addon", "Blizzard's colours again: its own energy colour put back, once")
+    prd.PowerBar:SetStatusBarColor(1, 1, 0)
+    prd:UpdatePowerBar()
+    ns.Resource:Apply()
+    power = 0
+    prd:UpdatePowerBar()
+    Equal(Tint() .. " | " .. Who(), "0.000,0.447,1.000 1 | Blizzard", "then left to Blizzard, which sets its mana blue as you change power")
+    -- A power with no cost colour of its own, or a secret one: mana's, as Blizzard does.
+    ns.Set("prdPower", "purple")
+    ns.Resource:Apply()
+    _G.UnitPowerType = function() return 1, "RAGE" end
+    ns.Set("prdPower", "default")
+    ns.Resource:Apply()
+    Equal(Tint(), "0.000,0.447,1.000 1", "rage, with no cost colour of its own: mana's put back")
+    -- A power Blizzard finds by its number, not its name: that one's; one the
+    -- game gives its own bar colour: mana's (Blizzard's colour for it has no
+    -- cost colour); one with no name: mana's (Blizzard looks nothing up).
+    local found = {}
+    for _, answer in ipairs({ { 3, "UNLISTED" }, { 3, "UNLISTED", .5, .5, .5 }, { 3 } }) do
+        ns.Set("prdPower", "purple")
+        ns.Resource:Apply()
+        _G.UnitPowerType = function() return table.unpack(answer) end
+        ns.Set("prdPower", "default")
+        ns.Resource:Apply()
+        found[#found + 1] = Tint()
+    end
+    Equal(table.concat(found, " | "), "1.000,0.850,0.400 1 | 0.000,0.447,1.000 1 | 0.000,0.447,1.000 1",
+        "a power found by its number: its own cost colour; one with the game's own bar colour or no name: mana's")
+    ns.Set("prdPower", "purple")
+    ns.Resource:Apply()
+    _G.issecretvalue = function(v) return rawequal(v, SECRETS.number) or rawequal(v, SECRETS.string) end
+    _G.UnitPowerType = function() return SECRETS.number, SECRETS.string end
+    ns.Set("prdPower", "default")
+    ns.Resource:Apply()
+    Equal(Tint(), "0.000,0.447,1.000 1", "a secret power type: mana's put back, and nothing done with the secret")
+    _G.issecretvalue = nil
+    _G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
+    Proto.SetVertexColor = SetTint
+    ns.Set("prdPower", "purple")
+    ns.Set("barStyle", "outline")
+    ns.Resource:Apply()
+    Equal(Tint() .. " " .. S[cost].alpha, PURPLE .. " 0.45", "purple and Outline again")
+end
 -- The bar texture picked on the Look page, and still only set when it changes
 -- as Blizzard recolours the bars.
 ns.Set("barTexture", "skills")
@@ -1155,16 +1524,25 @@ ns.Resource:Apply()
 local SKILLS = "Interface\\PaperDollInfoFrame\\UI-Character-Skills-Bar"
 Equal(S[health].barTexture .. " " .. S[prd.PowerBar].barTexture .. " " .. S[prd.AlternatePowerBar].barTexture,
     SKILLS .. " " .. SKILLS .. " " .. SKILLS, "the texture picked, on the display's bars")
+Equal(S[prd.PowerBar.ManaCostPredictionBar].file .. " " .. S[health.myHealPrediction].file .. " " .. S[health.otherHealPrediction].file
+    .. " " .. S[prd.PowerBar.FeedbackFrame.BarTexture].file, SKILLS .. " " .. SKILLS .. " " .. SKILLS .. " " .. SKILLS,
+    "and on Blizzard's pieces beside them")
 local fills = 0
-local SetFill = Proto.SetStatusBarTexture
+-- (Both setters, the bars' fills' and the pieces', counted together.)
+local SetFill = { Proto.SetStatusBarTexture, Proto.SetTexture }
 function Proto:SetStatusBarTexture(t)
     fills = fills + 1
-    SetFill(self, t)
+    SetFill[1](self, t)
+end
+function Proto:SetTexture(t)
+    fills = fills + 1
+    SetFill[2](self, t)
 end
 prd.PowerBar:SetStatusBarColor(0, 0, 1)
+prd:UpdatePowerBar()
 ns.Resource:Apply()
-Equal(fills .. " " .. S[prd.PowerBar].barTexture, "0 " .. SKILLS, "not set again while it stays the same")
-Proto.SetStatusBarTexture = SetFill
+Equal(fills .. " " .. S[prd.PowerBar].barTexture, "0 " .. SKILLS, "not set again while it stays the same, nor Blizzard's pieces beside it")
+Proto.SetStatusBarTexture, Proto.SetTexture = SetFill[1], SetFill[2]
 ns.Set("barTexture", "flat")
 ns.Resource:Apply()
 Equal(S[health].barTexture, "Interface\\Buttons\\WHITE8X8", "flat again")
@@ -1238,30 +1616,453 @@ Equal(#printed, 0, "no errors")
 -- Restyle off: Blizzard's bars untouched, but the repeat mana bar still hides.
 Environment()
 Viewers(0)
-_G.UnitPowerType = function() return power end
+_G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
 prd = PRD()
 _G.PersonalResourceDisplayFrame = prd
-ns = Load({ prdSkin = false })
+ns = Load({ prdSkin = false, prdPower = "purple" })
 Equal(S[prd.PowerBar].barTexture, nil, "restyle off: Blizzard's own bars")
+prd:UpdatePowerBar()
+Equal(S[prd.PowerBar.ManaCostPredictionBar].file .. " " .. S[prd.PowerBar.FeedbackFrame.BarTexture].file .. " "
+    .. table.concat(S[prd.PowerBar.FeedbackFrame.BarTexture].tint, ","), UI_STATUSBAR .. " " .. UI_STATUSBAR .. " 0,0,1",
+    "and Blizzard's own pieces beside them: its texture, and the flash as Blizzard tints it")
+Equal(ns.Get("prdPower") .. " " .. table.concat(S[prd.PowerBar.ManaCostPredictionBar].tint, ","), "purple 0,0.447,1",
+    "what a cast will cost in Blizzard's own blue, with a colour of yours saved")
 Equal(S[prd.AlternatePowerBar].alpha, 0, "the repeat bar still hides")
 
 -- Blizzard loads the display once it's switched on.
 Environment()
 Viewers(0)
-_G.UnitPowerType = function() return power end
-ns = Load(nil)
+_G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
+ns = Load({ prdPower = "purple" })
 prd = PRD()
 _G.PersonalResourceDisplayFrame = prd
 Fire("ADDON_LOADED", "Blizzard_PersonalResourceDisplay")
 Equal(S[prd.PowerBar].barTexture, "Interface\\Buttons\\WHITE8X8", "restyled once Blizzard loads it")
+-- With your colour saved: what a cast will cost in its lighter shade at once,
+-- and again after Blizzard first sets the bar up in its own.
+do
+    local cost = prd.PowerBar.ManaCostPredictionBar
+    local function Tint() return string.format("%.3f,%.3f,%.3f", S[cost].tint[1], S[cost].tint[2], S[cost].tint[3]) end
+    local first = Tint()
+    prd:UpdatePowerBar()
+    Equal(first .. " " .. Tint(), "0.690,0.558,0.930 0.690,0.558,0.930", "your lighter purple as it loads, and after Blizzard sets the bar up")
+end
 Equal(#printed, 0, "no errors from the display")
+
+-- A display without the pieces beside the fills (a build that drops them):
+-- restyled all the same, with nothing looked for that isn't there.
+do
+    Environment()
+    Viewers(0)
+    _G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
+    local bare = PRD(true)
+    _G.PersonalResourceDisplayFrame = bare
+    ns = Load(nil)
+    bare:UpdatePowerBar()
+    ns.Set("barStyle", "outline")
+    ns.Set("barTexture", "raid")
+    ns.Set("prdPower", "purple")
+    ns.Resource:Apply()
+    bare:UpdatePowerBar()
+    ns.Set("prdPower", "default")
+    ns.Resource:Apply()
+    Equal(S[bare.PowerBar].barTexture .. " " .. S[bare.HealthBarsContainer.healthBar].barTexture .. " " .. #printed,
+        RAID .. " " .. RAID .. " 0", "a display without those pieces: restyled all the same, with no error")
+end
+
+-- Something going wrong in the addon's hooks on the display, which run
+-- inside Blizzard's own calls: you're told once, and it's never handed back,
+-- so Blizzard's work carries on. Its UpdatePowerBar (70425) sets the bar's
+-- colour first, then notes your power type and sets up the rest; Edit Mode's
+-- setters and its Bar Width carry on after the addon's hooks too.
+do
+    Environment()
+    Viewers(0)
+    power = 0
+    _G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
+    local display = PRD()
+    _G.PersonalResourceDisplayFrame = display
+    local setUp, noted, maxed = display.UpdatePowerBar, nil, 0
+    rawset(display, "UpdatePowerBar", function(self)
+        local was = blizzardCalling
+        blizzardCalling = true
+        self.PowerBar:SetStatusBarColor(0, 0, 1)
+        local _, token = UnitPowerType("player")
+        noted, maxed = token, maxed + 1
+        blizzardCalling = was
+        setUp(self)
+    end)
+    ns = Load(nil)
+    local R = ns.Resource
+    -- One of Blizzard's own calls, as its events or Edit Mode make it: "true" when all of it ran.
+    local function Call(method, ...)
+        local done = false
+        local ok = pcall(function(...)
+            display[method](display, ...)
+            done = true
+        end, ...)
+        return tostring(ok and done)
+    end
+    local function Told(n, what)
+        return tostring(printed[n]):match("couldn't restyle the Personal Resource Display%. Please report this: .*" .. what) ~= nil
+    end
+    -- A fault in the look, as Blizzard colours the bar: the rest of UpdatePowerBar
+    -- still runs, and you're told once, not on each call.
+    local ShowSheen = ns.Style.ShowSheen
+    ns.Style.ShowSheen = function() error("a fault in the look") end
+    local first = Call("UpdatePowerBar") .. " " .. tostring(noted) .. " " .. maxed
+    local again = Call("UpdatePowerBar") .. " " .. maxed
+    ns.Style.ShowSheen = ShowSheen
+    Equal(first .. " | " .. again .. " | " .. #printed .. " " .. tostring(Told(1, "a fault in the look")), "true MANA 1 | true 2 | 1 true",
+        "a fault in the look as Blizzard colours the bar: its UpdatePowerBar still notes your power and carries on; told once")
+    -- A fault in Layout:Stack, as your power changes (the extra mana bar
+    -- comes back, so the rows make room) and as Blizzard sets the width.
+    R.lastError = nil
+    local layout = ns.Layout
+    ns.Layout = { Stack = function() error("a fault in the layout") end, Active = function() error("a fault in the layout") end,
+        MatchWidth = function() end }
+    power = 3
+    local shifted = Call("UpdatePowerBar") .. " " .. tostring(noted) .. " " .. tostring(R:ExtraHidden()) .. " " .. S[display.AlternatePowerBar].alpha
+    S[display].width = nil
+    local width = Call("UpdateBarWidth") .. " " .. string.format("%g", S[display].width or 0)
+    ns.Layout = layout
+    Equal(shifted .. " | " .. width .. " | " .. #printed .. " " .. tostring(Told(2, "a fault in the layout")),
+        "true ENERGY false 1 | true 200 | 2 true", "a fault in the layout after UpdatePowerBar and Bar Width: both carry on; told once")
+    -- A fault in the cost's tint as Edit Mode sets the bars' height.
+    R.lastError = nil
+    ns.Set("prdPower", "purple")
+    local BarColour = ns.Style.BarColour
+    ns.Style.BarColour = function() error("a fault in the tint") end
+    local height = Call("SetPowerBarHeight", 20) .. " " .. S[display.PowerBar].height
+    ns.Style.BarColour = BarColour
+    Equal(height .. " | " .. #printed .. " " .. tostring(Told(3, "a fault in the tint")), "true 20 | 3 true",
+        "a fault in the cost's tint after Edit Mode's bar height: it carries on; told once")
+    -- All well again: Blizzard's colour followed (the spent flash tinted in
+    -- it by the look), and nothing more said.
+    ns.Set("prdPower", "default")
+    ns.Resource:Apply()
+    display.PowerBar:SetStatusBarColor(1, 1, 0)
+    Equal(table.concat(S[display.PowerBar.FeedbackFrame.BarTexture].tint, ",") .. " " .. Call("UpdatePowerBar") .. " " .. #printed,
+        "1,1,0 true 3", "after it: Blizzard's colour followed again, and nothing more said")
+    power = 0
+end
+
+-- Your health and power as text on the display's bars ----------------------------------------
+-- Off by default, with nothing made and nothing listening. Ticked, the
+-- addon's own text, on frames of its own over Blizzard's bars that take no
+-- mouse, above everything Blizzard draws there. Your health and power are
+-- secret on Forever, in and out of combat, so here they're the mock game's
+-- secrets, which fail on any compare, sum, join or turn into text: the
+-- addon only hands them on, to the game's own calls (which keep them
+-- secret) and on to the text. Blizzard's own text on a bar goes see-through
+-- while ours shows there, and comes back after.
+;(function()
+    local SECRET, WORDS = SECRETS.number, SECRETS.string
+    local curve = {} -- the game's 0 to 100 curve
+    local asked = {}
+    -- A game function: what it was asked, secrets named, and its answer.
+    local function Game(name, answer)
+        return function(...)
+            local args, words = table.pack(...), {}
+            for i = 1, args.n do
+                local v = args[i]
+                words[i] = rawequal(v, SECRET) and "secret" or rawequal(v, WORDS) and "secret text" or rawequal(v, curve) and "curve"
+                    or tostring(v)
+            end
+            asked[#asked + 1] = name .. "(" .. table.concat(words, ", ") .. ")"
+            if type(answer) == "function" then return answer(...) end
+            return answer
+        end
+    end
+    local function Asked()
+        local list = table.concat(asked, " ")
+        asked = {}
+        return list
+    end
+    local function IsSecretTest(v) return rawequal(v, SECRET) end
+    local function Game0()
+        _G.UnitHealth, _G.UnitHealthMax = Game("UnitHealth", SECRET), Game("UnitHealthMax", SECRET)
+        _G.UnitHealthPercent = Game("UnitHealthPercent", SECRET)
+        _G.UnitPower, _G.UnitPowerMax = Game("UnitPower", SECRET), Game("UnitPowerMax", SECRET)
+        _G.UnitPowerPercent = Game("UnitPowerPercent", SECRET)
+        -- The game's own number writers take a secret and give secret text;
+        -- a plain number, plain text.
+        _G.BreakUpLargeNumbers = Game("BreakUpLargeNumbers", function(v)
+            if IsSecretTest(v) then return WORDS end
+            return tostring(math.floor(v)):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+        end)
+        _G.AbbreviateNumbers = Game("AbbreviateNumbers", function(v)
+            if IsSecretTest(v) then return WORDS end
+            return string.format("%.1fK", v / 1000)
+        end)
+        _G.CurveConstants = { ScaleTo100 = curve }
+        _G.UnitPowerType = function() return 0, "MANA" end
+    end
+    local function Fresh(saved)
+        Environment()
+        Viewers(0)
+        Game0()
+        local display = PRD()
+        _G.PersonalResourceDisplayFrame = display
+        ns = Load(saved)
+        asked = {}
+        return display, display.HealthBarsContainer.healthBar, display.PowerBar
+    end
+    -- A spot's text as handed over: its format and what went in it, secrets named.
+    local function Said(text)
+        local s = S[text]
+        if s.format == nil then return '"' .. tostring(s.text) .. '"' end
+        local words = {}
+        for i = 1, s.args.n do
+            local v = s.args[i]
+            words[i] = rawequal(v, SECRET) and "secret" or rawequal(v, WORDS) and "secret text" or tostring(v)
+        end
+        return s.format .. " [" .. table.concat(words, ", ") .. "]"
+    end
+    local function Spots(holder)
+        local slots = holder.slots
+        return Said(slots.centre) .. " | " .. Said(slots.left) .. " | " .. Said(slots.right)
+    end
+    local function Listening(holder)
+        local list = {}
+        for event, unit in pairs(S[holder].events) do list[#list + 1] = event .. ":" .. tostring(unit) end
+        table.sort(list)
+        return table.concat(list, " ")
+    end
+    local function BlizzardText(bar)
+        return S[bar.TextString].alpha .. S[bar.LeftText].alpha .. S[bar.RightText].alpha
+    end
+
+    -- Off by default: nothing made, nothing listening, Blizzard's text as it was.
+    local display, health, powerBar = Fresh(nil)
+    local made = 0
+    for _, frame in ipairs(frames) do
+        if S[frame].parent == health or S[frame].parent == powerBar then made = made + 1 end
+        if S[frame].events.UNIT_HEALTH or S[frame].events.UNIT_MAXHEALTH then made = made + 100 end
+    end
+    Equal(tostring(ns.Get("prdText")) .. " " .. tostring(next(ns.Resource.textHolders)) .. " " .. made .. " " .. BlizzardText(health)
+        .. " " .. Asked(), "false nil 0 111 ", "off by default: nothing made or listening, nothing asked, Blizzard's text left be")
+    Equal(table.concat({ ns.Get("prdHealthAt"), ns.Get("prdHealthCentre"), ns.Get("prdHealthLeft"), ns.Get("prdHealthRight"),
+        ns.Get("prdPowerAt"), ns.Get("prdPowerCentre"), ns.Get("prdPowerLeft"), ns.Get("prdPowerRight"), ns.Get("prdTextNumbers"),
+        ns.Get("prdTextSize"), ns.Get("prdTextFont") }, " "), "centre value value percent centre value value percent full 10 look",
+        "its choices start at the middle of each bar, the value now, numbers in full, size 10, the Look page's font")
+
+    -- Ticked: the text on both bars, in the middle.
+    ns.Set("prdText", true)
+    ns.Resource:Apply()
+    local text = ns.Resource.textHolders
+    local hp, mp = text.health, text.power
+    Equal(tostring(S[hp].parent == health) .. " " .. tostring(S[mp].parent == powerBar) .. " " .. tostring(S[hp].points[1][2] == health)
+        .. " " .. S[hp].points[1][1] .. " " .. S[hp].level .. " " .. S[mp].level .. " " .. tostring(S[hp].mouse) .. " " .. tostring(S[mp].mouse),
+        "true true true ALL 101 4 false false",
+        "on frames of its own over each bar, taking no mouse: over the lost max health (100), and the power bar's full pulse"
+        .. " (+1) and its spike and glow (+2)")
+    Equal(Spots(hp) .. " || " .. Spots(mp), '%s [secret text] | "nil" | "nil" || %s [secret text] | "nil" | "nil"',
+        "your health and power now in the middle, as the game wrote them")
+    Equal(Asked(), "UnitHealth(player) BreakUpLargeNumbers(secret) UnitPower(player, 0) BreakUpLargeNumbers(secret)",
+        "each handed straight from the game's answer to its own number writer")
+    Equal(S[hp.slots.centre].font .. " " .. S[hp.slots.left].font .. " " .. tostring(S[hp.slots.centre].wordWrap) .. " "
+        .. S[hp.slots.centre].justify .. " " .. S[hp.slots.left].justify .. " " .. S[hp.slots.right].justify,
+        "FECMFont10 FECMFont10 false CENTER LEFT RIGHT", "in the Look page's font at 10, each spot on one line")
+    local function At(slot, i)
+        local p = S[slot].points[i]
+        return p[1] .. " " .. p[3] .. " " .. p[4]
+    end
+    Equal(At(hp.slots.left, 1) .. ", " .. At(hp.slots.left, 2) .. " | " .. At(hp.slots.right, 1) .. ", " .. At(hp.slots.right, 2),
+        "LEFT LEFT 4, RIGHT CENTER -2 | LEFT CENTER 2, RIGHT RIGHT -4", "a left and right pair each have half the bar, so they can't overlap")
+    Equal(Listening(hp) .. " | " .. Listening(mp), "PLAYER_ENTERING_WORLD:true UNIT_HEALTH:player UNIT_MAXHEALTH:player | "
+        .. "PLAYER_ENTERING_WORLD:true UNIT_DISPLAYPOWER:player UNIT_MAXPOWER:player UNIT_POWER_FREQUENT:player",
+        "listening to your own health and power only, and for loading screens as Blizzard's display does")
+    Equal(BlizzardText(health) .. " " .. BlizzardText(powerBar) .. " " .. BlizzardText(display.AlternatePowerBar), "000 000 111",
+        "Blizzard's own text see-through on both bars, the extra mana bar's left be")
+
+    -- In a fight: an event writes only that bar's spots in use, with nothing else set.
+    local before = (S[hp.slots.centre].writes or 0) .. " " .. (S[mp.slots.centre].writes or 0)
+    local fonts, alphas, places = 0, 0, 0
+    local SetFont, SetAlpha, SetPoint = Proto.SetFontObject, Proto.SetAlpha, Proto.SetPoint
+    function Proto:SetFontObject(o) fonts = fonts + 1; SetFont(self, o) end
+    function Proto:SetAlpha(a) alphas = alphas + 1; SetAlpha(self, a) end
+    function Proto:SetPoint(...) places = places + 1; SetPoint(self, ...) end
+    Fire("UNIT_HEALTH", "player")
+    Fire("UNIT_POWER_FREQUENT", "player", "MANA")
+    Fire("UNIT_POWER_FREQUENT", "player", "MANA")
+    Proto.SetFontObject, Proto.SetAlpha, Proto.SetPoint = SetFont, SetAlpha, SetPoint
+    Equal(before .. " | " .. S[hp.slots.centre].writes .. " " .. S[mp.slots.centre].writes .. " " .. fonts .. alphas .. places .. " " .. Asked(),
+        "1 1 | 2 3 000 UnitHealth(player) BreakUpLargeNumbers(secret) UnitPower(player, 0) BreakUpLargeNumbers(secret) "
+        .. "UnitPower(player, 0) BreakUpLargeNumbers(secret)", "each event: its own bar's text written once, nothing else set")
+    -- A bar out of sight isn't written; it's brought up to date as it shows.
+    S[health].shown = false
+    Fire("UNIT_HEALTH", "player")
+    local hidden = S[hp.slots.centre].writes .. " " .. Asked()
+    S[health].shown = true
+    S[hp].scripts.OnShow(hp)
+    Equal(hidden .. " | " .. S[hp.slots.centre].writes .. " " .. Asked(), "2  | 3 UnitHealth(player) BreakUpLargeNumbers(secret)",
+        "out of sight: left until it shows again, then brought up to date")
+    -- After a loading screen: both bars written again, the game's numbers handed straight on.
+    Fire("PLAYER_ENTERING_WORLD", false, true)
+    Equal(S[hp.slots.centre].writes .. " " .. Asked(), "4 UnitHealth(player) BreakUpLargeNumbers(secret) UnitPower(player, 0) "
+        .. "BreakUpLargeNumbers(secret)", "a loading screen: both bars brought up to date")
+    -- Another power's change (a druid's mana ticking in cat form, say): the
+    -- power text is left alone, as Blizzard's own display does. Your own
+    -- power's, one with no name, one whose name the game keeps secret (never
+    -- compared) and your power type changing still write.
+    do
+        local writes = S[mp.slots.centre].writes
+        local function Wrote()
+            local now = S[mp.slots.centre].writes
+            local n = now - writes
+            writes = now
+            return n
+        end
+        Fire("UNIT_POWER_FREQUENT", "player", "ENERGY")
+        Fire("UNIT_MAXPOWER", "player", "ENERGY")
+        local other = Wrote() .. " " .. Asked()
+        Fire("UNIT_POWER_FREQUENT", "player", "MANA")
+        Fire("UNIT_MAXPOWER", "player", "MANA")
+        local own = Wrote()
+        Fire("UNIT_POWER_FREQUENT", "player")
+        _G.issecretvalue = function(v) return rawequal(v, SECRET) or rawequal(v, WORDS) end
+        Fire("UNIT_POWER_FREQUENT", "player", WORDS)
+        -- Your power's own name kept secret: never compared either.
+        local PowerType0 = _G.UnitPowerType
+        _G.UnitPowerType = function() return 0, WORDS end
+        Fire("UNIT_POWER_FREQUENT", "player", "ENERGY")
+        _G.UnitPowerType, _G.issecretvalue = PowerType0, nil
+        Fire("UNIT_DISPLAYPOWER", "player")
+        local rest = Wrote()
+        asked = {}
+        Equal(other .. "| " .. own .. " " .. rest .. " " .. #printed, "0 | 2 4 0",
+            "another power's change: nothing written or asked; your own, no name, a secret name either side and a new power type: written")
+    end
+
+    -- Each format, through the game's own calls only.
+    local function Pick(key, value)
+        ns.Set(key, value)
+        ns.Resource:Apply()
+    end
+    Pick("prdHealthCentre", "both")
+    Equal(Said(hp.slots.centre) .. " " .. Asked(), "%s / %s [secret text, secret text] UnitHealth(player) BreakUpLargeNumbers(secret) "
+        .. "UnitHealthMax(player) BreakUpLargeNumbers(secret) UnitPower(player, 0) BreakUpLargeNumbers(secret)",
+        "Value / max: both written by the game")
+    Pick("prdHealthCentre", "percent")
+    Pick("prdPowerCentre", "percent")
+    Equal(Said(hp.slots.centre) .. " | " .. Said(mp.slots.centre) .. " | " .. Asked(), "%.0f%% [secret] | %.0f%% [secret] | "
+        .. "UnitHealthPercent(player, false, curve) UnitPower(player, 0) BreakUpLargeNumbers(secret) "
+        .. "UnitHealthPercent(player, false, curve) UnitPowerPercent(player, 0, false, curve)",
+        "Percent: the game's percent through its 0 to 100 curve, handed to the text as it is")
+    Pick("prdTextNumbers", "short")
+    Pick("prdHealthCentre", "value")
+    Equal(Said(hp.slots.centre) .. " " .. Asked():match("UnitHealth%(player%) %S+"), "%s [secret text] UnitHealth(player) AbbreviateNumbers(secret)",
+        "4.3K: shortened by the game")
+    Pick("prdTextNumbers", "full")
+    Pick("prdPowerCentre", "value")
+
+    -- A left and right pair: the middle emptied, each end as chosen.
+    Pick("prdHealthAt", "sides")
+    Equal(Spots(hp), '"" | %s [secret text] | %.0f%% [secret]', "Left and right: the value at the left, the percent at the right")
+    Pick("prdHealthLeft", "none")
+    Equal(Spots(hp), '"" | "" | %.0f%% [secret]', "None at the left: just the right")
+    Pick("prdHealthRight", "both")
+    Equal(Spots(hp), '"" | "" | %s / %s [secret text, secret text]', "and Value / max there")
+    asked = {}
+    Fire("UNIT_HEALTH", "player")
+    Equal(Asked(), "UnitHealth(player) BreakUpLargeNumbers(secret) UnitHealthMax(player) BreakUpLargeNumbers(secret)",
+        "an event writes the one spot in use")
+    Pick("prdHealthLeft", "value")
+    Pick("prdHealthRight", "percent")
+
+    -- Size and font: the Look page's font at the size chosen, or one of the game's own.
+    Pick("prdTextSize", 14)
+    Equal(S[hp.slots.centre].font .. " " .. S[hp.slots.right].font .. " " .. S[mp.slots.left].font, "FECMFont14 FECMFont14 FECMFont14",
+        "a bigger size, on every spot")
+    Pick("prdTextFont", "arial")
+    Equal(S[hp.slots.left].font .. " " .. S[_G.FECMFontarial14].face, "FECMFontarial14 Fonts\\ARIALN.TTF 14 OUTLINE",
+        "Arial Narrow just for this text, outlined like the rest")
+    ns.Set("font", "skurri")
+    ns.Style:ApplyFont()
+    Equal(S[_G.FECMFontarial14].face .. " " .. S[_G.FECMFont14].face, "Fonts\\ARIALN.TTF 14 OUTLINE Fonts\\skurri.ttf 14 OUTLINE",
+        "a new Look page font leaves it be")
+    Pick("prdTextFont", "look")
+    Equal(S[hp.slots.left].font .. " " .. #printed, "FECMFont14 0", "back to the Look page's font, now Skurri")
+    ns.Set("font", "friz")
+    ns.Style:ApplyFont()
+    Pick("prdTextSize", 10)
+
+    -- A bar's text off: gone from that bar, its listening and Blizzard's text back.
+    Pick("prdHealthAt", "off")
+    Equal(tostring(S[hp].shown) .. " " .. Listening(hp) .. "| " .. BlizzardText(health) .. " " .. tostring(S[mp].shown) .. " "
+        .. BlizzardText(powerBar), "false | 111 true 000", "the health bar's text off: hidden and quiet, Blizzard's text back there")
+    Pick("prdHealthAt", "centre")
+    Equal(tostring(S[hp].shown) .. " " .. BlizzardText(health) .. " " .. Said(hp.slots.centre), "true 000 %s [secret text]", "and back")
+    -- Unticked: all of it gone, nothing listening, Blizzard's text back.
+    Pick("prdText", false)
+    Equal(tostring(S[hp].shown) .. " " .. tostring(S[mp].shown) .. " " .. Listening(hp) .. "|" .. Listening(mp) .. "| "
+        .. BlizzardText(health) .. BlizzardText(powerBar), "false false || 111111", "unticked: hidden, quiet, and Blizzard's text back")
+    asked = {}
+    Fire("UNIT_HEALTH", "player")
+    ns.Resource:Apply()
+    Equal(Asked(), "", "and nothing asked of the game")
+    Equal(#printed, 0, "no errors")
+
+    -- Kept over a reload; anything else saved is ignored.
+    local saved = ForeverEnhancedCooldownManagerDB
+    saved.prdText, saved.prdHealthAt, saved.prdPowerRight, saved.prdTextSize = true, "sides", "both", 12
+    display, health = Fresh(saved)
+    hp = ns.Resource.textHolders.health
+    Equal(tostring(S[hp].shown) .. " " .. Spots(hp) .. " " .. S[hp.slots.left].font, 'true "nil" | %s [secret text] | %.0f%% [secret] FECMFont12',
+        "kept over a reload: shown from the start as chosen")
+    saved.prdHealthCentre, saved.prdHealthLeft, saved.prdTextSize, saved.prdTextFont, saved.prdTextNumbers = "none", "middle", 30, "comic", 4
+    Fresh(saved)
+    Equal(table.concat({ ns.Get("prdHealthCentre"), ns.Get("prdHealthLeft"), ns.Get("prdTextSize"), ns.Get("prdTextFont"),
+        ns.Get("prdTextNumbers") }, " "), "value value 10 look full", "anything else is ignored (the middle always shows something)")
+
+    -- A power type the game keeps secret: the game picks your current one.
+    _G.issecretvalue = function(v) return rawequal(v, SECRET) end
+    display = Fresh({ prdText = true })
+    _G.UnitPowerType = function() return SECRET, "MANA" end
+    Fire("UNIT_POWER_FREQUENT", "player", "MANA")
+    Equal(Asked(), "UnitPower(player, nil) BreakUpLargeNumbers(secret)", "a secret power type isn't handed on: the game picks")
+    _G.issecretvalue = nil
+
+    -- A build without the percent call or its curve: percent spots stay blank.
+    Environment()
+    Viewers(0)
+    Game0()
+    _G.UnitHealthPercent, _G.CurveConstants = nil, nil
+    _G.PersonalResourceDisplayFrame = PRD()
+    ns = Load({ prdText = true, prdHealthCentre = "percent", prdPowerCentre = "percent" })
+    hp = ns.Resource.textHolders.health
+    Equal(Said(hp.slots.centre) .. " " .. Said(ns.Resource.textHolders.power.slots.centre) .. " " .. #printed, '"" "" 0',
+        "no percent call or curve: blank, with no error")
+    _G.CurveConstants = { ScaleTo100 = curve }
+
+    -- The game refusing a number: that bar's text goes blank, quiet and away,
+    -- Blizzard's own text there comes back, and you're told once.
+    display = Fresh({ prdText = true })
+    hp = ns.Resource.textHolders.health
+    local was = BlizzardText(display.HealthBarsContainer.healthBar)
+    _G.BreakUpLargeNumbers = function() error("bad argument #1 to 'BreakUpLargeNumbers'") end
+    Fire("UNIT_HEALTH", "player")
+    Fire("UNIT_HEALTH", "player")
+    local now = tostring(S[hp].shown) .. " " .. BlizzardText(display.HealthBarsContainer.healthBar)
+    ns.Resource:Apply()
+    Equal(Said(hp.slots.centre) .. " " .. Listening(hp) .. "| " .. #printed .. " " .. tostring(printed[1]):match("couldn't show text") ,
+        '"" | 1 couldn\'t show text', "refused: blank and quiet, one message to report")
+    Equal(was .. " " .. now .. " " .. tostring(S[hp].shown) .. " " .. BlizzardText(display.HealthBarsContainer.healthBar), "000 false 111 false 111",
+        "and put away at once, Blizzard's text back, staying that way")
+
+    for _, name in ipairs({ "UnitHealth", "UnitHealthMax", "UnitHealthPercent", "UnitPower", "UnitPowerMax", "UnitPowerPercent",
+        "BreakUpLargeNumbers", "AbbreviateNumbers", "CurveConstants" }) do
+        _G[name] = nil
+    end
+end)()
 
 -- A layout can make the display as wide as your widest row: only the widths
 -- its own Bar Width setting changes, never in combat, and Blizzard's back after.
 function Proto:GetEffectiveScale() return 1 end
 Environment()
 Viewers(0)
-_G.UnitPowerType = function() return power end
+_G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
 _G.UIParent = New("Frame")
 prd = PRD()
 _G.PersonalResourceDisplayFrame = prd
@@ -1301,17 +2102,36 @@ Equal(#printed, 0, "no errors while matching")
 Environment()
 Viewers(0)
 power = 3
-_G.UnitPowerType = function() return power end
+_G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
 local points = 2
 _G.UnitPower = function(unit, kind) assert(unit == "player" and kind == 4, "your combo points"); return points end
 prd = PRD()
 _G.PersonalResourceDisplayFrame = prd
 ns = Load(nil)
 Equal(ns.Resource:ComboRow(), nil, "off unless you tick it")
+-- What the combo points' listener hears (the display file's own frame with
+-- no parent): nothing while they're off; while they're on, what can show or
+-- hide them; while they show, your points and target too.
+local function ComboHears()
+    local list = {}
+    for _, frame in ipairs(frames) do
+        local script = S[frame].scripts.OnEvent
+        if script and S[frame].parent == nil and debug.getinfo(script, "S").source == "@Resource.lua" then
+            for event, unit in pairs(S[frame].events) do list[#list + 1] = event .. ":" .. tostring(unit) end
+        end
+    end
+    table.sort(list)
+    return table.concat(list, " ")
+end
+local COMBO_ON = "PLAYER_ENTERING_WORLD:true UNIT_DISPLAYPOWER:player UNIT_MAXPOWER:player UPDATE_SHAPESHIFT_FORM:true"
+local COMBO_SHOWN = "PLAYER_ENTERING_WORLD:true PLAYER_TARGET_CHANGED:true UNIT_DISPLAYPOWER:player UNIT_MAXPOWER:player"
+    .. " UNIT_POWER_FREQUENT:player UPDATE_SHAPESHIFT_FORM:true"
+Equal(ComboHears(), "", "off: a druid's combo listener hears nothing, not even your energy")
 ns.Set("prdCombo", true)
 ns.Resource:Apply()
 local row = ns.Resource:ComboRow()
 Equal(row ~= nil and S[row].shown, true, "ticked, a druid in cat form gets them")
+Equal(ComboHears(), COMBO_SHOWN, "and its listener hears your power, target, form and loading screens")
 -- Forever 70291 draws the game's own combo points too: see-through while ours show.
 Equal(S[prd.ClassFrameContainer].alpha .. " " .. tostring(S[prd.ClassFrameContainer].shown),
     "0 " .. tostring(S[prd.ClassFrameContainer].shown), "the game's own combo points go see-through, nothing else changed")
@@ -1345,9 +2165,10 @@ power = 0
 Fire("UPDATE_SHAPESHIFT_FORM")
 Equal(tostring(ns.Resource:ComboRow()) .. " " .. tostring(S[row].shown), "nil false", "gone out of cat form")
 Equal(S[prd.ClassFrameContainer].alpha, 1, "ours gone: the game's back in full")
+Equal(ComboHears(), COMBO_ON, "out of cat form: not your power or target, only what brings them back")
 power = 3
 Fire("UPDATE_SHAPESHIFT_FORM")
-Equal(S[row].shown, true, "back in cat form")
+Equal(tostring(S[row].shown) .. " " .. ComboHears(), "true " .. COMBO_SHOWN, "back in cat form, hearing your power and target again")
 -- A rogue has no extra mana bar: straight under the energy bar.
 S[prd.AlternatePowerBar].shown = false
 prd:UpdatePowerBar()
@@ -1391,7 +2212,33 @@ do
     Equal(string.format("%g %g", S[track].color[1], S[track].color[4]) .. " " .. tostring(S[over].points[2][2] == seg) .. " "
         .. tostring(S[rest].shown) .. " " .. tostring(S[ring[1]].shown), "0.08 0.85 true false false", "both off: as before")
 end
+-- Unticked: gone, and the listener hears nothing again.
+ns.Set("prdCombo", false)
+ns.Resource:Apply()
+Equal(tostring(ns.Resource:ComboRow()) .. " " .. tostring(S[row].shown) .. " [" .. ComboHears() .. "]", "nil false []",
+    "unticked: gone, and nothing heard")
 Equal(#printed, 0, "no errors from the combo points")
+-- A rogue: nothing heard until they're ticked; ticked, your energy and
+-- target too, and the points follow.
+do
+    Environment()
+    Viewers(0)
+    local UnitClass0 = _G.UnitClass
+    _G.UnitClass = function() return "Rogue", "ROGUE" end
+    prd = PRD()
+    _G.PersonalResourceDisplayFrame = prd
+    ns = Load(nil)
+    local off = ComboHears()
+    ns.Set("prdCombo", true)
+    ns.Resource:Apply()
+    points = 3
+    Fire("UNIT_POWER_FREQUENT", "player", "ENERGY")
+    local rogueRow = ns.Resource:ComboRow()
+    Equal("[" .. off .. "] " .. ComboHears() .. " " .. tostring(rogueRow and S[S[rogueRow].children[3]].value), "[] " .. COMBO_SHOWN .. " 3",
+        "a rogue: nothing heard while off; ticked, your energy and target too, and the points follow")
+    _G.UnitClass = UnitClass0
+    Equal(#printed, 0, "no errors from a rogue's combo points")
+end
 
 -- Your cast bar: Blizzard's own is only made invisible while yours is on,
 -- never moved, hidden or written on, and gets its alpha back after.
@@ -1423,6 +2270,21 @@ Equal(S[castingBar].alpha, 1, "then shows as normal")
 castingBar:PlayInterruptAnims()
 Equal(S[hold].calls.Play .. " " .. S[hold].calls.Stop, "2 1", "and its interrupt plays as normal")
 Equal(#printed, 0, "no errors from the cast bar")
+-- Something going wrong in a hook on Blizzard's cast bar: told once, and
+-- never handed back to Blizzard's call.
+do
+    ns.Set("castBar", true)
+    ns.CastBar:Apply()
+    rawset(hold, "Stop", function() error("a fault stopping the fade") end)
+    local fine = 0
+    for _ = 1, 2 do
+        if pcall(castingBar.PlayInterruptAnims, castingBar) then fine = fine + 1 end
+    end
+    rawset(hold, "Stop", nil)
+    Equal(fine .. " " .. #printed .. " " .. tostring(tostring(printed[1]):match(
+        "couldn't hide Blizzard's cast bar%. Please report this: .*a fault stopping the fade") ~= nil), "2 1 true",
+        "a fault in a hook on Blizzard's cast bar: its call carries on; told once")
+end
 _G.PlayerCastingBarFrame = nil
 
 -- Borders and shadows on Blizzard's icons: the addon's own textures, round

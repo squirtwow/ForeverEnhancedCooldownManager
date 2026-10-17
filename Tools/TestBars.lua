@@ -1573,6 +1573,70 @@ Fire("PLAYER_TARGET_CHANGED")
 Equal(containerCallsInCombat, 0, "a target change in combat sets nothing up")
 lockdown = false
 Fire("PLAYER_REGEN_ENABLED")
+-- Keep them greyed with no target (a player's idea, the Debuffs bar's own):
+-- the greyed spots stay with no target or a friendly one, a debuff still
+-- lighting in its slot over its spot. Out of combat Fade or Hide still
+-- apply to the whole bar. (In a closure: the main chunk is at 200 locals.)
+;(function()
+    local spot = debuffs.holders[1]
+    local function Seen() return tostring(S[spot.icon].alpha) .. " " .. tostring(InSight(spot.icon)) end
+    Equal(tostring(ns.BarData("debuff").greyedNoTarget) .. " " .. tostring(ns.BarData("buff").greyedNoTarget), "false false",
+        "keep them greyed: off unless ticked")
+    B:SetOption("debuff", "greyedNoTarget", true)
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    local kept = Seen()
+    target, hostile = true, false
+    Fire("PLAYER_TARGET_CHANGED")
+    kept = kept .. " | " .. Seen()
+    target, hostile = true, true
+    Fire("PLAYER_TARGET_CHANGED")
+    kept = kept .. " | " .. Seen() .. " " .. tostring(S[dbox].slots.b1.enabled) .. " "
+        .. tostring(S[dbox].slots.b1.filters.includeSpellIDs[8921] == true)
+    Equal(kept, "0.45 true | 0.45 true | 0.45 true true true",
+        "ticked: greyed in sight with no target and with a friendly one; with an enemy, its slot still there to light Moonfire")
+    -- Out of combat Show, Fade and Hide, with nothing targeted.
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    -- /ccm debug says so, under the Debuffs bar's entries.
+    SlashCmdList.FECM("debug")
+    local report = S[FECMDebugFrame.edit].text
+    FECMDebugFrame:Hide()
+    Equal(tostring(report:find("\n  missing greyed true, keep greyed with no target true, out of combat show, greyed spots up true", 1, true)
+        ~= nil) .. " " .. tostring(select(2, report:gsub("keep greyed with no target", ""))), "true 1",
+        "/ccm debug: the Debuffs bar's greyed spots, kept with no target and up, on its own line only")
+    local seen = {}
+    for _, mode in ipairs({ "show", "fade", "hide" }) do
+        B:SetOption("debuff", "outOfCombat", mode)
+        seen[#seen + 1] = mode .. " " .. tostring(S[debuffs].alpha) .. " " .. tostring(InSight(spot.icon))
+    end
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    seen[#seen + 1] = "fight " .. tostring(S[debuffs].alpha) .. " " .. Seen()
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    seen[#seen + 1] = "cleared " .. Seen() .. " " .. containerCallsInCombat
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(table.concat(seen, ", "), "show 1 true, fade 0.3 true, hide 0 false, fight 1 0.45 true, cleared 0.45 true 0",
+        "no target: Show shows them, Fade faintly, Hide not at all; in a fight they stay as you target and clear, setting nothing up")
+    B:SetOption("debuff", "outOfCombat", "show")
+    -- Missing debuffs greyed off: nothing to keep (packed, only those up).
+    B:SetOption("debuff", "showMissing", false)
+    Equal(tostring(ns.BuffBar:KeepGreyed(ns.BarData("debuff"))) .. " " .. tostring(S[spot].shown) .. " "
+        .. tostring(ns.BarData("debuff").greyedNoTarget), "false false true", "missing debuffs greyed off: no spots, the tick's own choice kept")
+    B:SetOption("debuff", "showMissing", true)
+    Equal(Seen(), "0.45 true", "and back with it, with no target")
+    B:SetOption("debuff", "greyedNoTarget", false)
+    Equal(Seen(), "0 false", "unticked: gone with no target, as before")
+    -- Only on the Debuffs bar: saved true on the Buffs bar, or anything but true, reads as off.
+    ns.BarData("buff").greyedNoTarget = true
+    ns.BarData("debuff").greyedNoTarget = "yes"
+    Equal(tostring(ns.BarData("buff").greyedNoTarget) .. " " .. tostring(ns.BarData("debuff").greyedNoTarget), "false false",
+        "only the Debuffs bar's, and only true or false")
+end)()
 B:SetOption("debuff", "showMissing", false)
 Equal(#printed, 0, "no errors")
 
@@ -1645,8 +1709,67 @@ end
 Equal(win.nav.debuff ~= nil and S[win.nav.debuff.count].text, 2, "Debuffs listed down the left")
 win:Select("debuff")
 Equal(S[barPage.options.showMissing.text].text, "Show missing debuffs greyed", "its page speaks of debuffs")
+-- Its click and hover area is its whole label on either page, though it's
+-- made with the shorter buffs one (a closure: the main chunk is at 200 locals).
+;(function()
+    local fixedWidth = Proto.GetStringWidth
+    Proto.GetStringWidth = function(self) return #(S[self].text or "") * 6 end
+    local widths = {}
+    for _, key in ipairs({ "debuff", "buff", "debuff" }) do
+        win:Select(key)
+        widths[#widths + 1] = key .. " " .. S[barPage.options.showMissing].width
+    end
+    Proto.GetStringWidth = fixedWidth
+    Equal(table.concat(widths, " | "), "debuff 180 | buff 168 | debuff 180",
+        "Show missing debuffs greyed as wide as its label (18 + 27 letters), and buffs greyed as wide as its own")
+end)()
 Equal(ListRow("Clearcasting"), nil, "procs aren't offered for debuffs")
 Equal(ListRow("Moonfire").check:GetChecked(), true, "spells on the bar are ticked")
+-- Keep them greyed with no target: the Debuffs page only, under missing
+-- debuffs greyed, greyed out until that's ticked. (A closure: the main
+-- chunk is at 200 locals.)
+;(function()
+    local tick, greyed, onYou = barPage.options.keepGreyed, barPage.options.showMissing, barPage.options.showSelf
+    local function Note(frame)
+        local hint = frame.hint
+        if type(hint) == "function" then hint = hint(frame) end
+        return hint
+    end
+    local seen = {}
+    for _, key in ipairs({ "cd", "util", "buff", "debuff" }) do
+        win:Select(key)
+        if tick:IsVisible() then seen[#seen + 1] = key end
+    end
+    local at, mat = S[tick].points[1], S[greyed].points[1]
+    Equal(table.concat(seen, " ") .. " | " .. S[tick.text].text .. " | " .. table.concat(at, " ", 1, 3) .. " | "
+        .. table.concat(mat, " ", 1, 3) .. " | " .. tostring(onYou:IsVisible()) .. " " .. S[onYou].points[1][2] .. " " .. S[onYou].points[1][3],
+        "debuff | Keep them greyed with no target | TOPLEFT 0 -107 | TOPLEFT 0 -85 | true 320 -107",
+        "on the Debuffs page only, straight under missing debuffs greyed, left of Show your debuffs on you")
+    Equal(tostring(ns.BarData("debuff").showMissing) .. " " .. tostring(tick.usable) .. " " .. S[tick].alpha .. " | " .. Note(tick) .. " | "
+        .. Note(greyed), "false false 0.35 | Tick Show missing debuffs greyed first: this keeps those greyed spots with no target."
+        .. " | Debuffs missing from your target show greyed in their spot while you have an enemy targeted, instead of hidden.",
+        "greyed out until missing debuffs greyed is ticked, saying so; that one's note says it needs an enemy targeted")
+    tick:Click()
+    Equal(tostring(ns.BarData("debuff").greyedNoTarget) .. " " .. tostring(tick:GetChecked()), "false false",
+        "a click on it while greyed out changes nothing")
+    greyed:Click()
+    Equal(tostring(ns.BarData("debuff").showMissing) .. " " .. tostring(tick.usable) .. " " .. S[tick].alpha .. " | " .. Note(tick),
+        "true true 1 | Missing debuffs stay greyed in their spots with no enemy targeted, instead of hiding."
+        .. " Out of combat Fade or Hide still applies. (experimental)",
+        "usable once it's ticked, saying what it does, that Out of combat still applies, and that it's experimental")
+    tick:Click()
+    Equal(tostring(ns.BarData("debuff").greyedNoTarget) .. " " .. tostring(tick:GetChecked()) .. " | " .. Note(greyed),
+        "true true | Debuffs missing from your target show greyed in their spot, instead of hidden, with an enemy targeted or not.",
+        "ticked: saved, and missing debuffs greyed's note says so")
+    greyed:Click()
+    Equal(tostring(ns.BarData("debuff").greyedNoTarget) .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(tick.usable),
+        "true true false", "missing debuffs greyed unticked: greyed out, keeping its own choice")
+    greyed:Click()
+    tick:Click()
+    greyed:Click()
+    Equal(tostring(ns.BarData("debuff").greyedNoTarget) .. " " .. tostring(ns.BarData("debuff").showMissing), "false false",
+        "both unticked again")
+end)()
 win:Select("buff")
 Equal(S[barPage.options.showMissing.text].text, "Show missing buffs greyed", "and the Buffs page of buffs")
 Equal(S[barPage.icons[1].link].shown, false, "the first icon has no join button")
@@ -2669,7 +2792,7 @@ do
         "clicking Dim sets it, shows it, and a ready icon on the bar dims")
     ready.buttons[3]:Click()
     Equal(ns.BarData("cd").whenReady .. " " .. ready.selected, "hide hide", "Hide instead: one choice at a time")
-    -- Each says what it does; Dim that it needs testing.
+    -- Each says what it does (seen working in game, so none is marked experimental).
     local notes = {}
     for _, button in ipairs(ready.buttons) do
         S[button].scripts.OnEnter(button)
@@ -3758,7 +3881,7 @@ Equal(IDs(data.PASSIVE_BUFFS[8076]) .. " " .. IDs(data.PASSIVE_BUFFS[25362]) .. 
 -- the totem buffs.
 local named = { [17794] = "Shadow Vulnerability", [1229504] = "Faction Banner", [1260270] = "Rapid Regeneration",
     [16870] = "Clearcasting", [12536] = "Clearcasting", [16246] = "Clearcasting", [17941] = "Shadow Trance",
-    [14143] = "Remorseless", [6150] = "Quick Shots", [1400001] = "Moonlit Path", [1400002] = "Starlit Path",
+    [14143] = "Remorseless", [6150] = "Quick Shots", [1326168] = "Dark Inspiration", [1400001] = "Moonlit Path", [1400002] = "Starlit Path",
     [1400003] = "Sunlit Path", [1400004] = "Dawnlit Path", [8076] = "Strength of Earth", [25362] = "Strength of Earth",
     [8836] = "Grace of Air", [5677] = "Mana Spring" }
 for _, list in ipairs({ data.RANKS, data.PASSIVES }) do
@@ -3906,6 +4029,29 @@ Equal(Drop(page.tray), "Procs only go on the Buffs bar.", "the Flurry talent ont
 cursor = { "spell", 1, "spell", 16487 }
 Equal(Drop(page.tray) .. " " .. List("cd"), "Blood Craze is passive. Only its buff can be tracked, on the Buffs bar. ",
     "Blood Craze's talent onto the Cooldowns page: turned away")
+-- A priest's Dark Inspiration (a talent new in build 70425): its buff is
+-- listed with the procs, so it's offered on the Buffs page and goes on by
+-- name, lit by the buff (never its hidden talent). The same saved table,
+-- read again as a priest.
+do
+    _G.UnitClass = function() return "Priest", "PRIEST" end
+    ns.Spells:Scan()
+    local dark, tap = ns.Spells:Find("Dark Inspiration"), ns.Spells:Find("Spirit Tap")
+    Equal(dark.kind .. " " .. dark.line .. " " .. table.concat(dark.ids, ",") .. " | " .. tap.kind .. " " .. table.concat(tap.ids, ","),
+        "proc Procs 1326168 | proc 15271", "a priest's procs: Spirit Tap and Dark Inspiration's buff, by its own ID")
+    w:Select("buff")
+    Search("dark insp")
+    local offered = Row("Dark Inspiration") ~= nil
+    Search("")
+    local ok, said = B:Add("buff", "Dark Inspiration")
+    Equal(tostring(offered) .. " " .. tostring(ok) .. " " .. said .. " " .. List("buff"),
+        "true true Added Dark Inspiration to Buffs. Flurry,Enrage,Blood Craze,Dark Inspiration",
+        "offered on the Buffs page as you type, and added by name")
+    w:Select("cd")
+    Equal(select(2, B:Add("cd", "Dark Inspiration")), "Procs only go on the Buffs bar.", "not on the Cooldowns bar")
+    _G.UnitClass = function() return "WARRIOR", "WARRIOR" end
+    ns.Spells:Scan()
+end
 w:Hide()
 
 -- A debuff of its own: a mage's Winter's Chill talent goes on the Debuffs
@@ -4440,6 +4586,10 @@ local function Display()
     S[prd.HealthBarsContainer].rect = { 400, 305, 200, 15 }
     rawset(prd, "PowerBar", New("StatusBar", prd))
     S[prd.PowerBar].rect = { 400, 300, 200, 5 }
+    -- Beside its fill: what a cast will cost, and the flash of power just spent.
+    rawset(prd.PowerBar, "ManaCostPredictionBar", New("Texture", prd.PowerBar))
+    rawset(prd.PowerBar, "FeedbackFrame", New("Frame", prd.PowerBar))
+    rawset(prd.PowerBar.FeedbackFrame, "BarTexture", New("Texture", prd.PowerBar.FeedbackFrame))
     rawset(prd, "AlternatePowerBar", false)
     rawset(prd, "ClassFrameContainer", false)
     rawset(prd, "defaultBarWidth", 200)
@@ -4512,6 +4662,18 @@ S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 250,
 prd:Hide()
 prd:Show()
 Equal(At(B:Get("cd")), "BOTTOM 0 -130", "stacked again as it shows")
+-- Something going wrong placing the rows as it shows or hides: told once,
+-- and never handed back to Blizzard's code.
+do
+    local Stack, before = L.Stack, #printed
+    L.Stack = function() error("a fault placing the rows") end
+    local fine = pcall(prd.Hide, prd) and pcall(prd.Show, prd) and pcall(prd.Hide, prd) and pcall(prd.Show, prd)
+    L.Stack, L.lastError = Stack, nil
+    Equal(tostring(fine) .. " " .. (#printed - before) .. " " .. tostring(tostring(printed[#printed]):match(
+        "couldn't place your bars round the Personal Resource Display%. Please report this: .*a fault placing the rows") ~= nil),
+        "true 1 true", "a fault placing the rows as the display shows or hides: told once, nothing handed back")
+    for i = #printed, before + 1, -1 do printed[i] = nil end
+end
 S[prd].rect, S[prd.HealthBarsContainer].rect, S[prd.PowerBar].rect = { 400, 200, 200, 20 }, { 400, 205, 200, 15 }, { 400, 200, 200, 5 }
 L:Stack()
 -- Edit Mode's Hide Health Bar hides the container, not the health bar in
@@ -5218,18 +5380,19 @@ Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
     Equal(tostring(fp[2] < fl and fp[3] == ft and fp[2] + S[w.faces].width == fr and fp[3] - S[w.faces].height == tb),
         "true", "one part round both rows and their labels, for the tour")
 
-    -- Each says what it's for on hover; all but today's look need testing.
+    -- Each says what it's for on hover; all but today's look are quietly experimental.
     Hover(font.buttons[2], "OnEnter")
     Equal(S[w.note].text, "Arial Narrow, plain and narrow, for countdowns, counts, keys and names on icons, and the text on your cast bar"
-        .. " and Tracked Bars. (Needs testing)", "each font says what it's for")
+        .. " and Tracked Bars. (experimental)", "each font says what it's for")
     Hover(font.buttons[2], "OnLeave")
     Hover(font.buttons[1], "OnEnter")
-    Equal(S[w.note].text:find("Friz Quadrata, the game's own font", 1, true) == 1 and S[w.note].text:find("Needs testing", 1, true), nil,
-        "Friz Quadrata, the look as it was, needs no testing")
+    Equal(tostring(S[w.note].text:find("Friz Quadrata, the game's own font", 1, true) == 1)
+        .. " " .. tostring(S[w.note].text:find("experimental", 1, true) or S[w.note].text:find("testing", 1, true)), "true nil",
+        "Friz Quadrata, the look as it was, isn't marked experimental")
     Hover(font.buttons[1], "OnLeave")
     Hover(fills[2], "OnEnter")
     Equal(S[w.note].text, "The game's classic unit frame bar on your cast bar, swing timer and combo points, and the restyled Tracked Bars"
-        .. " and resource display. (Needs testing)", "each texture says where it goes")
+        .. " and resource display. (experimental)", "each texture says where it goes")
     Hover(fills[2], "OnLeave")
 
     -- A font picked: every font made so far takes it at once, so the text in
@@ -5371,8 +5534,8 @@ end)()
         .. " | " .. S[thick.text].text .. " " .. tostring(thick:GetChecked()), "0 false | Darkness 0 | Thick edges false",
         "on the Look page, both off by default")
     local p, q = S[darkness].points[1], S[thick].points[1]
-    Equal(table.concat({ p[1], p[2], p[3], S[darkness].width, q[1], q[2], q[3] }, " "), "TOPLEFT 330 -176 276 TOPLEFT 382 -142",
-        "Thick edges under the textures, Darkness across the right-hand column level with the last tick")
+    Equal(table.concat({ p[1], p[2], p[3], S[darkness].width, q[1], q[2], q[3] }, " "), "TOPLEFT 382 -136 224 TOPLEFT 448 -160",
+        "Darkness under the textures, its track in line with the keybinds' Size; Thick edges under its track")
     Equal(Look() .. " || " .. Colour(preview.BarBG), TODAY .. " || 0.08 0.08 0.09 0.85",
         "your cast bar as it was: today's track, the shine over the whole top half, 1px edges; the preview's track too")
     Equal(tostring(sheen.rest) .. " " .. Shown(bar.inner) .. " " .. Shown(cb.iconInner), "nil none none",
@@ -6208,6 +6371,31 @@ do
     Fire("PLAYER_TARGET_CHANGED")
     Equal(Shown(spot.decor.border), "true", "a hidden answer counts as an enemy")
     hostile = true
+    -- Kept greyed with no target: the spots keep their rings with no enemy,
+    -- and the bar its whole-bar box. (A closure: no more main-chunk locals.)
+    ;(function()
+        B:SetOption("debuff", "greyedNoTarget", true)
+        target = false
+        Fire("PLAYER_TARGET_CHANGED")
+        local ringed = Shown(spot.decor.border) .. " " .. Shown((spot.decor.shadow or {})[1]) .. " " .. tostring(debuff.enemy)
+        ns.Set("iconBorder", "bar")
+        ns.Set("iconShadow", "bar")
+        B:ApplyDecor()
+        ringed = ringed .. " | " .. Shown(debuff.decor.border) .. " " .. Shown((debuff.decor.shadow or {})[1])
+        target, hostile = true, false
+        Fire("PLAYER_TARGET_CHANGED")
+        ringed = ringed .. " " .. Shown(debuff.decor.border) .. " " .. tostring(select(1, B:BarDecorFor("debuff")))
+        Equal(ringed, "true true true | true true true true",
+            "kept greyed: with no enemy the spots keep their rings and the bar its box, with a friend targeted too")
+        hostile = true
+        target = false
+        B:SetOption("debuff", "greyedNoTarget", false)
+        Equal(Shown(debuff.decor.border) .. " " .. tostring(debuff.enemy), "false false", "unticked: the box goes with no enemy, as before")
+        target = true
+        ns.Set("iconBorder", "icon")
+        ns.Set("iconShadow", "icon")
+        B:ApplyDecor()
+    end)()
     Equal(#printed, 0, "no errors from whole-bar boxes")
 
     -- A last row short of the rest (the user's Utility: 5 icons, 4 across)
@@ -7359,7 +7547,8 @@ do
     local mm = FECMMinimapButton
     local function At() local p = S[mm].points[1]; return string.format("%s %.1f %.1f", p[1], p[4], p[5]) end
     Equal(S[mm].shown and S[mm].parent == Minimap, true, "a minimap button, on by default")
-    Equal(At(), "CENTER -52.3 -52.3", "at the minimap's bottom left, just outside its edge")
+    Equal(At(), "CENTER -68.6 -27.7", "at the minimap's left, a little below the middle, just outside its edge (202 degrees)")
+    Equal(ForeverEnhancedCooldownManagerDB.minimapAngle, nil, "the default isn't saved, so a button never dragged follows a new default")
     S[GameTooltip].lines = nil
     S[mm].scripts.OnEnter(mm)
     local tip = ns.Theme.tip
@@ -7385,7 +7574,7 @@ do
     Equal(mm.isMoving, true, "flagged while it's dragged, so a minimap tidier (EraUI's) doesn't fade it")
     _G.GetCursorPosition = function() return 900, 800 end
     S[mm].scripts.OnUpdate(mm, .01)
-    Equal(At() .. " " .. ns.Get("minimapAngle"), "CENTER 0.0 74.0 225", "following the cursor")
+    Equal(At() .. " " .. ns.Get("minimapAngle"), "CENTER 0.0 74.0 202", "following the cursor")
     S[mm].scripts.OnDragStop(mm)
     Equal(ns.Get("minimapAngle") .. " " .. At() .. " " .. tostring(mm.isMoving), "90 CENTER 0.0 74.0 nil", "saved where it's let go")
     Equal(ForeverEnhancedCooldownManagerDB.minimapAngle, 90, "in the saved settings")
@@ -7415,6 +7604,16 @@ do
     ns = Load(saved)
     local p = S[FECMMinimapButton].points[1]
     Equal(string.format("%.1f %.1f", p[4], p[5]), "0.0 74.0", "where you left it after a reload")
+    -- The default moved from 225 (the bottom left) to 202 on 2026-10-16, to
+    -- clear our other addons' buttons. A spot you dragged it to stays, even
+    -- the old default's: only a button never dragged takes the new spot. (No
+    -- extra Load here: TestBars is near its heap limit, and two more made it
+    -- run past the runner's 30 minutes.)
+    ForeverEnhancedCooldownManagerDB.minimapAngle = 225
+    ns.MinimapButton:Place()
+    p = S[FECMMinimapButton].points[1]
+    Equal(string.format("%.1f %.1f", p[4], p[5]) .. " " .. ns.Get("minimapAngle"), "-52.3 -52.3 225",
+        "dragged to the old default's spot: it stays there")
 end
 
 -- Free-floating (the General page): anywhere on the screen, held by the
@@ -7449,7 +7648,7 @@ do
     Equal(At(), "CENTER screen 100.0 50.0", "dragged anywhere, following the cursor")
     S[mm].scripts.OnDragStop(mm)
     local db = ForeverEnhancedCooldownManagerDB
-    Equal(db.minimapX .. " " .. db.minimapY .. " " .. ns.Get("minimapAngle"), "100 50 225",
+    Equal(db.minimapX .. " " .. db.minimapY .. " " .. ns.Get("minimapAngle"), "100 50 202",
         "saved where it's dropped, its minimap spot kept")
     S[Minimap].scripts.OnSizeChanged(Minimap)
     Equal(At(), "CENTER screen 100.0 50.0", "a minimap resize leaves it be")
@@ -7458,14 +7657,14 @@ do
     -- it stays where it is.
     w.minimapFree:Click()
     Equal(tostring(ns.Get("minimapFree")) .. " " .. tostring(Last(mm, "SetParent") == Minimap) .. " " .. At(),
-        "false true CENTER minimap -52.3 -52.3", "unticked: back on the minimap, where it was")
-    S[mm].cx, S[mm].cy = 447.7, 347.7
+        "false true CENTER minimap -68.6 -27.7", "unticked: back on the minimap, where it was")
+    S[mm].cx, S[mm].cy = 431.4, 372.3
     w.minimapFree:Click()
-    Equal(At(), "CENTER screen -52.0 -52.0", "ticked again: from where it sits now")
+    Equal(At(), "CENTER screen -69.0 -28.0", "ticked again: from where it sits now")
     -- As it loads with the choice saved: held by the screen, where it was left.
     S[mm].last.SetParent = nil
     ns.MinimapButton:Apply()
-    Equal(tostring(Last(mm, "SetParent") == UIParent) .. " " .. At(), "true CENTER screen -52.0 -52.0", "loaded free-floating")
+    Equal(tostring(Last(mm, "SetParent") == UIParent) .. " " .. At(), "true CENTER screen -69.0 -28.0", "loaded free-floating")
 end
 
 -- The Discord: found a bug or have an idea ---------------------------------------------
@@ -8638,7 +8837,8 @@ end)()
     Enter(look)
     Leave(layout)
     Equal(next .. " | " .. Text(), "One-click layouts that stack your bars around your Personal Resource Display. | "
-        .. "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds, font, textures, ready glow and the accent.",
+        .. "Blizzard's Cooldown Manager and your resource display restyled: bar designs, borders, shadows, keybinds, font, textures,"
+        .. " health and power text, ready glow and the accent.",
         "entered before the last one is left, each keeps its note")
     Over(nil, look)
     Leave(look)

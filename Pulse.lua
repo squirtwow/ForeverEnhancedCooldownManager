@@ -494,7 +494,9 @@ end
 -- Your two trinkets with a use, your healthstones and potions (each the
 -- best one you carry), then items with a use in your bags or on your
 -- Cooldowns or Utility bar: no need to put one on a bar to pulse it (the
--- user). Each is on once you tick it.
+-- user). Each is on once you tick it. carried says whether you carry any of
+-- a healthstone or potion family now (nil for the rest, or while the game
+-- won't say), as Forever Enhanced Cooldown Pulse's list does.
 function P:Items()
     local found, seen, picks, onBar = {}, {}, ns.PulsePicks(), {}
     -- On any of a bar's lists: each form's too (Swap with my form).
@@ -508,8 +510,11 @@ function P:Items()
         if entry.kind ~= "slot" and entry.kind ~= "item" and entry.kind ~= "family" then return end
         if entry.kind == "slot" and not HasUse(entry.itemID) then return end
         local wanted = onBar[entry.key] or picks[entry.key]
+        -- Not an and/or: that would turn false (none carried) into nil.
+        local carried
+        if entry.kind == "family" then carried = ns.Spells:Carries(entry) end
         -- A healthstone or potion you carry none of shows only if it's wanted.
-        if entry.kind == "family" and not wanted and ns.Spells:Carries(entry) == false then return end
+        if entry.kind == "family" and not wanted and carried == false then return end
         -- A potion or healthstone in your bags is its family's row already
         -- (Healing Potions for a Minor Healing Potion), unless it's wanted on
         -- its own: on a bar by itself, or ticked.
@@ -517,7 +522,8 @@ function P:Items()
         if family and seen[family.key] and not wanted then return end
         seen[entry.key] = true
         found[#found + 1] = { key = entry.key, name = entry.name, icon = entry.icon, itemID = entry.itemID,
-            slot = entry.kind == "slot" and entry.slot or nil, bar = onBar[entry.key] == true, on = picks[entry.key] == true }
+            slot = entry.kind == "slot" and entry.slot or nil, bar = onBar[entry.key] == true, carried = carried,
+            on = picks[entry.key] == true }
     end
     for _, slot in ipairs(TRINKETS) do Take(ns.Spells:Find("slot:" .. slot)) end
     local list = ns.Spells:Fresh()

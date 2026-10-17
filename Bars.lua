@@ -603,8 +603,9 @@ end
 -- that stay put. Packed Buffs and Debuffs, Only show missing and a bar that
 -- hides when ready or on cooldown come and go (like Blizzard's Tracked
 -- Buffs), so they'd leave an empty box behind, as would the greyed Debuffs
--- spots while there's no enemy. A bar that dims its icons keeps them in
--- place, and its box.
+-- spots while there's no enemy (unless kept greyed with no target: then
+-- bar.enemy stays true). A bar that dims its icons keeps them in place, and
+-- its box.
 local function Steady(key, data)
     if ns.AURA_BARS[key] then return ns.BuffBar:Fixed(data) end
     return not Hides(data)
@@ -970,7 +971,8 @@ end
 -- its glow and whether it was last read as one you can't cast; on the Buffs
 -- and Debuffs bars, each entry's spells. Under a cooldown bar's icons, how
 -- they show when ready and on cooldown (a player asking why theirs are
--- faded). say turns a secret answer into "secret".
+-- faded); under the Debuffs bar's, its greyed spots. say turns a secret
+-- answer into "secret".
 function B:Report(add, say)
     add("Use my bars: " .. tostring(self:Enabled()))
     for _, key in ipairs(ns.BAR_KEYS) do
@@ -997,13 +999,19 @@ function B:Report(add, say)
                 local data = bar.data
                 -- Swap with my form: the game's answers now, and whose list
                 -- the bar shows (one picked on its page says so).
-                if data.swapForm then
+                if ns.Swaps(key) then
                     add(("  swap with my form: form %s, stealthed %s, showing %s%s"):format(
                         say(GetShapeshiftFormID and GetShapeshiftFormID()), say(IsStealthed and IsStealthed()),
                         ns.FormName(ns.ShownForm(key)), ns.ShownForm(key) ~= ns.FormNow() and " (picked on its page)" or ""))
                 end
                 add(("  when ready %s, on cooldown %s, dim when you can't cast it %s, dimmed icons %s%%"):format(
                     tostring(data.whenReady), tostring(data.onCooldown), tostring(data.dimUnusable), tostring(data.dimOpacity)))
+            elseif key == "debuff" then
+                -- Its greyed spots: ticked, kept with no target, and up now
+                -- (a player asking why they go without one).
+                local data = bar.data
+                add(("  missing greyed %s, keep greyed with no target %s, out of combat %s, greyed spots up %s"):format(
+                    tostring(data.showMissing), tostring(data.greyedNoTarget), tostring(data.outOfCombat), tostring(bar.enemy)))
             end
         end
     end
@@ -1903,7 +1911,8 @@ end
 -- An option only changes how one bar looks, so only that bar is redrawn;
 -- the size slider sends a change for every step it's dragged.
 function B:SetOption(key, field, value)
-    ns.BarData(key)[field] = value
+    -- Swap with my form is the profile's, beside the lists it swaps between.
+    if field == "swapForm" then ns.SetSwaps(key, value) else ns.BarData(key)[field] = value end
     -- Swap with my form ticked or unticked: the lists that show beside each
     -- other from now on keep a spell off both cooldown bars. Ticked, this
     -- bar's form lists kept from before give way to the other bar's;

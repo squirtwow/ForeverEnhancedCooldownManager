@@ -1027,13 +1027,13 @@ do
     w.profileButton:Click()
     Equal(R.Looks(ns, w), "tank greyed, healer plain, damage lit", "Damage lit now, Healer plain")
 
-    -- Each says what it does, and that it needs testing.
+    -- Each says what it does, and that it's experimental.
     local notes = {}
     for _, role in ipairs(ns.ROLE_KEYS) do notes[#notes + 1] = buttons[role].hint(buttons[role]) end
     Equal(table.concat(notes, " | "), "Save your lists as Druid Tank and switch to it. Right-click to save them without"
-        .. " switching. (Needs testing) | Switch to Druid Healer, your Healer profile. Right-click to save your lists over it."
-        .. " (Needs testing) | You're on Druid Damage, your Damage profile. (Needs testing)",
-        "each role's note in the footer: what a click and a right-click do (naming the profile a first click makes), marked Needs testing")
+        .. " switching. (experimental) | Switch to Druid Healer, your Healer profile. Right-click to save your lists over it."
+        .. " (experimental) | You're on Druid Damage, your Damage profile. (experimental)",
+        "each role's note in the footer: what a click and a right-click do (naming the profile a first click makes), quietly experimental")
     S[buttons.tank].scripts.OnEnter(buttons.tank)
     Equal(S[w.note].text:find("Save your lists as Druid Tank", 1, true) ~= nil, true, "shown in the footer on hover")
     S[buttons.tank].scripts.OnLeave(buttons.tank)
@@ -1350,9 +1350,9 @@ do
     Equal(R.Listening("TRAIT_CONFIG_UPDATED") .. " " .. R.Listening("PLAYER_TALENT_UPDATE") .. " " .. R.Listening("ACTIVE_TALENT_GROUP_CHANGED")
         .. " " .. R.Listening("TRAIT_CONFIG_LIST_UPDATED"), "1 1 1 1", "ticked: listening for talent changes")
     Equal(tostring(rawget(w.talentTick, "hint")), "When another talent tree takes the lead in points, switch to its role's profile,"
-        .. " after any fight. (Needs testing)", "the tick's note, marked Needs testing")
+        .. " after any fight. (experimental)", "the tick's note, quietly experimental")
     local choice = w.treeRows[3].choice.buttons[1]
-    Equal(choice.hint(choice), "When Restoration takes the lead in points, switch to your Tank profile. (Needs testing)", "each choice's note")
+    Equal(choice.hint(choice), "When Restoration takes the lead in points, switch to your Tank profile. (experimental)", "each choice's note")
 
     -- A respec that changes the main tree: switched to its role's profile.
     R.Points({ [101] = 31, [103] = 5 })
@@ -1567,8 +1567,8 @@ do
         "Tank=tank Healer=healer Damage=damage None=none | Balance 0 damage, Feral Combat 0 none, Restoration 31 healer | 103",
         "each tree has four choices, None last; a druid's Feral Combat starts on None (Restoration noted at login)")
     local none = w.treeRows[2].choice.buttons[4]
-    Equal(none.hint(none), "When Feral Combat takes the lead in points, don't switch: click a role yourself. (Needs testing)",
-        "None's note says what it does, marked Needs testing")
+    Equal(none.hint(none), "When Feral Combat takes the lead in points, don't switch: click a role yourself. (experimental)",
+        "None's note says what it does, quietly experimental")
 
     -- Balance takes the lead: switched to Damage and said, as before.
     R.Points({ [101] = 31 })
@@ -1792,22 +1792,22 @@ do
     -- 7 since Positions per profile took a row under Use on all characters.
     Equal(unticked .. " " .. tostring(ticked < unticked and ticked >= 4), "7 true",
         "the list shows 7 profiles unticked, a few fewer (" .. ticked .. ") with the trees and note, and still scrolls to the rest")
-    -- Every new control in the menu says what it does, and that it needs testing.
+    -- Every new control in the menu says what it does, and that it's experimental.
     local missing = {}
     for _, role in ipairs(ns.ROLE_KEYS) do
         local hint = w.roleButtons[role].hint
-        if type(hint) ~= "function" or not hint(w.roleButtons[role]):find("(Needs testing)", 1, true) then missing[#missing + 1] = role end
+        if type(hint) ~= "function" or not hint(w.roleButtons[role]):find("(experimental)", 1, true) then missing[#missing + 1] = role end
     end
     local tickHint = rawget(w.talentTick, "hint")
-    if not (tickHint and tickHint:find("(Needs testing)", 1, true)) then missing[#missing + 1] = "tick" end
+    if not (tickHint and tickHint:find("(experimental)", 1, true)) then missing[#missing + 1] = "tick" end
     for i, row in ipairs(w.treeRows) do
         for _, choice in ipairs(row.choice.buttons) do
-            if type(choice.hint) ~= "function" or not choice.hint(choice):find("(Needs testing)", 1, true) then
+            if type(choice.hint) ~= "function" or not choice.hint(choice):find("(experimental)", 1, true) then
                 missing[#missing + 1] = "tree " .. i .. " " .. choice.key
             end
         end
     end
-    Equal(table.concat(missing, ", "), "", "each role, the tick and each tree's choices have a note, marked Needs testing")
+    Equal(table.concat(missing, ", "), "", "each role, the tick and each tree's choices have a note, quietly experimental")
     -- Words fit: about 7.5 units a letter, 6.5 in the small font (as Tools/TestHelp.lua counts).
     local function Wide(text, small) return #text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") * (small and 6.5 or 7.5) end
     local fits = {}
@@ -1834,10 +1834,10 @@ do
         "the tick clear of the Roles heading, each tree's name and points clear of its four choices, the choices' words in their room")
     local tickAt, headingAt = S[w.talentTick].points[1], S[w.roleHeading].points[1]
     Equal(tickAt[1] .. " " .. tickAt[2] .. " " .. (tickAt[3] - headingAt[3]), "TOPLEFT 10 -42",
-        "the tick on its own row under the role buttons (the heading's row holds the Needs testing tag)")
+        "the tick on its own row under the role buttons (the heading's row holds the experimental tag)")
     local tag = w.roleTesting
-    Equal(tostring(tag ~= nil) .. " " .. S[tag].text .. " " .. tostring(S[tag].points[1][2] == w.roleHeading), "true Needs testing true",
-        "Needs testing in plain sight beside the Roles heading")
+    Equal(tostring(tag ~= nil) .. " " .. S[tag].text .. " " .. tostring(S[tag].points[1][2] == w.roleHeading), "true experimental true",
+        "the quiet lowercase experimental in plain sight beside the Roles heading")
     w:Hide()
 
     -- The ? over the open menu, and the tour's Profiles step, mention the roles.
@@ -1914,9 +1914,9 @@ do
     Equal(S[tick.text].text .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(S[tick].shown),
         "Positions per profile false true", "the tick, unticked")
     local hint = rawget(tick, "hint")
-    -- Seen in game 2026-10-09: no Needs testing any more.
-    Equal(hint:find("(Needs testing)", 1, true) == nil and hint:find("\226\128\148", 1, true) == nil, true,
-        "its hover is plain, no em dash")
+    -- Seen in game 2026-10-09: not marked experimental any more.
+    Equal(hint:find("(Needs testing)", 1, true) == nil and hint:find("experimental", 1, true) == nil
+        and hint:find("\226\128\148", 1, true) == nil, true, "its hover is plain, no em dash")
     -- In a fight it can't change.
     lockdown = true
     tick:Click()
@@ -2003,6 +2003,47 @@ do
     ns3.UseProfile("Zriel Two")
     Equal(R.Spot(ns3, "cd"), before, "and switching moves nothing again")
     Equal(#printed, 0, "no errors after")
+end
+
+-- Right-click Save with Positions per profile on: only the lists go over;
+-- the role keeps its own bar spots and sizes.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    R.class = { "Druid", "DRUID" }
+    _G.C_Traits, _G.C_ClassTalents, _G.C_SpecializationInfo = nil, nil, nil
+    local ns = R.Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local db = ForeverEnhancedCooldownManagerDB
+    local own = "Zriel (Druid) - Zephras"
+    local function Move(x, size)
+        local d = ns.BarData("cd")
+        d.point, d.x, d.y, d.size = d.point or "CENTER", x, d.y or -40, size or d.size
+        ns.Bars:Rebuild()
+        return R.Spot(ns, "cd")
+    end
+    ns.SetPlacePerProfile(true)
+    -- Tank's own spot and size, then yours.
+    ns.UseRole("tank")
+    local tank = Move(333, 50)
+    ns.UseProfile(own)
+    R.Put(ns, "cd", "Moonfire")
+    local mine = Move(-250, 30)
+    Equal(tank ~= mine, true, "Tank's bar and yours in different spots")
+    local ok, message = ns.SaveRole("tank")
+    Equal(tostring(ok) .. " | " .. message .. " | " .. ns.ProfileName() .. " | " .. R.Spot(ns, "cd"),
+        "true | Saved your lists over Druid Tank, your Tank profile. | " .. own .. " | " .. mine,
+        "saved over Tank: you stay on yours, your bar where it was")
+    local place = db.profiles["Druid Tank"].place.bars.cd
+    Equal(R.Lists(db.profiles["Druid Tank"]):match("^cd=[^ ]*") .. " | " .. ("%g %g"):format(place.x, place.size),
+        "cd=Moonfire | 333 50", "Tank gets your lists, and keeps its own spot and size")
+    ns.UseRole("tank")
+    Equal(R.Spot(ns, "cd"), tank, "switching to Tank puts the bar in Tank's own spot, at its size")
+    ns.UseProfile(own)
+    Equal(R.Spot(ns, "cd"), mine, "and back on yours, yours")
+    -- A role with no profile yet starts where you are, as a copy does.
+    ns.SaveRole("healer")
+    Equal(("%g"):format(db.profiles["Druid Healer"].place.bars.cd.x), "-250", "a role's first profile, saved: the spots on screen")
+    Equal(#printed, 0, "no errors")
 end
 
 print = _G.print

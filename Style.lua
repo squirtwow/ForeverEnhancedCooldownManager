@@ -87,6 +87,27 @@ function S:Font(size)
     return name
 end
 
+-- The same, but always in the face key (one of S.FONTS) whatever the Look
+-- page's font, for text with a font of its own: the resource display's
+-- health and power text. Made once and shared; a new Look page font leaves
+-- them be.
+local own = {}
+
+function S:FontIn(key, size)
+    local file = S.FONTS[key]
+    if not file then return self:Font(size) end
+    size = math.max(8, math.floor(size + .5))
+    local name = "FECMFont" .. key .. size
+    if not own[name] then
+        local font = CreateFont(name)
+        Face(font, file, size, Outline(size))
+        font:SetShadowOffset(0, 0)
+        font:SetTextColor(1, 1, 1)
+        own[name] = font
+    end
+    return name
+end
+
 -- A new font chosen: every font made so far takes it, and the text drawn in
 -- them follows by itself: countdowns, counts and keys, your cast bar, and
 -- Blizzard's restyled icons and Tracked Bars, with nothing set on them again.

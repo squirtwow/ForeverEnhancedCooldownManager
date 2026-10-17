@@ -1164,6 +1164,107 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- The display's health and power text: off (the default), nothing of it is made and nothing listens --
+
+do
+    -- Blizzard's Personal Resource Display, with the parts the text and the
+    -- restyle look for: its health and power bars, the lost max health, its
+    -- own text on each bar, and the pieces beside the power bar's fill.
+    local display, health
+    local texts, made = 0, nil
+    local function Game()
+        display = Blizzard(New("Frame"), "PersonalResourceDisplayFrame")
+        local container = New("Frame", display)
+        rawset(display, "HealthBarsContainer", container)
+        health = New("StatusBar", container)
+        rawset(container, "healthBar", health)
+        rawset(container, "TempMaxHealthLoss", New("StatusBar", container))
+        rawset(display, "PowerBar", New("StatusBar", display))
+        for _, bar in ipairs({ health, display.PowerBar }) do
+            for _, key in ipairs({ "TextString", "LeftText", "RightText" }) do rawset(bar, key, New("FontString", bar)) end
+        end
+        rawset(display.PowerBar, "ManaCostPredictionBar", New("Texture", display.PowerBar))
+        rawset(display.PowerBar, "FeedbackFrame", New("Frame", display.PowerBar))
+        rawset(display.PowerBar.FeedbackFrame, "BarTexture", New("Texture", display.PowerBar.FeedbackFrame))
+        -- The full-power pulse, with its spike and glow frames.
+        local pulse = New("Frame", display.PowerBar)
+        rawset(display.PowerBar, "FullPowerFrame", pulse)
+        for _, key in ipairs({ "SpikeFrame", "PulseFrame" }) do rawset(pulse, key, New("Frame", pulse)) end
+        rawset(display, "AlternatePowerBar", false)
+        rawset(display, "ClassFrameContainer", false)
+        _G.PersonalResourceDisplayFrame = display
+        -- Your health and power, which the game keeps secret, and its own number writer.
+        for _, name in ipairs({ "UnitHealth", "UnitHealthMax", "UnitHealthPercent", "UnitPowerMax", "UnitPowerPercent" }) do
+            _G[name] = function() return SECRET end
+        end
+        _G.BreakUpLargeNumbers = function(v) return v end
+        _G.UnitPowerType = function() return 0, "MANA" end
+        -- Text the display's file makes, counted from here on.
+        local create = Proto.CreateFontString
+        Proto.CreateFontString = function(...)
+            local info = debug.getinfo(2, "S")
+            if info and info.source == "@Resource.lua" then texts = texts + 1 end
+            return create(...)
+        end
+        made = function() Proto.CreateFontString = create end
+    end
+    local function Listening()
+        local count = 0
+        for _, obj in ipairs(objects) do
+            local events = S[obj].events
+            if events and (events.UNIT_HEALTH or events.UNIT_MAXHEALTH or (S[obj].parent == display.PowerBar and events.UNIT_POWER_FREQUENT)) then
+                count = count + 1
+            end
+        end
+        return count
+    end
+    local function OnBars()
+        local count = 0
+        for _, obj in ipairs(objects) do
+            if S[obj].kind == "Frame" and (S[obj].parent == health or S[obj].parent == display.PowerBar)
+                and obj ~= display.PowerBar.FeedbackFrame and obj ~= display.PowerBar.FullPowerFrame then
+                count = count + 1
+            end
+        end
+        return count
+    end
+    local ns = Start({ notesSeen = "dev" }, Game)
+    for _ = 1, 3 do Fire("UNIT_HEALTH", "player") end
+    Fire("UNIT_POWER_FREQUENT", "player", "MANA")
+    ns.Resource:Apply()
+    Equal(texts .. " " .. OnBars() .. " " .. Listening() .. " " .. tostring(next(ns.Resource.textHolders)) .. " "
+        .. S[health.TextString].alpha, "0 0 0 nil 1",
+        "off: no text made, no frame on the bars, nothing listening, Blizzard's own text left be")
+    -- Nothing at all hears your power for the display while its text and
+    -- combo points are off: a druid's combo listener stays quiet too.
+    do
+        local hearing = 0
+        for _, obj in ipairs(objects) do
+            local events = S[obj].events
+            if events and (events.UNIT_POWER_FREQUENT or events.UNIT_MAXPOWER or events.UNIT_DISPLAYPOWER) then hearing = hearing + 1 end
+        end
+        Equal(hearing, 0, "text and combo points off: nothing hears your power")
+    end
+    -- Ticked: two frames of its own, three spots each, each listening for its own bar.
+    ns.Set("prdText", true)
+    ns.Resource:Apply()
+    Equal(texts .. " " .. OnBars() .. " " .. Listening() .. " " .. S[health.TextString].alpha, "6 2 2 0",
+        "ticked: a frame of its own on each bar with three spots, listening, Blizzard's text see-through")
+    -- Unticked again: hidden and quiet, nothing more made.
+    ns.Set("prdText", false)
+    ns.Resource:Apply()
+    Fire("UNIT_HEALTH", "player")
+    Equal(texts .. " " .. Listening() .. " " .. tostring(S[ns.Resource.textHolders.health].shown) .. " " .. S[health.TextString].alpha,
+        "6 0 false 1", "unticked: hidden, nothing listening, Blizzard's text back")
+    made()
+    for _, name in ipairs({ "UnitHealth", "UnitHealthMax", "UnitHealthPercent", "UnitPowerMax", "UnitPowerPercent", "BreakUpLargeNumbers",
+        "UnitPowerType" }) do
+        _G[name] = nil
+    end
+    _G.PersonalResourceDisplayFrame = nil
+    Equal(#printed, 0, "no errors")
+end
+
 Equal(SecretMisuse[1], nil, "no secret misused anywhere")
 print = _G.print
 io.write("Cost checks passed: " .. checks .. " assertions.\n")

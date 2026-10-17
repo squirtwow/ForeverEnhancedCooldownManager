@@ -788,6 +788,10 @@ local function Display()
     S[prd.HealthBarsContainer].rect = { 400, 305, 200, 15 }
     rawset(prd, "PowerBar", New("StatusBar", prd))
     S[prd.PowerBar].rect = { 400, 300, 200, 5 }
+    -- Beside its fill: what a cast will cost, and the flash of power just spent.
+    rawset(prd.PowerBar, "ManaCostPredictionBar", New("Texture", prd.PowerBar))
+    rawset(prd.PowerBar, "FeedbackFrame", New("Frame", prd.PowerBar))
+    rawset(prd.PowerBar.FeedbackFrame, "BarTexture", New("Texture", prd.PowerBar.FeedbackFrame))
     rawset(prd, "AlternatePowerBar", false)
     rawset(prd, "ClassFrameContainer", false)
     rawset(prd, "defaultBarWidth", 200)

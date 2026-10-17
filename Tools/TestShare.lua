@@ -944,6 +944,14 @@ function H.RandomProfile()
         root.f = { [5] = { cd = H.RandomValue(4), util = H.RandomValue(4), buff = H.RandomValue(4) }, [8] = H.RandomValue(3),
             [1] = H.RandomValue(3), [H.NUMBERS[H.Random(#H.NUMBERS) + 1]] = H.RandomValue(3) }
     end
+    -- And the bars swapping with your form (w), or, as 1.6.0 shared it,
+    -- with a bar's settings in the look.
+    if H.Random(3) == 0 then
+        root.w = H.Random(2) == 0 and { cd = true, util = H.RandomValue(2), buff = true } or H.RandomValue(2)
+    end
+    if type(root.g) == "table" and type(root.g.b) == "table" and type(root.g.b.cd) == "table" and H.Random(2) == 0 then
+        root.g.b.cd.swapForm = ({ true, false, "yes", 1 })[H.Random(4) + 1]
+    end
     H.formSeed, H.seed = H.seed, main
     return root
 end
@@ -971,12 +979,17 @@ function H.Sane(ns, shared)
         return type(v) == "string" and #v >= 1 and #v <= 64 and not v:find("[%c|]") and v == v:match("^%s*(.-)%s*$")
     end
     local function ID(v) return type(v) == "number" and v == math.floor(v) and v >= 1 and v <= 2147483647 end
-    local known = { lists = true, forms = true, joins = true, pick = true, style = true, added = true, setup = true, count = true,
-        picks = true, skipped = true, name = true, version = true }
+    local known = { lists = true, forms = true, swap = true, joins = true, pick = true, style = true, added = true, setup = true,
+        count = true, picks = true, skipped = true, name = true, version = true }
     for k in pairs(shared) do
         if not known[k] then return "an unknown key " .. tostring(k) end
     end
     if type(shared.skipped) ~= "number" or shared.skipped < 0 then return "skipped" end
+    -- The bars swapping with your form: the Cooldowns and Utility bars, true each.
+    if type(shared.swap) ~= "table" then return "swap" end
+    for k, v in pairs(shared.swap) do
+        if (k ~= "cd" and k ~= "util") or v ~= true then return "a bar swapping " .. tostring(k) end
+    end
     if shared.name ~= nil and not (type(shared.name) == "string" and #shared.name <= 48 and not shared.name:find("[%c|]")) then return "name" end
     if shared.version ~= nil and not (type(shared.version) == "string" and shared.version:find("^[%w%.%-]+$")) then return "version" end
     local count, on, cooldown = 0, {}, {}
@@ -1090,12 +1103,15 @@ function H.SetupNow(ns)
     return H.Text({ look = look, bars = bars, layout = layout, colours = colours })
 end
 
--- The profile you're on, as its lists.
+-- The profile you're on, as its lists, and the bars swapping with your form.
 function H.ProfileNow(ns)
-    local lists = {}
-    for _, key in ipairs(ns.BAR_KEYS) do lists[key] = ns.ActiveList(key) end
+    local lists, swap = {}, {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        lists[key] = ns.ActiveList(key)
+        if ns.Swaps(key) then swap[key] = true end
+    end
     return H.Text({ lists = lists, buff = ns.Joins("buff"), debuff = ns.Joins("debuff"), pick = ns.PulsePicks(),
-        style = ns.PulseStyles() })
+        style = ns.PulseStyles(), swap = swap })
 end
 
 -- Watches what draws the look again: a function giving the parts drawn
@@ -1121,7 +1137,7 @@ function H.Spy(ns)
 end
 
 -- Settings a shared profile never carries: switching a part on or off, and the window's own.
-H.NOT_SHARED = { "skin", "useBars", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "castBar", "swingTimer",
+H.NOT_SHARED = { "skin", "useBars", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "prdText", "castBar", "swingTimer",
     "pullTimer", "raidWarnings", "bossCasts", "pulse", "keybinds", "layoutPreview", "growArrows", "minimap", "minimapAngle",
     "minimapFree", "minimapX", "minimapY", "talentSwitch" }
 
@@ -1154,8 +1170,9 @@ do
         for _, f in ipairs(ns.SHARE_BAR_FIELDS) do found = found or f == field end
         if not found then fields[#fields + 1] = field .. " not shared" end
     end
-    Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,swapForm,outOfCombat,showMissing,"
-        .. "onlyMissing,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y", "each bar setting shared has its own check, and only those")
+    Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
+        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y",
+        "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
     -- On cooldown takes When ready's three choices and nothing else; its
     -- tick is a plain true or false.
     local checks = {}
@@ -1163,9 +1180,8 @@ do
         checks[#checks + 1] = tostring(barChecks.onCooldown(value))
     end
     for _, value in ipairs({ true, false, "true", 1 }) do checks[#checks + 1] = tostring(barChecks.dimUnusable(value)) end
-    for _, value in ipairs({ true, false, "true", 1 }) do checks[#checks + 1] = tostring(barChecks.swapForm(value)) end
-    Equal(table.concat(checks, " "), "true true true false false false false true true false false true true false false",
-        "On cooldown is Show, Dim or Hide; Dim when you can't cast it and Swap with my form are true or false")
+    Equal(table.concat(checks, " "), "true true true false false false false true true false false",
+        "On cooldown is Show, Dim or Hide; Dim when you can't cast it is true or false")
     -- Dimmed icons: a number from 10 to 90 (percent), nothing else.
     checks = {}
     for _, value in ipairs({ 10, 40, 90, 55, 5, 95, 0, -40, "40", true, 0 / 0, math.huge }) do
@@ -1225,6 +1241,7 @@ do
     B:SetOption("buff", "spacing", 2)
     B:SetOption("debuff", "selfDebuffs", true)
     B:SetOption("debuff", "showTimer", false)
+    B:SetOption("debuff", "greyedNoTarget", true)
     L:Apply("sides")
     L:SetGap(3)
     L:TakeOut("util")
@@ -1247,7 +1264,8 @@ do
         "no name (by default it's your character's, and strings get posted in public), the version that made it, nothing left out")
     Equal(tostring(text:find("Zriel", 1, true)), "nil", "the character's name is nowhere in it")
     Equal(H.Text({ lists = shared.lists, buff = shared.joins.buff, debuff = shared.joins.debuff or {}, pick = shared.pick,
-        style = shared.style }), profile, "every list, join, pulse tick and Long style comes back the same")
+        style = shared.style, swap = shared.swap }), profile,
+        "every list, join, pulse tick and Long style comes back the same, and the bars swapping with your form")
     Equal(H.Text(shared.added), H.Text({ ["Power Word: Fortitude"] = { 1243 } }), "and the spell added by ID, with its ID")
     local look = {}
     for _, key in ipairs(ns.SHARE_LOOK) do
@@ -1267,14 +1285,16 @@ do
         "Utility's On cooldown and Dim when you can't cast it with them; Cooldowns' left out at their defaults")
     Equal(tostring(util.dimOpacity) .. " " .. tostring(cd.dimOpacity), "25 nil",
         "Utility's Dimmed icons with them; Cooldowns' left out at 40%, the default")
-    Equal(tostring(util.swapForm) .. " " .. tostring(cd.swapForm), "true nil",
-        "Utility's Swap with my form with them; Cooldowns' left out, off")
+    Equal(H.Text(shared.swap) .. " " .. tostring(util.swapForm) .. " " .. tostring(cd.swapForm), '{["util"]=true} nil nil',
+        "Utility's Swap with my form with the profile, beside its lists, not with the bar's settings; Cooldowns' left out, off")
     Equal(H.Text(shared.forms), H.Text({ [5] = { util = { "ammo", "item:118" } } }),
         "and Utility's own list for Bear Form, as made from its normal one")
     local buff = shared.setup.bars.buff
     Equal(tostring(buff.onlyMissing) .. " " .. tostring(buff.showMissing) .. " " .. tostring(debuff.onlyMissing) .. " "
         .. tostring(cd.onlyMissing), "true true nil nil",
         "the Buffs bar's Only show missing with them, and its missing ones greyed kept beside it")
+    Equal(tostring(debuff.greyedNoTarget) .. " " .. tostring(buff.greyedNoTarget) .. " " .. tostring(cd.greyedNoTarget), "true nil nil",
+        "the Debuffs bar's Keep them greyed with no target with them; the other bars have none")
     Equal(tostring(cd.point) .. " " .. tostring(cd.x) .. " " .. tostring(cd.wrap) .. " " .. tostring(debuff.grow) .. " | "
         .. tostring(util.point == ns.BarData("util").point and util.x == ns.BarData("util").x and util.y == ns.BarData("util").y),
         "nil nil nil nil | true", "no spot or way to grow for a bar the layout places (it works them out again), a bar taken out keeps its spot")
@@ -1309,9 +1329,12 @@ do
     Equal(tostring(ns2.BarData("buff").onlyMissing) .. " " .. tostring(ns2.BarData("buff").showMissing) .. " "
         .. tostring(ns2.Bars:Get("buff").spots ~= nil and S[ns2.Bars.driver].events.UNIT_AURA),
         "true true true", "Only show missing came too, on the Buffs bar at once, hearing your buffs change")
-    Equal(tostring(ns2.BarData("util").swapForm) .. " " .. tostring(ns2.BarData("cd").swapForm) .. " "
-        .. tostring(S[ns2.Bars.driver].events.UPDATE_SHAPESHIFT_FORM), "true false true",
-        "Swap with my form came too, on Utility only, hearing your form change at once")
+    Equal(tostring(ns2.BarData("debuff").greyedNoTarget) .. " " .. tostring(ns2.BarData("buff").greyedNoTarget), "true false",
+        "and Keep them greyed with no target, on the Debuffs bar")
+    Equal(tostring(ns2.Swaps("util")) .. " " .. tostring(ns2.Swaps("cd")) .. " "
+        .. tostring(S[ns2.Bars.driver].events.UPDATE_SHAPESHIFT_FORM) .. " | " .. H.Text(db.profiles["Shared profile"].swapForm) .. " "
+        .. H.Text(db.profiles[own].swapForm), 'true false true | {["util"]=true} nil',
+        "Swap with my form came too, on Utility only, in the new profile (yours as it was), hearing your form change at once")
     Equal(H.Text(db.profiles["Shared profile"].forms), H.Text({ [5] = { util = { "ammo", "item:118" } } }),
         "and Utility's own list for Bear Form")
     Equal(ns2.BarData("util").dimOpacity .. " " .. ns2.BarData("cd").dimOpacity, "25 40",
@@ -1364,41 +1387,93 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Keep them greyed with no target in strings --------------------------------------------------------
+-- The Debuffs bar's tick goes with the look and layout like its other
+-- settings. A string made before it reads as off, and so does one on the
+-- Buffs bar, which has none; anything but true or false is left out.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetOption("debuff", "showMissing", true)
+    B:SetOption("debuff", "greyedNoTarget", true)
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = { "Moonfire" } } end
+    -- Made by 1.6.0: missing debuffs greyed, and nothing about keeping them.
+    local old = P.Read(H.String({ a = "1.6.0", l = Lists(), g = { s = {}, b = { debuff = { showMissing = true } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. tostring(old.setup.bars.debuff.greyedNoTarget), "|0 nil",
+        "a string from before it reads as it did, with no Keep them greyed with no target")
+    P.Import("Old", old, true)
+    Equal(tostring(ns.BarData("debuff").greyedNoTarget) .. " " .. tostring(ns.BarData("debuff").showMissing), "false true",
+        "imported with its look: off, its missing debuffs greyed on")
+    local odd = P.Read(H.String({ l = Lists(), g = { s = {}, b = { buff = { greyedNoTarget = true }, debuff = { greyedNoTarget = true } },
+        l = {}, k = {} } }))
+    P.Import("Odd", odd, true)
+    Equal(tostring(ns.BarData("debuff").greyedNoTarget) .. " " .. tostring(ns.BarData("buff").greyedNoTarget),
+        "true false", "on the Debuffs bar it comes; on the Buffs bar, which has none, it's off")
+    local bad = P.Read(H.String({ l = Lists(), g = { s = {}, b = { debuff = { greyedNoTarget = "yes" } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.debuff.greyedNoTarget), "|1 nil",
+        "anything but true or false: left out, and counted")
+    Equal(#printed, 0, "no errors")
+end
+
 -- Swap with my form in strings ------------------------------------------------------------------------
--- The tick goes with the look and layout like a bar's other settings. A
--- string made before it reads as off; on the Buffs or Debuffs bar, which
--- have none, it's off; anything but true or false is left out, and so is
--- the never-released Only show what your form can use. Each form's lists go
--- with the profile (f): only a form with a list of its own (the game's data:
--- Dire Bear Form shares Bear Form's), the Cooldowns and Utility bars only,
--- each entry checked as on a bar's list and on one of a form's two bars; a
--- string with none makes none.
+-- The tick goes with the profile (w), beside its form lists: imported with
+-- or without the look, into the new profile only. A string made by 1.6.0
+-- has it with a bar's settings in the look: read into the profile all the
+-- same. A string made before it reads as off; on the Buffs or Debuffs bar,
+-- which have none, it's off; anything but true is left out (1.6.0's false
+-- read as off), and so is the never-released Only show what your form can
+-- use. Each form's lists go with the profile (f): only a form with a list
+-- of its own (the game's data: Dire Bear Form shares Bear Form's), the
+-- Cooldowns and Utility bars only, each entry checked as on a bar's list
+-- and on one of a form's two bars; a string with none makes none.
 
 do
     character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
     local P, B = ns.ProfileShare, ns.Bars
     local db = ForeverEnhancedCooldownManagerDB
+    local own = ns.ProfileName()
     B:Assign("Moonfire", "cd")
     B:SetOption("cd", "swapForm", true)
     local function Lists() return { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } end
     -- Made by 1.5.9: When ready, and nothing about forms.
     local old = P.Read(H.String({ a = "1.5.9", l = Lists(), g = { s = {}, b = { cd = { whenReady = "dim" } }, l = {}, k = {} } }))
-    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. tostring(old.setup.bars.cd.swapForm) .. " " .. H.Text(old.forms), "|0 nil {}",
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. H.Text(old.swap) .. " " .. H.Text(old.forms), "|0 {} {}",
         "a string from before it reads as it did: no Swap with my form, and no form lists")
     local ok = P.Import("Old", old, true)
-    Equal(tostring(ok) .. " " .. tostring(ns.BarData("cd").swapForm) .. " " .. ns.BarData("cd").whenReady .. " "
-        .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM) .. " " .. H.Text(db.profiles.Old.forms), "true false dim nil {}",
-        "imported with its look: off, When ready as it says, your form no longer heard, no form lists")
-    local odd = P.Read(H.String({ l = Lists(), g = { s = {}, b = { cd = { swapForm = true }, buff = { swapForm = true } },
-        l = {}, k = {} } }))
+    Equal(tostring(ok) .. " " .. tostring(ns.Swaps("cd")) .. " " .. ns.BarData("cd").whenReady .. " "
+        .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM) .. " " .. H.Text(db.profiles.Old.forms) .. " | "
+        .. H.Text(db.profiles[own].swapForm), 'true false dim nil {} | {["cd"]=true}',
+        "imported with its look: off, When ready as it says, your form no longer heard, no form lists; the profile you were on"
+            .. " still ticked")
+    -- Made by 1.6.0: the tick with a bar's settings, in the look.
+    local odd = P.Read(H.String({ a = "1.6.0", l = Lists(), g = { s = {}, b = { cd = { swapForm = true }, buff = { swapForm = true },
+        util = { swapForm = false } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. H.Text(odd.swap) .. " " .. tostring(odd.setup.bars.cd.swapForm),
+        '|0 {["cd"]=true} nil', "a 1.6.0 string: its tick read for the profile, not the look; the Buffs bar's off, nothing left out")
     P.Import("Odd", odd, true)
-    Equal(tostring(ns.BarData("cd").swapForm) .. " " .. tostring(ns.BarData("buff").swapForm) .. " "
-        .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM), "true false true",
-        "on the Cooldowns bar it comes, heard at once; on the Buffs bar, which has none, it's off")
+    Equal(tostring(ns.Swaps("cd")) .. " " .. tostring(ns.Swaps("buff")) .. " " .. tostring(ns.Swaps("util")) .. " "
+        .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM) .. " " .. tostring(rawget(db.bars.cd, "swapForm")), "true false false true nil",
+        "on the Cooldowns bar it comes, heard at once; on the Buffs bar, which has none, it's off; never with the bars' settings")
+    P.Import("Odd Lists", odd, false)
+    Equal(ns.ProfileName() .. " " .. tostring(ns.Swaps("cd")), "Odd Lists true", "and without its look too: it's the profile's")
     local bad = P.Read(H.String({ l = Lists(), g = { s = {}, b = { cd = { swapForm = "yes", onlyForm = true } }, l = {}, k = {} } }))
-    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.swapForm) .. " " .. tostring(bad.setup.bars.cd.onlyForm),
-        "|2 nil nil", "anything but true or false left out, and the never-released Only show what your form can use: both counted")
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. H.Text(bad.swap) .. " " .. tostring(bad.setup.bars.cd.onlyForm),
+        "|2 {} nil", "anything but true or false left out, and the never-released Only show what your form can use: both counted")
+    -- Made now: the profile's ticks (w), only true on the Cooldowns or
+    -- Utility bar; anything else left out and counted.
+    local w = P.Read(H.String({ l = Lists(), w = { cd = true, util = "yes", buff = true, x = true } }))
+    Equal(H.Sane(ns, w) .. "|" .. w.skipped .. " " .. H.Text(w.swap), '|3 {["cd"]=true}',
+        "w: Cooldowns' tick kept; Utility's \"yes\", the Buffs bar's and a bar no one has left out")
+    local notTable = P.Read(H.String({ l = Lists(), w = "cd" }))
+    Equal(H.Sane(ns, notTable) .. "|" .. notTable.skipped .. " " .. H.Text(notTable.swap), "|1 {}", "w that isn't a table: left out")
+    ns.UseProfile(own)
+    local mine = P.Read(P.Export())
+    Equal(H.Text(mine.swap) .. " " .. tostring(mine.setup.bars.cd.swapForm), '{["cd"]=true} nil',
+        "shared: the tick goes with the profile (w), not with the bar's settings")
     -- Form lists: Bear Form's (5) with a spell twice, one on both its bars,
     -- a number, a bad item and a Buffs list; Cat Form's (1) with too many;
     -- Dire Bear Form's (8, Bear Form's own), a form no class takes, a list
@@ -2031,8 +2106,8 @@ do
     Paste(text)
 
     -- Its look ticked: asked first; Cancel changes nothing.
-    Equal(S[box.look.text].text .. " | " .. tostring(rawget(box.look, "hint")), "Also use its look and layout (Needs testing) | Its bar"
-        .. " sizes, spots, layout and look in place of yours, on every character. It asks first.", "the tick says it needs testing")
+    Equal(S[box.look.text].text .. " | " .. tostring(rawget(box.look, "hint")), "Also use its look and layout (experimental) | Its bar"
+        .. " sizes, spots, layout and look in place of yours, on every character. It asks first.", "the tick quietly says it's experimental")
     box.look:Click()
     Equal(S[box.lookNote].text, P.LOOK_ON, "ticked, it says what changes")
     local count = #ns.ProfileNames()

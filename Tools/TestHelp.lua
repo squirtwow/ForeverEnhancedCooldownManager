@@ -975,11 +975,31 @@ function Fit.Below(a, b)
     return false
 end
 -- Every piece on a page inside it and none on another: "" when all fit.
-function Fit.Problems(root)
-    local list, found = Fit.Pieces(root), {}
+-- With boxes ({ frame, name } each: a panel drawn round some of the
+-- pieces), a piece in a box is inside it too, past none of its edges, and
+-- each box shown is clear of the pieces outside it, like a piece itself.
+function Fit.Problems(root, boxes)
+    local list, found, named = Fit.Pieces(root), {}, {}
+    for _, box in ipairs(boxes or {}) do
+        if box[1]:IsVisible() then
+            named[box[1]] = box[2]
+            local l, t, r, b = Fit.Rect(box[1])
+            list[#list + 1] = { l, t, r, b, obj = box[1], name = box[2] }
+        end
+    end
     local rl, rt, rr, rb = Fit.Rect(root)
     for i, a in ipairs(list) do
         if a[1] < rl or a[3] > rr or a[2] < rt or a[4] > rb then found[#found + 1] = a.name .. " off the page" end
+        -- The nearest box it's in, if any.
+        local box = S[a.obj].parent
+        while box and box ~= root and S[box] and not named[box] do box = S[box].parent end
+        if box and named[box] then
+            local l, t, r, b = Fit.Rect(box)
+            if a[1] < l or a[3] > r or a[2] < t or a[4] > b then
+                found[#found + 1] = ("%s out of %s (%.1f, %.1f to %.1f, %.1f in %.1f, %.1f to %.1f, %.1f)"):format(a.name, named[box],
+                    a[1], a[2], a[3], a[4], l, t, r, b)
+            end
+        end
         for j = i + 1, #list do
             local b = list[j]
             if a[1] < b[3] and b[1] < a[3] and a[2] < b[4] and b[2] < a[4] and not Fit.Below(a.obj, b.obj) and not Fit.Below(b.obj, a.obj) then
@@ -993,6 +1013,39 @@ function Fit.Clear(a, b)
     local al, at, ar, ab = Fit.Rect(a)
     local bl, bt, br, bb = Fit.Rect(b)
     return not (al < br and bl < ar and at < bb and bt < ab)
+end
+-- The Look page's boxes: the preview, the choices under it and the Each bar box.
+function Fit.LookBoxes(w)
+    return { { S[w.lookOptions].points[1][2], "the preview" }, { w.lookOptions, "the choices" }, { w.eachPanel, "the Each bar box" } }
+end
+-- The Each bar box's rows, which scroll (so the page's check leaves them
+-- out): each shown one across the list and clear of the list's note and
+-- its button under them, and its icon, name, swatches and colour's name
+-- inside it, none on another.
+function Fit.Rows(w)
+    local found = {}
+    for i, row in ipairs(w.eachRows) do
+        if row:IsVisible() then
+            local scroll = S[S[row].parent].parent
+            local sl, _, sr = Fit.Rect(scroll)
+            local l, t, r, b = Fit.Rect(row)
+            if l < sl or r > sr then found[#found + 1] = ("row %d (%.1f to %.1f) wider than the list (%.1f to %.1f)"):format(i, l, r, sl, sr) end
+            for _, under in ipairs({ { w.eachEmpty, "the list's note" }, { w.eachFix, "its button" } }) do
+                if under[1]:IsVisible() and not Fit.Clear(row, under[1]) then found[#found + 1] = ("row %d on %s"):format(i, under[2]) end
+            end
+            local parts = { { row.icon, "icon" }, { row.name, "name " .. tostring(S[row.name].text) },
+                { row.chosen, "colour's name " .. tostring(S[row.chosen].text) } }
+            for s, swatch in ipairs(row.swatches) do parts[#parts + 1] = { swatch, "swatch " .. s } end
+            for p, part in ipairs(parts) do
+                local pl, pt, pr, pb = Fit.Rect(part[1])
+                if pl < l or pr > r or pt < t or pb > b then found[#found + 1] = ("row %d: %s out of its row"):format(i, part[2]) end
+                for q = p + 1, #parts do
+                    if not Fit.Clear(part[1], parts[q][1]) then found[#found + 1] = ("row %d: %s on %s"):format(i, part[2], parts[q][2]) end
+                end
+            end
+        end
+    end
+    return table.concat(found, "; ")
 end
 
 -- The ?'s tooltip: just under it, in the addon's own look ------------------------------------------
@@ -1404,9 +1457,10 @@ end)()
     SlashCmdList.FECM("")
     local w = FECMFrame
     local found = {}
+    -- (The Look page's pieces inside its boxes too: more of it below.)
     local function Check(key, label)
         w:Select(key)
-        local problems = Fit.Problems(w.pages[key] or w.pages.bar)
+        local problems = Fit.Problems(w.pages[key] or w.pages.bar, key == "look" and Fit.LookBoxes(w) or nil)
         if problems ~= "" then found[#found + 1] = (label or key) .. ": " .. problems end
     end
     for _, key in ipairs({ "cd", "util", "buff", "debuff", "look", "layout", "cast", "general", "pulse" }) do Check(key) end
@@ -1437,6 +1491,14 @@ end)()
     Equal(tostring(bp.options.onlyMissing:IsVisible()) .. " " .. tostring(bp.across:IsVisible()) .. " "
         .. tostring(bp.options.wrap:IsVisible()) .. " " .. tostring(bp.options.showNames:IsVisible()),
         "true true true true", "(the tick, Icons per row, New rows and Show spell names all checked there)")
+    -- Debuffs with missing ones greyed: Keep them greyed with no target
+    -- under it, beside Show your debuffs on you.
+    ns.Bars:SetOption("debuff", "showMissing", true)
+    ns.Bars:SetOption("debuff", "greyedNoTarget", true)
+    Check("debuff", "debuff with keep them greyed")
+    Equal(tostring(bp.options.keepGreyed:IsVisible()) .. " " .. tostring(bp.options.showSelf:IsVisible()) .. " "
+        .. tostring(bp.options.showNames:IsVisible()) .. " " .. tostring(bp.options.keepGreyed.usable),
+        "true true true true", "(Keep them greyed with no target, usable, beside Show your debuffs on you, checked there)")
     -- Cooldowns with Swap with my form ticked (a druid with Bear Form): the
     -- tick, and Editing under it on the longest name it shows.
     table.insert(book[2].items, { name = "Bear Form", spellID = 5487, iconID = 132276 })
@@ -1475,6 +1537,360 @@ end)()
     Equal(table.concat(rows, ", "), "cd 40 icons in true 2 rows, buff 40 icons in true 2 rows",
         "a full bar: every icon in its tray, and two rows of the spell list showing")
     Equal(table.concat(found, " | "), "", "on every page and in every state, each label clear of the next control, all inside the page")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Health and power text: the Look page's tick, and Set up's panel --------------------------------
+-- The tick at the foot of the right-hand column, off, with Set up beside
+-- it: under the Darkness slider and Thick edges, level with the combo
+-- points' tick on the left, both inside the choices, which keep the height
+-- they had before it (198), so the Each bar box keeps its room (a taller
+-- box left the box's note spilling over its foot, in game, 2026-10-17).
+-- The rest of the Look page's fit is checked below. Set up opens a panel
+-- over the window: every piece inside it and none on another in each state
+-- (the middle or a pair on each bar, a bar's text off, the display
+-- switched off, the text off on your bars, both warnings at once), as tall
+-- as the rows it shows, under the title bar, and clear of the footer, where
+-- each of its controls still says what it does. While the tick is off it
+-- says so, and its Turn on ticks it.
+-- Each choice is set at once, and its preview is drawn by the display's
+-- own text code (Resource.lua).
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    -- The game's own number writers, on the preview's plain numbers.
+    _G.BreakUpLargeNumbers = function(v) return (("%d"):format(v):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")) end
+    _G.AbbreviateNumbers = function(v) return ("%.1fK"):format(v / 1000) end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local tick, setUp = w.prdText, w.prdTextSetUp
+    local function Note(control)
+        S[control].scripts.OnEnter(control)
+        local text = S[w.note].text
+        S[control].scripts.OnLeave(control)
+        return text
+    end
+    Equal(tostring(tick:IsVisible()) .. " " .. tostring(tick:GetChecked()) .. " " .. S[tick.text].text .. " | " .. S[setUp.label].text
+        .. " | " .. Note(tick), "true false Health and power text | Set up | Your health and power as numbers on the resource display,"
+        .. " in and out of combat. (experimental)", "the tick, off by default, named like its panel, its note quietly experimental,"
+        .. " with Set up beside it")
+    local tickLeft, tickTop, tickRight, tickBottom = Fit.Rect(tick)
+    local setLeft, setTop, setRight, setBottom = Fit.Rect(setUp)
+    local _, comboTop, comboRight = Fit.Rect(w.combo)
+    local _, _, _, darkBottom = Fit.Rect(w.darkness)
+    local _, _, _, thickBottom = Fit.Rect(w.thickEdges)
+    local _, _, optionsRight, optionsBottom = Fit.Rect(w.lookOptions)
+    local keysLeft = Fit.Rect(w.keybinds)
+    Equal(table.concat({ tostring(tickLeft == keysLeft and tickLeft > comboRight), tostring(tickTop >= darkBottom and tickTop >= thickBottom),
+        tostring(math.abs(tickTop - comboTop) <= 1), tostring(tickRight < setLeft and setRight <= optionsRight),
+        tostring(math.max(tickBottom, setBottom) <= optionsBottom), Num(setTop + setBottom - tickTop - tickBottom),
+        tostring(S[w.lookOptions].height) }, " "), "true true true true true 0.00 198",
+        "in the right-hand column, under Darkness and Thick edges, level with the combo points' tick, Set up beside it and"
+        .. " level with it, both inside the choices, which are as tall as before the tick")
+
+    setUp:Click()
+    local panel = w.textPanel
+    local dialog, preview = panel.dialog, panel.preview
+    local found = {}
+    local function Check(label)
+        local problems = Fit.Problems(dialog)
+        local _, top, _, bottom = Fit.Rect(dialog)
+        if top < 42 or bottom > 560 - 28 then problems = problems .. ("the panel at %.1f to %.1f, over the title bar or the footer"):format(top, bottom) end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    Equal(tostring(dialog:IsVisible()) .. " " .. tostring(S[panel].points[2][3]), "true 28", "Set up opens the panel, its shade clear of the footer")
+    Check("at the start")
+    -- The tick off, as it starts: the choices show only on the preview, so
+    -- the panel says the text is off on your bars, with Turn on.
+    Equal(tostring(panel.textOff:IsVisible()) .. " " .. S[panel.textOff].text .. " | " .. tostring(panel.textOn:IsVisible()) .. " "
+        .. S[panel.textOn.label].text .. " | " .. Note(panel.textOn), "true The text is off on your bars. | true Turn on | "
+        .. "Show this text on your bars, as ticking Health and power text on the Look page does.",
+        "the tick off: the panel says the text is off on your bars, with Turn on, which says what it does")
+    -- The preview: the display's own text code, on plain numbers, in the
+    -- Look page's texture and each bar's colour.
+    local hp, mp = preview.health, preview.power
+    -- What each spot says now, as the game would write it.
+    local said = setmetatable({}, { __mode = "k" })
+    for _, bar in pairs(preview) do
+        for _, spot in ipairs({ "centre", "left", "right" }) do
+            rawset(bar.slots[spot], "SetText", function(self, text) said[self] = text end)
+            rawset(bar.slots[spot], "SetFormattedText", function(self, format, ...) said[self] = format:format(...) end)
+        end
+    end
+    w:Refresh()
+    local function Spot(slot)
+        local text = said[slot]
+        return (text == nil or text == "") and '""' or text
+    end
+    local function Preview(bar) return Spot(bar.slots.centre) .. " | " .. Spot(bar.slots.left) .. " | " .. Spot(bar.slots.right) end
+    Equal(Preview(hp) .. " || " .. Preview(mp) .. " | " .. Last(hp.slots.centre, "SetFontObject") .. " " .. Last(hp, "SetStatusBarTexture")
+        .. " " .. Last(hp, "SetStatusBarColor", 2) .. " " .. Last(mp, "SetStatusBarColor", 3), '4,321 | "" | "" || 1,876 | "" | "" | '
+        .. "FECMFont10 Interface\\Buttons\\WHITE8X8 0.8 1", "the preview: each value in the middle, in the Look page's font at 10, flat, green and blue")
+
+    -- Each choice, at once.
+    local function Row(key)
+        for _, row in ipairs(panel.rows) do
+            if row.key == key then return row.pills end
+        end
+    end
+    local function Pick(key, choice)
+        for _, button in ipairs(Row(key).buttons) do
+            if button.key == choice then return S[button].scripts.OnClick(button) end
+        end
+        error("no " .. tostring(choice) .. " for " .. key)
+    end
+    Pick("prdHealthAt", "sides")
+    Equal(ns.Get("prdHealthAt") .. " " .. Preview(hp) .. " " .. tostring(Row("prdHealthLeft"):IsVisible()) .. " "
+        .. tostring(Row("prdHealthCentre"):IsVisible()), 'sides "" | 4,321 | 84% true false',
+        "Left and right on the health bar: the value at the left, the percent at the right, their rows in place of Centre's")
+    Check("health left and right")
+    Pick("prdPowerAt", "sides")
+    Pick("prdPowerRight", "both")
+    Pick("prdTextNumbers", "short")
+    Equal(Preview(mp), '"" | 1.9K | 1.9K / 2.4K', "Value / max at the right, numbers shortened")
+    Check("both left and right")
+    Pick("prdHealthAt", "off")
+    Equal(Preview(hp) .. " " .. tostring(Row("prdHealthLeft"):IsVisible()), '"" | "" | "" false', "the health bar's text off: none, and no rows under it")
+    Check("health off")
+    Pick("prdHealthAt", "sides")
+    -- The display switched off: why there's no text, and Turn on, over the rows.
+    prdOn = false
+    w:Refresh()
+    Equal(tostring(panel.turnOn:IsVisible()), "true", "the display off: Turn on in the panel")
+    local _, displayTop = Fit.Rect(panel.turnOn)
+    local _, textTop = Fit.Rect(panel.textOn)
+    Equal(tostring(panel.textOn:IsVisible()) .. " " .. Num(textTop - displayTop), "true 25.00",
+        "the text off too: both warnings, the text's a row under the display's")
+    -- Its tallest: both warnings over a pair on each bar, still under the title bar.
+    Check("display and text off, both left and right")
+    panel.turnOn:Click()
+    Equal(tostring(prdOn) .. " " .. S[w.note].text, "true Your Personal Resource Display is on. Reload to finish.",
+        "and it switches the display on, as the Look page's own Turn on does")
+    w:Refresh()
+    Equal(tostring(panel.turnOn:IsVisible()), "false", "gone once it's on")
+    -- The text's Turn on ticks the Look page's tick: on your bars, the
+    -- warning gone, the panel still open; unticked there, it's back.
+    panel.textOn:Click()
+    Equal(tostring(ns.Get("prdText")) .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(panel.textOff:IsVisible()) .. " "
+        .. tostring(panel.textOn:IsVisible()) .. " " .. tostring(dialog:IsVisible()), "true true false false true",
+        "Turn on ticks Health and power text: saved, the Look page's tick ticked, the warning gone, the panel still open")
+    Check("text on")
+    tick:Click()
+    Equal(tostring(ns.Get("prdText")) .. " " .. tostring(panel.textOff:IsVisible()) .. " " .. tostring(panel.textOn:IsVisible()),
+        "false true true", "unticked on the Look page: the warning back")
+    -- Size and font.
+    panel.size:Choose(14)
+    Pick("prdTextFont", "arial")
+    Equal(ns.Get("prdTextSize") .. " " .. Last(hp.slots.left, "SetFontObject") .. " " .. Last(mp.slots.right, "SetFontObject"),
+        "14 FECMFontarial14 FECMFontarial14", "a bigger size and Arial Narrow, just for this text")
+    local fonts = panel.fonts
+    Equal(S[fonts.buttons[1].label].text .. " " .. Last(fonts.buttons[1].label, "SetFontObject") .. " " .. Last(fonts.buttons[3].label, "SetFontObject")
+        .. " | " .. Note(fonts.buttons[1]) .. " | " .. Note(fonts.buttons[3]), "Look page FECMSamplefriz FECMSamplearial | "
+        .. "The font picked on the Look page, now Friz Quadrata. | Arial Narrow, plain and narrow, just for this text.",
+        "the Look page's font first, then the game's own, each in its own face and saying what it is")
+    Check("size 14 in Arial Narrow")
+    Equal(Note(Row("prdHealthAt").buttons[2]) .. " | " .. Note(Row("prdPowerLeft").buttons[3]) .. " | " .. Note(Row("prdTextNumbers").buttons[2])
+        .. " | " .. Note(panel.size), "A pair at the ends of your health bar. Long text is cut short rather than run into the other. | "
+        .. "What you have now and the most you can have, like 4,321 / 5,120. | Numbers shortened by the game, like 4.3K or 12K. | "
+        .. "The text's size. It can't fit itself to the bar, so text too long for it is cut short.",
+        "each choice says what it does in the footer, clear of the panel")
+    -- Your own colours on the preview.
+    ns.Set("prdHealth", "purple")
+    w:Refresh()
+    Equal(Last(hp, "SetStatusBarColor", 1), .6, "the preview in your own colour for a bar")
+    -- Done closes it; the tick is still the Look page's, and nothing breaks with no display.
+    panel.done:Click()
+    tick:Click()
+    Equal(tostring(dialog:IsVisible()) .. " " .. tostring(ns.Get("prdText")) .. " " .. tostring(w:IsShown()), "false true true",
+        "Done closes it; the tick turns the text on")
+    setUp:Click()
+    w:Hide()
+    Equal(tostring(S[panel].shown), "false", "closed with the window")
+    Equal(table.concat(found, " | "), "", "in every state: every piece inside the panel and none on another, the panel under the title bar and clear of the footer")
+    _G.BreakUpLargeNumbers, _G.AbbreviateNumbers = nil, nil
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The Set up panel goes when another page takes the window ----------------------------------------
+-- Its shade covers the whole window but the footer, with the mouse on, so a
+-- page picked from code while it's open would show dimmed and blocked under
+-- it: /ccm tour (its first step points at the menu and picks no page), /ccm
+-- reset (the Layout page and its question), What's new's tour (Show me
+-- what's new), and the Cooldown pulse's Move box bringing the window back
+-- on its page. Each puts the panel away; Set up opens it again after.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    local said = {}
+    local function After(label, run)
+        if FECMTour and FECMTour:IsShown() then FECMTour.skip:Click() end
+        w:Select("look")
+        w.prdTextSetUp:Click()
+        local open = w.textPanel:IsVisible()
+        run()
+        said[#said + 1] = label .. " " .. tostring(open) .. " " .. tostring(w.textPanel:IsVisible()) .. " " .. tostring(w:IsShown())
+            .. " " .. w.selected
+    end
+    After("/ccm tour", function() SlashCmdList.FECM("tour") end)
+    local tourUp = S[FECMTour].shown
+    After("What's new's tour", function() ns.Tour:StartNews("1.1.0") end)
+    local newsUp = S[FECMTour].shown
+    After("a page picked", function() w:Select("pulse") end)
+    After("/ccm reset", function() SlashCmdList.FECM("reset") end)
+    Equal(table.concat(said, " | ") .. " | " .. tostring(tourUp) .. " " .. tostring(newsUp), "/ccm tour true false true look | "
+        .. "What's new's tour true false true cd | a page picked true false true pulse | /ccm reset true false true layout | true true",
+        "the panel open, then put away by each, the window still up on the page picked, the tours shown")
+    -- Each page's note on hover in two lines of the footer at most, the
+    -- Look page's longer now it names the resource display and its text.
+    local long = {}
+    for key, item in pairs(w.nav) do
+        local hint = type(item.hint) == "function" and item.hint(item) or item.hint
+        if Fit.Wide(hint, "GameFontHighlightSmall") > 2 * S[w.note].width then long[#long + 1] = key end
+    end
+    Equal(table.concat(long, " ") .. " | " .. tostring(w.nav.look.hint:find("resource display", 1, true) ~= nil), " | true",
+        "each page's hover fits two lines of the footer, the Look page's naming the resource display")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The Look page: every piece inside its box, in every state ---------------------------------------
+-- The preview, the choices under it and the Each bar box: each text, tick,
+-- button, choice and slider inside the box it's drawn in, past none of its
+-- edges, none on another, and each box clear of everything outside it; and
+-- each row of the Each bar list across the list, its icon, name, swatches
+-- and colour's name inside it and on none of each other. In every state
+-- that changes what shows: the list's note and its button (no Tracked Bars
+-- yet, the look off, waiting for a reload, Blizzard's Cooldown Manager off)
+-- under none, two or three of the display's rows (three for a druid with
+-- combo points), your Tracked Bars listed, the warnings on the title's and
+-- Each bar's rows, keybinds off and on, the display's text on, and every
+-- design, colour, texture, font, accent, ready glow and keybind position.
+-- The window is a fixed 820 by 560 (it can't be resized), so that's every
+-- size it comes in. A taller choices box left the Each bar box's note
+-- spilling over its foot in game (2026-10-17): this catches that.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    local spellName = C_Spell.GetSpellName
+    C_Spell.GetSpellName = function(id)
+        if id == 25895 then return "Greater Blessing of Salvation" end -- a long name
+        return spellName(id)
+    end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local page, boxes = w.pages.look, Fit.LookBoxes(w)
+    local found = {}
+    local function Check(label)
+        w:Refresh()
+        local problems, rows = Fit.Problems(page, boxes), Fit.Rows(w)
+        if rows ~= "" then problems = problems .. (problems ~= "" and "; " or "") .. rows end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    -- What the list shows: its rows, then its note and its button.
+    local function List()
+        local shown = 0
+        for _, row in ipairs(w.eachRows) do
+            if row:IsVisible() then shown = shown + 1 end
+        end
+        return shown .. " rows | " .. (w.eachEmpty:IsVisible() and S[w.eachEmpty].text or "no note") .. " | "
+            .. (w.eachFix:IsVisible() and S[w.eachFix.label].text or "no button")
+    end
+    -- Blizzard's Tracked Bars, as the Look page reads them (Skin.lua TrackedBars).
+    local tracked = {}
+    _G.BuffBarCooldownViewer = { itemFramePool = { EnumerateActive = function() return pairs(tracked) end } }
+    local function Track(ids)
+        tracked = {}
+        for i, id in ipairs(ids) do tracked[{ GetBaseSpellID = function() return id end, layoutIndex = i }] = true end
+    end
+    -- What the list can say, and the look settings behind each.
+    local REASONS = {
+        { "no Tracked Bars", function() end },
+        { "Tracked Bars listed", function() Track({ 16870, 16886, 1243, 25895 }) end },
+        { "the look off", function() ns.Set("skin", false); ns.loaded.skin = false end },
+        { "waiting for a reload", function() ns.loaded.skin = false end },
+        { "Blizzard's Cooldown Manager off", function() cvarOn = false end },
+    }
+    -- The display's rows over it: none, its two bars, and a druid's combo points.
+    local DISPLAY = { { "no display rows", false, false }, { "two display rows", true, false }, { "three display rows", true, true } }
+    local said, titles = {}, {}
+    for _, reason in ipairs(REASONS) do
+        for _, display in ipairs(DISPLAY) do
+            Track({})
+            ns.Set("skin", true)
+            ns.loaded.skin, cvarOn = true, true
+            reason[2]()
+            _G.PersonalResourceDisplayFrame = display[2] and {} or nil
+            ns.Set("prdCombo", display[3])
+            Check(reason[1] .. ", " .. display[1])
+            said[#said + 1] = List()
+            -- The title's row: Reload to apply, or the Cooldown Manager's warning and Turn on.
+            if w.reload:IsVisible() then titles[reason[1] .. " reload"] = true end
+            if w.off:IsVisible() and w.turnOnManager:IsVisible() then titles[reason[1] .. " warning"] = true end
+        end
+    end
+    Equal(table.concat(said, " || "), "0 rows | Blizzard's Tracked Bars (buffs shown as timer bars) will be listed here to colour once you"
+        .. " set some up in Blizzard's Cooldown Settings. Not using them? Nothing to do here. | no button || 2 rows | Blizzard's Tracked"
+        .. " Bars (buffs shown as timer bars) will be listed here to colour once you set some up in Blizzard's Cooldown Settings. Not"
+        .. " using them? Nothing to do here. | no button || 3 rows | Blizzard's Tracked Bars (buffs shown as timer bars) will be listed"
+        .. " here to colour once you set some up in Blizzard's Cooldown Settings. Not using them? Nothing to do here. | no button || "
+        .. "4 rows | no note | no button || 6 rows | no note | no button || 7 rows | no note | no button || "
+        .. "0 rows | Apply this look to the Cooldown Manager and reload to colour your bars one by one. | Turn on || "
+        .. "2 rows | Apply this look to the Cooldown Manager and reload to colour your bars one by one. | Turn on || "
+        .. "3 rows | Apply this look to the Cooldown Manager and reload to colour your bars one by one. | Turn on || "
+        .. "0 rows | Reload first, then colour your bars one by one here. | Reload || "
+        .. "2 rows | Reload first, then colour your bars one by one here. | Reload || "
+        .. "3 rows | Reload first, then colour your bars one by one here. | Reload || "
+        .. "0 rows | Blizzard's Cooldown Manager is off. | Turn on || 2 rows | Blizzard's Cooldown Manager is off. | Turn on || "
+        .. "3 rows | Blizzard's Cooldown Manager is off. | Turn on",
+        "(each state's list: its rows, note and button, checked there)")
+    local titleList = {}
+    for key in pairs(titles) do titleList[#titleList + 1] = key end
+    table.sort(titleList)
+    Equal(table.concat(titleList, ", "), "Blizzard's Cooldown Manager off warning, waiting for a reload reload",
+        "(the title's row checked with Reload to apply while waiting for a reload, and the Cooldown Manager's warning while it's off)")
+
+    -- The display ticked but switched off: the warning and its Turn on on
+    -- Each bar's row, over the list's three rows, its note and button.
+    cvarOn = true
+    ns.Set("skin", false)
+    ns.loaded.skin = false
+    prdOn = false
+    Check("the display off")
+    Equal(tostring(w.personalOff:IsVisible()) .. " " .. tostring(w.turnOnPersonal:IsVisible()) .. " | " .. List(),
+        "true true | 3 rows | Apply this look to the Cooldown Manager and reload to colour your bars one by one. | Turn on",
+        "(the display off: its warning and Turn on, over three rows, the note and its button, checked there)")
+    prdOn = true
+
+    -- Each choice, in that fullest list, with keybinds off and on and the display's text on.
+    local CHOICES = { { "barStyle", ns.BAR_STYLE_KEYS }, { "barColour", ns.BAR_COLOUR_KEYS }, { "barTexture", ns.BAR_TEXTURE_KEYS },
+        { "font", ns.FONT_KEYS }, { "accent", ns.ACCENT_KEYS }, { "readyGlow", ns.READY_GLOW_KEYS },
+        { "keybindPosition", ns.KEYBIND_POSITIONS } }
+    local tried = 0
+    for _, keys in ipairs({ false, true }) do
+        ns.Set("keybinds", keys)
+        ns.Set("prdText", keys)
+        for _, choice in ipairs(CHOICES) do
+            local was = ns.Get(choice[1])
+            for _, key in ipairs(choice[2]) do
+                ns.Set(choice[1], key)
+                Check(("keybinds %s, %s %s"):format(keys and "on" or "off", choice[1], key))
+                tried = tried + 1
+            end
+            ns.Set(choice[1], was)
+        end
+    end
+    Equal(tostring(w.keyPlace:IsVisible()) .. " " .. tostring(w.prdText:GetChecked()) .. " " .. tried, "true true 56",
+        "(keybinds' choices shown, the text ticked, and every choice tried twice)")
+    Equal(table.concat(found, " | "), "", "in every state, each piece on the Look page inside its box (the preview, the choices,"
+        .. " the Each bar box), none on another, and each row of the list inside it")
+    C_Spell.GetSpellName = spellName
+    _G.BuffBarCooldownViewer, _G.PersonalResourceDisplayFrame = nil, nil
     Equal(#printed, 0, "no errors")
 end)()
 

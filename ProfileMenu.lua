@@ -23,7 +23,7 @@ local TREE_CHOICE = 156
 local TREE_WIDTHS = { tank = 32, healer = 45, damage = 45, none = 32 }
 local TICK_ROW = 24 -- the Switch with my talents tick's own row, under the role buttons
 local PLACES_ROW = 22 -- the Positions per profile tick's own row, under Use on all characters
-local UNTESTED = " (Needs testing)" -- the roles and talents, until they're seen in game
+local UNTESTED = " (experimental)" -- the roles and talents, until they're seen in game
 
 local function Users(name)
     if ns.OnAll(name) then return "all characters" end
@@ -256,9 +256,10 @@ function ns.BuildProfileMenu(window, header, anchor)
     local roleHeading = T:Heading(panel, "Roles")
     roleHeading:SetPoint("TOPLEFT", 10, -194)
     -- In plain sight beside the heading until the roles and talents are seen
-    -- working in game (the user's call, 2026-10-08), not only on hover.
+    -- working in game (the user's call, 2026-10-08), not only on hover. The
+    -- quiet lowercase word, as beside Health and power text's panel title.
     local roleTesting = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
-    roleTesting:SetText("Needs testing")
+    roleTesting:SetText("experimental")
     roleTesting:SetPoint("LEFT", roleHeading, "RIGHT", 8, 0)
     local function UseRole(role)
         local ok, message = ns.UseRole(role)
@@ -309,7 +310,7 @@ function ns.BuildProfileMenu(window, header, anchor)
     window.roleHeading, window.roleButtons, window.roleTesting = roleHeading, roleButtons, roleTesting
 
     -- Switch with my talents, on its own row under the role buttons (the
-    -- heading's row holds the Needs testing tag), and while it's ticked each
+    -- heading's row holds the experimental tag), and while it's ticked each
     -- talent tree under it with its points and its role, or None (it never
     -- switches); under them what the talents last did.
     local talents = T:Check(panel, "Switch with my talents", function(self)

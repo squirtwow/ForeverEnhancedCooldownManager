@@ -35,6 +35,9 @@ EraUI.
 - Health and power bars in the same designs, in Blizzard's colours or yours
 - The extra mana bar some specs get hides in caster form and is half size in
   forms
+- Health and power text: the numbers on its bars, in the centre or left and
+  right, as value, value / max or percent, in the size and font you like (off
+  by default, experimental)
 - Combo points under your energy bar for rogues and druids in cat form, which
   Forever's display leaves out (off by default)
 - Your own cast bar right under it, with the spell's icon, name and time left
@@ -60,7 +63,9 @@ EraUI.
   Weakened Soul, or with Only show missing just the buffs you're missing, so
   you see what to cast again (both off by default)
 - Debuffs bar: your own debuffs on your target, with a search that lists your
-  class's debuffs. It can show your debuffs on you too (off by default)
+  class's debuffs. It can show your debuffs on you too (off by default), and
+  Keep them greyed with no target keeps your tracked debuffs faded with nothing
+  targeted (off by default, experimental)
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag
   items in from your bags, and any ammo becomes one icon for whatever you have
   equipped

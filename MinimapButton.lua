@@ -27,8 +27,12 @@ local function Limit(value)
 end
 
 -- Round the minimap's edge at the saved angle: degrees anticlockwise from the
--- right, so 225 is the bottom left. Free-floating, where it was dropped, from
--- the middle of the screen. While dragging, where the cursor is.
+-- right, so 180 is the left. The default, 202, is just below that: one spot in
+-- a layout shared with our other addons' buttons, so none sit on each other
+-- (it was 225, the bottom left, until 2026-10-16). Only the default moved: an
+-- angle is saved only when the button is dragged, and a saved one stays.
+-- Free-floating, where it was dropped, from the middle of the screen. While
+-- dragging, where the cursor is.
 function M:Place()
     if not button then return end
     button:ClearAllPoints()

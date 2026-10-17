@@ -27,7 +27,8 @@ local function Detail(page, text, x, y, width)
     return detail
 end
 
--- Look: Blizzard's Cooldown Manager restyled, laid out like a bar's page: a
+-- Look: Blizzard's Cooldown Manager and the Personal Resource Display
+-- restyled, laid out like a bar's page: a
 -- title row, a panel with a live preview bar, the choices under it, your
 -- Tracked Bars to colour one by one, and the window's accent at the foot.
 local SWATCH, SWATCH_GAP = 20, 6 -- colour swatches
@@ -54,7 +55,7 @@ local TEXTURE_NOTES = {
     skills = "The game's skill bar, from the character sheet",
 }
 local TEXTURE_USE = " on your cast bar, swing timer and combo points, and the restyled Tracked Bars and resource display."
-local UNTESTED = " (Needs testing)" -- on every choice but today's look
+local UNTESTED = " (experimental)" -- on every choice but today's look
 local DARK_LABEL = 66 -- room for the Darkness slider's label before its track
 -- Ready glow's choices at the foot, and room for its label before them
 -- (about seven units a letter in the game: "Ready glow" needs about 70).
@@ -96,6 +97,258 @@ end
 -- Shared with the Cast bar page.
 ns.Swatch, ns.ClassIcon, ns.PaintSwatch = Swatch, ClassIcon, PaintSwatch
 
+-- Health and power text --------------------------------------------------------------
+-- A panel over the window from the Look page's Set up: where the text goes
+-- on each of the display's bars and what it shows, how its numbers are
+-- written, its size and its font, under a preview of two sample bars drawn
+-- by the same code as the display's (Resource.lua). Each choice shows at
+-- once on the preview, and on your bars while the Look page's tick is on:
+-- while it's off, the panel says so, with a way to turn it on. Its shade
+-- leaves the window's footer clear, so each control still says what it
+-- does there. Made the first time it opens.
+local PANEL_WIDTH = 460
+local PANEL_TOP = 106 -- where its rows start, under the title and the preview
+local PANEL_ROW = 25 -- from one row to the next
+local PANEL_AT = 100 -- where each row's choices start, clear of its label
+local PANEL_PILLS = 300 -- a row's choices
+local PANEL_FONTS = 340 -- the fonts' five
+local PREVIEW_BAR = { 260, 18 }
+-- Each sample bar: its colour while it's Blizzard's own, and how full it is.
+local SAMPLE_BARS = {
+    health = { setting = "prdHealth", colour = { 0, .8, 0 }, fill = 84, y = -8 },
+    power = { setting = "prdPower", colour = { 0, 0, 1 }, fill = 78, y = -30 },
+}
+local TEXT_NOTE = "Shown in and out of combat. Mana shows what you have now, not what's left after the spell you're casting."
+local AT_NOTES = {
+    centre = "One text in the middle of your %s bar.",
+    sides = "A pair at the ends of your %s bar. Long text is cut short rather than run into the other.",
+    off = "No text on your %s bar.",
+}
+local FORMAT_NOTES = {
+    none = "Nothing on this side.",
+    value = "What you have now, like 4,321.",
+    both = "What you have now and the most you can have, like 4,321 / 5,120.",
+    percent = "As a percent, like 84%.",
+}
+local NUMBER_NOTES = {
+    full = "Numbers in full, like 4,321.",
+    short = "Numbers shortened by the game, like 4.3K or 12K.",
+}
+
+-- A row of choices that sets key, with its label; each choice says what it does.
+local function PanelPills(window, dialog, label, key, keys, names, width, notes, Changed)
+    local items = {}
+    for _, choice in ipairs(keys) do items[#items + 1] = { key = choice, label = names[choice] } end
+    local pills = T:Segmented(dialog, items, width, function(value)
+        ns.Set(key, value)
+        Changed()
+    end)
+    for _, button in ipairs(pills.buttons) do window:Hint(button, notes[button.key]) end
+    local text = T:Text(dialog, "GameFontHighlight")
+    text:SetText(label)
+    return { key = key, pills = pills, parts = { { text, 16, -4 }, { pills, PANEL_AT, 0 } } }
+end
+
+-- A bar's rows: where its text goes, then what the middle, or each end, shows.
+local function PanelBar(window, dialog, rows, word, prefix, Changed)
+    local atNotes, centreKeys, centreNotes = {}, {}, {}
+    for key, note in pairs(AT_NOTES) do atNotes[key] = note:format(word:lower()) end
+    for _, key in ipairs(ns.TEXT_FORMAT_KEYS) do
+        if key ~= "none" then
+            centreKeys[#centreKeys + 1] = key
+            centreNotes[key] = FORMAT_NOTES[key]
+        end
+    end
+    local at = prefix .. "At"
+    rows[#rows + 1] = PanelPills(window, dialog, word, at, ns.TEXT_AT_KEYS, ns.TEXT_AT_NAMES, PANEL_PILLS, atNotes, Changed)
+    local function Is(where) return function() return ns.Get(at) == where end end
+    for _, spot in ipairs({ { "Centre", centreKeys, centreNotes, "centre" }, { "Left", ns.TEXT_FORMAT_KEYS, FORMAT_NOTES, "sides" },
+        { "Right", ns.TEXT_FORMAT_KEYS, FORMAT_NOTES, "sides" } }) do
+        local row = PanelPills(window, dialog, spot[1], prefix .. spot[1], spot[2], ns.TEXT_FORMAT_NAMES, PANEL_PILLS, spot[3], Changed)
+        -- Under the bar's own row, its label set in and quieter.
+        row.parts[1][2] = 28
+        row.parts[1][1]:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
+        row.when = Is(spot[4])
+        rows[#rows + 1] = row
+    end
+end
+
+-- The preview: two sample bars, health over power, in the Look page's
+-- texture and each bar's colour, with their text.
+local function PanelPreview(dialog)
+    local tray = CreateFrame("Frame", nil, dialog, "BackdropTemplate")
+    tray:SetPoint("TOPLEFT", 16, -38)
+    tray:SetSize(PANEL_WIDTH - 32, 56)
+    T:Flat(tray, T.FIELD, T.BORDER)
+    local bars = {}
+    for kind, look in pairs(SAMPLE_BARS) do
+        local bar = CreateFrame("StatusBar", nil, tray)
+        bar:SetSize(PREVIEW_BAR[1], PREVIEW_BAR[2])
+        bar:SetPoint("TOP", 0, look.y)
+        bar:SetMinMaxValues(0, 100)
+        bar:SetValue(look.fill)
+        bar.track = bar:CreateTexture(nil, "BACKGROUND")
+        bar.track:SetAllPoints()
+        bar.slots = ns.Resource:TextSlots(bar)
+        bars[kind] = bar
+    end
+    return tray, bars
+end
+
+local function TextPanel(window)
+    local shade = CreateFrame("Frame", nil, window)
+    shade:SetPoint("TOPLEFT")
+    shade:SetPoint("BOTTOMRIGHT", 0, FOOTER)
+    -- Over the profile menu (60), under the tour (70) and Are you sure? (80).
+    shade:SetFrameLevel(window:GetFrameLevel() + 64)
+    shade:EnableMouse(true) -- nothing behind it can be clicked meanwhile
+    local dim = shade:CreateTexture(nil, "BACKGROUND")
+    dim:SetAllPoints()
+    dim:SetColorTexture(0, 0, 0, .45)
+    shade:Hide()
+    local dialog = CreateFrame("Frame", nil, shade, "BackdropTemplate")
+    dialog:SetSize(PANEL_WIDTH, 320)
+    -- Centred under the title bar, so its tallest (both warnings over a pair
+    -- on each bar) still clears it.
+    dialog:SetPoint("CENTER", 0, -HEADER / 2)
+    T:Flat(dialog, T.PANEL, T.CONTROL_BORDER)
+    shade.dialog = dialog
+    local title = T:Heading(dialog, "Health and power text")
+    title:SetPoint("TOPLEFT", 16, -16)
+    local quiet = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
+    quiet:SetPoint("LEFT", title, "RIGHT", 8, 0)
+    quiet:SetText("experimental")
+    local _, preview = PanelPreview(dialog)
+    shade.preview = preview
+    local function Changed()
+        if ns.Resource then ns.Resource:Apply() end
+        window:Refresh()
+    end
+
+    -- While the display is off: why there's no text on it, and a way to switch it on.
+    local rows = {}
+    local off = T:Text(dialog, "GameFontHighlightSmall", T.WARN)
+    off:SetText("Your Personal Resource Display is off.")
+    local turnOn = T:Button(dialog, "Turn on", 70, 18)
+    turnOn:SetScript("OnClick", function() window.turnOnPersonal:Click() end)
+    window:Hint(turnOn, "Switch your Personal Resource Display on (Options > Combat).")
+    rows[1] = { parts = { { off, 16, -3 }, { turnOn, PANEL_WIDTH - 16 - 70, 0 } },
+        when = function() return not ns.PersonalDisplayOn() end }
+    shade.turnOn = turnOn
+    -- While the Look page's tick is off: the choices show only on the
+    -- preview, so say so, and a way to tick it from here.
+    local textOff = T:Text(dialog, "GameFontHighlightSmall", T.WARN)
+    textOff:SetText("The text is off on your bars.")
+    local textOn = T:Button(dialog, "Turn on", 70, 18)
+    textOn:SetScript("OnClick", function()
+        if not ns.Get("prdText") then window.prdText:Click() end
+    end)
+    window:Hint(textOn, "Show this text on your bars, as ticking Health and power text on the Look page does.")
+    rows[2] = { parts = { { textOff, 16, -3 }, { textOn, PANEL_WIDTH - 16 - 70, 0 } },
+        when = function() return not ns.Get("prdText") end }
+    shade.textOff, shade.textOn = textOff, textOn
+    PanelBar(window, dialog, rows, "Health", "prdHealth", Changed)
+    PanelBar(window, dialog, rows, "Power", "prdPower", Changed)
+    rows[#rows + 1] = PanelPills(window, dialog, "Numbers", "prdTextNumbers", ns.TEXT_NUMBER_KEYS, ns.TEXT_NUMBER_NAMES, 160,
+        NUMBER_NOTES, Changed)
+    local size = T:Slider(dialog, "Size", ns.TEXT_SIZE, 1, PANEL_AT - 16 + PANEL_PILLS + 40, function(value)
+        ns.Set("prdTextSize", value)
+        Changed()
+    end, PANEL_AT - 16)
+    window:Hint(size, "The text's size. It can't fit itself to the bar, so text too long for it is cut short.")
+    rows[#rows + 1] = { parts = { { size, 16, 0 } } }
+    shade.size = size
+    -- The Look page's font first, its name in that font; then the game's own,
+    -- each in its own face.
+    local fontNames, fontNotes = { look = "Look page" }, {}
+    for _, key in ipairs(ns.FONT_KEYS) do
+        fontNames[key] = ns.FONT_NAMES[key]:match("^%S+")
+        fontNotes[key] = FONT_NOTES[key] .. ", just for this text."
+    end
+    fontNotes.look = function() return "The font picked on the Look page, now " .. ns.FONT_NAMES[ns.Get("font")] .. "." end
+    local fonts = PanelPills(window, dialog, "Font", "prdTextFont", ns.TEXT_FONT_KEYS, fontNames, PANEL_FONTS, fontNotes, Changed)
+    for _, button in ipairs(fonts.pills.buttons) do
+        if button.key ~= "look" then button.label:SetFontObject(ns.Style:SampleFont(button.key)) end
+    end
+    rows[#rows + 1] = fonts
+    shade.rows, shade.fonts = rows, fonts.pills
+
+    local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
+    note:SetWidth(PANEL_WIDTH - 32)
+    note:SetText(TEXT_NOTE)
+    local done = T:Button(dialog, "Done", 90, 22)
+    done:SetPoint("BOTTOMRIGHT", -16, 14)
+    done:SetScript("OnClick", function() shade:Hide() end)
+    window:Hint(done, "Close this panel. Every choice is kept as you make it.")
+    shade.done = done
+    window:HookScript("OnHide", function() shade:Hide() end)
+
+    -- The rows that apply, one under the next, and the panel as tall as they need.
+    function shade:Refresh()
+        local y = -PANEL_TOP
+        for _, row in ipairs(rows) do
+            local shown = row.when == nil or row.when()
+            for _, part in ipairs(row.parts) do
+                local region = part[1]
+                region:SetShown(shown)
+                if shown then
+                    region:ClearAllPoints()
+                    region:SetPoint("TOPLEFT", part[2], y + part[3])
+                end
+            end
+            if shown and row.pills then row.pills:SetSelected(ns.Get(row.key)) end
+            if shown then y = y - PANEL_ROW end
+        end
+        size:Set(ns.Get("prdTextSize"))
+        fonts.pills.buttons[1].label:SetFontObject(ns.Style:SampleFont(ns.Get("font")))
+        note:ClearAllPoints()
+        note:SetPoint("TOPLEFT", 16, y - 4)
+        dialog:SetHeight(math.ceil(-y + 4 + (note:GetStringHeight() or 24) + 10 + 22 + 14))
+        local texture = ns.Style:BarTexture()
+        for kind, bar in pairs(preview) do
+            local look = SAMPLE_BARS[kind]
+            local key = ns.Get(look.setting)
+            local colour = key ~= "default" and ns.Style:BarColour(key) or look.colour
+            bar:SetStatusBarTexture(texture)
+            bar:SetStatusBarColor(colour[1], colour[2], colour[3], 1)
+            bar.track:SetColorTexture(ns.Style:TrackColour())
+            ns.Resource:WriteSample(bar.slots, kind)
+        end
+    end
+    function shade:Open()
+        self:Show()
+        self:Refresh()
+    end
+    return shade
+end
+
+-- The Look page's tick for the display's text, and Set up beside it for the
+-- panel above: at the foot of the right-hand column, level with the combo
+-- points' tick, so the choices keep their height and the Each bar box its
+-- room. Named like the panel, short enough for Set up to fit beside it.
+-- Its Refresh keeps both up to date.
+local function TextRow(window, Choice, x)
+    local options = window.lookOptions
+    local tick = Choice("Health and power text", "prdText", -181,
+        "Your health and power as numbers on the resource display, in and out of combat. (experimental)",
+        function() if ns.Resource then ns.Resource:Apply() end end, x)
+    local setUp = T:Button(options, "Set up", 64, 18)
+    setUp:SetPoint("LEFT", tick, "RIGHT", 8, 0)
+    setUp:SetScript("OnClick", function()
+        window.textPanel = window.textPanel or TextPanel(window)
+        window.textPanel:Open()
+    end)
+    window:Hint(setUp, "Where the text goes on each bar, what it shows, and its size and font, with a preview.")
+    window.prdText, window.prdTextSetUp = tick, setUp
+    local row = {}
+    function row:Refresh()
+        tick:SetChecked(ns.Get("prdText"))
+        local panel = window.textPanel
+        if panel and panel:IsShown() then panel:Refresh() end
+    end
+    return row
+end
+
 local function BuildLook(window, page, width)
     local inner = width - 32
     local function Redraw()
@@ -116,7 +369,7 @@ local function BuildLook(window, page, width)
     title:SetPoint("TOPLEFT", 16, -16)
     local about = T:Text(page, "GameFontHighlightSmall", T.MUTED)
     about:SetPoint("LEFT", title, "RIGHT", 10, 0)
-    about:SetText("Blizzard's Cooldown Manager, restyled")
+    about:SetText("Blizzard's Cooldown Manager and resource display, restyled")
     local off = T:Text(page, "GameFontHighlightSmall", T.WARN)
     off:SetPoint("LEFT", title, "RIGHT", 10, 0)
     off:SetText("Blizzard's Cooldown Manager is off.")
@@ -362,26 +615,30 @@ local function BuildLook(window, page, width)
     fillChosen:SetPoint("TOPLEFT", FACES_X + #ns.BAR_TEXTURE_KEYS * (FILL_SWATCH[1] + SWATCH_GAP) + 2, -120)
     window.fontChoice, window.fills, window.fillChosen = font, fills, fillChosen
 
-    -- Thick edges under the textures, and how dark the empty part of the bars
-    -- is level with the last tick on the left: both clear of the long ticks
-    -- beside them. The preview above and your bars change at once, as you drag.
+    -- How dark the empty part of the bars is, under the textures and level
+    -- with the second tick on the left, its track in line with the keybinds'
+    -- Size; then Thick edges under its track, level with the third tick, and
+    -- the display's text at the column's foot, level with the last. Each is
+    -- clear of the long ticks beside it. The preview above and your bars
+    -- change at once, as you drag.
     local function Reshade()
         if ns.Skin then ns.Skin:ApplyBarLook() end
         if ns.Resource then ns.Resource:Apply() end
         if ns.CastBar then ns.CastBar:Apply() end
     end
-    local thick = Choice("Thick edges", "thickEdges", -142,
-        "A 2px black edge round your bars instead of 1px (in their own colour for Outline). Your cast bar, swing timer, combo"
-        .. " points, resource display and Tracked Bars, and the icons beside them.", Reshade, FACES_X)
-    local darkness = T:Slider(options, "Darkness", ns.BAR_DARKNESS, 5, inner - KEYS_X, function(value)
+    local darkness = T:Slider(options, "Darkness", ns.BAR_DARKNESS, 5, inner - FACES_X, function(value)
         ns.Set("barDarkness", value)
         Reshade()
         window:Refresh()
     end, DARK_LABEL)
-    darkness:SetPoint("TOPLEFT", KEYS_X, -176)
+    darkness:SetPoint("TOPLEFT", FACES_X, -136)
+    local thick = Choice("Thick edges", "thickEdges", -160,
+        "A 2px black edge round your bars instead of 1px (in their own colour for Outline). Your cast bar, swing timer, combo"
+        .. " points, resource display and Tracked Bars, and the icons beside them.", Reshade, FACES_X + DARK_LABEL)
     window:Hint(darkness, "How dark the empty part of your bars is: 0 as it's always been, 100 solid black, with Glass's shine"
         .. " kept to the fill. Your cast bar, swing timer, combo points, resource display and Tracked Bars.")
     window.darkness, window.thickEdges = darkness, thick
+    local textRow = TextRow(window, Choice, KEYS_X)
 
     -- Each Tracked Bar in a colour of its own.
     local eachTitle = T:Heading(page, "Each bar")
@@ -412,9 +669,12 @@ local function BuildLook(window, page, width)
     empty:SetPoint("TOPLEFT", 12, -12)
     empty:SetWidth(inner - 24)
     window.eachEmpty = empty
-    -- Under the reason the list is empty, a button to sort it out.
-    local fix = T:Button(listPanel, "Turn on", 90, 20)
-    fix:SetPoint("TOPLEFT", empty, "BOTTOMLEFT", 0, -8)
+    -- Level with the reason the list is empty, at the box's right, a button
+    -- to sort it out: beside the reason, not under it, so both fit under the
+    -- display's three rows (a rogue's or a druid's combo points) too.
+    local FIX = 90
+    local fix = T:Button(listPanel, "Turn on", FIX, 20)
+    fix:SetPoint("TOPRIGHT", -12, -8)
     fix:SetScript("OnClick", function(self) if self.action then self.action() end end)
     window:Hint(fix, function() return fix.about end)
     window.eachFix = fix
@@ -567,6 +827,7 @@ local function BuildLook(window, page, width)
         personal:SetChecked(ns.Get("prdSkin"))
         repeatMana:SetChecked(ns.Get("prdHideRepeat"))
         combo:SetChecked(ns.Get("prdCombo"))
+        textRow:Refresh()
         design:SetSelected(ns.Get("barStyle"))
         border:SetSelected(ns.Get("iconBorder"))
         shadow:SetSelected(ns.Get("iconShadow"))
@@ -628,12 +889,16 @@ local function BuildLook(window, page, width)
         if not why then
             for _, id in ipairs(spells) do entries[#entries + 1] = { spell = id } end
         end
+        local top = 12 + personalRows * ROW
         empty:ClearAllPoints()
-        empty:SetPoint("TOPLEFT", 12, -(12 + personalRows * ROW))
+        empty:SetPoint("TOPLEFT", 12, -top)
+        empty:SetWidth(inner - 24 - (fixAction and FIX + 12 or 0))
         empty:SetText(why or "")
         empty:SetShown(why ~= nil)
         fix:SetLabel(fixLabel or "")
         fix.action, fix.about = fixAction, fixNote
+        fix:ClearAllPoints()
+        fix:SetPoint("TOPRIGHT", -12, -(top - 4)) -- its middle on the reason's first line
         fix:SetShown(fixAction ~= nil)
         for i, entry in ipairs(entries) do
             local row = Row(i)
@@ -824,7 +1089,8 @@ end
 
 -- What each page is for, in the footer on hover.
 local NAV_NOTES = {
-    look = "Blizzard's Cooldown Manager restyled: bar designs, borders, shadows, keybinds, font, textures, ready glow and the accent.",
+    look = "Blizzard's Cooldown Manager and your resource display restyled: bar designs, borders, shadows, keybinds, font, textures,"
+        .. " health and power text, ready glow and the accent.",
     layout = "One-click layouts that stack your bars around your Personal Resource Display.",
     cast = "Your own cast bar and a swing timer, under your Personal Resource Display.",
     general = "Your bars on or off, the minimap button, the tour, the Discord and EraUI.",
@@ -1323,6 +1589,9 @@ local function BuildWindow()
     function window:Select(key)
         self.selected = key
         self.profilePanel:Hide()
+        -- And the Health and power text panel, whose shade would leave the
+        -- new page dimmed and blocked (the tour, /ccm reset, What's new).
+        if self.textPanel then self.textPanel:Hide() end
         self:Refresh()
         if ns.Tour then ns.Tour:Sync() end
     end
@@ -1371,6 +1640,9 @@ end
 
 function ns.ShowWindow()
     local window = ns.window or BuildWindow()
+    -- Clear of the Health and power text panel for whatever opened it (the
+    -- tour's first step points at the menu under it, and picks no page).
+    if window.textPanel then window.textPanel:Hide() end
     window:Show()
     window:Raise()
 end

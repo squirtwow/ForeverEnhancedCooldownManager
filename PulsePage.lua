@@ -340,7 +340,7 @@ local function BuildList(window, page, inner)
         window:Hint(row.check, function()
             local name = row.name:GetText() or ""
             return row.check:GetChecked() and ("Untick to leave " .. name .. " out.")
-                or ("Tick to pulse when " .. name .. " is ready." .. (row.bags and " (Needs testing)" or ""))
+                or ("Tick to pulse when " .. name .. " is ready." .. (row.bags and " (experimental)" or ""))
         end)
         -- Quick or Long, on the right; its cooldown just before it.
         row.style = T:Segmented(row, Choices(ns.PULSE_STYLE_KEYS, ns.PULSE_STYLE_NAMES), SWITCH, function(key)
@@ -414,7 +414,12 @@ local function BuildList(window, page, inner)
         if #spells > 0 then Header("Spells") end
         for _, entry in ipairs(spells) do Entry(entry, Long(entry.base), false) end
         if #items > 0 then Header("Items") end
-        for _, entry in ipairs(items) do Entry(entry, entry.slot and "trinket" or entry.bar and "on your bars" or "in your bags", true) end
+        -- A potion or healthstone listed with none carried (ticked, or on a
+        -- bar) won't pulse: its row says so.
+        for _, entry in ipairs(items) do
+            Entry(entry, entry.slot and "trinket" or entry.carried == false and "none left" or entry.bar and "on your bars"
+                or "in your bags", true)
+        end
         for i = n + 1, #page.rows do page.rows[i]:Hide() end
         empty:SetText(n == 0 and "None of your spells has a cooldown of its own yet. New ones show here as you learn them." or "")
         empty:SetShown(n == 0)

@@ -76,13 +76,23 @@ end
 
 -- The display showing (say it's set to show only in combat) stacks the bars
 -- around it again, and hiding (switched off in Options, say) closes the rows
--- up. Post-hooks on Blizzard's frame, set once.
+-- up. Post-hooks on Blizzard's frame, set once. Anything going wrong there
+-- is reported once and never handed back to Blizzard's code.
 local watching
+local function Restack()
+    local ok, err = pcall(L.Stack, L)
+    if not ok and not L.lastError then
+        L.lastError = tostring(err)
+        print("|cffffd100" .. ns.TITLE .. ":|r couldn't place your bars round the Personal Resource Display. Please report this: "
+            .. L.lastError)
+    end
+end
+
 local function Watch(frame)
     if watching or not frame.HookScript then return end
     watching = true
-    frame:HookScript("OnShow", function() L:Stack() end)
-    frame:HookScript("OnHide", function() L:Stack() end)
+    frame:HookScript("OnShow", Restack)
+    frame:HookScript("OnHide", Restack)
 end
 
 -- The display's bars you can see now: health, power, the extra mana bar

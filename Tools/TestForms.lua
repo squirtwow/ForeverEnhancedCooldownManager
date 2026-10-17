@@ -832,6 +832,30 @@ local function Character(class, spells, saved, form, stealthed, known)
     return ns, ns.Bars, ns.Bars:Get("cd")
 end
 
+-- Saved settings (your bars on, unless others are given) with Swap with my
+-- form ticked on these bars in the profile a character of this class logs
+-- in to: its own, named as a new character's is. As the bar's page saves
+-- it: the tick is the profile's.
+local function Ticked(class, keys, saved)
+    saved = saved or { useBars = true }
+    local name = ("%s (%s) - %s"):format(character.name, class:sub(1, 1) .. class:sub(2):lower(), character.realm)
+    local ticks = {}
+    for _, key in ipairs(keys) do ticks[key] = true end
+    saved.profiles, saved.chars = { [name] = { swapForm = ticks } }, { [character.guid] = name }
+    return saved
+end
+
+-- A profile's saved ticks as text: the bars ticked, in order ("cd,util"),
+-- or "nil" for none saved.
+local function Ticks(profile)
+    local ticks = profile and profile.swapForm
+    if ticks == nil then return "nil" end
+    local out = {}
+    for key, on in pairs(ticks) do out[#out + 1] = key .. (on == true and "" or "=" .. tostring(on)) end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+
 -- The icons showing on a bar, in order, each with where it sits from the
 -- bar's corner ("Maul 60" in the first row, "Maul 40,-40" below it). The
 -- trinket is "Trinket".
@@ -896,7 +920,9 @@ end
 
 do
     local ns, B, bar = Character("DRUID", DRUID, nil, 5)
-    Equal(tostring(ns.BarData("cd").swapForm) .. " " .. tostring(ns.BarData("util").swapForm), "false false", "off on both cooldown bars")
+    Equal(tostring(ns.Swaps("cd")) .. " " .. tostring(ns.Swaps("util")) .. " "
+        .. tostring(ForeverEnhancedCooldownManagerDB.profiles[ns.ProfileName()].swapForm), "false false nil",
+        "off on both cooldown bars, nothing saved for it in your profile")
     Equal(Showing(bar) .. " | " .. FormReads .. " " .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM) .. " | " .. List(ns, "cd", 5),
         SHOWN.all .. " | 0 nil | none", "in bear form, the one list as always: your form never asked, its changes not heard, no form's list")
     Shift(ns, 1)
@@ -906,6 +932,9 @@ do
     B:SetOption("cd", "swapForm", true)
     Equal(Showing(bar) .. " | " .. List(ns, "cd", 5) .. " | " .. List(ns, "cd"), SHOWN.bear .. " | Maul,Barkskin,Bear Form,slot:13 | " .. NORMAL,
         "ticked in bear form: bear form's own list, made from the normal one, which stays as it was")
+    local db = ForeverEnhancedCooldownManagerDB
+    Equal(Ticks(db.profiles[ns.ProfileName()]) .. " " .. tostring(rawget(db.bars.cd, "swapForm")), "cd nil",
+        "the tick saved in your profile, beside its lists, not with the bar's settings every character shares")
     -- Unticked: the normal list, your form no longer asked or heard, and
     -- bear form's list kept for next time.
     B:SetOption("cd", "swapForm", false)
@@ -914,6 +943,7 @@ do
     Equal(Showing(bar) .. " | " .. tostring(FormReads - reads) .. " " .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM) .. " | "
         .. List(ns, "cd", 5), SHOWN.all .. " | 0 nil | Maul,Barkskin,Bear Form,slot:13",
         "unticked: the normal list, your form no longer asked or heard, bear form's list kept")
+    Equal(Ticks(db.profiles[ns.ProfileName()]), "nil", "and nothing left saved for the tick")
     Shift(ns, 5)
     B:SetOption("cd", "swapForm", true)
     Equal(Showing(bar), SHOWN.bear, "and ticked again: bear form's list once more")
@@ -923,7 +953,7 @@ end
 -- A druid: each form its own list ------------------------------------------------------------------
 
 do
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } }, nil, nil,
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }), nil, nil,
         { { "Cat Form", 768 }, { "Travel Form", 783 }, { "Moonkin Form", 24858 } })
     local profile = ForeverEnhancedCooldownManagerDB.profiles[ns.ProfileName()]
     Equal(Showing(bar) .. " | " .. List(ns, "cd") .. " | " .. tostring(profile.forms), SHOWN.all .. " | " .. NORMAL .. " | nil",
@@ -994,7 +1024,7 @@ end
 -- Each list its own --------------------------------------------------------------------------------
 
 do
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true }, util = { swapForm = true } } })
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd", "util" }))
     Shift(ns, 1)
     Shift(ns, 5)
     local cat = "Claw,Pounce,Barkskin,Bear Form,slot:13"
@@ -1047,7 +1077,7 @@ end
 
 do
     -- Only Cooldowns swaps: Utility's list shows in every form.
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } })
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }))
     local util = B:Get("util")
     Shift(ns, 5)
     Shift(ns, nil)
@@ -1080,7 +1110,7 @@ end
 do
     -- The other way: a trade from Utility (which doesn't swap) in bear form
     -- puts Maul on it, so Maul leaves Cooldowns' normal list too.
-    local ns, B = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } })
+    local ns, B = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }))
     B:Assign("Barkskin", "util")
     Shift(ns, 5)
     B:Trade("util", "Barkskin", "cd", "Maul")
@@ -1092,7 +1122,7 @@ end
 do
     -- Only Utility swaps: Cooldowns' list shows in every form. A trade in
     -- bear form puts Barkskin on it: off Utility's normal list too.
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { util = { swapForm = true } } })
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "util" }))
     local util = B:Get("util")
     B:Assign("Barkskin", "util")
     Shift(ns, 5)
@@ -1116,7 +1146,7 @@ end
 
 do
     -- Both swap, Utility ticked after Cooldowns' bear form list was made.
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } })
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }))
     local util = B:Get("util")
     Shift(ns, 5)
     Shift(ns, nil)
@@ -1144,7 +1174,7 @@ end
 do
     -- A tick turned on or off, and lists from elsewhere: a spell on both
     -- bars in a form stays on one.
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true }, util = { swapForm = true } } })
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd", "util" }))
     local util = B:Get("util")
     local profile = ForeverEnhancedCooldownManagerDB.profiles[ns.ProfileName()]
     Shift(ns, 5)
@@ -1172,7 +1202,7 @@ end
 
 do
     -- Your form kept secret in a fight: read again as it ends.
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } })
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }))
     lockdown = true
     Fire("PLAYER_REGEN_DISABLED")
     Shift(ns, SECRET)
@@ -1188,7 +1218,7 @@ end
 -- The game won't say, or names no list -------------------------------------------------------------
 
 do
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } }, 5)
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }), 5)
     Equal(Showing(bar), SHOWN.bear, "bear form")
     Shift(ns, SECRET)
     Equal(Showing(bar) .. " | " .. ns.FormNow(), SHOWN.bear .. " | 5", "your form kept secret: the list it shows stays")
@@ -1216,7 +1246,7 @@ end
 do
     local ns, B, bar = Character("WARRIOR", { { "Charge", 100, "Rank 1" }, { "Overpower", 7384, "Rank 1" }, { "Shield Wall", 871 },
         { "Intercept", 20252, "Rank 1" }, { "Execute", 5308, "Rank 1" }, { "Heroic Strike", 78, "Rank 1" }, { "Battle Stance", 2457 } },
-        { useBars = true, bars = { cd = { swapForm = true, grow = "right" } } }, 17)
+        Ticked("WARRIOR", { "cd" }, { useBars = true, bars = { cd = { grow = "right" } } }), 17)
     Equal(Showing(bar), "Charge 0 | Overpower 40 | Execute 80 | Heroic Strike 120 | Battle Stance 160 | Trinket 200",
         "Battle Stance: its own list, without what only the other stances can use")
     Shift(ns, 18)
@@ -1235,7 +1265,7 @@ end
 
 do
     local ns, B, bar = Character("ROGUE", { { "Sinister Strike", 1752, "Rank 1" }, { "Ambush", 8676, "Rank 1" }, { "Sap", 6770, "Rank 1" },
-        { "Stealth", 1784, "Rank 1" } }, { useBars = true, bars = { cd = { swapForm = true, grow = "right" } } })
+        { "Stealth", 1784, "Rank 1" } }, Ticked("ROGUE", { "cd" }, { useBars = true, bars = { cd = { grow = "right" } } }))
     local all = "Sinister Strike 0 | Ambush 40 | Sap 80 | Stealth 120 | Trinket 160"
     Equal(Showing(bar), all, "out of stealth: the normal list")
     Shift(ns, 30, true)
@@ -1253,7 +1283,7 @@ end
 -- Your bars off and on again: your form still heard -----------------------------------------------
 
 do
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } }, 5)
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }), 5)
     local function Heard()
         local events = S[B.driver].events
         return tostring(events.UPDATE_SHAPESHIFT_FORM) .. " " .. tostring(events.UPDATE_SHAPESHIFT_FORMS) .. " "
@@ -1285,7 +1315,7 @@ end
 -- In a fight: the addon's own icons only ----------------------------------------------------------
 
 do
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true, showAuras = true } } })
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }, { useBars = true, bars = { cd = { showAuras = true } } }))
     lockdown = true
     Fire("PLAYER_REGEN_DISABLED")
     local calls, runs = containerCallsInCombat, #ContainerRuns
@@ -1308,7 +1338,7 @@ end
 -- /ccm debug says what it read --------------------------------------------------------------------
 
 do
-    local ns = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } }, 5)
+    local ns = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }), 5)
     local report = ns.DebugReport()
     Equal(report:match("\n  swap with my form: [^\n]*"), "\n  swap with my form: form 5, stealthed false, showing Bear Form",
         "the form and stealth the game gave, and whose list the bar shows")
@@ -1346,7 +1376,7 @@ do
     S[tick].scripts.OnLeave(tick)
     tick:Click()
     local pick, label = S[editing].points[1], S[editing.label].points[1]
-    Equal(tostring(ns.BarData("cd").swapForm) .. " " .. tostring(tick:GetChecked()) .. " | " .. tostring(S[editing].shown) .. " "
+    Equal(tostring(ns.Swaps("cd")) .. " " .. tostring(tick:GetChecked()) .. " | " .. tostring(S[editing].shown) .. " "
         .. S[editing.label].text .. " " .. pick[2] .. " " .. pick[3] .. " " .. label[2] .. " " .. label[3] .. " " .. S[editing.name].text
         .. " | " .. Showing(bar), "true true | true Editing 420 -151 320 -155 Bear Form | " .. SHOWN.bear,
         "clicked: on, Editing under it on your form, and the bar shows bear form's list at once")
@@ -1362,7 +1392,7 @@ do
 end
 
 do
-    local ns, B, bar = Character("DRUID", DRUID, { useBars = true, bars = { cd = { swapForm = true } } }, nil, nil,
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }), nil, nil,
         { { "Cat Form", 768 }, { "Dire Bear Form", 9634 } })
     SlashCmdList.FECM("")
     local w = FECMFrame
@@ -1478,8 +1508,7 @@ for _, case in ipairs({
             .. " Editing then shows under the tick, to set them up without using Ghost Wolf." },
 }) do
     local class, spells, label, hover, note, fight = case[1], case[2], case[3], case[4], case[5], case[6]
-    local ns = Character(class, spells,
-        { useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { swapForm = true } } })
+    local ns = Character(class, spells, Ticked(class, { "cd" }, { useBars = true, notesSeen = "dev", helpSeen = true }))
     SlashCmdList.FECM("")
     local w = FECMFrame
     w:Select("cd")
@@ -1519,7 +1548,7 @@ end
 
 do
     local ns, B, bar = Character("MAGE", { { "Fireball", 133, "Rank 1" } },
-        { useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { swapForm = true } } })
+        Ticked("MAGE", { "cd" }, { useBars = true, notesSeen = "dev", helpSeen = true }))
     SlashCmdList.FECM("")
     local w = FECMFrame
     w:Select("cd")
@@ -1541,21 +1570,156 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Each profile its own tick ---------------------------------------------------------------------------
+-- The tick is saved in the profile, beside the lists it swaps between, so a
+-- druid ticking it never changes a warrior's bars on the same account (in
+-- 1.6.0 it was every character's: a warrior always in a stance then only
+-- ever saw Battle Stance's list). A profile switched to brings its own; a
+-- profile shared by several characters (Use on all characters) has one tick
+-- for them all.
+
+-- A bar's icons showing, by name only ("Maul | Barkskin").
+local function Names(bar)
+    return (Showing(bar):gsub(" [%d,%.%-]+", ""))
+end
+local WARRIOR = { { "Charge", 100, "Rank 1" }, { "Overpower", 7384, "Rank 1" }, { "Shield Wall", 871 },
+    { "Intercept", 20252, "Rank 1" }, { "Execute", 5308, "Rank 1" }, { "Heroic Strike", 78, "Rank 1" }, { "Battle Stance", 2457 } }
+local WARRIOR_ALL = "Charge | Overpower | Shield Wall | Intercept | Execute | Heroic Strike | Battle Stance | Trinket"
+
+do
+    -- A druid ticks it, then a warrior logs in on the same account.
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns, B, bar = Character("DRUID", DRUID, nil, 5)
+    local saved = ForeverEnhancedCooldownManagerDB
+    local druid = ns.ProfileName()
+    B:SetOption("cd", "swapForm", true)
+    Equal(Showing(bar) .. " | " .. Ticks(saved.profiles[druid]), SHOWN.bear .. " | cd", "the druid ticks it: bear form's list")
+    character = { guid = "Player-1-0002", name = "Grom", realm = "Zephras" }
+    local ns2, B2, bar2 = Character("WARRIOR", WARRIOR, saved, 17)
+    local warrior = ns2.ProfileName()
+    Equal(warrior .. " | " .. tostring(ns2.Swaps("cd")) .. " " .. Ticks(saved.profiles[warrior]) .. " | " .. Names(bar2) .. " | "
+        .. List(ns2, "cd", 17) .. " " .. tostring(S[B2.driver].events.UPDATE_SHAPESHIFT_FORM),
+        "Grom (Warrior) - Zephras | false nil | " .. WARRIOR_ALL .. " | none nil",
+        "a warrior on its own profile: not ticked, its whole list in Battle Stance, no stance list made, its stance not heard")
+    SlashCmdList.FECM("")
+    FECMFrame:Select("cd")
+    local tick = FECMFrame.pages.bar.options.swapForm
+    Equal(S[tick.text].text .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(S[FECMFrame.pages.bar.options.editing].shown),
+        "Swap with my stance false false", "and its page shows the tick unticked")
+    -- The warrior ticks and unticks its own: the druid's stays ticked.
+    tick:Click()
+    Equal(Names(bar2) .. " | " .. Ticks(saved.profiles[warrior]) .. " " .. Ticks(saved.profiles[druid]),
+        "Charge | Overpower | Execute | Heroic Strike | Battle Stance | Trinket | cd cd",
+        "the warrior ticks it: Battle Stance's own list, and the druid's tick as it was")
+    tick:Click()
+    Equal(Names(bar2) .. " | " .. Ticks(saved.profiles[warrior]) .. " " .. Ticks(saved.profiles[druid]), WARRIOR_ALL .. " | nil cd",
+        "unticked on the warrior: its whole list again, the druid's still ticked")
+    FECMFrame:Hide()
+    Equal(#printed, 0, "no errors")
+    -- Back on the druid: ticked, in bear form, bear form's list.
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns3, B3, bar3 = Character("DRUID", {}, saved, 5, nil, DRUID)
+    Equal(ns3.ProfileName() .. " | " .. tostring(ns3.Swaps("cd")) .. " | " .. Names(bar3), druid .. " | true | Maul | Barkskin | Bear Form"
+        .. " | Trinket", "the druid logs in again: still ticked, bear form's list")
+    -- Another profile switched to has its own (none); back again, ticked.
+    ns3.NewProfile("Fresh")
+    Equal(tostring(ns3.Swaps("cd")) .. " " .. tostring(S[B3.driver].events.UPDATE_SHAPESHIFT_FORM), "false nil",
+        "a new profile: not ticked, your form not heard")
+    ns3.UseProfile(druid)
+    Equal(tostring(ns3.Swaps("cd")) .. " " .. tostring(S[B3.driver].events.UPDATE_SHAPESHIFT_FORM) .. " | " .. Names(bar3),
+        "true true | Maul | Barkskin | Bear Form | Trinket", "back on the druid's: ticked, heard, bear form's list at once")
+    Equal(#printed, 0, "no errors")
+end
+
+do
+    -- Saved by 1.6.0, the tick every character's: a druid's profile with
+    -- bear form's list, a warrior's that logged in meanwhile (so it has a
+    -- Battle Stance list), and a mage's and another warrior's that never
+    -- swapped. The tick goes into the two that swapped, once.
+    local druid, grom, mage, thrall = "Zriel (Druid) - Zephras", "Grom (Warrior) - Zephras", "Jaina (Mage) - Zephras",
+        "Thrall (Warrior) - Zephras"
+    local saved = { useBars = true, bars = { cd = { swapForm = true, size = 40 } },
+        chars = { ["Player-1-0001"] = druid, ["Player-1-0002"] = grom, ["Player-1-0003"] = mage, ["Player-1-0004"] = thrall },
+        profiles = {
+            [druid] = { cd = { "Moonfire", "Maul", "Barkskin", "Bear Form" }, forms = { [5] = { cd = { "Maul", "Barkskin", "Bear Form" } } } },
+            [grom] = { cd = { "Charge", "Shield Wall", "Battle Stance" }, forms = { [17] = { cd = { "Charge", "Battle Stance" } } } },
+            [mage] = { cd = { "Fireball" } }, [thrall] = { cd = { "Charge" }, util = { "Shield Wall" } } } }
+    -- Each logs in with its spells known (none newly put on a bar: only the
+    -- trinket, on the normal list).
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns, B, bar = Character("DRUID", {}, saved, 5, nil, DRUID)
+    Equal(Ticks(saved.profiles[druid]) .. " " .. Ticks(saved.profiles[grom]) .. " " .. Ticks(saved.profiles[mage]) .. " "
+        .. Ticks(saved.profiles[thrall]) .. " | " .. tostring(rawget(saved.bars.cd, "swapForm")) .. " " .. saved.bars.cd.size,
+        "cd cd nil nil | nil 40", "moved into each profile with a form's list for that bar; gone from the bar's settings, the rest kept")
+    Equal(Names(bar), "Maul | Barkskin | Bear Form", "the druid: as before, bear form's list")
+    -- The warrior, whose bar swapped meanwhile, keeps it; unticked there
+    -- now, the druid's stays (and it isn't moved again).
+    character = { guid = "Player-1-0002", name = "Grom", realm = "Zephras" }
+    local ns2, B2, bar2 = Character("WARRIOR", {}, saved, 17, nil, WARRIOR)
+    Equal(tostring(ns2.Swaps("cd")) .. " | " .. Names(bar2), "true | Charge | Battle Stance",
+        "the warrior that swapped meanwhile: as before, Battle Stance's list")
+    B2:SetOption("cd", "swapForm", false)
+    Equal(Names(bar2) .. " | " .. Ticks(saved.profiles[grom]) .. " " .. Ticks(saved.profiles[druid]),
+        "Charge | Shield Wall | Battle Stance | Trinket | nil cd", "unticked on the warrior alone: its whole list, the druid's still ticked")
+    -- The other warrior never swapped: its whole list, always.
+    character = { guid = "Player-1-0004", name = "Thrall", realm = "Zephras" }
+    local ns4, B4, bar4 = Character("WARRIOR", {}, saved, 17, nil, WARRIOR)
+    Equal(tostring(ns4.Swaps("cd")) .. " | " .. Names(bar4) .. " | " .. tostring(saved.profiles[thrall].forms),
+        "false | Charge | Trinket | nil", "a warrior that never swapped: not ticked, its whole list, no stance list made")
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns3, B3, bar3 = Character("DRUID", {}, saved, 5, nil, DRUID)
+    Equal(tostring(ns3.Swaps("cd")) .. " " .. Ticks(saved.profiles[grom]) .. " | " .. Names(bar3), "true nil | Maul | Barkskin | Bear Form",
+        "the druid again: still ticked, and the warrior's not ticked again")
+    Equal(#printed, 0, "no errors")
+end
+
+do
+    -- Use on all characters: one profile, one tick for every character on it.
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns, B, bar = Character("DRUID", DRUID, nil, 5)
+    local saved = ForeverEnhancedCooldownManagerDB
+    local everyone = ns.ProfileName()
+    ns.UseOnAll()
+    B:SetOption("cd", "swapForm", true)
+    character = { guid = "Player-1-0002", name = "Grom", realm = "Zephras" }
+    local ns2, B2, bar2 = Character("WARRIOR", WARRIOR, saved, 17)
+    Equal(ns2.ProfileName() .. " | " .. tostring(ns2.Swaps("cd")) .. " | " .. Names(bar2), everyone .. " | true | Trinket | Charge"
+        .. " | Overpower | Execute | Heroic Strike | Battle Stance", "a warrior on the profile used on all characters: ticked, as it's"
+        .. " the same profile, Battle Stance's own list (without Shield Wall and Intercept)")
+    B2:SetOption("cd", "swapForm", false)
+    Equal(Ticks(saved.profiles[everyone]), "nil", "unticked by the warrior: off for every character on that profile")
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns3, B3, bar3 = Character("DRUID", {}, saved, 5, nil, DRUID)
+    Equal(tostring(ns3.Swaps("cd")) .. " | " .. tostring(Names(bar3):find("Moonfire", 1, true) ~= nil), "false | true",
+        "the druid on it: unticked too, its whole list in bear form")
+    Equal(#printed, 0, "no errors")
+end
+
 -- Saved, repaired, copied and kept ------------------------------------------------------------------
 
 do
     Environment()
     local many = {}
     for i = 1, 45 do many[i] = "Spell " .. i end
+    -- Saved by 1.6.0, when the tick was with each bar's settings (every
+    -- character's): moved into each profile with a form's list for that bar.
     local ns = Load({ useBars = true, chars = { ["Player-1-0001"] = "Mine" },
         bars = { cd = { swapForm = "yes", onlyForm = true }, util = { swapForm = true }, buff = { swapForm = true }, debuff = { swapForm = 1 } },
         profiles = { Mine = { cd = { "Maul" }, forms = {
             [5] = { cd = { "Maul", 7, "", "Swipe" }, util = "x", buff = { "Thorns" }, nope = {} },
-            [8] = { cd = { "Maul" } }, [99] = { cd = {} }, ["5"] = { cd = {} }, [1] = "cat", [31] = { util = many } } } } })
+            [8] = { cd = { "Maul" } }, [99] = { cd = {} }, ["5"] = { cd = {} }, [1] = "cat", [31] = { util = many } } },
+            Junk = { swapForm = { cd = true, util = "yes", buff = true, [3] = true, nope = true } }, Odd = { swapForm = "cd" } } })
     local db = ForeverEnhancedCooldownManagerDB
-    Equal(tostring(ns.BarData("cd").swapForm) .. " " .. tostring(ns.BarData("util").swapForm) .. " " .. tostring(ns.BarData("buff").swapForm)
-        .. " " .. tostring(ns.BarData("debuff").swapForm) .. " " .. tostring(db.bars.cd.onlyForm), "false true false false nil",
-        "kept over a reload: only true is on, never on the Buffs or Debuffs bar; Only show what your form can use (never released) gone")
+    Equal(tostring(ns.Swaps("cd")) .. " " .. tostring(ns.Swaps("util")) .. " " .. tostring(ns.Swaps("buff"))
+        .. " " .. tostring(ns.Swaps("debuff")) .. " | " .. Ticks(db.profiles.Mine), "false true false false | util",
+        "kept over a reload: only true is on, never on the Buffs or Debuffs bar, and Utility's tick moved into the profile"
+            .. " with a Utility list for a form")
+    local left = {}
+    for _, key in ipairs(ns.BAR_KEYS) do left[#left + 1] = tostring(rawget(db.bars[key], "swapForm")) end
+    Equal(table.concat(left, " ") .. " " .. tostring(db.bars.cd.onlyForm), "nil nil nil nil nil",
+        "none left with the bars' settings; Only show what your form can use (never released) gone")
+    Equal(Ticks(db.profiles.Junk) .. " | " .. Ticks(db.profiles.Odd), "cd | nil",
+        "a profile's own ticks repaired: only true, the Cooldowns and Utility bars only; anything else none")
     local forms, keys, five = db.profiles.Mine.forms, {}, {}
     for form in pairs(forms) do keys[#keys + 1] = tostring(form) end
     table.sort(keys)
@@ -1569,6 +1733,9 @@ do
     copy[5].cd[1] = "Bash"
     Equal(tostring(ok) .. " | " .. table.concat(copy[5].cd, ",") .. " | " .. table.concat(forms[5].cd, ",") .. " | " .. #copy[31].util,
         "true | Bash,Swipe | Maul,Swipe | 40", "a profile copied takes each form's lists, a copy of its own")
+    ns.Bars:SetOption("cd", "swapForm", true)
+    Equal(Ticks(db.profiles.Copy) .. " | " .. Ticks(db.profiles.Mine), "cd,util | util",
+        "and the ticks, a copy of their own: ticking Cooldowns on the copy leaves the first as it was")
     -- A spell added by ID that's only on a form's list stays, and is found for the bars.
     ns.AddCustom("Spell 7", { 1243 })
     ns.Bars:Changed()

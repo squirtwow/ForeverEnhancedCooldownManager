@@ -9,7 +9,8 @@
 // never reads one's times, only whether it's on hold) and never takes the
 // mouse but for the box that moves it. And the pulse's link with Forever
 // Enhanced Cooldown Pulse: one shared global, made only when missing, its
-// code the same as that addon's Link.lua when it's beside this one.
+// code the same as that addon's Link.lua when it's beside this one. And
+// untested options marked the one quiet "(experimental)" way.
 // Run with: node --test Tools/TestRules.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -216,10 +217,13 @@ test("the game's settings change only through ns.TurnOn and ns.TurnOff, from you
 // sits in, or in an `if not Open(...) then return` before it.
 // Keybinds.lua's Call(fn, ...) runs one of these for it (GetActionInfo,
 // GetMacroItem, C_ActionBar's questions).
+// Your health and power (and the game's text of them) are secret on Forever
+// in and out of combat (FERF's probe, 2026-10).
 const SECRET_ANSWERS = ['GetInventoryItemCooldown', 'C_Item.GetItemCooldown', 'C_Item.GetItemCount', 'C_Item.IsUsableItem',
   'C_Item.IsEquippedItem', 'C_Spell.IsSpellUsable', 'C_Spell.IsSpellInRange', 'C_Spell.SpellHasRange', 'UnitCanAttack',
   'IsSpellOverlayed', 'UnitCastingInfo', 'UnitChannelInfo', 'GetInventoryItemCount', 'UnitPower', 'GetShapeshiftFormID', 'IsStealthed',
-  'Call'];
+  'UnitHealth', 'UnitHealthMax', 'UnitHealthPercent', 'UnitHealthMissing', 'UnitPowerMax', 'UnitPowerPercent', 'BreakUpLargeNumbers',
+  'AbbreviateNumbers', 'Call'];
 // Answers the game's events hand on, which can be secret too: the cast bar's
 // cast ID and who broke the channel (UNIT_SPELLCAST_*, secret when the
 // unit's casts are), and the swing's time and hand (PLAYER_SWING).
@@ -313,6 +317,70 @@ test('answers the game may keep secret are read with Open() first', () => {
   const kept = 'local function Read()\n    local _, link = Call(GetMacroItem, 1)\n    link = Word(link)\n    return link and link:match("x")\nend\n';
   assert.equal(unguarded(kept).found.length, 0, 'made safe in place by Word()');
   assert.equal(unguarded(kept.replace('    link = Word(link)\n', '')).found.length, 1, 'and caught without it');
+});
+
+// The resource display's health and power text (Resource.lua). Your health
+// and power are secret on Forever, in and out of combat, so the game's
+// numbers only ever go straight into its own calls: each is asked for in one
+// place, a source's function that returns it as it comes; what a source
+// gives goes only into Number() (the game's own number writers) or straight
+// into SetFormattedText; and nothing turns one into text or a number, joins,
+// compares, measures or reads one back. Tools/TestSkin.lua runs it on the
+// mock game's secrets, which fail on any of that.
+test("the display's text hands your health and power straight to the game's own text calls", () => {
+  const resource = code['Resource.lua'];
+  const lineAt = index => resource.slice(resource.lastIndexOf('\n', index) + 1, resource.indexOf('\n', index)).trim();
+  const asks = {
+    'UnitHealth("player")': 'return UnitHealth("player")',
+    'UnitHealthMax("player")': 'return UnitHealthMax("player")',
+    'UnitHealthPercent("player", false, curve)': 'return UnitHealthPercent("player", false, curve)',
+    'UnitPower("player", PowerType())': 'return UnitPower("player", PowerType())',
+    'UnitPowerMax("player", PowerType())': 'return UnitPowerMax("player", PowerType())',
+    'UnitPowerPercent("player", PowerType(), false, curve)': 'return UnitPowerPercent("player", PowerType(), false, curve)',
+  };
+  for (const [ask, returned] of Object.entries(asks)) {
+    assert.equal(resource.split(ask).length - 1, 1, `${ask} asked once`);
+    assert.equal(resource.split(returned).length - 1, 1, `${ask} returned as it comes`);
+  }
+  // Every other ask of the game's numbers in the file: the combo points'
+  // count, handed straight to its segments, and Number()'s two writers.
+  const others = [...resource.matchAll(/\b(UnitHealth\w*|UnitPower(?:Max|Percent)?|BreakUpLargeNumbers|AbbreviateNumbers)\(/g)]
+    .map(match => lineAt(match.index)).filter(line => !Object.values(asks).some(returned => line.includes(returned)));
+  assert.deepEqual([...new Set(others)], ['local points = UnitPower("player", COMBO)',
+    'if AbbreviateNumbers and ns.Get("prdTextNumbers") == "short" then return AbbreviateNumbers(value) end',
+    'if BreakUpLargeNumbers then return BreakUpLargeNumbers(value) end']);
+  assert.match(resource, /local points = UnitPower\("player", COMBO\)\r?\n\s+for _, bar in ipairs\(combo\.segments\) do bar:SetValue\(points\) end/);
+  // What a source gives: only into Number() or SetFormattedText.
+  const uses = [...resource.matchAll(/source\.(Current|Max|Percent)\(\)/g)].map(match => lineAt(match.index));
+  assert.ok(uses.length >= 4, 'the sources are used');
+  for (const line of uses) {
+    assert.match(line, /^text:SetFormattedText\("[^"]*"(, (Number\(source\.(Current|Max)\(\)\)|source\.Percent\(\)))+\)$/, line);
+  }
+  // Number() hands its value to the game's writers or back, and does nothing else with it.
+  const number = resource.match(/local function Number\(value\)\r?\n([\s\S]*?)\r?\nend/)[1];
+  assert.doesNotMatch(number.replace(/AbbreviateNumbers\(value\)|BreakUpLargeNumbers\(value\)|return value/g, ''), /\bvalue\b/);
+  // Never turned into a number, measured or read back; nor the event whose payload is secret.
+  for (const pattern of [/tonumber/, /:GetText\(/, /GetStringWidth/, /GetStringHeight/, /:GetValue\(/, /GetMinMaxValues/,
+    /UNIT_MAX_HEALTH_MODIFIERS_CHANGED/]) {
+    assert.doesNotMatch(resource, pattern);
+  }
+  assert.deepEqual([...new Set([...resource.matchAll(/tostring\((\w+)\)/g)].map(match => match[1]))], ['err'],
+    'tostring only for an error');
+  // Its events read nothing they bring: Update takes the frame alone. The
+  // power bar's take one thing more, the power's name (a plain word: no
+  // SecretPayloads on UNIT_POWER_FREQUENT or UNIT_MAXPOWER), compared with
+  // your power's only once both are checked plain words.
+  assert.match(resource, /local function Update\(holder\)\r?\n/);
+  assert.match(resource, /holder:SetScript\("OnEvent", kind == "power" and PowerEvent or Update\)/);
+  assert.equal(count(resource, /:SetScript\("OnEvent"/g), 3, 'the holders, the combo listener and the load watcher');
+  assert.match(resource, /local function Plain\(word\)\r?\n\s+return type\(word\) == "string" and not \(issecretvalue and issecretvalue\(word\)\)\r?\nend/);
+  const powerEvent = resource.match(/local function PowerEvent\(holder, event, _, token\)\r?\n([\s\S]*?)\r?\nend/)[1];
+  assert.equal(powerEvent.replace(/\s+/g, ' ').trim(), 'if POWER_CHANGES[event] and Plain(token) then local _, current = UnitPowerType("player") '
+    + 'if Plain(current) and current ~= token then return end end Update(holder)', 'the name compared only once both are plain');
+  // Blizzard's own text on the bars: only its alpha.
+  assert.match(resource, /local BLIZZARD_TEXT = \{ "TextString", "LeftText", "RightText" \}/);
+  assert.match(resource, /for _, key in ipairs\(BLIZZARD_TEXT\) do\r?\n\s+local text = Part\(holder\.bar, key\)\r?\n\s+if text then text:SetAlpha\(mute and 0 or 1\) end\r?\n\s+end/);
+  assert.equal(resource.split('BLIZZARD_TEXT').length - 1, 2, 'used in that one place');
 });
 
 // Escape closes the addon's windows through the game's own list of windows
@@ -420,4 +488,24 @@ test('every function the addon defines is used, or says it is for the tests', ()
   }
   assert.deepEqual(unused, [], 'defined but never used');
   assert.match(code['RaidTimers.lua'], /ForeverEnhancedCooldownManagerAPI = setmetatable\(\{\}, \{\s*__index = api,/, 'api is the public API');
+});
+
+// Untested options are marked one quiet way (the user's call, 2026-10-11, and
+// for the older labels 2026-10-17): " (experimental)" at the end of a label
+// or hover, or a lowercase "experimental" beside a heading. Never the old
+// "Needs testing" in any case, nor a capital "Experimental". What's new
+// (Notes.lua) keeps released versions' lines word for word, as history; its
+// lines waiting for a version number follow the rule.
+test('untested options are marked the quiet way, never "Needs testing"', () => {
+  const shipped = files.filter(name => name !== 'Notes.lua');
+  const loud = text => /needs testing/i.test(text) || /Experimental|EXPERIMENTAL/.test(text);
+  assert.deepEqual(shipped.filter(name => loud(code[name])), [], 'the old wording, or a loud one');
+  const unreleased = code['Notes.lua'].split(/version = "/).filter(part => part.startsWith('Unreleased'));
+  assert.deepEqual(unreleased.filter(loud), [], "What's new for the next update");
+  for (const [name, pattern] of [['Window.lua', /local UNTESTED = " \(experimental\)"/], ['ProfileMenu.lua', /local UNTESTED = " \(experimental\)"/],
+    ['ProfileMenu.lua', /roleTesting:SetText\("experimental"\)/], ['RaidTimersPage.lua', /local UNTESTED = " \(experimental\)"/],
+    ['ProfileShare.lua', /"Also use its look and layout \(experimental\)"/], ['PulsePage.lua', /row\.bags and " \(experimental\)"/],
+    ['BarPage.lua', /can't show there", " \(experimental\)"/]]) {
+    assert.ok(pattern.test(code[name]), `${name}: the quiet word`);
+  }
 });

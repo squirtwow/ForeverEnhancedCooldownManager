@@ -266,10 +266,11 @@ local BAR_CHECKS = {
     perRow = function(v) return Within(v, ns.BAR_LIMITS.perRow) end,
     whenReady = function(v) return ns.WHEN_READY_NAMES[v] ~= nil end,
     onCooldown = function(v) return ns.WHEN_READY_NAMES[v] ~= nil end,
-    dimUnusable = Bool, swapForm = Bool,
+    dimUnusable = Bool,
     dimOpacity = function(v) return Within(v, ns.BAR_LIMITS.dimOpacity) end,
     outOfCombat = function(v) return ns.OUT_OF_COMBAT_NAMES[v] ~= nil end,
-    showMissing = Bool, onlyMissing = Bool, showNames = Bool, showTimer = Bool, showAuras = Bool, selfDebuffs = Bool,
+    showMissing = Bool, onlyMissing = Bool, greyedNoTarget = Bool, showNames = Bool, showTimer = Bool, showAuras = Bool,
+    selfDebuffs = Bool,
     grow = function(v) return ns.GROW_NAMES[v] ~= nil end,
     wrap = function(v) return ns.WRAP_NAMES[v] ~= nil end,
     point = function(v) return ns.BAR_POINTS[v] == true end,
@@ -277,9 +278,9 @@ local BAR_CHECKS = {
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], spacing = ns.BAR_LIMITS.spacing[3], perRow = ns.BAR_LIMITS.perRow[3],
-    whenReady = "show", onCooldown = "show", dimUnusable = false, dimOpacity = ns.BAR_LIMITS.dimOpacity[3], swapForm = false,
-    outOfCombat = "show", showMissing = false, onlyMissing = false, showNames = false, showTimer = true, showAuras = false,
-    selfDebuffs = false, grow = "centre", wrap = "down" }
+    whenReady = "show", onCooldown = "show", dimUnusable = false, dimOpacity = ns.BAR_LIMITS.dimOpacity[3],
+    outOfCombat = "show", showMissing = false, onlyMissing = false, greyedNoTarget = false, showNames = false, showTimer = true,
+    showAuras = false, selfDebuffs = false, grow = "centre", wrap = "down" }
 -- The layout's own settings; its rows and the bars taken out are lists.
 local LAYOUT_CHECKS = {
     on = Bool, preset = Preset, base = Preset, left = BarKey, right = BarKey,
@@ -291,9 +292,10 @@ local LOOK = {}
 for _, key in ipairs(ns.SHARE_LOOK) do LOOK[key] = true end
 -- What a string's top table holds: its name (n), the addon's version (a),
 -- the bars' lists (l), each form's lists (f: Swap with my form, form ->
--- bar -> list), joins (j), Cooldown pulse ticks (p) and Long ones (q),
--- spells added by name or ID (c), and the look and layout (g).
-local KNOWN = { n = true, a = true, l = true, f = true, j = true, p = true, q = true, c = true, g = true }
+-- bar -> list) and the bars swapping with your form (w: bar -> true),
+-- joins (j), Cooldown pulse ticks (p) and Long ones (q), spells added by
+-- name or ID (c), and the look and layout (g).
+local KNOWN = { n = true, a = true, l = true, f = true, w = true, j = true, p = true, q = true, c = true, g = true }
 
 -- Reading ----------------------------------------------------------------------------------------
 
@@ -312,8 +314,10 @@ local function SharedName(value)
 end
 
 -- The look and layout from a string's g: only settings this version shares,
--- each checked.
-local function Setup(g, Skip)
+-- each checked. A string made by 1.6.0 has Swap with my form with each
+-- bar's settings: true or false read (true on the Cooldowns or Utility bar
+-- goes into swap, for the profile), anything else left out.
+local function Setup(g, Skip, swap)
     local setup = { look = {}, bars = {}, layout = {}, colours = {} }
     for key, value in pairs(Table(g.s)) do
         if LOOK[key] and ns.Valid(key, value) then setup.look[key] = value else Skip() end
@@ -326,7 +330,13 @@ local function Setup(g, Skip)
         local own = {}
         for field, value in pairs(Table(bars[key])) do
             local check = BAR_CHECKS[field]
-            if check and check(value) then own[field] = value else Skip() end
+            if check and check(value) then
+                own[field] = value
+            elseif field == "swapForm" and Bool(value) then
+                if value and not ns.AURA_BARS[key] then swap[key] = true end
+            else
+                Skip()
+            end
         end
         setup.bars[key] = own
     end
@@ -369,7 +379,7 @@ local function Clean(data)
     for key in pairs(data) do
         if not KNOWN[key] then Skip() end
     end
-    local shared = { lists = {}, forms = {}, joins = {}, pick = {}, style = {}, added = {}, count = 0, picks = 0 }
+    local shared = { lists = {}, forms = {}, swap = {}, joins = {}, pick = {}, style = {}, added = {}, count = 0, picks = 0 }
     -- Each bar's entries, each once and at most the bars' limit; a spell
     -- sits on the Cooldowns or the Utility bar, not both.
     local lists, cooldown, listed = Table(data.l), {}, {}
@@ -423,6 +433,11 @@ local function Clean(data)
             Skip()
         end
     end
+    -- The bars swapping with your form: the Cooldowns and Utility bars, true each.
+    if data.w ~= nil and type(data.w) ~= "table" then Skip() end
+    for key, on in pairs(Table(data.w)) do
+        if BarKey(key) and not ns.AURA_BARS[key] and on == true then shared.swap[key] = true else Skip() end
+    end
     -- On the Buffs and Debuffs bars, names joined to the entry before them.
     for key, joins in pairs(Table(data.j)) do
         if ns.AURA_BARS[key] and type(joins) == "table" then
@@ -462,7 +477,7 @@ local function Clean(data)
         if #kept > 0 then shared.added[name] = kept else Skip() end
     end
     if type(data.g) == "table" then
-        shared.setup = Setup(data.g, Skip)
+        shared.setup = Setup(data.g, Skip, shared.swap)
     elseif data.g ~= nil then
         Skip()
     end
@@ -472,7 +487,7 @@ local function Clean(data)
     return shared
 end
 
--- A pasted string's profile: { name, lists, forms, joins, pick, style,
+-- A pasted string's profile: { name, lists, forms, swap, joins, pick, style,
 -- added, setup (or nil), count (entries on its bars), picks, skipped }; or nil
 -- and why not (nil only, for an empty box). The string is read from its
 -- "FECM1:" wherever that is, so a whole chat message pasted (words or a
@@ -611,6 +626,11 @@ function P.Export()
         end
     end
     if next(forms) then data.f = forms end
+    local swap = {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if ns.Swaps(key) then swap[key] = true end
+    end
+    if next(swap) then data.w = swap end
     for key in pairs(ns.AURA_BARS) do
         local set = Picks(ns.Joins(key), true)
         if next(set) then joins[key] = set end
@@ -781,7 +801,7 @@ function P.BuildBox(window)
     local lookNote = T:Text(box, "GameFontHighlightSmall", T.MUTED)
     lookNote:SetPoint("TOPLEFT", 32, -180)
     lookNote:SetWidth(INNER - 18)
-    local look = T:Check(box, "Also use its look and layout (Needs testing)", function(self)
+    local look = T:Check(box, "Also use its look and layout (experimental)", function(self)
         lookNote:SetText(self:GetChecked() and LOOK_ON or LOOK_OFF)
     end)
     look:SetPoint("TOPLEFT", 14, -160)

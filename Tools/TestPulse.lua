@@ -1369,8 +1369,9 @@ do
     w:Refresh()
     Equal(tostring(watchers["slot:13"]) .. " " .. tostring(watchers["family:healing"]) .. " | " .. Rows(page),
         "nil nil | SPELLS | [x] Barkskin 1 min Quick | [x] Bash 1 min Quick | [ ] Overpower 5s Quick | [x] Walk on Air 1.5 min Quick"
-        .. " | ITEMS | [ ] Trinket 1: Lucky Charm trinket Quick | [ ] Healing Potions on your bars Quick",
-        "a trinket with a use put on, and a potion on your Cooldowns bar: listed under Items, unticked to start, so not watched")
+        .. " | ITEMS | [ ] Trinket 1: Lucky Charm trinket Quick | [ ] Healing Potions none left Quick",
+        "a trinket with a use put on, and a potion on your Cooldowns bar (none carried yet: none left): listed under Items,"
+            .. " unticked to start, so not watched")
     RowFor(page, "slot:13").check:Click()
     RowFor(page, "family:healing").check:Click()
     Equal(tostring(watchers["slot:13"] ~= nil) .. " " .. tostring(watchers["family:healing"] ~= nil) .. " " .. Saved("pulsePick"),
@@ -1466,11 +1467,32 @@ do
         barRow.check:SetChecked(false)
         Equal(Note(RowFor(page, "item:6948").check) .. " | " .. Note(RowFor(page, "family:mana").check) .. " | "
             .. Note(trinketRow.check) .. " | " .. Note(barRow.check),
-            "Tick to pulse when Hearthstone is ready. (Needs testing) | Tick to pulse when Mana Potions is ready. (Needs testing)"
+            "Tick to pulse when Hearthstone is ready. (experimental) | Tick to pulse when Mana Potions is ready. (experimental)"
             .. " | Tick to pulse when Trinket 1: Lucky Charm is ready. | Tick to pulse when Healing Potions is ready.",
-            "items from your bags say Needs testing on their ticks, trinkets and items on your bars don't")
+            "items from your bags are quietly experimental on their ticks, trinkets and items on your bars aren't")
         trinketRow.check:SetChecked(true)
         barRow.check:SetChecked(true)
+    end
+    -- Mana Potions ticked, on no bar, and your last one drunk: still listed,
+    -- as it's ticked, saying none left (it won't pulse until you carry one),
+    -- as Forever Enhanced Cooldown Pulse's row does. One on your bars with
+    -- none left says so too. Carrying one again: back as before.
+    do
+        RowFor(page, "family:mana").check:Click()
+        itemCount[2455] = 0
+        w:Refresh()
+        Equal(Rows(page):match("ITEMS.*"), "ITEMS | [x] Trinket 1: Lucky Charm trinket Quick | [x] Healing Potions on your bars Quick"
+            .. " | [x] Mana Potions none left Quick | [ ] Hearthstone in your bags Quick",
+            "a ticked potion you carry none of, on no bar: none left, not in your bags")
+        itemCount[118] = 0
+        w:Refresh()
+        Equal(S[RowFor(page, "family:healing").long].text, "none left", "a potion on your bars with none left: none left")
+        itemCount[118], itemCount[2455] = 1, 1
+        w:Refresh()
+        Equal(Rows(page):match("ITEMS.*"), "ITEMS | [x] Trinket 1: Lucky Charm trinket Quick | [x] Healing Potions on your bars Quick"
+            .. " | [x] Mana Potions in your bags Quick | [ ] Hearthstone in your bags Quick", "carried again: on your bars, in your bags")
+        RowFor(page, "family:mana").check:Click()
+        Equal(tostring(Profile("pulsePick")["family:mana"]), "nil", "unticked again")
     end
     RowFor(page, "item:6948").check:Click()
     Equal(tostring(watchers["item:6948"] ~= nil) .. " " .. tostring(Profile("pulsePick")["item:6948"]), "true true", "ticked: watched")
@@ -1792,7 +1814,7 @@ do
         local name = S[button.label]
         if Wide(name.text, name.template) + 4 > S[button].width then tight[#tight + 1] = name.text end
     end
-    for _, text in ipairs({ "on your bars", "in your bags", "trinket", "1.5 min", "2 hours" }) do
+    for _, text in ipairs({ "on your bars", "in your bags", "none left", "trinket", "1.5 min", "2 hours" }) do
         if Wide(text, S[row.long].template) > S[row.long].width then tight[#tight + 1] = text end
     end
     local room = S[page.sound.play].width
@@ -2354,7 +2376,7 @@ end
     -- it in, and the box moves under it, at its right end, covering neither.
     tick:Click()
     o, p = S[box.outline].points, S[box].points[1]
-    Equal(tostring(tns.BarData("cd").swapForm) .. " " .. tostring(S[editing].shown) .. " " .. tostring(o[1][2] == tick and o[2][2] == editing)
+    Equal(tostring(tns.Swaps("cd")) .. " " .. tostring(S[editing].shown) .. " " .. tostring(o[1][2] == tick and o[2][2] == editing)
         .. " " .. p[1] .. " " .. tostring(p[2] == editing) .. " " .. p[3] .. " " .. BoxFits(bp) .. "|"
         .. tostring(select(2, Placed(box)) >= select(4, Placed(editing)) + 14),
         "true true true TOPRIGHT true BOTTOMRIGHT |true", "ticked: Editing outlined too, the box under it at its right end")
@@ -2366,7 +2388,7 @@ end
     Equal(tostring(S[box].shown) .. " " .. S[w.note].text, "false That's what's new. See it again any time from What's new, or with /ccm new.",
         "Done ends it")
     Equal(tostring(tns.Get("pulse")) .. " " .. tns.Get("readyGlow") .. " " .. tns.BarData("cd").onCooldown .. " "
-        .. tostring(tns.BarData("cd").swapForm), "true proc show false", "the tour only changed what you did yourself")
+        .. tostring(tns.Swaps("cd")), "true proc show false", "the tour only changed what you did yourself")
     tns.Set("pulse", false)
     tns.Pulse:Apply()
 

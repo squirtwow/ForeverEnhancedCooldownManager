@@ -17,11 +17,12 @@ local TRINKETS = { 13, 14 }
 local BAGS = 4
 
 -- Buffs that talents put on you, which have no spellbook entry. The Forever
--- client holds only these IDs (checked against its game data).
+-- client holds only these IDs (checked against its game data). Dark
+-- Inspiration (build 70425) is the buff, never its hidden talent (1326159).
 local PROCS = {
     DRUID = { 16870, 16886 }, -- Clearcasting, Nature's Grace
     MAGE = { 12536 }, -- Clearcasting
-    PRIEST = { 15271 }, -- Spirit Tap
+    PRIEST = { 15271, 1326168 }, -- Spirit Tap, Dark Inspiration
     SHAMAN = { 16246, 16257 }, -- Clearcasting, Flurry
     WARRIOR = { 12966, 12880 }, -- Flurry, Enrage
     WARLOCK = { 17941 }, -- Shadow Trance

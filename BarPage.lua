@@ -25,7 +25,7 @@ local function Full(key)
 end
 
 -- The "Show your debuffs on you" tick on each aura bar's page (the Debuffs
--- one seen working in game 2026-10-08, so no Needs testing label).
+-- one seen working in game 2026-10-08, so no experimental label).
 local SELF_TICK = { buff = "Show your debuffs on you", debuff = "Show your debuffs on you" }
 local SELF_LABEL = { buff = SELF_TICK.buff, debuff = SELF_TICK.debuff }
 
@@ -95,7 +95,7 @@ function ns.BuildBarPage(window, page, width)
         -- there for no one, go too (B:Leftovers): said only while there are any.
         local also, untested = "", ""
         if #B:Leftovers(state.bar) > 0 then
-            also, untested = ", and buffs or debuffs added to it that can't show there", " (Needs testing)"
+            also, untested = ", and buffs or debuffs added to it that can't show there", " (experimental)"
         end
         return state.armed == state.bar and ("Click again to take every icon off " .. name .. also .. "." .. untested)
             or ("Take every icon off " .. name .. also .. ". It asks for a second click." .. untested)
@@ -353,8 +353,23 @@ function ns.BuildBarPage(window, page, width)
         if state.bar == "buff" and ns.BarData("buff").onlyMissing then
             return "Not with Only show missing, which shows only the buffs you're missing."
         end
-        return (state.bar == "debuff" and "Debuffs missing from your target" or "Buffs missing from you")
-            .. " show greyed in their spot, instead of hidden."
+        if state.bar ~= "debuff" then return "Buffs missing from you show greyed in their spot, instead of hidden." end
+        -- Debuffs: only with an enemy targeted, unless kept greyed (under it).
+        if ns.BarData("debuff").greyedNoTarget then
+            return "Debuffs missing from your target show greyed in their spot, instead of hidden, with an enemy targeted or not."
+        end
+        return "Debuffs missing from your target show greyed in their spot while you have an enemy targeted, instead of hidden."
+    end, 0)
+    -- The Debuffs bar only, under that, in Only show missing's spot (a
+    -- player's idea): its greyed spots kept with no enemy targeted. Greyed
+    -- out while missing debuffs greyed is off, which it goes with; its own
+    -- choice is kept.
+    local keepGreyed = Option("Keep them greyed with no target", "greyedNoTarget", -107, function()
+        if not ns.BarData("debuff").showMissing then
+            return "Tick Show missing debuffs greyed first: this keeps those greyed spots with no target."
+        end
+        return "Missing debuffs stay greyed in their spots with no enemy targeted, instead of hiding."
+            .. " Out of combat Fade or Hide still applies. (experimental)"
     end, 0)
     -- The Buffs bar only: each buff only while it's not on you, under the
     -- sliders. Not on the Debuffs bar: your target's debuffs change in a
@@ -556,7 +571,7 @@ function ns.BuildBarPage(window, page, width)
     local wrap = Pills("New rows", 320, -85, 110, ns.WRAP, ns.WRAP_NAMES, "wrap",
         "Where the next row goes when there are more icons than fit across.")
     page.options = { whenReady = whenReady, onCooldown = onCooldown, dimUnusable = dimUnusable, dimOpacity = dimOpacity,
-        showMissing = showMissing,
+        showMissing = showMissing, keepGreyed = keepGreyed,
         onlyMissing = onlyMissing, showNames = showNames, showTimer = showTimer, showAuras = showAuras, swapForm = swapForm,
         editing = editing,
         showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap }
@@ -920,6 +935,7 @@ function ns.BuildBarPage(window, page, width)
         dimOpacity:SetUsable(Dims(data))
         showMissing:SetShown(aura ~= nil)
         showMissing.text:SetText("Show missing " .. word .. "s greyed")
+        showMissing:SetWidth(18 + (showMissing.text:GetStringWidth() or 0)) -- the label is its click area
         onlyMissing:SetShown(key == "buff")
         onlyMissing:SetChecked(data.onlyMissing)
         -- Packed buffs have no fixed spot to put a name under.
@@ -927,16 +943,20 @@ function ns.BuildBarPage(window, page, width)
         whenReady:SetSelected(data.whenReady)
         showMissing:SetChecked(data.showMissing)
         showMissing:SetUsable(not data.onlyMissing)
+        -- The Debuffs bar's own, usable with missing debuffs greyed ticked.
+        keepGreyed:SetShown(key == "debuff")
+        keepGreyed:SetChecked(data.greyedNoTarget)
+        keepGreyed:SetUsable(data.showMissing)
         showNames:SetChecked(data.showNames)
         outOfCombat:SetSelected(data.outOfCombat)
         showTimer:SetChecked(data.showTimer)
         showAuras:SetShown(not aura)
         showAuras:SetChecked(data.showAuras)
-        -- Swap with my form, for a character who knows a form; Editing
-        -- with it ticked, naming whose icons show.
-        local forms = not aura and #ns.KnownForms() > 0
+        -- Swap with my form, for a character who knows a form (ticked in
+        -- your profile); Editing with it ticked, naming whose icons show.
+        local forms, swaps = not aura and #ns.KnownForms() > 0, ns.Swaps(key)
         swapForm:SetShown(forms)
-        swapForm:SetChecked(data.swapForm)
+        swapForm:SetChecked(swaps)
         if forms then
             local label = ns.SwapWords().label
             if swapForm.text:GetText() ~= label then
@@ -944,7 +964,7 @@ function ns.BuildBarPage(window, page, width)
                 swapForm:SetWidth(18 + (swapForm.text:GetStringWidth() or 0)) -- the label is its click area
             end
         end
-        local picking = forms and data.swapForm
+        local picking = forms and swaps
         editing:SetShown(picking)
         editing.label:SetShown(picking)
         if picking then editing.name:SetText(ns.FormName(ns.ShownForm(key))) end

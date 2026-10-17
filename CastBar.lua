@@ -55,24 +55,36 @@ local function Conceal(frame)
     writing = false
 end
 
+-- fn as a hook on Blizzard's cast bar: anything going wrong is reported once
+-- and never handed back, so Blizzard's own cast bar code carries on.
+local function Safely(fn)
+    return function(...)
+        local ok, err = pcall(fn, ...)
+        if not ok and not C.lastError then
+            C.lastError = tostring(err)
+            print("|cffffd100" .. ns.TITLE .. ":|r couldn't hide Blizzard's cast bar. Please report this: " .. C.lastError)
+        end
+    end
+end
+
 local function Native(show)
     local frame = _G.PlayerCastingBarFrame
     if not frame or (show and not hidden) then return end
     if not hooked then
         hooked = true
-        hooksecurefunc(frame, "SetAlpha", function(self, alpha)
+        hooksecurefunc(frame, "SetAlpha", Safely(function(self, alpha)
             if writing or not hidden then return end
             wanted = alpha
             Conceal(self)
-        end)
-        frame:HookScript("OnShow", Conceal)
+        end))
+        frame:HookScript("OnShow", Safely(Conceal))
         -- Right after Blizzard starts it, before anything is drawn.
         if type(frame.PlayInterruptAnims) == "function" then
-            hooksecurefunc(frame, "PlayInterruptAnims", function(self)
+            hooksecurefunc(frame, "PlayInterruptAnims", Safely(function(self)
                 local hold = self.HoldFadeOutAnim
                 if hidden and type(hold) == "table" and hold.Stop then hold:Stop() end
                 Conceal(self)
-            end)
+            end))
         end
     end
     if show then

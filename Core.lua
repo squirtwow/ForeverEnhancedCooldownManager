@@ -62,6 +62,20 @@ ns.DEFAULTS = {
     prdMatch = true, -- while a layout holds your bars, the display is as wide as your widest row
     prdCombo = false, -- the addon's own combo points under the display
     prdComboColour = "default", -- their colour: the addon's red, or a bar colour
+    -- The addon's own text on the display's health and power bars (Look page,
+    -- Set up; Resource.lua): off unless ticked.
+    prdText = false,
+    prdHealthAt = "centre", -- where on the health bar: centre, sides (a left and right pair) or off
+    prdHealthCentre = "value", -- what each spot shows: value, both (value / max) or percent; left and right also none
+    prdHealthLeft = "value",
+    prdHealthRight = "percent",
+    prdPowerAt = "centre", -- the same for the power bar
+    prdPowerCentre = "value",
+    prdPowerLeft = "value",
+    prdPowerRight = "percent",
+    prdTextNumbers = "full", -- full (4,321) or short (4.3K), both written by the game
+    prdTextSize = 10,
+    prdTextFont = "look", -- the Look page's font, or one of the game's own just for this text
     castBar = false, -- the addon's own cast bar under the display
     castColour = "default", -- its colour: Blizzard's gold (green channelling), or a bar colour
     castHeight = 18,
@@ -117,7 +131,7 @@ ns.DEFAULTS = {
     barScale = 100, -- every bar's icons together, as a share of each bar's own size (the Layout page's All bars)
     growArrows = false, -- while your bars are arranged (unlocked or in Edit Mode), an arrow on each for the way it grows
     minimap = true, -- the minimap button
-    minimapAngle = 225, -- where it sits round the minimap: degrees anticlockwise from the right
+    minimapAngle = 202, -- where it sits round the minimap: degrees anticlockwise from the right (MinimapButton.lua)
     minimapFree = false, -- free-floating: anywhere on the screen, not on the minimap's edge
     minimapX = 0, -- where it sits while free-floating: from the middle of the screen
     minimapY = 0,
@@ -131,13 +145,14 @@ ns.KEYBIND_POSITIONS = { "BOTTOM", "TOPLEFT", "TOP", "TOPRIGHT" }
 ns.KEYBIND_POSITION_NAMES = { BOTTOM = "Bottom", TOPLEFT = "Top left", TOP = "Top", TOPRIGHT = "Top right" }
 -- Number settings, each within its limits: min, max, default.
 ns.CAST_HEIGHT = { 10, 32, 18 }
-ns.MINIMAP_ANGLE = { 0, 359, 225 }
+ns.MINIMAP_ANGLE = { 0, 359, 202 }
 ns.MINIMAP_PLACE = { -4000, 4000, 0 }
 ns.KEYBIND_SIZE = { 50, 150, 100 } -- min, max, default (percent)
 ns.BAR_SCALE = { 50, 150, 100 } -- min, max, default (percent)
 ns.BAR_DARKNESS = { 0, 100, 0 } -- percent of the way to black
 ns.RAID_SIZE = { 50, 200, 100 } -- each Raid Timers size (percent)
 ns.RAID_SIZE_ALL = { 50, 150, 100 } -- all of them together, so the biggest is three times Blizzard's
+ns.TEXT_SIZE = { 8, 16, 10 } -- the display's health and power text
 -- Cooldown pulse.
 ns.PULSE_SIZE = { 64, 512, 272 }
 ns.PULSE_TIME = { 3, 20, 10 } -- tenths of a second: 0.3 to 2 seconds
@@ -151,7 +166,8 @@ local NUMBERS = { castHeight = ns.CAST_HEIGHT, minimapAngle = ns.MINIMAP_ANGLE, 
     warningSize = ns.RAID_SIZE, emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
     pulseLongSize = ns.PULSE_LONG_SIZE, pulseLongTime = ns.PULSE_LONG_TIME,
     pulseSeeThrough = ns.PULSE_SEE_THROUGH, pulseGrow = ns.PULSE_GROW,
-    pulseX = ns.PULSE_PLACE, pulseY = ns.PULSE_PLACE, minimapX = ns.MINIMAP_PLACE, minimapY = ns.MINIMAP_PLACE }
+    pulseX = ns.PULSE_PLACE, pulseY = ns.PULSE_PLACE, minimapX = ns.MINIMAP_PLACE, minimapY = ns.MINIMAP_PLACE,
+    prdTextSize = ns.TEXT_SIZE }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
 ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
@@ -182,6 +198,16 @@ ns.PULSE_SOUND_NAMES = { none = "None", chime = "Chime", bell = "Bell", trill = 
     warhorn = "War horn", fanfare = "Fanfare", gold = "Gold", jackpot = "Jackpot bell", anvil = "Anvil" }
 ns.PULSE_STYLE_KEYS = { "quick", "long" }
 ns.PULSE_STYLE_NAMES = { quick = "Quick", long = "Long" }
+-- The display's health and power text: where on each bar, what each spot
+-- shows (the centre always shows something), how numbers are written, and
+-- its font: the Look page's, or one of the game's own just for it.
+ns.TEXT_AT_KEYS = { "centre", "sides", "off" }
+ns.TEXT_AT_NAMES = { centre = "Centre", sides = "Left and right", off = "Off" }
+ns.TEXT_FORMAT_KEYS = { "none", "value", "both", "percent" }
+ns.TEXT_FORMAT_NAMES = { none = "None", value = "Value", both = "Value / max", percent = "Percent" }
+ns.TEXT_NUMBER_KEYS = { "full", "short" }
+ns.TEXT_NUMBER_NAMES = { full = "4,321", short = "4.3K" }
+ns.TEXT_FONT_KEYS = { "look", "friz", "arial", "morpheus", "skurri" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
@@ -207,6 +233,18 @@ for _, key in ipairs(ns.OUTLINE_KEYS) do CHOICES.warningOutline[key] = true end
 CHOICES.pulseBorder, CHOICES.pulseSound, CHOICES.pulseLongSound = {}, {}, {}
 for _, key in ipairs(ns.PULSE_BORDER_KEYS) do CHOICES.pulseBorder[key] = true end
 for _, key in ipairs(ns.PULSE_SOUND_KEYS) do CHOICES.pulseSound[key], CHOICES.pulseLongSound[key] = true, true end
+-- The display's health and power text.
+CHOICES.prdTextNumbers, CHOICES.prdTextFont = {}, {}
+for _, bar in ipairs({ "prdHealth", "prdPower" }) do
+    CHOICES[bar .. "At"], CHOICES[bar .. "Centre"], CHOICES[bar .. "Left"], CHOICES[bar .. "Right"] = {}, {}, {}, {}
+    for _, key in ipairs(ns.TEXT_AT_KEYS) do CHOICES[bar .. "At"][key] = true end
+    for _, key in ipairs(ns.TEXT_FORMAT_KEYS) do
+        CHOICES[bar .. "Centre"][key] = key ~= "none" or nil
+        CHOICES[bar .. "Left"][key], CHOICES[bar .. "Right"][key] = true, true
+    end
+end
+for _, key in ipairs(ns.TEXT_NUMBER_KEYS) do CHOICES.prdTextNumbers[key] = true end
+for _, key in ipairs(ns.TEXT_FONT_KEYS) do CHOICES.prdTextFont[key] = true end
 
 function ns.Valid(key, value)
     local default = ns.DEFAULTS[key]
@@ -226,10 +264,13 @@ ns.RELOAD = {
 -- bars, the restyled bars, your cast bar, Raid Timers and the Cooldown pulse
 -- look, and where they sit. Never a tick that switches a part on or off (your
 -- bars, the look on Blizzard's bars or display, the cast bar, swing timer,
--- combo points, keybinds, the pulse, each Raid Timers part), nor the window's
--- own (its accent, lists, preview, grow arrows and the minimap button).
+-- combo points, the display's text, keybinds, the pulse, each Raid Timers
+-- part), nor the window's own (its accent, lists, preview, grow arrows and
+-- the minimap button).
 ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
     "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
+    "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
+    "prdPowerRight", "prdTextNumbers", "prdTextSize", "prdTextFont",
     "castColour", "castHeight", "castIcon", "castName", "castTime", "swingColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
@@ -263,9 +304,11 @@ ns.WRAP_NAMES = { down = "Below", up = "Above" }
 local POINTS = { CENTER = true, TOP = true, BOTTOM = true, TOPLEFT = true, TOPRIGHT = true,
     BOTTOMLEFT = true, BOTTOMRIGHT = true }
 ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
--- A bar's settings a shared profile carries (its spells are in the profile).
-ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "swapForm", "outOfCombat",
-    "showMissing", "onlyMissing", "showNames", "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x", "y" }
+-- A bar's settings a shared profile carries (its spells are in the profile,
+-- and so is Swap with my form, beside the lists it swaps between).
+ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
+    "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x",
+    "y" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -452,6 +495,15 @@ local function Lists(profile)
         end
     end
     RepairForms(profile)
+    -- Swap with my form's ticks (below): the Cooldowns and Utility bars'
+    -- (true each), or none.
+    local ticks = profile.swapForm
+    if type(ticks) == "table" then
+        for key, on in pairs(ticks) do
+            if not ns.BAR_NAMES[key] or ns.AURA_BARS[key] or on ~= true then ticks[key] = nil end
+        end
+    end
+    profile.swapForm = type(ticks) == "table" and next(ticks) ~= nil and ticks or nil
     RenameSpells(profile)
     -- Positions per profile: its spots and sizes, repaired as they're used.
     if profile.place ~= nil and type(profile.place) ~= "table" then profile.place = nil end
@@ -524,9 +576,9 @@ local function RepairProfiles()
 end
 
 -- Swap with my form ------------------------------------------------------------
--- Ticked on a Cooldowns or Utility bar (swapForm; a player's idea: other
--- cooldowns in bear form than in cat form), the bar keeps a list of its own
--- for each form you take, in your profile beside the normal ones
+-- Ticked on a Cooldowns or Utility bar (a player's idea: other cooldowns in
+-- bear form than in cat form), the bar keeps a list of its own for each
+-- form you take, in your profile beside the normal ones
 -- (profile.forms[form][bar], under the form's list in ns.FORM_LISTS), and
 -- shows the one for the form you're in: the normal one ("Normal") in no
 -- form, or in a form no class's list is for. Only the icons change: every
@@ -535,19 +587,59 @@ end
 -- cast (Forms.lua's rules, Spells.lua S:FormCasts); after that each list is
 -- its own. Unticked, the form lists stay for when it's ticked again. The
 -- bar's page can set up another form's list without changing form
--- (Editing), out of a fight.
+-- (Editing), out of a fight. The tick is the profile's too
+-- (profile.swapForm[bar] = true), beside the lists it swaps between, so
+-- ticking it on one character never changes another's bars (in 1.6.0 it
+-- was every character's: MoveSwapTicks, below).
 local formNow = 0 -- the list the bars follow: 0 for Normal, else a form's own (OwnList)
 local formEditing -- the list the bar's page is setting up (0 for Normal), or nil: your form's
 local STEALTH = 30 -- the game's form for a rogue's Stealth (ROGUE_STEALTH)
 
--- Whether a bar swaps with your form: ticked, on a bar that can.
+-- Whether a bar swaps with your form: ticked in the profile you're on (or
+-- the stand-in lists, until the character is known), on a bar that can.
 local function Swaps(key)
-    local bar = db and ns.BAR_NAMES[key] and not ns.AURA_BARS[key] and type(db.bars) == "table" and db.bars[key]
-    return type(bar) == "table" and rawget(bar, "swapForm") == true
+    if not ns.BAR_NAMES[key] or ns.AURA_BARS[key] then return false end
+    local ticks = (active and db and Profiles()[active] or scratch).swapForm
+    return type(ticks) == "table" and ticks[key] == true
 end
 
 function ns.Swaps(key)
     return Swaps(key)
+end
+
+-- Ticks it on or off for a bar, in the profile you're on. What follows
+-- from it (lists kept apart, your form read and heard) is Bars.lua's
+-- B:SetOption, which the bar's page goes through.
+function ns.SetSwaps(key, on)
+    if not ns.BAR_NAMES[key] or ns.AURA_BARS[key] then return end
+    local store = ns.ProfileLists()
+    local ticks = type(store.swapForm) == "table" and store.swapForm or {}
+    ticks[key] = on == true or nil
+    store.swapForm = next(ticks) ~= nil and ticks or nil
+end
+
+-- In 1.6.0 the tick was every character's (db.bars[bar].swapForm), so a
+-- druid ticking it changed a warrior's bars too. Once, as the settings
+-- load: a tick saved that way goes into each profile that already has a
+-- form's list for that bar (each one that has swapped with it), then it's
+-- gone from the bars. Profiles that never swapped stay unticked.
+local function MoveSwapTicks()
+    local bars = type(db.bars) == "table" and db.bars or {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = bars[key]
+        local ticked = type(bar) == "table" and rawget(bar, "swapForm") == true and not ns.AURA_BARS[key]
+        if type(bar) == "table" then rawset(bar, "swapForm", nil) end
+        for _, profile in pairs(ticked and Profiles() or {}) do
+            local made = false
+            for _, lists in pairs(type(profile.forms) == "table" and profile.forms or {}) do
+                made = made or type(lists) == "table" and type(lists[key]) == "table"
+            end
+            if made then
+                profile.swapForm = type(profile.swapForm) == "table" and profile.swapForm or {}
+                profile.swapForm[key] = true
+            end
+        end
+    end
 end
 
 -- Whether any bar does.
@@ -981,10 +1073,15 @@ local function CopyForms(forms)
     return copy
 end
 
--- A copy of a profile's lists: its bars' (each form's too), their joins and
--- the Cooldown pulse's ticks, sharing nothing with it.
+-- A copy of a profile's lists: its bars' (each form's too, and which bars
+-- swap with your form), their joins and the Cooldown pulse's ticks, sharing
+-- nothing with it.
 local function Duplicate(from)
     local profile = { joins = {}, forms = CopyForms(from.forms) }
+    if type(from.swapForm) == "table" then
+        profile.swapForm = {}
+        for key, on in pairs(from.swapForm) do profile.swapForm[key] = on end
+    end
     for _, key in ipairs(ns.BAR_KEYS) do
         local list = {}
         for i, spell in ipairs(type(from[key]) == "table" and from[key] or {}) do list[i] = spell end
@@ -1165,7 +1262,6 @@ end
 -- spacing and icons per row, and the whole Layout page arrangement. The
 -- look (colours, border, font, All bars) stays every character's.
 local PLACE_FIELDS = { "size", "spacing", "perRow", "grow", "wrap", "point", "x", "y" }
-ns.PLACE_FIELDS = PLACE_FIELDS
 
 -- The spots and sizes on screen now, sharing nothing with them.
 local function Snapshot()
@@ -1321,9 +1417,10 @@ function ns.ImportProfile(text, shared, withLook)
     local name, problem = CleanName(text)
     if not name then return false, problem end
     name = FreeName(name)
-    -- Each form's lists too (Swap with my form), checked as the bars' are.
+    -- Each form's lists too (Swap with my form), checked as the bars' are,
+    -- and which bars swap with your form.
     local profile = { joins = {}, pulsePick = CopySet(shared.pick), pulseStyle = CopySet(shared.style),
-        forms = CopyForms(shared.forms) }
+        forms = CopyForms(shared.forms), swapForm = CopySet(shared.swap) }
     for _, key in ipairs(ns.BAR_KEYS) do profile[key] = CopyList(shared.lists[key]) end
     for key in pairs(ns.AURA_BARS) do
         local joins = type(shared.joins) == "table" and shared.joins[key]
@@ -1442,7 +1539,11 @@ function ns.SaveRole(role)
     local word, name = ns.ROLE_NAMES[role], ns.RoleProfile(role)
     if name == active then return true, ("You're on %s: it saves as you go."):format(name) end
     if not name then return true, ("Saved your lists as %s, your %s profile."):format(MakeRole(role), word) end
+    -- Only the lists: with Positions per profile on, the role keeps its own
+    -- bar spots and sizes, not the ones on screen now.
+    local place = Profiles()[name].place
     Profiles()[name] = Duplicate(Profiles()[active])
+    Profiles()[name].place = place
     ns.PruneCustom()
     return true, ("Saved your lists over %s, your %s profile."):format(name, word)
 end
@@ -1700,11 +1801,10 @@ function ns.BarData(key)
     -- How much of a dimmed icon shows: 40% unless you choose, as dim as
     -- they were before you could.
     bar.dimOpacity = Limit(bar.dimOpacity, ns.BAR_LIMITS.dimOpacity)
-    -- The Cooldowns and Utility bars only: Swap with my form, a list of
-    -- icons for each form you take, off unless ticked. (The Buffs and
-    -- Debuffs bars show auras, which no form changes.) Only show what your
-    -- form can use, which it replaced, was never released: its tick goes.
-    bar.swapForm = ns.AURA_BARS[key] == nil and bar.swapForm == true
+    -- Swap with my form is each profile's now (MoveSwapTicks moved 1.6.0's
+    -- tick there as the settings loaded). Only show what your form can use,
+    -- which it replaced, was never released: its tick goes.
+    bar.swapForm = nil
     bar.onlyForm = nil
     -- Bars set to "only in combat" before this choice existed hide.
     if not ns.OUT_OF_COMBAT_NAMES[bar.outOfCombat] then
@@ -1716,6 +1816,9 @@ function ns.BarData(key)
     -- unless ticked. (A target's debuffs change in a fight, when the addon
     -- can't read them.)
     bar.onlyMissing = key == "buff" and bar.onlyMissing == true
+    -- The Debuffs bar only (a player's idea): its missing debuffs greyed
+    -- stay with no enemy targeted, off unless ticked.
+    bar.greyedNoTarget = key == "debuff" and bar.greyedNoTarget == true
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
@@ -2084,6 +2187,7 @@ local function Load()
     if db.helpSeen ~= true then db.helpSeen = nil end -- the ? clicked once: true, or not saved at all
     -- Everything saved is checked and repaired now, before anything uses it.
     RepairProfiles()
+    MoveSwapTicks()
     for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key) end
     ns.LayoutData()
     RenameCustom()

@@ -58,6 +58,13 @@ function F:Fixed(data)
     return data.showMissing == true and not self:OnlyMissing(data)
 end
 
+-- Keep them greyed with no target (the Debuffs bar's own, a player's idea):
+-- with missing debuffs greyed, their spots stay with no enemy targeted
+-- (ns.BarData keeps it off on the Buffs bar).
+function F:KeepGreyed(data)
+    return data ~= nil and data.greyedNoTarget == true and self:Fixed(data)
+end
+
 -- Sizes an icon's numbers for its size, and shows or hides the countdown.
 local function Fit(parts, size, showTimer)
     parts.cooldown:SetCountdownFont(Style:Countdown(size))
@@ -211,13 +218,17 @@ function F:HolderDecor(bar)
 end
 
 -- The Debuffs bar's greyed spots only show while you have a target you can
--- attack, and its icons follow a new target at once. Only the addon's own
--- textures change here, so this is fine in combat, as is the refresh, which
--- Blizzard's target frame does the same way.
+-- attack, or always with Keep them greyed with no target, and its icons
+-- follow a new target at once. Only the addon's own textures change here,
+-- so this is fine in combat, as is the refresh, which Blizzard's target
+-- frame does the same way. (bar.enemy: whether the spots show, which their
+-- rings and the whole-bar box follow.)
 function F:UpdateTarget(bar)
     if not (bar and bar.holders and ns.AURA_BARS[bar.key].unit == "target") then return end
     local hostile = UnitExists("target") and UnitCanAttack("player", "target")
     if not Open(hostile) then hostile = true end
+    -- Kept greyed: no target, a friendly or a dead one leave them up too.
+    if self:KeepGreyed(bar.data) then hostile = true end
     bar.enemy = hostile and true or false
     for _, holder in ipairs(bar.holders) do holder.icon:SetAlpha(bar.enemy and .45 or 0) end
     self:HolderDecor(bar)
