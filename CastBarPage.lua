@@ -7,6 +7,8 @@ local T = ns.Theme
 
 local SWATCH, SWATCH_GAP = 20, 6
 local SAMPLE = { name = "Hearthstone", icon = "Interface\\Icons\\INV_Misc_Rune_01", total = 3 }
+-- The batch preview: a few crafts of a long batch, counting down.
+local BATCH_SAMPLE = { name = "Roasted Boar Meat", icon = "Interface\\Icons\\INV_Misc_Food_14", total = 3, count = 133, from = 4 }
 local SWING_SAMPLE = 2.8 -- seconds between the preview's swings
 local DIM = .35 -- a preview bar whose tick is off
 
@@ -28,10 +30,10 @@ function ns.BuildCastBarPage(window, page, width)
     -- timer under it. Each grows away from the middle as the height changes.
     local tray = CreateFrame("Frame", nil, page, "BackdropTemplate")
     tray:SetPoint("TOPLEFT", 16, -38)
-    tray:SetSize(inner, 92)
+    tray:SetSize(inner, 120)
     T:Flat(tray, T.PANEL, T.BORDER)
     local sample = C:Make(tray)
-    sample:SetPoint("BOTTOMLEFT", tray, "LEFT", 12, 3)
+    sample:SetPoint("BOTTOMLEFT", tray, "LEFT", 12, 17)
     sample:SetWidth(300)
     sample.icon:SetTexture(SAMPLE.icon)
     sample.bar.name:SetText(SAMPLE.name)
@@ -44,7 +46,7 @@ function ns.BuildCastBarPage(window, page, width)
     end)
     page.sample = sample
     local swingSample = C:Make(tray)
-    swingSample:SetPoint("TOPLEFT", tray, "LEFT", 12, -3)
+    swingSample:SetPoint("TOPLEFT", tray, "LEFT", 12, 11)
     swingSample:SetWidth(300)
     swingSample.bar:SetMinMaxValues(0, SWING_SAMPLE)
     local swung = 0
@@ -54,6 +56,22 @@ function ns.BuildCastBarPage(window, page, width)
         swingSample.bar.time:SetFormattedText("%.1f", SWING_SAMPLE - swung)
     end)
     page.swingSample = swingSample
+    local batchSample = C:Make(tray)
+    batchSample:SetPoint("TOPLEFT", swingSample, "BOTTOMLEFT", 0, -6)
+    batchSample:SetWidth(300)
+    batchSample.icon:SetTexture(BATCH_SAMPLE.icon)
+    batchSample.bar:SetMinMaxValues(0, BATCH_SAMPLE.total)
+    local crafted = 0
+    batchSample:SetScript("OnUpdate", function(_, delta)
+        crafted = (crafted + delta) % (BATCH_SAMPLE.total * 5)
+        local index = BATCH_SAMPLE.from + math.floor(crafted / BATCH_SAMPLE.total)
+        local into = crafted % BATCH_SAMPLE.total
+        batchSample.bar:SetValue(into)
+        batchSample.bar.name:SetFormattedText("%s %d / %d", BATCH_SAMPLE.name, index, BATCH_SAMPLE.count)
+        local left = math.floor((BATCH_SAMPLE.total - into) + (BATCH_SAMPLE.count - index) * BATCH_SAMPLE.total + .5)
+        batchSample.bar.time:SetFormattedText("%d:%02d left", math.floor(left / 60), left % 60)
+    end)
+    page.batchSample = batchSample
     local previewNote = T:Text(tray, "GameFontHighlightSmall", T.MUTED)
     previewNote:SetPoint("RIGHT", -12, 0)
     previewNote:SetJustifyH("RIGHT")
@@ -129,7 +147,11 @@ function ns.BuildCastBarPage(window, page, width)
     local icon = Tick("Icon", "castIcon", -146, "The spell's icon at the left end, or your weapon's for the swing timer.")
     local name = Tick("Name", "castName", -168, "The spell's name on the bar, or Main hand, Auto Shot or Ranged for the swing timer.")
     local timer = Tick("Time left", "castTime", -190, "Seconds left, at the right end.")
-    page.shown, page.swing, page.icon, page.name, page.timer = shown, swings, icon, name, timer
+    local batch = Tick("Crafting: time left for the batch", "castBatch", -146,
+        "With Create All or a number of crafts, the bar shows which one you're on, like 4 / 133, and the time left for them all. (experimental)")
+    batch:ClearAllPoints()
+    batch:SetPoint("TOPLEFT", 300, -146)
+    page.shown, page.swing, page.icon, page.name, page.timer, page.batch = shown, swings, icon, name, timer, batch
     -- The height and the three ticks under it as one part, for the walkthrough.
     local parts = CreateFrame("Frame", nil, options)
     parts:SetPoint("TOPLEFT", 0, -114)
@@ -167,10 +189,12 @@ function ns.BuildCastBarPage(window, page, width)
         icon:SetChecked(ns.Get("castIcon"))
         name:SetChecked(ns.Get("castName"))
         timer:SetChecked(ns.Get("castTime"))
+        batch:SetChecked(ns.Get("castBatch"))
         height:Set(ns.Get("castHeight"))
         Paint(swatches, chosen, "castColour", "Blizzard's gold")
         Paint(swingSwatches, swingChosen, "swingColour", "Silver")
         C:Look(sample, false)
+        C:Look(batchSample, false)
         C:SwingLook(swingSample)
         -- Auto Shot for hunters, the main hand for everyone else.
         local ranged = C:Hunter()
@@ -179,5 +203,13 @@ function ns.BuildCastBarPage(window, page, width)
         -- Each preview bar dims while its tick is off.
         sample:SetAlpha(casts and 1 or DIM)
         swingSample:SetAlpha(swinging and 1 or DIM)
+        -- The batch preview only while its tick is on: the tray grows for it.
+        local batching = ns.Get("castBatch") and true or false
+        batchSample:SetShown(batching)
+        tray:SetHeight(batching and 120 or 92)
+        sample:ClearAllPoints()
+        sample:SetPoint("BOTTOMLEFT", tray, "LEFT", 12, batching and 17 or 3)
+        swingSample:ClearAllPoints()
+        swingSample:SetPoint("TOPLEFT", tray, "LEFT", 12, batching and 11 or -3)
     end
 end

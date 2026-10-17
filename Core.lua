@@ -82,6 +82,7 @@ ns.DEFAULTS = {
     castIcon = true, -- the spell's icon, name and time left on it
     castName = true,
     castTime = true,
+    castBatch = false, -- crafting a batch (Create All or a number): which one of how many, and the time left for them all
     swingTimer = false, -- a swing timer in the cast bar's spot: Auto Shot for hunters, the main hand for everyone
     swingColour = "default", -- its colour: silver, or a bar colour
     -- Raid Timers: Blizzard's own raid and dungeon timers restyled, each part on its own.
@@ -136,6 +137,7 @@ ns.DEFAULTS = {
     minimapX = 0, -- where it sits while free-floating: from the middle of the screen
     minimapY = 0,
     talentSwitch = false, -- another talent tree taking the lead in points switches to its role's profile (profile menu)
+    updateNotice = true, -- a line in chat when a newer version is out (General page; SquirtVersions.lua)
 }
 ns.DECOR_KEYS = { "off", "icon", "bar" }
 ns.DECOR_NAMES = { off = "Off", icon = "Each icon", bar = "Whole bar" }
@@ -266,7 +268,7 @@ ns.RELOAD = {
 -- bars, the look on Blizzard's bars or display, the cast bar, swing timer,
 -- combo points, the display's text, keybinds, the pulse, each Raid Timers
 -- part), nor the window's own (its accent, lists, preview, grow arrows and
--- the minimap button).
+-- the minimap button), nor the update notice.
 ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
     "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
     "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
@@ -2024,15 +2026,39 @@ function ns.PruneCustom()
     end
 end
 
+-- Update notices ---------------------------------------------------------------------
+-- "Tell me when an update is out" (General page): the shared update notices
+-- (SquirtVersions.lua, the same file in each of Squirt's addons on
+-- CurseForge) swap versions with other players in hidden addon messages and
+-- say once a session in chat when a newer one is out. A copy straight from
+-- the source ("dev") listens, but has no version to share or be told about.
+
+local function Notices()
+    local notices = _G.SquirtVersions
+    return type(notices) == "table" and type(notices.Register) == "function" and notices or nil
+end
+
+local function NoticeUpdates()
+    local notices = Notices()
+    if not notices then return end
+    notices:Register({ code = "CM", title = ns.TITLE, colour = "ffd100", version = ns.Version(),
+        IsOn = function() return ns.Get("updateNotice") == true end, Print = function(line) print(line) end })
+end
+
 -- Changes ---------------------------------------------------------------------------
 -- Everything lives in the saved settings, which the game writes at logout and
 -- on a reload; a change only needs the window redrawn. The Cooldown pulse
--- switched on or off is told to Forever Enhanced Cooldown Pulse too (Pulse.lua).
+-- switched on or off is told to Forever Enhanced Cooldown Pulse too (Pulse.lua),
+-- and the update notice's tick to the shared update notices.
 
 function ns.Set(key, value)
     if not db then return end
     db[key] = value
     if key == "pulse" and ns.Pulse and ns.Pulse.Notify then ns.Pulse:Notify() end
+    if key == "updateNotice" then
+        local notices = Notices()
+        if notices and type(notices.Refresh) == "function" then notices:Refresh() end
+    end
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 
@@ -2226,6 +2252,7 @@ local function Load()
     if ns.Layout then ns.Layout:Start() end
     if ns.MinimapButton then ns.MinimapButton:Start() end
     if ns.Notes then ns.Notes:Start() end
+    NoticeUpdates()
 end
 
 loader:SetScript("OnEvent", function(self, event, name)

@@ -798,7 +798,7 @@ local function BlizzardFrames()
 end
 
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
-local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
+local FILES = { "Core.lua", "SquirtVersions.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
     "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua",
     "Window.lua", "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
@@ -1137,9 +1137,9 @@ function H.Spy(ns)
 end
 
 -- Settings a shared profile never carries: switching a part on or off, and the window's own.
-H.NOT_SHARED = { "skin", "useBars", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "prdText", "castBar", "swingTimer",
+H.NOT_SHARED = { "skin", "useBars", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "prdText", "castBar", "castBatch", "swingTimer",
     "pullTimer", "raidWarnings", "bossCasts", "pulse", "keybinds", "layoutPreview", "growArrows", "minimap", "minimapAngle",
-    "minimapFree", "minimapX", "minimapY", "talentSwitch" }
+    "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice" }
 
 -- Every setting is either shared or kept out, on purpose -------------------------------------------
 -- A setting added later must be put on one side or the other.

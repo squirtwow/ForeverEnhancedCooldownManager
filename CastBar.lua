@@ -294,12 +294,41 @@ local function Handover(now)
     swingEnd, drawn = nil, nil
 end
 
+-- A batch of crafts (Create All or a number): the game says how many casts
+-- are left after this one. Each tradeskill cast asks again; a count that
+-- doesn't go down starts a new batch. Nil for anything else.
+local batch
+local function Batch(tradeSkill)
+    local api = C_TradeSkillUI and C_TradeSkillUI.GetRemainingRecasts
+    if not (ns.Get("castBatch") and api and Open(tradeSkill) and tradeSkill) then batch = nil return nil end
+    local ok, left = pcall(api)
+    if not ok or not Open(left) or type(left) ~= "number" or left < 0 then batch = nil return nil end
+    if not batch or left >= batch.last then
+        if left == 0 then batch = nil return nil end
+        batch = { total = left + 1 }
+    end
+    batch.last = left
+    local this = { index = batch.total - left, total = batch.total, left = left }
+    if left == 0 then batch = nil end
+    return this
+end
+
+-- Minutes and seconds for the whole batch.
+local function Clock(seconds)
+    seconds = math.floor(seconds + .5)
+    return ("%d:%02d left"):format(math.floor(seconds / 60), seconds % 60)
+end
+
 local function Tick()
     local now = GetTime()
     if cast then
         local bar, left = row.bar, math.max(0, cast.finish - now)
         bar:SetValue(cast.channel and left or math.min(cast.total, now - cast.start))
-        bar.time:SetFormattedText("%.1f", left)
+        if cast.batch then
+            bar.time:SetText(Clock(left + cast.batch.left * cast.total))
+        else
+            bar.time:SetFormattedText("%.1f", left)
+        end
         return
     end
     if fading then
@@ -370,12 +399,13 @@ end
 
 -- Casting ------------------------------------------------------------------------------
 
-local function Begin(channel)
-    local name, text, texture, startMS, endMS, id, _
+local function Begin(channel, fresh)
+    local keep = cast and not cast.channel and not channel and cast.batch
+    local name, text, texture, startMS, endMS, id, tradeSkill
     if channel then
         name, text, texture, startMS, endMS = UnitChannelInfo("player")
     else
-        name, text, texture, startMS, endMS, _, id = UnitCastingInfo("player")
+        name, text, texture, startMS, endMS, tradeSkill, id = UnitCastingInfo("player")
     end
     if Open(name) and not name then return end
     if not (Open(startMS) and Open(endMS) and Open(id)) then
@@ -386,11 +416,20 @@ local function Begin(channel)
     Native(false)
     local start, finish = startMS / 1000, endMS / 1000
     cast, fading = { channel = channel, id = id, start = start, finish = finish, total = math.max(.001, finish - start) }, nil
+    -- A delay keeps the batch's count; only a new cast asks the game again.
+    if not channel then
+        if fresh then cast.batch = Batch(tradeSkill) else cast.batch = keep or nil end
+        if not Open(text) then cast.batch = nil end
+    end
     drawn = channel and "channel" or "cast"
     C:Look(row, channel)
     row.bar:SetMinMaxValues(0, cast.total)
     row.icon:SetTexture(texture)
-    row.bar.name:SetText(text)
+    if cast.batch then
+        row.bar.name:SetFormattedText("%s %d / %d", text, cast.batch.index, cast.batch.total)
+    else
+        row.bar.name:SetText(text)
+    end
     row:SetAlpha(1)
     row:SetScript("OnUpdate", Tick)
     Tick()
@@ -430,7 +469,7 @@ function C:Event(event, id, interruptedBy)
             DropCast()
         end
     elseif event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_DELAYED" then
-        Begin(false)
+        Begin(false, event == "UNIT_SPELLCAST_START")
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_CHANNEL_UPDATE" then
         Begin(true)
     elseif not cast then

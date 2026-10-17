@@ -509,3 +509,32 @@ test('untested options are marked the quiet way, never "Needs testing"', () => {
     assert.ok(pattern.test(code[name]), `${name}: the quiet word`);
   }
 });
+
+// The update notices (SquirtVersions.lua) are one file shared by Squirt's
+// addons on CurseForge: the same in every one beside this one (EraUI keeps it
+// in Core/), and so is its test but for the last line its runner reads. One
+// global, set only there; registered once, from Core.lua.
+const SHARED_HOMES = [['EraUI', 'Core/SquirtVersions.lua'], ['ForeverEnhancedCooldownManager', 'SquirtVersions.lua'],
+  ['ForeverEnhancedCooldownPulse', 'SquirtVersions.lua'], ['ForeverEnhancedPrivacy', 'SquirtVersions.lua'],
+  ['ForeverEnhancedCursor', 'SquirtVersions.lua']];
+test('the shared update notices: one global, the same file as in every other addon beside this one', () => {
+  const plain = text => text.replace(/\r\n/g, '\n');
+  const lastOff = text => plain(text).replace(/\n[^\n]*\n?$/, '');
+  assert.deepEqual(where(/_G\.SquirtVersions\s*=/), ['SquirtVersions.lua'], 'set in one file');
+  assert.deepEqual(where(/SquirtVersions/).sort(), ['Core.lua', 'SquirtVersions.lua'], 'used only from Core.lua');
+  assert.equal(count(code['Core.lua'], /notices:Register\(\{ code = "CM"/g), 1, 'registered once');
+  const ours = plain(readFileSync(new URL('SquirtVersions.lua', root), 'utf8'));
+  const test = lastOff(readFileSync(new URL('Tools/TestSquirtVersions.lua', root), 'utf8'));
+  let compared = 0;
+  for (const [home, file] of SHARED_HOMES) {
+    if (home === 'ForeverEnhancedCooldownManager' || !existsSync(new URL(`../../${home}/`, import.meta.url))) continue;
+    const theirs = new URL(`../../${home}/${file}`, import.meta.url);
+    assert.ok(existsSync(theirs), `${home} has the shared file`);
+    assert.equal(plain(readFileSync(theirs, 'utf8')), ours, `${home}/${file} is the same file`);
+    const theirTest = new URL(`../../${home}/Tools/TestSquirtVersions.lua`, import.meta.url);
+    assert.ok(existsSync(theirTest), `${home} has the shared test`);
+    assert.equal(lastOff(readFileSync(theirTest, 'utf8')), test, `${home}'s test is the same but its last line`);
+    compared++;
+  }
+  console.log(`compared with ${compared} other addons`);
+});

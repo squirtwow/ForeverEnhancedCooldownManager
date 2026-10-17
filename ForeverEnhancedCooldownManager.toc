@@ -8,6 +8,7 @@
 ## Category: UI
 
 Core.lua
+SquirtVersions.lua
 Style.lua
 Skin.lua
 Resource.lua

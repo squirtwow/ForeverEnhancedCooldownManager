@@ -69,6 +69,23 @@ local RENAMED = {
 -- counting as the new ones.
 local MOVED = { ["Read Ley Line"] = true, ["Blessing of Salvation"] = true, ["Greater Blessing of Salvation"] = true }
 
+-- Debuff IDs the game's skill data leaves out of a spell's ranks (the ranks
+-- come from it, Ranks.lua), checked against build 70425's data: Judgement of
+-- the Crusader's first rank puts its own debuff on the target (21183, a
+-- player's report: rank 1 never lit on the Debuffs bar), and spells whose
+-- debuff is another spell they trigger: Charge's stun (and a boar's Charge),
+-- Intercept's stuns, Seal of Justice's stun, Nature's Grasp's roots, and
+-- Frost and Ice Armor's chill on whoever hits you.
+local EXTRA_IDS = {
+    ["Judgement of the Crusader"] = { 21183 },
+    ["Charge"] = { 7922, 25999 },
+    ["Intercept"] = { 20253, 20614, 20615 },
+    ["Seal of Justice"] = { 20170 },
+    ["Nature's Grasp"] = { 19970, 19971, 19972, 19973, 19974, 19975 },
+    ["Frost Armor"] = { 6136 },
+    ["Ice Armor"] = { 7321 },
+}
+
 -- A saved key's name now, for a spell that moved: a fixed rank's "@N" or a
 -- pinned ID's "#ID" stays after it. Nil for any other key.
 function S:NewName(key)
@@ -238,6 +255,7 @@ local function BuffIDs(name, known)
         if now and GROUP[now] then Add(ranks[GROUP[now]]) end
         Add(named[name])
         if now then Add(named[now]) end
+        Add(EXTRA_IDS[name])
     end
     for _, id in ipairs(known or {}) do
         Add(ns.PASSIVE_BUFFS and ns.PASSIVE_BUFFS[id])

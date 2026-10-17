@@ -10,6 +10,18 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.7.1",
+        sections = {
+            { "Added", {
+                "New option on the Cast bar page: show the time left on a batch of crafts.",
+                "A line in chat when a newer version is out. It uses a hidden chat channel and can be turned off on the General page.",
+            } },
+            { "Fixed", {
+                "Added missing debuffs to the Debuffs bar, like rank 1 spells and some stuns.",
+            } },
+        },
+    },
+    {
         version = "1.7.0",
         sections = {
             { "Added", {

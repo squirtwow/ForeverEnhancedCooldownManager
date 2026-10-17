@@ -1014,16 +1014,28 @@ local function BuildGeneral(window, page)
     Detail(page, "Click it for these settings, right-click for What's new, and drag it round the minimap, or anywhere while it's free-floating.",
         34, -136)
 
+    -- Updates: a line in chat when a newer version is out (Core.lua's update
+    -- notices).
+    T:Heading(page, "Updates"):SetPoint("TOPLEFT", 16, -176)
+    local updates = T:Check(page, "Tell me when an update is out", function(self)
+        ns.Set("updateNotice", self:GetChecked())
+    end)
+    updates:SetPoint("TOPLEFT", 16, -196)
+    window:Hint(updates, "A line in chat, once a session, when a newer version is out. It uses a hidden chat channel,"
+        .. " which takes one of your chat channel slots.")
+    window.updateNotice = updates
+    Detail(page, "Versions are swapped with your guild, your group, players nearby and a hidden chat channel.", 34, -216)
+
     -- Help: the tour of the basics, as a first install offers it, and the
     -- Discord for bugs and ideas.
-    T:Heading(page, "Help"):SetPoint("TOPLEFT", 16, -176)
+    T:Heading(page, "Help"):SetPoint("TOPLEFT", 16, -256)
     local tour = T:Button(page, "Take the tour", 110, 22)
-    tour:SetPoint("TOPLEFT", 16, -194)
+    tour:SetPoint("TOPLEFT", 16, -274)
     tour:SetScript("OnClick", function() if ns.Tour then ns.Tour:Start() end end)
     window:Hint(tour, "A short tour of this window, a page at a time. /ccm tour starts it too.")
     window.tour = tour
     local discord = T:Button(page, "Discord", 80, 22)
-    discord:SetPoint("TOPLEFT", 134, -194)
+    discord:SetPoint("TOPLEFT", 134, -274)
     discord:SetScript("OnClick", ns.ShowDiscord)
     window:Hint(discord, "The Discord invite, ready to copy: bugs, ideas and help.")
     window.discord = discord
@@ -1032,9 +1044,9 @@ local function BuildGeneral(window, page)
     helpAbout:SetText("A tour of the basics, or the Discord for bugs and ideas.")
 
     -- More from Squirt: the author's other addons, and a way to open them.
-    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -236)
+    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -316)
     local more = CreateFrame("Frame", nil, page, "BackdropTemplate")
-    more:SetPoint("TOPLEFT", 16, -256)
+    more:SetPoint("TOPLEFT", 16, -336)
     more:SetSize(WIDTH - NAV - 34, 74)
     T:Flat(more, T.PANEL, T.BORDER)
     local moreIcon = more:CreateTexture(nil, "ARTWORK")
@@ -1080,6 +1092,7 @@ local function BuildGeneral(window, page)
         bars:SetChecked(B:Enabled())
         minimap:SetChecked(ns.Get("minimap"))
         free:SetChecked(ns.Get("minimapFree"))
+        updates:SetChecked(ns.Get("updateNotice"))
         -- New files only load after a full restart: until then, no tour.
         tour:SetShown(ns.Tour ~= nil)
     end
@@ -1093,7 +1106,7 @@ local NAV_NOTES = {
         .. " health and power text, ready glow and the accent.",
     layout = "One-click layouts that stack your bars around your Personal Resource Display.",
     cast = "Your own cast bar and a swing timer, under your Personal Resource Display.",
-    general = "Your bars on or off, the minimap button, the tour, the Discord and EraUI.",
+    general = "Your bars on or off, the minimap button, update notices, the tour, the Discord and EraUI.",
     raid = "Blizzard's pull countdown, raid warnings and boss cast bars, in your look.",
     pulse = "A big icon in the middle of your screen when a cooldown is ready.",
 }

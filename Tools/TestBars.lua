@@ -3121,9 +3121,11 @@ Equal(S[pills.buttons[2].label].shadow, 1, "light text on dark keeps its shadow"
 
 -- General: your bars and moving them.
 w:Select("general")
--- No saved-settings section: More from Squirt sits under the tour and Discord.
+-- No saved-settings section: More from Squirt sits under the tour and Discord,
+-- which sit under Updates.
 Equal(tostring(w.kept) .. " " .. tostring(Heading("SAVED SETTINGS") ~= nil), "nil false", "no saved-settings text or heading")
-Equal(S[Heading("MORE FROM SQUIRT")].points[1][3], -236, "More from Squirt closes the gap")
+Equal(S[Heading("UPDATES")].points[1][3] .. " " .. S[Heading("HELP")].points[1][3] .. " " .. S[Heading("MORE FROM SQUIRT")].points[1][3],
+    "-176 -256 -316", "Updates under the minimap button, then Help, then More from Squirt")
 -- More from Squirt: EraUI, and a way to open it.
 Equal(S[w.moreOpen].shown, false, "EraUI not installed: no Open button")
 Equal(S[w.moreLinks[1]].shown and S[w.moreLinks[2]].shown, true, "but CurseForge and GitHub buttons")

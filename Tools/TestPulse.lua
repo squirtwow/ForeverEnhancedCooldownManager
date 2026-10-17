@@ -858,7 +858,7 @@ local function PulseGame()
 end
 
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
-local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
+local FILES = { "Core.lua", "SquirtVersions.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
     "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
     "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
@@ -2818,8 +2818,10 @@ end)()
             added[#added + 1] = name
         end
     end
-    Equal(#ADDED_GLOBALS > 5 and table.concat(added, ","), "ForeverPulseLink",
-        "in the game's global space, only the addon's own names and the link: none to clash with Forever Enhanced Cooldown Pulse's")
+    table.sort(added)
+    Equal(#ADDED_GLOBALS > 5 and table.concat(added, ","), "ForeverPulseLink,SquirtVersions",
+        "in the game's global space, only the addon's own names, the link and the shared update notices (each one table, made"
+        .. " by whichever addon loads first): none to clash with Forever Enhanced Cooldown Pulse's")
 
     -- Present and on, this one off: it joins while the window is open, and this tick greys out at once.
     lns, page = Start({ pulse = false }, nil)

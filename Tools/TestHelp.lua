@@ -812,7 +812,7 @@ local function BlizzardFrames()
 end
 
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
-local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
+local FILES = { "Core.lua", "SquirtVersions.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
     "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
     "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
@@ -2025,6 +2025,55 @@ end)()
         "with Show me what's new and Discord up, the lines on the left end before Discord")
     notes:Hide()
     Equal(#printed, 0, "no errors")
+end)()
+
+-- Tell me when an update is out (General page, under the minimap button): on
+-- from the start, in the shared update notices (SquirtVersions.lua, tested on
+-- its own in Tools/TestSquirtVersions.lua) by its code, title and version,
+-- and unticked it leaves them nothing to do for this addon. A copy straight
+-- from the source ("dev") listens, with no version to share.
+;(function()
+    _G.SquirtVersions = nil
+    _G.GetAddOnMetadata = function(addon, field) return addon == "ForeverEnhancedCooldownManager" and field == "Version" and "1.7.0" or nil end
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    _G.GetAddOnMetadata = nil
+    local notices = _G.SquirtVersions
+    local entry = notices and notices.addons and notices.addons.CM
+    Equal(entry and (entry.title .. " | " .. entry.version .. " | " .. entry.colour .. " | " .. tostring(entry.IsOn())),
+        "Forever Enhanced Cooldown Manager | 1.7.0 | ffd100 | true", "in the shared update notices, on from the start")
+    Equal(notices:Payload("H"), "H1:CM=1.7.0", "sharing its version")
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("general")
+    local tick = w.updateNotice
+    local function Note(control)
+        S[control].scripts.OnEnter(control)
+        local text = S[w.note].text
+        S[control].scripts.OnLeave(control)
+        return text
+    end
+    Equal(tostring(tick:IsVisible()) .. " " .. tostring(tick:GetChecked()) .. " " .. S[tick.text].text .. " | " .. Note(tick),
+        "true true Tell me when an update is out | A line in chat, once a session, when a newer version is out. It uses a hidden"
+        .. " chat channel, which takes one of your chat channel slots.", "the tick, on, its note naming the channel slot")
+    tick:Click()
+    Equal(tostring(ns.Get("updateNotice")) .. " " .. tostring(ForeverEnhancedCooldownManagerDB.updateNotice) .. " "
+        .. tostring(notices:Wanted()) .. " " .. tostring(notices:Payload("H")), "false false false nil",
+        "unticked: saved, and the update notices have nothing to do or share for it")
+    tick:Click()
+    Equal(tostring(ns.Get("updateNotice")) .. " " .. tostring(notices:Wanted()), "true true", "ticked again: back")
+    -- The line itself, through the addon's own chat line.
+    printed = {}
+    Equal(notices:Test("CM"), 1, "the hidden test")
+    Equal(printed[1], "|cffffd100Forever Enhanced Cooldown Manager|r 1.7.1 is out (you have 1.7.0). Update on CurseForge.",
+        "says the line in chat")
+    printed = {}
+    -- A copy straight from the source: no version to share, still listening.
+    _G.SquirtVersions = nil
+    ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    notices = _G.SquirtVersions
+    Equal(notices.addons.CM.version .. " " .. tostring(notices:Payload("H")) .. " " .. tostring(notices:Wanted()), "dev nil true",
+        "dev: nothing shared, still listening")
+    _G.SquirtVersions = nil
 end)()
 
 Equal(#printed, 0, "no errors")
