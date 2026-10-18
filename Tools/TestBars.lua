@@ -5747,8 +5747,17 @@ do
         end
         return shown
     end
+    cb.bar.GetLeft = function() return 100.3 end -- a bar that starts between two screen pixels
     Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 689)
     Equal(S[cb.bar.name].text .. " " .. Marks(), "Drain Life 4", "a channel says its own name, with a mark between each of its 5 ticks")
+    local edges = {}
+    for i = 1, 4 do
+        local edge = 100.3 + S[cb.bar.marks[i].top].points[1][4] - S[cb.bar.marks[i].top].width / 2
+        edges[i] = string.format("%.3f", edge - math.floor(edge + .5))
+    end
+    Equal(table.concat(edges, " "), "0.100 0.100 0.100 0.100",
+        "each tick a tenth of a pixel inside whole screen pixels, so the game's rounding can't make one wider")
+    cb.bar.GetLeft = nil
     channel[5] = 109000 -- pushed back: two seconds gone from its end
     Fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", nil, 689)
     Equal(Marks(), 2, "pushed back, the ticks keep their moments and those past its new end go")

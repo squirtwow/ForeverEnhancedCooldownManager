@@ -207,8 +207,8 @@ ns.TICK_COLOUR_KEYS = { "white", "black" }
 for _, key in ipairs(ns.BAR_COLOUR_KEYS) do ns.TICK_COLOUR_KEYS[#ns.TICK_COLOUR_KEYS + 1] = key end
 ns.TICK_STYLE_KEYS = { "notches", "lines" }
 ns.TICK_STYLE_NAMES = { notches = "Notches", lines = "Lines" }
--- The latency zone: red, white, black or a bar colour.
-ns.LATENCY_COLOUR_KEYS = { "red", "white", "black" }
+-- The latency zone: red, paler (the cast bar's own, lighter), white, black or a bar colour.
+ns.LATENCY_COLOUR_KEYS = { "red", "paler", "white", "black" } -- paler: a lighter shade of the cast bar's own
 for _, key in ipairs(ns.BAR_COLOUR_KEYS) do ns.LATENCY_COLOUR_KEYS[#ns.LATENCY_COLOUR_KEYS + 1] = key end
 -- The time on the cast bar: seconds left, or left / the whole cast.
 ns.TIME_FORMAT_KEYS = { "left", "total" }

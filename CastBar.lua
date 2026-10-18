@@ -305,9 +305,15 @@ end
 -- a broken cast.
 local LAG_COLOURS = { red = { RED[1], RED[2], RED[3], .85 }, white = { 1, 1, 1, .7 }, black = { 0, 0, 0, .7 } }
 
-function C:LagColour(key)
+local PALER = .5 -- Paler: this much of the way from the cast bar's colour to white
+
+function C:LagColour(key, channel)
     key = key or ns.Get("castLatencyColour")
     if LAG_COLOURS[key] then return LAG_COLOURS[key] end
+    if key == "paler" then
+        local own = Colour(channel)
+        return { own[1] + (1 - own[1]) * PALER, own[2] + (1 - own[2]) * PALER, own[3] + (1 - own[3]) * PALER, .85 }
+    end
     local colour = Style:BarColour(key)
     return { colour[1], colour[2], colour[3], .85 }
 end
@@ -323,7 +329,7 @@ function C:Lag(frame, share, ms, channel)
         bar.ms:Hide()
         return
     end
-    local colour = self:LagColour()
+    local colour = self:LagColour(nil, channel)
     local side = channel and "LEFT" or "RIGHT"
     -- The bar's own texture, set only when it changes; Outline's see-through
     -- fill gets a see-through zone.
@@ -435,8 +441,9 @@ local function Notch(bar)
 end
 
 -- One screen pixel in the bar's own units. A notch a whole number of them
--- wide is drawn the same width wherever it lands; one that isn't comes out
--- one pixel wider or narrower here and there as the game rounds its edges.
+-- wide, its edges on whole pixels too (C:Marks), is drawn crisp and the same
+-- width wherever it lands; otherwise one comes out a pixel wider or
+-- narrower, or blurred over the next, here and there.
 local function Pixel(frame)
     local _, high = GetPhysicalScreenSize and GetPhysicalScreenSize()
     local scale = type(frame.GetEffectiveScale) == "function" and frame:GetEffectiveScale()
@@ -457,8 +464,18 @@ function C:Marks(bar, at)
         local lines = ns.Get("castTickStyle") == "lines"
         local tall = math.max(2, math.floor((type(height) == "number" and height or 0) * NOTCH / px + .5)) * px
         local colour = self:MarkColour()
+        -- Where the bar starts on the screen, so each tick's edge can go on a
+        -- whole pixel whatever your UI scale and the bar's place. Drawn a
+        -- tenth of a pixel inside each edge: exactly on them, the game's
+        -- rounding can tip an edge either way and make a tick a pixel wider
+        -- (seen at UI scale 0.65 on 1440p).
+        local left = bar.GetLeft and bar:GetLeft()
+        local drawn = wide - .2 * px
         for _, share in ipairs(at) do
             local x = share * width
+            if type(left) == "number" then
+                x = math.floor((left + x - wide / 2) / px + .5) * px + wide / 2 - left
+            end
             if x > wide and x < width - wide then
                 shown = shown + 1
                 local mark = marks[shown]
@@ -468,7 +485,7 @@ function C:Marks(bar, at)
                 end
                 local top, bottom = mark.top, mark.bottom
                 top:SetColorTexture(colour[1], colour[2], colour[3], colour[4])
-                top:SetWidth(wide)
+                top:SetWidth(drawn)
                 top:ClearAllPoints()
                 top:SetPoint("TOP", bar, "TOPLEFT", x, 0)
                 top:Show()
@@ -479,7 +496,7 @@ function C:Marks(bar, at)
                 else
                     top:SetHeight(tall)
                     bottom:SetColorTexture(colour[1], colour[2], colour[3], colour[4])
-                    bottom:SetWidth(wide)
+                    bottom:SetWidth(drawn)
                     bottom:SetHeight(tall)
                     bottom:ClearAllPoints()
                     bottom:SetPoint("BOTTOM", bar, "BOTTOMLEFT", x, 0)

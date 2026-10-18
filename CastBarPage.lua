@@ -241,8 +241,9 @@ function ns.BuildCastBarPage(window, page, width)
         end)
         swatch.key = key
         if key == "class" then ns.ClassIcon(swatch) end
-        window:Hint(swatch, (key == "red" and "Red" or key == "white" and "White" or key == "black" and "Black"
-            or ns.BAR_COLOUR_NAMES[key]) .. " latency zone, in your bar's texture.")
+        window:Hint(swatch, key == "paler" and "A paler shade of your cast bar's own colour for the latency zone."
+            or ((key == "red" and "Red" or key == "white" and "White" or key == "black" and "Black"
+            or ns.BAR_COLOUR_NAMES[key]) .. " latency zone, in your bar's texture."))
         latencySwatches[i] = swatch
     end
     page.latency, page.latencyMs, page.latencySwatches = latency, latencyMs, latencySwatches
