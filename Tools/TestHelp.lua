@@ -1721,22 +1721,62 @@ end)()
     tick:Click()
     Equal(tostring(ns.Get("prdText")) .. " " .. tostring(panel.textOff:IsVisible()) .. " " .. tostring(panel.textOn:IsVisible()),
         "false true true", "unticked on the Look page: the warning back")
-    -- Size and font.
-    panel.size:Choose(14)
+    -- The Bar picker: one bar's rows at a time (the preview shows them all).
+    local function Picker()
+        for _, pills in pairs(panel.pickers) do
+            if pills:IsVisible() then return pills end
+        end
+    end
+    local function PickBar(kind)
+        for _, button in ipairs(Picker().buttons) do
+            if button.key == kind then return S[button].scripts.OnClick(button) end
+        end
+        error("no bar " .. kind)
+    end
+    -- Size and font: each bar its own size, under its rows; one font.
+    panel.sizes.health:Choose(14)
+    PickBar("power")
+    panel.sizes.power:Choose(12)
+    PickBar("health")
     Pick("prdTextFont", "arial")
-    Equal(ns.Get("prdTextSize") .. " " .. Last(hp.slots.left, "SetFontObject") .. " " .. Last(mp.slots.right, "SetFontObject"),
-        "14 FECMFontarial14 FECMFontarial14", "a bigger size and Arial Narrow, just for this text")
+    Equal(ns.Get("prdHealthSize") .. " " .. ns.Get("prdPowerSize") .. " " .. Last(hp.slots.left, "SetFontObject") .. " "
+        .. Last(mp.slots.right, "SetFontObject"), "14 12 FECMFontarial14 FECMFontarial12", "each bar its own size, in Arial Narrow, just for this text")
     local fonts = panel.fonts
     Equal(S[fonts.buttons[1].label].text .. " " .. Last(fonts.buttons[1].label, "SetFontObject") .. " " .. Last(fonts.buttons[3].label, "SetFontObject")
         .. " | " .. Note(fonts.buttons[1]) .. " | " .. Note(fonts.buttons[3]), "Look page FECMSamplefriz FECMSamplearial | "
         .. "The font picked on the Look page, now Friz Quadrata. | Arial Narrow, plain and narrow, just for this text.",
         "the Look page's font first, then the game's own, each in its own face and saying what it is")
     Check("size 14 in Arial Narrow")
-    Equal(Note(Row("prdHealthAt").buttons[2]) .. " | " .. Note(Row("prdPowerLeft").buttons[3]) .. " | " .. Note(Row("prdTextNumbers").buttons[2])
-        .. " | " .. Note(panel.size), "A pair at the ends of your health bar. Long text is cut short rather than run into the other. | "
-        .. "What you have now and the most you can have, like 4,321 / 5,120. | Numbers shortened by the game, like 4.3K or 12K. | "
-        .. "The text's size. It can't fit itself to the bar, so text too long for it is cut short.",
+    local healthNote = Note(Row("prdHealthAt").buttons[2])
+    PickBar("power")
+    Equal(healthNote .. " | " .. Note(Row("prdPowerLeft").buttons[3]) .. " | " .. Note(Row("prdTextNumbers").buttons[2])
+        .. " | " .. Note(panel.sizes.power) .. " | " .. Note(Picker().buttons[1]), "A pair at the ends of your health bar. Long text is"
+        .. " cut short rather than run into the other. | What you have now and the most you can have, like 4,321 / 5,120. | Numbers"
+        .. " shortened by the game, like 4.3K or 12K. | The text's size on your power bar. It can't fit itself to the bar, so text too"
+        .. " long for it is cut short. | Which bar's text to set up. The preview shows them all.",
         "each choice says what it does in the footer, clear of the panel")
+    -- A druid's extra mana bar, and the energy bar once it's ticked: the
+    -- same rows, off to start, and their own preview bars.
+    Equal(#Picker().buttons .. " " .. tostring(preview.extra:IsVisible()) .. " " .. tostring(preview.energy:IsVisible()) .. " "
+        .. tostring(Row("prdHealthAt"):IsVisible()) .. " " .. tostring(Row("prdPowerAt"):IsVisible()) .. " " .. Preview(preview.extra),
+        '3 true false false true "" | "" | ""', "a druid: Health, Power and Extra mana, Power's rows only, the extra mana bar's text off")
+    PickBar("extra")
+    Pick("prdExtraAt", "centre")
+    Pick("prdExtraCentre", "both")
+    Equal(tostring(Row("prdPowerAt"):IsVisible()) .. " " .. Preview(preview.extra), 'false 1.2K / 2.4K | "" | ""',
+        "Extra mana: its own rows, its value / max in the middle")
+    Check("extra mana in the middle")
+    ns.Set("prdEnergy", true)
+    w:Refresh()
+    PickBar("energy")
+    Pick("prdEnergyAt", "sides")
+    Pick("prdTextNumbers", "full")
+    Equal(#Picker().buttons .. " " .. tostring(preview.energy:IsVisible()) .. " " .. Preview(preview.energy), '4 true "" | 80 | 80%',
+        "the energy bar ticked: Energy too, a pair at its ends")
+    Check("energy left and right")
+    ns.Set("prdEnergy", false)
+    w:Refresh()
+    Equal(#Picker().buttons .. " " .. tostring(Row("prdHealthAt"):IsVisible()), "3 true", "unticked: Energy goes, back on Health")
     -- Your own colours on the preview.
     ns.Set("prdHealth", "purple")
     w:Refresh()
@@ -2115,6 +2155,119 @@ end)()
     Equal(notices.addons.CM.version .. " " .. tostring(notices:Payload("H")) .. " " .. tostring(notices:Wanted()), "dev nil true",
         "dev: nothing shared, still listening")
     _G.SquirtVersions = nil
+end)()
+
+-- Presets: a look in one click from the Look page, with what to switch on.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    local P = ns.ProfileShare
+    -- Every preset's every value is one the addon takes, and none of them
+    -- is where things sit, the window's accent, Raid Timers or the pulse.
+    local bad = {}
+    local LEFT_ALONE = { accent = true, pulseX = true, pulseY = true, barScale = true, prdMatch = true }
+    for _, look in ipairs(P.LOOKS) do
+        for key, value in pairs(look.values) do
+            if not ns.Valid(key, value) or LEFT_ALONE[key] or key:find("^pulse") or key:find("^pull") or key:find("^warning")
+                or key:find("^emote") or key:find("^boss") or key:find("^raid") then
+                bad[#bad + 1] = look.key .. "." .. key
+            end
+        end
+        for _, extra in ipairs(look.extras) do
+            local known = false
+            for _, each in ipairs(P.EXTRAS) do known = known or each.key == extra end
+            if not known then bad[#bad + 1] = look.key .. " extra " .. extra end
+        end
+    end
+    Equal(#P.LOOKS .. " " .. table.concat(bad, " "), "4 ", "four looks, every value one the addon takes, none of what's left alone")
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local function Note(control)
+        S[control].scripts.OnEnter(control)
+        local text = S[w.note].text
+        S[control].scripts.OnLeave(control)
+        return text
+    end
+    Equal(tostring(w.presets:IsVisible()) .. " " .. S[w.presets.label].text, "true Presets", "Presets on the Look page's title row")
+    w.presets:Click()
+    local panel = w.presetsPanel
+    local dialog = panel.dialog
+    local found = {}
+    local function Check(label)
+        local problems = Fit.Problems(dialog)
+        local _, top, _, bottom = Fit.Rect(dialog)
+        if top < 42 or bottom > 560 - 28 then problems = problems .. ("the panel at %.1f to %.1f, over the title bar or the footer"):format(top, bottom) end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    local names, labels = {}, {}
+    for _, card in ipairs(panel.cards) do names[#names + 1] = S[card.label].text end
+    for _, check in ipairs(panel.ticks) do labels[#labels + 1] = S[check.text].text end
+    Equal(table.concat(names, ", ") .. " | " .. #labels .. " " .. labels[#labels], "Keep mine, Clean, Bold, Minimal, Classic | 9 Tidy extra mana bar",
+        "Keep mine first, then the four looks; a druid gets all nine things to switch on, combo points and the energy bar among them")
+    Check("at the start")
+    -- Bold: its suggestions ticked; Apply sets its look and switches them on.
+    local function Card(key)
+        for _, card in ipairs(panel.cards) do if card.key == key then return card end end
+    end
+    Card("bold"):Click()
+    local ticked = {}
+    for _, check in ipairs(panel.ticks) do if check:GetChecked() and check.usable ~= false then ticked[#ticked + 1] = check.extra.key end end
+    Equal(table.concat(ticked, " "), "keybinds text cast ticks latency", "Bold ticks what it goes well with")
+    -- Shown live on your bars, nothing saved yet.
+    Equal(ns.Get("barColour") .. " " .. ns.GetSaved("barColour") .. " " .. tostring(ns.Previewing()), "class orange true",
+        "picked: Bold shows at once, your own look still what's saved")
+    local before = ns.GetSaved("barStyle") .. " " .. ns.GetSaved("barColour") .. " " .. tostring(ns.GetSaved("thickEdges")) .. " "
+        .. ns.GetSaved("accent")
+    panel.apply:Click()
+    Equal(before .. " | " .. ns.Get("barStyle") .. " " .. ns.Get("barColour") .. " " .. tostring(ns.Get("thickEdges")) .. " " .. ns.Get("accent")
+        .. " " .. ns.Get("castTickStyle") .. " " .. tostring(ns.Get("keybinds")) .. " " .. tostring(ns.Get("prdText")) .. " "
+        .. tostring(ns.Get("castBar")) .. " " .. tostring(ns.Get("castTicks")) .. " " .. tostring(ns.Get("castLatency")),
+        "glass orange false purple | glass class true purple lines true true true true true",
+        "applied: Bold's look, the accent left alone, and the ticked ones switched on")
+    Equal(tostring(Card("bold") ~= nil) .. " " .. S[panel.said].text .. " " .. tostring(ns.Previewing()), "true Bold look applied, and turned"
+        .. " on: Keybinds on icons, Health and power text, Your own cast bar, Cast bar tick marks, Cast bar latency. false",
+        "saying what it did, the preview now saved")
+    -- Already on: ticked and greyed, so a preset can't switch it off.
+    local greyed = {}
+    for _, check in ipairs(panel.ticks) do if check.usable == false then greyed[#greyed + 1] = check.extra.key end end
+    Equal(table.concat(greyed, " "), "keybinds text look cast ticks latency tidy",
+        "what's on shows ticked and greyed (the look on Blizzard's bars and Tidy were on already here)")
+    Check("after Bold")
+    -- Undo: the look before, and what Bold switched on off again.
+    panel.undo:Click()
+    Equal(ns.Get("barStyle") .. " " .. ns.Get("barColour") .. " " .. tostring(ns.Get("thickEdges")) .. " " .. tostring(ns.Get("keybinds"))
+        .. " " .. tostring(ns.Get("prdText")) .. " " .. tostring(ns.Get("castBar")) .. " " .. tostring(ns.Get("prdHideRepeat")) .. " | "
+        .. S[panel.said].text .. " " .. tostring(P.CanUndoLook()), "glass orange false false false false true | Your look before the presets"
+        .. " is back. false", "Undo: the look before, what it switched on off again, what was on already left on")
+    -- Two presets in a row, one Undo: back to before the first. Make it
+    -- yours: a font of your own in place of the look's, shown and kept.
+    Card("bold"):Click()
+    panel.apply:Click()
+    Card("minimal"):Click()
+    for _, button in ipairs(panel.fonts.buttons) do
+        if button.key == "morpheus" then S[button].scripts.OnClick(button) end
+    end
+    Equal(ns.Get("font") .. " " .. ns.GetSaved("font"), "morpheus skurri", "your font shows at once over Minimal's, Bold's still saved")
+    panel.apply:Click()
+    Equal(ns.GetSaved("barStyle") .. " " .. ns.GetSaved("font"), "outline morpheus", "Minimal kept, in your font")
+    panel.undo:Click()
+    Equal(ns.GetSaved("barStyle") .. " " .. ns.GetSaved("barColour") .. " " .. ns.GetSaved("font") .. " " .. tostring(ns.GetSaved("keybinds")),
+        "glass orange friz false", "one Undo after two presets: back to before the first")
+    -- Picked but not applied: closing puts your look back.
+    Card("bold"):Click()
+    panel.done:Click()
+    Equal(ns.Get("barColour") .. " " .. tostring(ns.Previewing()), "orange false", "Done without Apply: your own look back")
+    w.presets:Click()
+    -- Text you turned off on a bar stays off.
+    ns.Set("prdHealthAt", "off")
+    Card("classic"):Click()
+    panel.apply:Click()
+    Equal(ns.Get("prdHealthAt") .. " " .. ns.Get("prdPowerAt") .. " " .. ns.Get("barTexture"), "off centre classic",
+        "a preset never turns text on where you switched it off")
+    Equal(Note(panel.apply) .. " | " .. Note(Card("minimal")), "Keep this look, and switch on what's ticked. | Minimal: Outline bars, small"
+        .. " and quiet.", "each part says what it does")
+    Equal(table.concat(found, " | "), "", "the panel inside the window, under the title bar and clear of the footer, nothing overlapping")
 end)()
 
 Equal(#printed, 0, "no errors")

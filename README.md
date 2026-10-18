@@ -21,6 +21,9 @@ EraUI.
 ![A whole-bar shadow round the stack](Screenshots/whole-bar-shadow.png)
 
 ## Blizzard's Cooldown Manager
+- Presets on the Look page: Clean, Bold, Minimal or Classic sets how everything
+  looks in one click, and can switch on what goes with it (keybinds, text, your
+  cast bar). Undo puts your look back
 - Square icons with big, bold countdown numbers
 - Tracked Bars in three designs (Glass, Split and Outline) and six colours, or a
   colour of their own for any bar
@@ -36,8 +39,9 @@ EraUI.
 - The extra mana bar some specs get hides in caster form and is half size in
   forms
 - Health and power text: the numbers on its bars, in the centre or left and
-  right, as value, value / max or percent, in the size and font you like (off
-  by default, experimental)
+  right, as value, value / max or percent, in the size and font you like.
+  Druids can put it on the extra mana bar and the energy bar too (off by
+  default, experimental)
 - Combo points under your energy bar for rogues and druids in cat form, which
   Forever's display leaves out (off by default)
 - Druids: your energy bar under it in your other forms too (off by default,

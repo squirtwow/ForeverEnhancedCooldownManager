@@ -337,6 +337,10 @@ test("the display's text hands your health and power straight to the game's own 
     'UnitPower("player", PowerType())': 'return UnitPower("player", PowerType())',
     'UnitPowerMax("player", PowerType())': 'return UnitPowerMax("player", PowerType())',
     'UnitPowerPercent("player", PowerType(), false, curve)': 'return UnitPowerPercent("player", PowerType(), false, curve)',
+    // A druid's extra mana and energy bars: their own power, as it comes.
+    'UnitPower("player", power)': 'return UnitPower("player", power)',
+    'UnitPowerMax("player", power)': 'return UnitPowerMax("player", power)',
+    'UnitPowerPercent("player", power, false, curve)': 'return UnitPowerPercent("player", power, false, curve)',
   };
   for (const [ask, returned] of Object.entries(asks)) {
     assert.equal(resource.split(ask).length - 1, 1, `${ask} asked once`);
@@ -373,11 +377,13 @@ test("the display's text hands your health and power straight to the game's own 
   // SecretPayloads on UNIT_POWER_FREQUENT or UNIT_MAXPOWER), compared with
   // your power's only once both are checked plain words.
   assert.match(resource, /local function Update\(holder\)\r?\n/);
-  assert.match(resource, /holder:SetScript\("OnEvent", kind == "power" and PowerEvent or Update\)/);
+  assert.match(resource, /holder:SetScript\("OnEvent", kind == "health" and Update or PowerEvent\)/);
   assert.equal(count(resource, /:SetScript\("OnEvent"/g), 4, 'the holders, the combo and energy listeners and the load watcher');
   assert.match(resource, /local function Plain\(word\)\r?\n\s+return type\(word\) == "string" and not \(issecretvalue and issecretvalue\(word\)\)\r?\nend/);
   const powerEvent = resource.match(/local function PowerEvent\(holder, event, _, token\)\r?\n([\s\S]*?)\r?\nend/)[1];
-  assert.equal(powerEvent.replace(/\s+/g, ' ').trim(), 'if POWER_CHANGES[event] and Plain(token) then local _, current = UnitPowerType("player") '
+  // (A druid's extra mana and energy bars compare with their own power's name.)
+  assert.equal(powerEvent.replace(/\s+/g, ' ').trim(), 'if POWER_CHANGES[event] and Plain(token) then local own = OWN_POWER[holder.kind] '
+    + 'local current = own and own[2] or select(2, UnitPowerType("player")) '
     + 'if Plain(current) and current ~= token then return end end Update(holder)', 'the name compared only once both are plain');
   // Blizzard's own text on the bars: only its alpha.
   assert.match(resource, /local BLIZZARD_TEXT = \{ "TextString", "LeftText", "RightText" \}/);

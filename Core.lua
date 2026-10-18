@@ -74,6 +74,20 @@ ns.DEFAULTS = {
     prdPowerCentre = "value",
     prdPowerLeft = "value",
     prdPowerRight = "percent",
+    prdExtraAt = "off", -- the same for a druid's extra mana bar in forms, off until picked
+    prdExtraCentre = "value",
+    prdExtraLeft = "value",
+    prdExtraRight = "percent",
+    prdEnergyAt = "off", -- and for a druid's energy bar in other forms
+    prdEnergyCentre = "value",
+    prdEnergyLeft = "value",
+    prdEnergyRight = "percent",
+    -- Each bar's own size for its text, set in Set up: 0 goes by prdTextSize
+    -- (the size all of it had before), the thinner bars start smaller.
+    prdHealthSize = 0,
+    prdPowerSize = 0,
+    prdExtraSize = 10,
+    prdEnergySize = 10,
     prdTextNumbers = "full", -- full (4,321) or short (4.3K), both written by the game
     prdTextSize = 10,
     prdTextFont = "look", -- the Look page's font, or one of the game's own just for this text
@@ -165,6 +179,7 @@ ns.BAR_DARKNESS = { 0, 100, 0 } -- percent of the way to black
 ns.RAID_SIZE = { 50, 200, 100 } -- each Raid Timers size (percent)
 ns.RAID_SIZE_ALL = { 50, 150, 100 } -- all of them together, so the biggest is three times Blizzard's
 ns.TEXT_SIZE = { 8, 16, 10 } -- the display's health and power text
+ns.TEXT_BAR_SIZE = { 0, ns.TEXT_SIZE[2], 0 } -- a bar's own size for it; 0 goes by prdTextSize
 -- Cooldown pulse.
 ns.PULSE_SIZE = { 64, 512, 272 }
 ns.PULSE_TIME = { 3, 20, 10 } -- tenths of a second: 0.3 to 2 seconds
@@ -179,7 +194,8 @@ local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTickWidth = ns.CAST_TICK_WIDT
     pulseLongSize = ns.PULSE_LONG_SIZE, pulseLongTime = ns.PULSE_LONG_TIME,
     pulseSeeThrough = ns.PULSE_SEE_THROUGH, pulseGrow = ns.PULSE_GROW,
     pulseX = ns.PULSE_PLACE, pulseY = ns.PULSE_PLACE, minimapX = ns.MINIMAP_PLACE, minimapY = ns.MINIMAP_PLACE,
-    prdTextSize = ns.TEXT_SIZE }
+    prdTextSize = ns.TEXT_SIZE, prdHealthSize = ns.TEXT_BAR_SIZE, prdPowerSize = ns.TEXT_BAR_SIZE,
+    prdExtraSize = ns.TEXT_BAR_SIZE, prdEnergySize = ns.TEXT_BAR_SIZE }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
 ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
@@ -262,7 +278,7 @@ for _, key in ipairs(ns.PULSE_BORDER_KEYS) do CHOICES.pulseBorder[key] = true en
 for _, key in ipairs(ns.PULSE_SOUND_KEYS) do CHOICES.pulseSound[key], CHOICES.pulseLongSound[key] = true, true end
 -- The display's health and power text.
 CHOICES.prdTextNumbers, CHOICES.prdTextFont = {}, {}
-for _, bar in ipairs({ "prdHealth", "prdPower" }) do
+for _, bar in ipairs({ "prdHealth", "prdPower", "prdExtra", "prdEnergy" }) do
     CHOICES[bar .. "At"], CHOICES[bar .. "Centre"], CHOICES[bar .. "Left"], CHOICES[bar .. "Right"] = {}, {}, {}, {}
     for _, key in ipairs(ns.TEXT_AT_KEYS) do CHOICES[bar .. "At"][key] = true end
     for _, key in ipairs(ns.TEXT_FORMAT_KEYS) do
@@ -297,7 +313,9 @@ ns.RELOAD = {
 ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
     "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
     "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
-    "prdPowerRight", "prdTextNumbers", "prdTextSize", "prdTextFont",
+    "prdPowerRight", "prdExtraAt", "prdExtraCentre", "prdExtraLeft", "prdExtraRight", "prdEnergyAt", "prdEnergyCentre",
+    "prdEnergyLeft", "prdEnergyRight", "prdHealthSize", "prdPowerSize", "prdExtraSize", "prdEnergySize",
+    "prdTextNumbers", "prdTextSize", "prdTextFont",
     "castColour", "castHeight", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
     "castLatencyColour", "castLatencyText", "swingColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
@@ -350,11 +368,33 @@ ns.BUFF_SLOTS = 16 -- the Buffs bar has one secure slot per buff
 
 local db
 ns.loaded = {}
+-- A preset's look shown for a moment while you pick one (the Look page's
+-- Presets): read before what's saved, and never saved itself, so closing
+-- the panel or a reload puts your own look back.
+local previewing
 
-function ns.Get(key)
+-- What's saved (or the default), whatever is being previewed.
+function ns.GetSaved(key)
     local value = db and db[key]
     if value == nil or not ns.Valid(key, value) then value = ns.DEFAULTS[key] end
     return value
+end
+
+function ns.Get(key)
+    if previewing then
+        local value = previewing[key]
+        if value ~= nil then return value end
+    end
+    return ns.GetSaved(key)
+end
+
+-- Shows values (checked by the caller) in place of yours until it's nil again.
+function ns.PreviewLook(values)
+    previewing = values
+end
+
+function ns.Previewing()
+    return previewing ~= nil
 end
 
 local function Finite(n)
@@ -2077,6 +2117,8 @@ end
 -- switched on or off is told to Forever Enhanced Cooldown Pulse too (Pulse.lua),
 -- and the update notice's tick to the shared update notices.
 
+local batching = 0 -- while a preset sets many at once, the window redraws once after
+
 function ns.Set(key, value)
     if not db then return end
     db[key] = value
@@ -2085,7 +2127,17 @@ function ns.Set(key, value)
         local notices = Notices()
         if notices and type(notices.Refresh) == "function" then notices:Refresh() end
     end
+    if batching == 0 and ns.window and ns.window:IsShown() then ns.window:Refresh() end
+end
+
+-- Many changes at once (a preset): fn sets them, then the window redraws
+-- once. Anything going wrong still ends the batch and is passed on.
+function ns.SetMany(fn)
+    batching = batching + 1
+    local ok, err = pcall(fn)
+    batching = batching - 1
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
+    if not ok then error(err, 0) end
 end
 
 -- A Tracked Bar's own colour, or nil to go back to the colour for all bars.

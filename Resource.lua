@@ -570,16 +570,27 @@ end
 -- added up or joined. While it shows on a bar, Blizzard's own text there
 -- (Edit Mode's Show Bar Text) goes see-through: only its alpha, and back to
 -- full when ours goes.
+-- A druid's extra mana bar in forms and energy bar out of cat form can have
+-- text too (off until picked): each always its own power, mana or energy.
 local SPOTS = { "centre", "left", "right" }
-local TEXT_KINDS = { "health", "power" }
+local TEXT_KINDS = { "health", "power", "extra", "energy" }
 local TEXT_KEYS = {
-    health = { at = "prdHealthAt", centre = "prdHealthCentre", left = "prdHealthLeft", right = "prdHealthRight" },
-    power = { at = "prdPowerAt", centre = "prdPowerCentre", left = "prdPowerLeft", right = "prdPowerRight" },
+    health = { at = "prdHealthAt", centre = "prdHealthCentre", left = "prdHealthLeft", right = "prdHealthRight", size = "prdHealthSize" },
+    power = { at = "prdPowerAt", centre = "prdPowerCentre", left = "prdPowerLeft", right = "prdPowerRight", size = "prdPowerSize" },
+    extra = { at = "prdExtraAt", centre = "prdExtraCentre", left = "prdExtraLeft", right = "prdExtraRight", size = "prdExtraSize" },
+    energy = { at = "prdEnergyAt", centre = "prdEnergyCentre", left = "prdEnergyLeft", right = "prdEnergyRight", size = "prdEnergySize" },
 }
+local POWER_EVENTS = { "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" }
 local TEXT_EVENTS = {
     health = { "UNIT_HEALTH", "UNIT_MAXHEALTH" },
-    power = { "UNIT_POWER_FREQUENT", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER" },
+    power = POWER_EVENTS,
+    extra = POWER_EVENTS,
+    energy = POWER_EVENTS,
 }
+local MANA = Enum and Enum.PowerType and Enum.PowerType.Mana or 0
+-- The power each of those bars always shows, by number and by the word the
+-- game's power events name it with.
+local OWN_POWER = { extra = { MANA, "MANA" }, energy = { ENERGY, "ENERGY" } }
 -- And after each loading screen, as Blizzard's own display does: your
 -- numbers can settle then without an event of their own.
 local TEXT_REFRESH = "PLAYER_ENTERING_WORLD"
@@ -593,6 +604,8 @@ local textOn = false
 local SAMPLES = {
     health = { Current = function() return 4321 end, Max = function() return 5120 end, Percent = function() return 84.4 end },
     power = { Current = function() return 1876 end, Max = function() return 2400 end, Percent = function() return 78.2 end },
+    extra = { Current = function() return 1240 end, Max = function() return 2400 end, Percent = function() return 51.7 end },
+    energy = { Current = function() return 80 end, Max = function() return 100 end, Percent = function() return 80 end },
 }
 
 -- Your power type, plain, or nil for the game's own choice of your current one.
@@ -612,6 +625,15 @@ local function GameSource(kind)
             Current = function() return UnitHealth("player") end,
             Max = function() return UnitHealthMax("player") end,
             Percent = curve and UnitHealthPercent and function() return UnitHealthPercent("player", false, curve) end or nil,
+        }
+    end
+    local own = OWN_POWER[kind]
+    if own then
+        local power = own[1]
+        return {
+            Current = function() return UnitPower("player", power) end,
+            Max = function() return UnitPowerMax("player", power) end,
+            Percent = curve and UnitPowerPercent and function() return UnitPowerPercent("player", power, false, curve) end or nil,
         }
     end
     return {
@@ -642,9 +664,16 @@ local function Put(text, format, source)
     end
 end
 
--- The text's font: the Look page's at the size chosen, or one of the game's own.
-local function TextFont()
-    local size, key = ns.Get("prdTextSize"), ns.Get("prdTextFont")
+-- A bar's text size: its own, or (0) the size all of it shares.
+function R:TextSize(kind)
+    local size = kind and TEXT_KEYS[kind] and ns.Get(TEXT_KEYS[kind].size) or 0
+    if size == 0 then size = ns.Get("prdTextSize") end
+    return size
+end
+
+-- kind's text font: the Look page's at the bar's size, or one of the game's own.
+local function TextFont(kind)
+    local size, key = R:TextSize(kind), ns.Get("prdTextFont")
     if key == "look" then return Style:Font(size) end
     return Style:FontIn(key, size)
 end
@@ -652,8 +681,8 @@ end
 -- A bar's three spots for text, on frame (the addon's own): the middle, and
 -- a left and right pair, each half the bar, so a long pair is cut short
 -- rather than run into each other. Each has its font before any text.
-function R:TextSlots(frame)
-    local slots = { font = TextFont() }
+function R:TextSlots(frame, kind)
+    local slots = { font = TextFont(kind) }
     for _, spot in ipairs(SPOTS) do
         local text = frame:CreateFontString(nil, "OVERLAY")
         text:SetFontObject(slots.font)
@@ -673,9 +702,9 @@ function R:TextSlots(frame)
     return slots
 end
 
--- The font and size chosen, set only when they change.
-local function Dress(slots)
-    local font = TextFont()
+-- The font and kind's size chosen, set only when they change.
+local function Dress(slots, kind)
+    local font = TextFont(kind)
     if slots.font == font then return end
     slots.font = font
     for _, spot in ipairs(SPOTS) do slots[spot]:SetFontObject(font) end
@@ -708,7 +737,7 @@ end
 -- The Set up panel's preview (Window.lua): kind's text from plain numbers,
 -- through the same code as your bars, so the two always match.
 function R:WriteSample(slots, kind)
-    Dress(slots)
+    Dress(slots, kind)
     Arrange(slots, kind)
     Write(slots, SAMPLES[kind])
 end
@@ -716,7 +745,8 @@ end
 -- Blizzard's own text on the bar see-through while ours shows there, and
 -- back to full after: only its alpha, set only when that changes.
 local function MuteBlizzard(holder, mute)
-    if holder.muted == mute then return end
+    -- (The energy bar is the addon's own: no Blizzard text on it.)
+    if holder.muted == mute or holder.kind == "energy" then return end
     holder.muted = mute
     for _, key in ipairs(BLIZZARD_TEXT) do
         local text = Part(holder.bar, key)
@@ -763,15 +793,19 @@ end
 
 local function PowerEvent(holder, event, _, token)
     if POWER_CHANGES[event] and Plain(token) then
-        local _, current = UnitPowerType("player")
+        local own = OWN_POWER[holder.kind]
+        local current = own and own[2] or select(2, UnitPowerType("player"))
         if Plain(current) and current ~= token then return end
     end
     Update(holder)
 end
 
--- The bars the text goes on: the display's health bar and main power bar.
+-- The bars the text goes on: the display's health bar and main power bar,
+-- its extra mana bar, and the addon's own energy bar (a druid's, once made).
 local function TextBar(frame, kind)
     if kind == "health" then return Part(Part(frame, "HealthBarsContainer"), "healthBar") end
+    if kind == "extra" then return Part(frame, "AlternatePowerBar") end
+    if kind == "energy" then return energy end
     return Part(frame, "PowerBar")
 end
 
@@ -789,6 +823,8 @@ end
 local function TextLevel(frame, bar, kind)
     local level = bar:GetFrameLevel()
     if kind == "health" then return Above(level, Part(Part(frame, "HealthBarsContainer"), "TempMaxHealthLoss")) + 1 end
+    -- The extra mana bar and the addon's energy bar have no pulse: just over them.
+    if kind ~= "power" then return level + 2 end
     local pulse = Part(bar, "FullPowerFrame")
     return Above(Above(Above(level + 1, pulse), Part(pulse, "SpikeFrame")), Part(pulse, "PulseFrame")) + 1
 end
@@ -802,8 +838,8 @@ local function MakeHolder(frame, kind)
     holder:EnableMouse(false)
     holder:Hide()
     holder.bar, holder.kind, holder.source, holder.muted = bar, kind, GameSource(kind), false
-    holder.slots = R:TextSlots(holder)
-    holder:SetScript("OnEvent", kind == "power" and PowerEvent or Update)
+    holder.slots = R:TextSlots(holder, kind)
+    holder:SetScript("OnEvent", kind == "health" and Update or PowerEvent)
     holder:SetScript("OnShow", Update)
     return holder
 end
@@ -816,11 +852,13 @@ local function ApplyText()
     if not (frame and (on or textOn)) then return end
     textOn = on
     for _, kind in ipairs(TEXT_KINDS) do
-        if on and not holders[kind] then holders[kind] = MakeHolder(frame, kind) end
+        -- A bar's frame is made once it has text to show (the extra mana and
+        -- energy bars start with none).
+        if on and not holders[kind] and ns.Get(TEXT_KEYS[kind].at) ~= "off" then holders[kind] = MakeHolder(frame, kind) end
         local holder = holders[kind]
         if holder then
             local slots = holder.slots
-            Dress(slots)
+            Dress(slots, kind)
             Arrange(slots, kind)
             local show = on and slots.any and not holder.broken
             holder:UnregisterAllEvents()

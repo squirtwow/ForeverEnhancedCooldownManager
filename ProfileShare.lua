@@ -656,6 +656,12 @@ end
 -- Undo on the Layout page is for a layout you picked, so it goes.
 local function Redraw()
     if ns.Layout then ns.Layout.undo, ns.Layout.moved = nil, nil end
+    P.RedrawLook()
+end
+
+-- Everything that shows the look, after it changed: the font, your bars, the
+-- restyled Blizzard bars, the display, the cast bar, Raid Timers and pulse.
+function P.RedrawLook()
     ns.Style:ApplyFont()
     local B = ns.Bars
     if B and B.started then
@@ -675,6 +681,174 @@ local function Redraw()
     if ns.CastBar and ns.CastBar.started then ns.CastBar:Apply() end
     if ns.RaidTimers and ns.RaidTimers.started then ns.RaidTimers:Apply() end
     if ns.Pulse and ns.Pulse.started then ns.Pulse:Apply() end
+end
+
+-- Presets ---------------------------------------------------------------------------
+-- One click for how everything looks (the Look page's Presets): the design,
+-- colour, texture and font, borders, shadows and edges, keys on icons, the
+-- display's text and the cast bar's look. Not the window's accent, where
+-- anything sits, Raid Timers or the pulse; and a preset never turns
+-- anything off: text you switched off on a bar stays off. Picked with a
+-- preset, the Also turn on choices switch on what the look goes well with.
+-- Undo puts back the look and switches off what was turned on, until the
+-- next preset or a reload.
+P.LOOKS = {
+    { key = "clean", name = "Clean", about = "Flat and tidy, thin edges, no shadows.", extras = { "keybinds", "cast" }, values = {
+        barStyle = "split", barColour = "blue", barTexture = "flat", font = "friz", iconBorder = "icon", iconShadow = "off",
+        barDarkness = 50, thickEdges = false, readyGlow = "edge", keybindPosition = "TOPRIGHT", keybindSize = 90,
+        prdHealthAt = "centre", prdHealthCentre = "value", prdPowerAt = "centre", prdPowerCentre = "value", prdTextNumbers = "short",
+        prdTextFont = "look", prdHealthSize = 11, prdPowerSize = 10, prdExtraSize = 9, prdEnergySize = 8,
+        castColour = "blue", castHeight = 16, castTickColour = "white", castTickStyle = "notches", castTickWidth = 2,
+        castTimeFormat = "left", castLatencyColour = "red", swingColour = "charcoal" } },
+    { key = "bold", name = "Bold", about = "Glass in your class colour, thick edges, borders and shadows.",
+        extras = { "keybinds", "text", "cast", "ticks", "latency" }, values = {
+        barStyle = "glass", barColour = "class", barTexture = "raid", font = "skurri", iconBorder = "icon", iconShadow = "bar",
+        barDarkness = 75, thickEdges = true, readyGlow = "proc", keybindPosition = "BOTTOM", keybindSize = 115,
+        prdHealthAt = "sides", prdHealthLeft = "value", prdHealthRight = "percent", prdPowerAt = "sides", prdPowerLeft = "value",
+        prdPowerRight = "percent", prdTextNumbers = "short", prdTextFont = "look", prdHealthSize = 14, prdPowerSize = 12,
+        prdExtraSize = 10, prdEnergySize = 9,
+        castColour = "class", castHeight = 22, castTickColour = "white", castTickStyle = "lines", castTickWidth = 3,
+        castTimeFormat = "total", castLatencyColour = "red", swingColour = "default" } },
+    { key = "minimal", name = "Minimal", about = "Outline bars, small and quiet.", extras = {}, values = {
+        barStyle = "outline", barColour = "charcoal", barTexture = "flat", font = "arial", iconBorder = "off", iconShadow = "off",
+        barDarkness = 0, thickEdges = false, readyGlow = "edge", keybindPosition = "TOPLEFT", keybindSize = 80,
+        prdHealthAt = "centre", prdHealthCentre = "percent", prdPowerAt = "centre", prdPowerCentre = "value", prdTextNumbers = "short",
+        prdTextFont = "arial", prdHealthSize = 9, prdPowerSize = 9, prdExtraSize = 8, prdEnergySize = 8,
+        castColour = "charcoal", castHeight = 12, castTickColour = "white", castTickStyle = "notches", castTickWidth = 1,
+        castTimeFormat = "left", castLatencyColour = "white", swingColour = "charcoal" } },
+    { key = "classic", name = "Classic", about = "Close to Blizzard's own: the classic bar, gold casts.", extras = { "look", "cast" }, values = {
+        barStyle = "glass", barColour = "orange", barTexture = "classic", font = "friz", iconBorder = "icon", iconShadow = "off",
+        barDarkness = 0, thickEdges = false, readyGlow = "proc", keybindPosition = "TOPRIGHT", keybindSize = 100,
+        prdHealthAt = "centre", prdHealthCentre = "value", prdPowerAt = "centre", prdPowerCentre = "value", prdTextNumbers = "full",
+        prdTextFont = "friz", prdHealthSize = 10, prdPowerSize = 10, prdExtraSize = 9, prdEnergySize = 9,
+        castColour = "default", castHeight = 18, castTickColour = "white", castTickStyle = "notches", castTickWidth = 2,
+        castTimeFormat = "left", castLatencyColour = "red", swingColour = "default" } },
+}
+local LOOK = {}
+for _, look in ipairs(P.LOOKS) do LOOK[look.key] = look end
+
+-- What a preset can switch on as well, each a tick (some for some classes).
+P.EXTRAS = {
+    { key = "keybinds", label = "Keybinds on icons", settings = { "keybinds" } },
+    { key = "text", label = "Health and power text", settings = { "prdText" } },
+    { key = "look", label = "The look on Blizzard's bars", settings = { "skin", "prdSkin" },
+        about = "Apply this look to Blizzard's Cooldown Manager and resource display. Needs a reload." },
+    { key = "cast", label = "Your own cast bar", settings = { "castBar" } },
+    { key = "ticks", label = "Cast bar tick marks", settings = { "castTicks" }, about = "Tick marks on channelled spells." },
+    { key = "latency", label = "Cast bar latency", settings = { "castLatency" }, about = "Your latency at the end of each cast." },
+    { key = "combo", label = "Combo points", settings = { "prdCombo" }, classes = { ROGUE = true, DRUID = true },
+        about = "Combo points under your energy bar." },
+    { key = "energy", label = "Energy bar in other forms", settings = { "prdEnergy" }, classes = { DRUID = true } },
+    { key = "tidy", label = "Tidy extra mana bar", settings = { "prdHideRepeat" }, classes = { DRUID = true } },
+}
+-- A look made yours in the panel: its font and colour, in place of its own.
+local OWN = { font = "font", colour = "barColour" }
+
+-- The choices to offer you: every extra, or those for your class.
+function P.ExtrasFor(class)
+    local list = {}
+    for _, extra in ipairs(P.EXTRAS) do
+        if not extra.classes or extra.classes[class] then list[#list + 1] = extra end
+    end
+    return list
+end
+
+-- An extra is on when all it switches is on already.
+function P.ExtraOn(extra)
+    for _, key in ipairs(extra.settings) do
+        if ns.Get(key) ~= true then return false end
+    end
+    return true
+end
+
+-- What a preset sets for you now ("keep": nothing of its own): its values
+-- the addon takes, less text on a bar you switched off (a preset never
+-- turns it back on), with own (font, colour) in place of its own. Nil for
+-- no such preset.
+function P.LookValues(key, own)
+    local look = LOOK[key]
+    if not look and key ~= "keep" then return nil end
+    local values = {}
+    for setting, value in pairs(look and look.values or {}) do
+        local skip = (setting == "prdHealthAt" or setting == "prdPowerAt") and ns.GetSaved(setting) == "off"
+        if not skip and ns.Valid(setting, value) then values[setting] = value end
+    end
+    for which, setting in pairs(OWN) do
+        local value = own and own[which]
+        if value ~= nil and ns.Valid(setting, value) then values[setting] = value end
+    end
+    return values
+end
+
+-- A look shown on your bars for a moment while you pick (nil for yours),
+-- nothing saved.
+function P.PreviewLook(key, own)
+    local values = key and P.LookValues(key, own)
+    ns.PreviewLook(values and next(values) and values or nil)
+    P.RedrawLook()
+end
+
+-- After keys on icons were switched on or off: Keybinds.lua reads your
+-- action bars again first, as the Look page's tick has it do.
+local function Rekey(undo)
+    if not ns.Keybinds then return end
+    for _, setting in ipairs(undo.on) do
+        if setting == "keybinds" then return ns.Keybinds:Update() end
+    end
+end
+
+-- A preset's look (made yours by own), and the extras ticked (by key),
+-- switched on: what was there kept for Undo, back to before the first
+-- preset since the last Undo. A message to show.
+function P.ApplyLook(key, extras, own)
+    local values = P.LookValues(key, own)
+    if not values then return false, "There's no preset called that." end
+    local look = LOOK[key]
+    ns.PreviewLook(nil)
+    local undo, turned = P.undo or { values = {}, on = {} }, {}
+    ns.SetMany(function()
+        for setting, value in pairs(values) do
+            if undo.values[setting] == nil then undo.values[setting] = ns.Get(setting) end
+            ns.Set(setting, value)
+        end
+        for _, extra in ipairs(P.EXTRAS) do
+            if extras and extras[extra.key] and not P.ExtraOn(extra) then
+                for _, setting in ipairs(extra.settings) do
+                    if ns.Get(setting) ~= true then
+                        undo.on[#undo.on + 1] = setting
+                        ns.Set(setting, true)
+                    end
+                end
+                turned[#turned + 1] = extra.label
+            end
+        end
+    end)
+    P.undo = undo
+    Rekey(undo)
+    P.RedrawLook()
+    local said = look and (look.name .. " look applied") or next(values) and "Your look changed" or "Your look kept"
+    if #turned > 0 then said = said .. ", and turned on: " .. table.concat(turned, ", ") end
+    if ns.NeedsReload and ns.NeedsReload() then said = said .. ". Reload to finish" end
+    return true, said .. "."
+end
+
+function P.CanUndoLook()
+    return P.undo ~= nil
+end
+
+-- The look before the presets, and anything they turned on off again.
+function P.UndoLook()
+    local undo = P.undo
+    if not undo then return false, "Nothing to undo." end
+    P.undo = nil
+    ns.PreviewLook(nil)
+    ns.SetMany(function()
+        for setting, value in pairs(undo.values) do ns.Set(setting, value) end
+        for _, setting in ipairs(undo.on) do ns.Set(setting, false) end
+    end)
+    Rekey(undo)
+    P.RedrawLook()
+    return true, "Your look before the presets is back."
 end
 
 -- A string read by P.Read as a new profile (Core.lua's ns.ImportProfile),

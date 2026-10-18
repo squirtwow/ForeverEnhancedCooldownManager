@@ -2036,6 +2036,29 @@ end
         "no percent call or curve: blank, with no error")
     _G.CurveConstants = { ScaleTo100 = curve }
 
+    -- A druid's extra mana bar (off until picked): your mana, whatever your
+    -- power, Blizzard's text there see-through while ours shows; another
+    -- power ticking doesn't write it. Then the energy bar's, on that bar.
+    do
+        display = Fresh({ prdText = true, prdExtraAt = "centre" })
+        local alternate = display.AlternatePowerBar
+        local xp = ns.Resource.textHolders.extra
+        Equal(tostring(S[xp].parent == alternate) .. " " .. Spots(xp) .. " " .. BlizzardText(alternate),
+            'true %s [secret text] | "nil" | "nil" 000', "the extra mana bar: your mana in the middle, Blizzard's text there see-through")
+        Asked()
+        Fire("UNIT_POWER_FREQUENT", "player", "RAGE")
+        Equal(Asked(), "", "rage ticking writes neither your mana bar's text nor the extra mana bar's")
+        ns.Set("prdEnergy", true)
+        ns.Set("prdEnergyAt", "sides")
+        ns.Resource:Apply()
+        local ep = ns.Resource.textHolders.energy
+        Equal(tostring(ep ~= nil and S[ep].parent == ns.Resource:ComboRow()) .. " " .. Spots(ep), 'true "nil" | %s [secret text] | %.0f%% [secret]',
+            "the energy bar in other forms: your energy as a pair at its ends, on that bar")
+        ns.Set("prdExtraAt", "off")
+        ns.Resource:Apply()
+        Equal(BlizzardText(alternate), "111", "off again: Blizzard's text on the extra mana bar comes back")
+    end
+
     -- The game refusing a number: that bar's text goes blank, quiet and away,
     -- Blizzard's own text there comes back, and you're told once.
     display = Fresh({ prdText = true })
