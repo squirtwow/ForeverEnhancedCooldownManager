@@ -5341,12 +5341,36 @@ Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
     local font, fills = w.fontChoice, w.fills
     local cdBar, buffBar, castBar = B:Get("cd"), B:Get("buff"), ns.CastBar.row.bar
 
-    -- Four of the game's own fonts, each name in its own face; Friz Quadrata
-    -- and flat, as before, until you pick another.
-    local labels = {}
-    for i, button in ipairs(font.buttons) do labels[i] = S[button.label].text .. ":" .. Last(button.label, "SetFontObject") end
-    Equal(table.concat(labels, " "), "Friz:FECMSamplefriz Arial:FECMSamplearial Morpheus:FECMSamplemorpheus Skurri:FECMSampleskurri",
-        "four of the game's fonts, each name in its own face")
+    -- Four of the game's own fonts and Game font (1.8.0: the rest of the
+    -- game's, in its language), each name in its own face, each pill as wide
+    -- as its name needs (about 6.5 units a letter in the small font); Friz
+    -- Quadrata and flat, as before, until you pick another.
+    local labels, cramped = {}, {}
+    for i, button in ipairs(font.buttons) do
+        labels[i] = S[button.label].text .. ":" .. Last(button.label, "SetFontObject")
+        if #S[button.label].text * 6.5 + 4 > S[button].width then cramped[#cramped + 1] = S[button.label].text end
+    end
+    Equal(table.concat(labels, " ") .. " | " .. table.concat(cramped, ", "), "Friz:FECMSamplefriz Arial:FECMSamplearial"
+        .. " Morpheus:FECMSamplemorpheus Skurri:FECMSampleskurri Game:FECMSamplegame | ",
+        "four of the game's fonts and Game font, each name in its own face and inside its pill")
+    Hover(font.buttons[5], "OnEnter")
+    Equal(S[w.note].text, "Game font, your game's own, for names in any language, for countdowns, counts, keys and names on icons, and the"
+        .. " text on your cast bar and Tracked Bars. (experimental)", "Game font says what it's for, quietly experimental")
+    Hover(font.buttons[5], "OnLeave")
+    -- Every font's and texture's note fits the footer's two lines (about 6.5
+    -- units a letter in the small font).
+    local long = {}
+    for _, control in ipairs(font.buttons) do
+        Hover(control, "OnEnter")
+        if #S[w.note].text * 6.5 > 2 * S[w.note].width then long[#long + 1] = S[control.label].text end
+        Hover(control, "OnLeave")
+    end
+    for _, control in ipairs(fills) do
+        Hover(control, "OnEnter")
+        if #S[w.note].text * 6.5 > 2 * S[w.note].width then long[#long + 1] = control.key end
+        Hover(control, "OnLeave")
+    end
+    Equal(table.concat(long, ", "), "", "each font's and texture's note fits the footer's two lines")
     Equal(Last(FECMSamplearial, "SetFont", 1) .. " " .. Last(FECMSamplemorpheus, "SetFont", 1) .. " " .. Last(FECMSampleskurri, "SetFont", 1),
         ARIAL .. " Fonts\\MORPHEUS.ttf " .. SKURRI, "from the game's own files")
     Equal(font.selected .. " " .. ns.Get("font") .. " " .. Last(FECMFont18, "SetFont", 1) .. " " .. S[cdBar.icons[1].label].template .. " "

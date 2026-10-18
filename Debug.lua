@@ -13,6 +13,41 @@ local function Say(value)
     return tostring(value)
 end
 
+-- A word in each language a font may not write (Chinese, Korean, Russian),
+-- measured in each font on a hidden line, English first, for scale. Letters
+-- a font lacks don't measure 0 (an English game gave 16 for two Chinese
+-- letters in every font), so compare: the font that draws them measures
+-- them differently from the rest.
+local SAMPLES = { { "en", "Abc" }, { "zh", "中文" }, { "ko", "한글" }, { "ru", "Рус" } }
+local measure
+
+local function Width(file, text)
+    if not measure then
+        measure = UIParent:CreateFontString(nil, "BACKGROUND")
+        measure:Hide()
+    end
+    local ok, done = pcall(measure.SetFont, measure, file, 12, "")
+    if not ok or done == false then return "refused" end
+    measure:SetText(text)
+    return tostring(math.floor((measure:GetStringWidth() or 0) + .5))
+end
+
+-- The fonts: your game's language and its own font, each setting's font,
+-- the file the addon's text is in now, and each font's sample widths.
+local function Fonts(Add)
+    local Style = ns.Style
+    local inUse = _G[Style:Font(13)]
+    Add(("Fonts: game language %s, game font %s, Game font first %s"):format(Say(GetLocale and GetLocale()),
+        Say(STANDARD_TEXT_FONT), tostring(ns.GAME_FONT_FIRST)))
+    Add(("Font %s, text %s, raid warnings %s; in use %s"):format(tostring(ns.Get("font")), tostring(ns.Get("prdTextFont")),
+        tostring(ns.Get("warningFont")), Say(inUse and inUse.GetFont and inUse:GetFont())))
+    for _, key in ipairs(ns.FONT_KEYS) do
+        local file, widths = Style.FONTS[key], {}
+        for _, sample in ipairs(SAMPLES) do widths[#widths + 1] = sample[1] .. " " .. Width(file, sample[2]) end
+        Add(("  %s (%s): %s"):format(key, tostring(file), table.concat(widths, ", ")))
+    end
+end
+
 function ns.DebugReport()
     local lines = {}
     local function Add(text) lines[#lines + 1] = text end
@@ -22,6 +57,7 @@ function ns.DebugReport()
         Say(class), Say(UnitLevel and UnitLevel("player")), tostring(InCombatLockdown())))
     Add(("Look: icon border %s, shadow %s, ready glow %s"):format(tostring(ns.Get("iconBorder")), tostring(ns.Get("iconShadow")),
         tostring(ns.Get("readyGlow"))))
+    if ns.Style then Fonts(Add) end
     if ns.Bars and ns.Bars.Report then ns.Bars:Report(Add, Say) end
     return table.concat(lines, "\n")
 end

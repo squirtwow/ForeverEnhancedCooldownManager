@@ -43,7 +43,9 @@ function S:BarTexture()
 end
 
 -- The fonts the numbers and text can be in: the game's own, so every player
--- has them. Friz Quadrata is the /ccm window's too.
+-- has them. Friz Quadrata is the /ccm window's too. Game font is the one the
+-- rest of the game is in, for its language: Friz Quadrata in English, a
+-- Chinese, Korean or Cyrillic one where the others can't write the names.
 S.FONTS = {
     friz = "Fonts\\FRIZQT__.TTF",
     arial = "Fonts\\ARIALN.TTF",
@@ -51,6 +53,7 @@ S.FONTS = {
     skurri = "Fonts\\skurri.ttf",
 }
 local FONT = S.FONTS.friz
+S.FONTS.game = type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT ~= "" and STANDARD_TEXT_FONT or FONT
 local THICK = 16 -- from this size up, a heavier outline
 local made = {}
 
@@ -116,14 +119,14 @@ function S:ApplyFont()
     for size, font in pairs(made) do Face(font, file, size, Outline(size)) end
 end
 
--- Spell names under icons: the game's own small text, or a copy of it in the
--- font chosen, the same size and shadow.
+-- Spell names under icons: the game's own small text (in Friz Quadrata or
+-- Game font), or a copy of it in the font chosen, the same size and shadow.
 local NAMES = "GameFontHighlightSmall"
 local names
 
 function S:NameFont()
     local file, small = self:FontFile(), _G[NAMES]
-    if file == FONT or not (small and small.GetFont) then return NAMES end
+    if file == FONT or ns.Get("font") == "game" or not (small and small.GetFont) then return NAMES end
     if not names then
         names = CreateFont("FECMNames")
         names:CopyFontObject(small)

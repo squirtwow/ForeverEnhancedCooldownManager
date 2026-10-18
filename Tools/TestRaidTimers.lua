@@ -1095,7 +1095,7 @@ for _, control in ipairs(controls) do
     local hint = type(control.hint) == "function" and control.hint(control) or control.hint
     if type(hint) ~= "string" or hint == "" or hint:find("\226\128\148", 1, true) then quiet = quiet + 1 end
 end
-Equal(#controls .. " " .. quiet, "44 0", "every tick, choice, colour, size and button has a note, none with an em dash")
+Equal(#controls .. " " .. quiet, "45 0", "every tick, choice, colour, size and button has a note, none with an em dash")
 -- No "In the game" section: no heading, no how-to lines anywhere on the page.
 -- The boss cast bars' how-to stays in the Edit Mode button's own note.
 do

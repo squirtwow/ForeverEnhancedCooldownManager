@@ -773,6 +773,13 @@ function P.LookValues(key, own)
         local skip = (setting == "prdHealthAt" or setting == "prdPowerAt") and ns.GetSaved(setting) == "off"
         if not skip and ns.Valid(setting, value) then values[setting] = value end
     end
+    -- A game in Chinese, Korean or Russian keeps its own font, which can
+    -- write its names and its short numbers' word (like 万), unless you pick
+    -- another yourself.
+    if ns.GAME_FONT_FIRST then
+        if values.font ~= nil then values.font = "game" end
+        if values.prdTextFont ~= nil and values.prdTextFont ~= "look" then values.prdTextFont = "game" end
+    end
     for which, setting in pairs(OWN) do
         local value = own and own[which]
         if value ~= nil and ns.Valid(setting, value) then values[setting] = value end

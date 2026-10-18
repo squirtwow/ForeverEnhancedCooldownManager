@@ -41,7 +41,7 @@ EraUI.
 - Health and power text: the numbers on its bars, in the centre or left and
   right, as value, value / max or percent, in the size and font you like.
   Druids can put it on the extra mana bar and the energy bar too (off by
-  default, experimental)
+  default)
 - Combo points under your energy bar for rogues and druids in cat form, which
   Forever's display leaves out (off by default)
 - Druids: your energy bar under it in your other forms too (off by default,
@@ -93,7 +93,9 @@ EraUI.
 - Swap with my form: each form, stance or Stealth gets its own icons on the
   Cooldowns and Utility bars, swapped as you change, in a fight too (off by
   default)
-- Your choice of font and bar texture on the Look page
+- Your choice of font and bar texture on the Look page. Game font shows
+  Chinese, Korean and Russian names, and is picked for you if your game is in
+  one (experimental)
 
 ## Layouts
 - One click stacks your bars around your Personal Resource Display: Pyramid,

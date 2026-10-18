@@ -286,18 +286,30 @@ end
 
 -- Joined buttons; the chosen one fills with the accent. Each is an equal
 -- share of the width, unless the items give their own (item.width): all
--- or none, since a share takes no account of the widths given.
+-- or none, since a share takes no account of the widths given. With
+-- items.fit, each share goes by its label's length instead, for a row
+-- whose names differ a lot (the fonts: Friz beside Morpheus).
 function T:Segmented(parent, items, width, onSelect)
     local bar = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     bar:SetSize(width, 20)
     self:Flat(bar, T.FIELD, T.CONTROL_BORDER)
     bar.buttons = {}
     local each, x = (width - 2) / #items, 1
+    local shares = {}
+    if items.fit then
+        local letters = 0
+        for i, item in ipairs(items) do
+            shares[i] = #item.label + 3 -- a little room either side
+            letters = letters + shares[i]
+        end
+        for i in ipairs(items) do shares[i] = (width - 2) * shares[i] / letters end
+    end
     for i, item in ipairs(items) do
         local button = CreateFrame("Button", nil, bar)
-        button:SetSize(item.width or each, 18)
+        local share = item.width or shares[i] or each
+        button:SetSize(share, 18)
         button:SetPoint("LEFT", x, 0)
-        x = x + (item.width or each)
+        x = x + share
         button.fill = button:CreateTexture(nil, "BACKGROUND")
         button.fill:SetAllPoints()
         button.label = self:Text(button, "GameFontHighlightSmall")

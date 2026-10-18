@@ -2180,6 +2180,33 @@ do
         "the labels fit their room, and a refusal fits on one line")
 end
 
+-- Game font (1.8.0): a game in Chinese, Korean or Russian starts in its own
+-- font, which can write its names; Friz Quadrata and the rest can't.
+do
+    local locale, standard = _G.GetLocale, _G.STANDARD_TEXT_FONT
+    _G.GetLocale, _G.STANDARD_TEXT_FONT = function() return "zhTW" end, "Fonts\\blei00d.TTF"
+    local ns = Start({})
+    local P = ns.ProfileShare
+    Equal(table.concat({ tostring(ns.GAME_FONT_FIRST), ns.Get("font"), ns.Get("warningFont"), ns.Style.FONTS.game,
+        ns.Style:FontFile(), ns.Style:NameFont() }, " | "),
+        "true | game | game | Fonts\\blei00d.TTF | Fonts\\blei00d.TTF | GameFontHighlightSmall",
+        "a game in Chinese: Game font by default, for icons and raid warnings, in the game's own file; names in its small text")
+    Equal(P.LookValues("bold").font .. " " .. P.LookValues("minimal", { font = "skurri" }).font .. " "
+        .. P.LookValues("minimal").prdTextFont .. " " .. P.LookValues("clean").prdTextFont, "game skurri game look",
+        "a preset keeps Game font there, for the display's text too, unless you pick another in Make it yours")
+    local report = ns.DebugReport()
+    Equal(tostring(report:match("Fonts: [^\n]*")) .. " | " .. tostring(report:match("\n  game %(([^)]*)%)")) .. " | "
+        .. tostring(report:match("\n  friz %([^)]*%): (en %S+, zh %S+, ko %S+, ru %S+)\n") ~= nil),
+        "Fonts: game language zhTW, game font Fonts\\blei00d.TTF, Game font first true | Fonts\\blei00d.TTF | true",
+        "/ccm debug: the game's language and font, each font's file and its sample widths")
+    _G.GetLocale, _G.STANDARD_TEXT_FONT = function() return "enUS" end, "Fonts\\FRIZQT__.TTF"
+    ns = Start({})
+    Equal(table.concat({ tostring(ns.GAME_FONT_FIRST), ns.Get("font"), ns.Get("warningFont"), ns.Style.FONTS.game,
+        ns.ProfileShare.LookValues("bold").font }, " | "), "false | friz | friz | Fonts\\FRIZQT__.TTF | skurri",
+        "in English: Friz Quadrata as before, Game font is Friz Quadrata, and presets keep their own fonts")
+    _G.GetLocale, _G.STANDARD_TEXT_FONT = locale, standard
+end
+
 print = _G.print
 Equal(SecretMisuse[1], nil, "no secret misused anywhere")
 Equal(WidgetMisses[1], nil, "no method Forever lacks looked for anywhere")

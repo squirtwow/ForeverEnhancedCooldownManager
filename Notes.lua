@@ -10,6 +10,21 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.8.0",
+        sections = {
+            { "Added", {
+                "Presets on the Look page: a whole look in one click, with live preview and Undo.",
+                "Latency on the cast bar: a zone showing its ms, in a colour you pick.",
+                "Cast bar time can show time left / whole cast, like 1.5 / 3.0.",
+                "Health and power text on a druid's extra mana and energy bars, each with its own size.",
+                "Game font: shows Chinese, Korean and Russian names, picked for you if your game is in one (experimental).",
+            } },
+            { "Fixed", {
+                "Channel tick marks are now all the same width at any UI scale.",
+            } },
+        },
+    },
+    {
         version = "1.7.3",
         sections = {
             { "Added", {

@@ -46,6 +46,7 @@ local FONT_NOTES = {
     arial = "Arial Narrow, plain and narrow",
     morpheus = "Morpheus, the game's storybook lettering",
     skurri = "Skurri, heavy like the game's big numbers",
+    game = "Game font, your game's own, for names in any language",
 }
 local FONT_USE = ", for countdowns, counts, keys and names on icons, and the text on your cast bar and Tracked Bars."
 local TEXTURE_NOTES = {
@@ -145,7 +146,7 @@ local NUMBER_NOTES = {
 
 -- A row of choices that sets key, with its label; each choice says what it does.
 local function PanelPills(window, dialog, label, key, keys, names, width, notes, Changed)
-    local items = {}
+    local items = { fit = key == "prdTextFont" } -- the fonts, by their names' length
     for _, choice in ipairs(keys) do items[#items + 1] = { key = choice, label = names[choice] } end
     local pills = T:Segmented(dialog, items, width, function(value)
         ns.Set(key, value)
@@ -240,9 +241,6 @@ local function TextPanel(window)
     shade.dialog = dialog
     local title = T:Heading(dialog, "Health and power text")
     title:SetPoint("TOPLEFT", 16, -16)
-    local quiet = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
-    quiet:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    quiet:SetText("experimental")
     local tray, preview = PanelPreview(dialog)
     shade.preview, shade.tray = preview, tray
     local function Changed()
@@ -544,7 +542,7 @@ local function PresetsPanel(window)
         label:SetText(text)
     end
     OwnLabel("Font", PRESET_OWN)
-    local fontItems = { { key = "look", label = "Look's own" } }
+    local fontItems = { { key = "look", label = "Look's own" }, fit = true }
     for _, key in ipairs(ns.FONT_KEYS) do fontItems[#fontItems + 1] = { key = key, label = ns.FONT_NAMES[key]:match("^%S+") } end
     local fonts = T:Segmented(dialog, fontItems, 380, function(key)
         own.font = key ~= "look" and key or nil
@@ -683,7 +681,7 @@ end
 local function TextRow(window, Choice, x)
     local options = window.lookOptions
     local tick = Choice("Health and power text", "prdText", -181,
-        "Your health and power as numbers on the resource display, in and out of combat. (experimental)",
+        "Your health and power as numbers on the resource display, in and out of combat.",
         function() if ns.Resource then ns.Resource:Apply() end end, x)
     local setUp = T:Button(options, "Set up", 64, 18)
     setUp:SetPoint("LEFT", tick, "RIGHT", 8, 0)
@@ -947,7 +945,7 @@ local function BuildLook(window, page, width)
     local fontLabel = T:Text(options, "GameFontHighlight")
     fontLabel:SetPoint("TOPLEFT", KEYS_X, -92)
     fontLabel:SetText("Font")
-    local fontItems = {}
+    local fontItems = { fit = true }
     for _, key in ipairs(ns.FONT_KEYS) do
         fontItems[#fontItems + 1] = { key = key, label = ns.FONT_NAMES[key]:match("^%S+") }
     end
@@ -958,7 +956,9 @@ local function BuildLook(window, page, width)
     font:SetPoint("TOPLEFT", FACES_X, -88)
     for _, button in ipairs(font.buttons) do
         button.label:SetFontObject(ns.Style:SampleFont(button.key))
-        window:Hint(button, FONT_NOTES[button.key] .. FONT_USE .. (button.key ~= ns.DEFAULTS.font and UNTESTED or ""))
+        -- Friz Quadrata the one seen in game (the default's Game font where
+        -- the game is in Chinese, Korean or Russian, not yet seen there).
+        window:Hint(button, FONT_NOTES[button.key] .. FONT_USE .. (button.key ~= "friz" and UNTESTED or ""))
     end
     local textureLabel = T:Text(options, "GameFontHighlight")
     textureLabel:SetPoint("TOPLEFT", KEYS_X, -120)

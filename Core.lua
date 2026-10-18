@@ -45,6 +45,12 @@ function ns.CompareVersions(a, b)
     return 0
 end
 
+-- A game in Chinese, Korean or Russian: Friz Quadrata and the game's other
+-- Latin fonts can't write its names, so its own font is the default there.
+local LOCALE = GetLocale and GetLocale()
+ns.GAME_FONT_FIRST = LOCALE == "zhCN" or LOCALE == "zhTW" or LOCALE == "koKR" or LOCALE == "ruRU"
+local FONT = ns.GAME_FONT_FIRST and "game" or "friz"
+
 ns.DEFAULTS = {
     skin = true,
     useBars = false, -- the addon's own bars
@@ -54,7 +60,7 @@ ns.DEFAULTS = {
     barStyle = "glass", -- Blizzard's Tracked Bars: glass, split or outline
     barColour = "orange", -- and their colour
     barTexture = "flat", -- the fill of the addon's bars and the restyled ones: flat, or one of the game's (Look page)
-    font = "friz", -- the numbers and text on icons and bars: Friz Quadrata, or another of the game's fonts
+    font = FONT, -- the numbers and text on icons and bars: Friz Quadrata, or another of the game's fonts
     prdSkin = true, -- Blizzard's Personal Resource Display in the same design
     prdHideRepeat = true, -- its second mana bar hidden while the main one is mana
     prdHealth = "default", -- its bars' colours: Blizzard's, or a bar colour
@@ -113,7 +119,7 @@ ns.DEFAULTS = {
     pullColour = "default", -- its bar: Blizzard's red, or a bar colour
     pullNumbers = "gold", -- its big numbers: Blizzard's gold, white, or the bar's colour
     raidWarnings = false, -- raid warnings and boss emotes in a font of your choice
-    warningFont = "friz",
+    warningFont = FONT,
     warningOutline = "outline", -- none, outline or thick
     warningShadow = true,
     warningColour = "default", -- raid warnings: Blizzard's colour, or a text colour
@@ -214,8 +220,9 @@ for _, key in ipairs(ns.BAR_COLOUR_KEYS) do ns.LATENCY_COLOUR_KEYS[#ns.LATENCY_C
 ns.TIME_FORMAT_KEYS = { "left", "total" }
 -- The game's own fonts and bar textures, so every player has them (their
 -- files are in Style.lua).
-ns.FONT_KEYS = { "friz", "arial", "morpheus", "skurri" }
-ns.FONT_NAMES = { friz = "Friz Quadrata", arial = "Arial Narrow", morpheus = "Morpheus", skurri = "Skurri" }
+-- Game font: the one the rest of your game uses, in your game's language.
+ns.FONT_KEYS = { "friz", "arial", "morpheus", "skurri", "game" }
+ns.FONT_NAMES = { friz = "Friz Quadrata", arial = "Arial Narrow", morpheus = "Morpheus", skurri = "Skurri", game = "Game font" }
 ns.BAR_TEXTURE_KEYS = { "flat", "classic", "raid", "skills" }
 ns.BAR_TEXTURE_NAMES = { flat = "Flat", classic = "Classic", raid = "Raid", skills = "Skills" }
 -- Raid Timers: the countdown's big numbers, the raid warnings' outline and their
@@ -245,7 +252,7 @@ ns.TEXT_FORMAT_KEYS = { "none", "value", "both", "percent" }
 ns.TEXT_FORMAT_NAMES = { none = "None", value = "Value", both = "Value / max", percent = "Percent" }
 ns.TEXT_NUMBER_KEYS = { "full", "short" }
 ns.TEXT_NUMBER_NAMES = { full = "4,321", short = "4.3K" }
-ns.TEXT_FONT_KEYS = { "look", "friz", "arial", "morpheus", "skurri" }
+ns.TEXT_FONT_KEYS = { "look", "friz", "arial", "morpheus", "skurri", "game" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },

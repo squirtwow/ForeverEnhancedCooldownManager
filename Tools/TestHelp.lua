@@ -1601,8 +1601,8 @@ end)()
     end
     Equal(tostring(tick:IsVisible()) .. " " .. tostring(tick:GetChecked()) .. " " .. S[tick.text].text .. " | " .. S[setUp.label].text
         .. " | " .. Note(tick), "true false Health and power text | Set up | Your health and power as numbers on the resource display,"
-        .. " in and out of combat. (experimental)", "the tick, off by default, named like its panel, its note quietly experimental,"
-        .. " with Set up beside it")
+        .. " in and out of combat.", "the tick, off by default, named like its panel, its note (no longer marked experimental:"
+        .. " seen working in game, 1.8.0), with Set up beside it")
     local tickLeft, tickTop, tickRight, tickBottom = Fit.Rect(tick)
     local setLeft, setTop, setRight, setBottom = Fit.Rect(setUp)
     local _, comboTop, comboRight = Fit.Rect(w.combo)
@@ -1966,7 +1966,7 @@ end)()
             ns.Set(choice[1], was)
         end
     end
-    Equal(tostring(w.keyPlace:IsVisible()) .. " " .. tostring(w.prdText:GetChecked()) .. " " .. tried, "true true 56",
+    Equal(tostring(w.keyPlace:IsVisible()) .. " " .. tostring(w.prdText:GetChecked()) .. " " .. tried, "true true 58",
         "(keybinds' choices shown, the text ticked, and every choice tried twice)")
     Equal(table.concat(found, " | "), "", "in every state, each piece on the Look page inside its box (the preview, the choices,"
         .. " the Each bar box), none on another, and each row of the list inside it")

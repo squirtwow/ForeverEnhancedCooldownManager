@@ -244,7 +244,7 @@ function ns.BuildRaidTimersPage(window, page, width)
         return { swatches = swatches, chosen = chosen, key = key, colourOf = colourOf }
     end
     local function Pills(keys, names, setting, pillsWidth, x, y, note)
-        local items = {}
+        local items = { fit = setting == "warningFont" } -- the fonts, by their names' length
         for _, key in ipairs(keys) do items[#items + 1] = { key = key, label = names[key] } end
         local pills = T:Segmented(options, items, pillsWidth, function(key)
             ns.Set(setting, key)
