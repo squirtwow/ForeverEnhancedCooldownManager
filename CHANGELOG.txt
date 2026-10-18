@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.3
+
+### Added
+- Tick marks on channelled spells, on the Cast bar page, in the colour, style and width you like.
+
+### Fixed
+- Channelled spells show their name on the cast bar instead of "Channeling".
+
 ## 1.7.2
 
 ### Added

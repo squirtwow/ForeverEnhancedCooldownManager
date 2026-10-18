@@ -319,6 +319,127 @@ local function Clock(seconds)
     return ("%d:%02d left"):format(math.floor(seconds / 60), seconds % 60)
 end
 
+-- Tick marks ---------------------------------------------------------------------------
+-- Where each tick of a channelled spell lands, as thin marks across the bar
+-- (Cast bar page, off by default). How many times a spell ticks comes from
+-- Forever's own spell data: its duration over its period, by spell ID, so each
+-- rank has its own (made by Tools/MakeChannelTicks.mjs). The ticks are spread
+-- evenly over the channel as it started, so haste is counted, and keep their
+-- moments when a hit pushes the channel back: the ones past its new end go.
+-- Each is a pair of short light notches, one down from the bar's top edge and
+-- one up from its bottom, so they read as ticks rather than splitting the bar
+-- into blocks like the combo points.
+local CHANNEL_TICKS = {
+    [5143] = 3, [5144] = 4, [5145] = 5, [8416] = 5, [8417] = 5, [10211] = 5, [10212] = 5, [25345] = 5, -- Arcane Missiles
+    [10] = 8, [6141] = 8, [8427] = 8, [10185] = 8, [10186] = 8, [10187] = 8, -- Blizzard
+    [17767] = 5, [17850] = 5, [17851] = 5, [17852] = 5, [17853] = 5, [17854] = 5, -- Consume Shadows
+    [689] = 5, [699] = 5, [709] = 5, [7651] = 5, [11699] = 5, [11700] = 5, -- Drain Life
+    [5138] = 5, [6226] = 5, [11703] = 5, [11704] = 5, -- Drain Mana
+    [1120] = 5, [8288] = 5, [8289] = 5, [11675] = 5, -- Drain Soul
+    [12051] = 8, -- Evocation
+    [746] = 6, [1159] = 6, [3267] = 7, [3268] = 7, [7926] = 8, [7927] = 8, [10838] = 8, [10839] = 8, [18608] = 8, [18610] = 8, [23567] = 8, [23568] = 8, [23569] = 8, [23696] = 8, [24412] = 8, [24413] = 8, [24414] = 8, [30020] = 10, [470345] = 8, [1290863] = 8, [1290865] = 8, [1290867] = 8, -- First Aid
+    [755] = 10, [3698] = 10, [3699] = 10, [3700] = 10, [11693] = 10, [11694] = 10, [11695] = 10, -- Health Funnel
+    [1949] = 15, [11683] = 15, [11684] = 15, -- Hellfire
+    [16914] = 10, [17401] = 10, [17402] = 10, -- Hurricane
+    [136] = 5, [3111] = 5, [3661] = 5, [3662] = 5, [13542] = 5, [13543] = 5, [13544] = 5, -- Mend Pet
+    [15407] = 3, [17311] = 3, [17312] = 3, [17313] = 3, [17314] = 3, [18807] = 3, -- Mind Flay
+    [5740] = 4, [6219] = 4, [11677] = 4, [11678] = 4, -- Rain of Fire
+    [10797] = 6, [19296] = 6, [19299] = 6, [19302] = 6, [19303] = 6, [19304] = 6, [19305] = 6, -- Starshards
+    [740] = 5, [8918] = 5, [9862] = 5, [9863] = 5, -- Tranquility
+    [1510] = 6, [14294] = 6, [14295] = 6, -- Volley
+    [1316697] = 6, -- Wrack
+}
+local MARK_COLOURS = { white = { 1, 1, 1, .8 }, black = { 0, 0, 0, .85 } }
+local NOTCH = .35 -- each notch's share of the bar's height
+local NONE = {}
+
+-- White, black or a bar colour, as chosen on the Cast bar page.
+function C:MarkColour(key)
+    key = key or ns.Get("castTickColour")
+    if MARK_COLOURS[key] then return MARK_COLOURS[key] end
+    local colour = Style:BarColour(key)
+    return { colour[1], colour[2], colour[3], 1 }
+end
+
+local function Notch(bar)
+    return bar:CreateTexture(nil, "OVERLAY", nil, -6)
+end
+
+-- One screen pixel in the bar's own units. A notch a whole number of them
+-- wide is drawn the same width wherever it lands; one that isn't comes out
+-- one pixel wider or narrower here and there as the game rounds its edges.
+local function Pixel(frame)
+    local _, high = GetPhysicalScreenSize and GetPhysicalScreenSize()
+    local scale = type(frame.GetEffectiveScale) == "function" and frame:GetEffectiveScale()
+    if not (type(high) == "number" and high > 0 and type(scale) == "number" and scale > 0) then return 1 end
+    return 768 / high / scale
+end
+
+-- Marks on a cast bar's bar at these fractions of its width from the left,
+-- in the colour, style and width chosen; any it had past those hide. For
+-- your cast bar and the Cast bar page's preview alike.
+function C:Marks(bar, at)
+    local marks = bar.marks or {}
+    bar.marks = marks
+    local width, height, shown = bar:GetWidth(), bar:GetHeight(), 0
+    if type(width) == "number" and width > 0 then
+        local px = Pixel(bar)
+        local wide = ns.Get("castTickWidth") * px
+        local lines = ns.Get("castTickStyle") == "lines"
+        local tall = math.max(2, math.floor((type(height) == "number" and height or 0) * NOTCH / px + .5)) * px
+        local colour = self:MarkColour()
+        for _, share in ipairs(at) do
+            local x = share * width
+            if x > wide and x < width - wide then
+                shown = shown + 1
+                local mark = marks[shown]
+                if not mark then
+                    mark = { top = Notch(bar), bottom = Notch(bar) }
+                    marks[shown] = mark
+                end
+                local top, bottom = mark.top, mark.bottom
+                top:SetColorTexture(colour[1], colour[2], colour[3], colour[4])
+                top:SetWidth(wide)
+                top:ClearAllPoints()
+                top:SetPoint("TOP", bar, "TOPLEFT", x, 0)
+                top:Show()
+                -- Lines: the top one right down the bar, and no bottom one.
+                if lines then
+                    top:SetPoint("BOTTOM", bar, "BOTTOMLEFT", x, 0)
+                    bottom:Hide()
+                else
+                    top:SetHeight(tall)
+                    bottom:SetColorTexture(colour[1], colour[2], colour[3], colour[4])
+                    bottom:SetWidth(wide)
+                    bottom:SetHeight(tall)
+                    bottom:ClearAllPoints()
+                    bottom:SetPoint("BOTTOM", bar, "BOTTOMLEFT", x, 0)
+                    bottom:Show()
+                end
+            end
+        end
+    end
+    for i = shown + 1, #marks do
+        marks[i].top:Hide()
+        marks[i].bottom:Hide()
+    end
+end
+
+local function HideMarks()
+    C:Marks(row.bar, NONE)
+end
+
+-- The bar is the time left (full to empty), so the tick k periods in sits as
+-- far along as the time left at that moment.
+local function PlaceMarks()
+    if not (cast and cast.ticks) then return HideMarks() end
+    local at = {}
+    for k = 1, cast.ticks - 1 do
+        at[k] = (cast.finish - (cast.tickStart + k * cast.period)) / cast.total
+    end
+    C:Marks(row.bar, at)
+end
+
 local function Tick()
     local now = GetTime()
     if cast then
@@ -376,6 +497,7 @@ end
 local function DropCast()
     if not (cast or fading) then return end
     cast, fading = nil, nil
+    HideMarks()
     Handover(GetTime())
     Wake()
 end
@@ -400,10 +522,11 @@ end
 -- Casting ------------------------------------------------------------------------------
 
 local function Begin(channel, fresh)
+    local previous = cast
     local keep = cast and not cast.channel and not channel and cast.batch
-    local name, text, texture, startMS, endMS, id, tradeSkill
+    local name, text, texture, startMS, endMS, id, tradeSkill, spell, _
     if channel then
-        name, text, texture, startMS, endMS = UnitChannelInfo("player")
+        name, text, texture, startMS, endMS, _, _, spell = UnitChannelInfo("player")
     else
         name, text, texture, startMS, endMS, tradeSkill, id = UnitCastingInfo("player")
     end
@@ -421,15 +544,27 @@ local function Begin(channel, fresh)
         if fresh then cast.batch = Batch(tradeSkill) else cast.batch = keep or nil end
         if not Open(text) then cast.batch = nil end
     end
+    -- A channel's ticks: a pushback (not fresh) keeps the moments its start gave.
+    if channel and ns.Get("castTicks") and Open(spell) and CHANNEL_TICKS[spell] then
+        local ticks = CHANNEL_TICKS[spell]
+        local same = not fresh and previous and previous.channel and previous.spell == spell and previous.ticks
+        cast.spell, cast.ticks = spell, ticks
+        cast.tickStart = same and previous.tickStart or start
+        cast.period = same and previous.period or cast.total / ticks
+    end
     drawn = channel and "channel" or "cast"
     C:Look(row, channel)
     row.bar:SetMinMaxValues(0, cast.total)
     row.icon:SetTexture(texture)
     if cast.batch then
         row.bar.name:SetFormattedText("%s %d / %d", text, cast.batch.index, cast.batch.total)
+    elseif channel then
+        -- A channel's own name: the game's text for one is just "Channeling".
+        row.bar.name:SetText(name)
     else
         row.bar.name:SetText(text)
     end
+    PlaceMarks()
     row:SetAlpha(1)
     row:SetScript("OnUpdate", Tick)
     Tick()
@@ -439,12 +574,14 @@ end
 local function Done()
     if not cast.channel then row.bar:SetValue(cast.total) end
     cast, fading = nil, GetTime()
+    HideMarks()
 end
 
 -- Interrupted or failed: full and red, saying so, then it fades.
 local function Broken(text)
     local channel, total = cast.channel, cast.total
     cast, fading = nil, GetTime()
+    HideMarks()
     drawn = "broken"
     C:Look(row, channel, true)
     row.bar:SetValue(total)
@@ -471,7 +608,7 @@ function C:Event(event, id, interruptedBy)
     elseif event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_DELAYED" then
         Begin(false, event == "UNIT_SPELLCAST_START")
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_CHANNEL_UPDATE" then
-        Begin(true)
+        Begin(true, event == "UNIT_SPELLCAST_CHANNEL_START")
     elseif not cast then
         return
     elseif event == "UNIT_SPELLCAST_STOP" then
@@ -564,6 +701,8 @@ function C:Apply()
     Native(not casts)
     Restyle()
     if ns.Layout then ns.Layout:Stack() else self:Place() end
+    -- A channel's marks in the colour, style and width just chosen.
+    if cast and cast.ticks then PlaceMarks() end
 end
 
 function C:Start()
@@ -571,6 +710,8 @@ function C:Start()
     self.started = true
     row = self:Make(UIParent)
     row:SetAlpha(0)
+    -- A channel's tick marks move with the bar's width (a layout, the display's size).
+    row.bar:SetScript("OnSizeChanged", function() if cast and cast.ticks then PlaceMarks() end end)
     local events = CreateFrame("Frame")
     for _, event in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
         "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_DELAYED", "UNIT_SPELLCAST_CHANNEL_START",

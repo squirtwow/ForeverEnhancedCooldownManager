@@ -5732,6 +5732,30 @@ Equal(Last(cb.bar, "SetStatusBarColor", 2) .. " " .. string.format("%g", Last(cb
     "a channel: green, draining as it goes")
 Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 740, "Creature-0-1")
 Equal(S[cb.bar.name].text, "Interrupted", "a channel cut short says so too")
+-- Tick marks (off by default): a mark between each of a channel's ticks, from
+-- the game's data by spell ID; and a channel's own name, not the game's
+-- "Channeling".
+do
+    ns.Set("castTicks", true)
+    cb.bar:SetWidth(200) -- the game works it out from the bar's anchors
+    local channel = { "Drain Life", "Channeling", 136169, 106000, 111000, false, false, 689 }
+    _G.UnitChannelInfo = function() return table.unpack(channel) end
+    local function Marks()
+        local shown = 0
+        for _, mark in ipairs(cb.bar.marks or {}) do
+            if S[mark.top].shown and S[mark.bottom].shown then shown = shown + 1 end
+        end
+        return shown
+    end
+    Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 689)
+    Equal(S[cb.bar.name].text .. " " .. Marks(), "Drain Life 4", "a channel says its own name, with a mark between each of its 5 ticks")
+    channel[5] = 109000 -- pushed back: two seconds gone from its end
+    Fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", nil, 689)
+    Equal(Marks(), 2, "pushed back, the ticks keep their moments and those past its new end go")
+    Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 689)
+    Equal(Marks(), 0, "and the marks go with the channel")
+    ns.Set("castTicks", false)
+end
 _G.UnitChannelInfo = function() return nil end
 -- Times the game keeps secret: Blizzard's own bar shows that cast.
 casting = { "Wrath", "Wrath", 136006, SECRETS.number, SECRETS.number, false, "cast-4" }

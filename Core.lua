@@ -84,6 +84,10 @@ ns.DEFAULTS = {
     castName = true,
     castTime = true,
     castBatch = false, -- crafting a batch (Create All or a number): which one of how many, and the time left for them all
+    castTicks = false, -- marks where each tick of a channelled spell lands
+    castTickColour = "white", -- their colour: white, black or a bar colour
+    castTickStyle = "notches", -- notches at the bar's top and bottom edges, or lines right across
+    castTickWidth = 2, -- screen pixels
     swingTimer = false, -- a swing timer in the cast bar's spot: Auto Shot for hunters, the main hand for everyone
     swingColour = "default", -- its colour: silver, or a bar colour
     -- Raid Timers: Blizzard's own raid and dungeon timers restyled, each part on its own.
@@ -148,6 +152,7 @@ ns.KEYBIND_POSITIONS = { "BOTTOM", "TOPLEFT", "TOP", "TOPRIGHT" }
 ns.KEYBIND_POSITION_NAMES = { BOTTOM = "Bottom", TOPLEFT = "Top left", TOP = "Top", TOPRIGHT = "Top right" }
 -- Number settings, each within its limits: min, max, default.
 ns.CAST_HEIGHT = { 10, 32, 18 }
+ns.CAST_TICK_WIDTH = { 1, 6, 2 } -- screen pixels
 ns.MINIMAP_ANGLE = { 0, 359, 202 }
 ns.MINIMAP_PLACE = { -4000, 4000, 0 }
 ns.KEYBIND_SIZE = { 50, 150, 100 } -- min, max, default (percent)
@@ -164,7 +169,7 @@ ns.PULSE_LONG_TIME = { 3, 50, 25 } -- 0.3 to 5 seconds
 ns.PULSE_SEE_THROUGH = { 0, 90, 80 }
 ns.PULSE_GROW = { 100, 160, 135 }
 ns.PULSE_PLACE = { -4000, 4000, 0 }
-local NUMBERS = { castHeight = ns.CAST_HEIGHT, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
+local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTickWidth = ns.CAST_TICK_WIDTH, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
     barScale = ns.BAR_SCALE, barDarkness = ns.BAR_DARKNESS, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE,
     warningSize = ns.RAID_SIZE, emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
     pulseLongSize = ns.PULSE_LONG_SIZE, pulseLongTime = ns.PULSE_LONG_TIME,
@@ -177,6 +182,11 @@ ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
 ns.BAR_STYLE_NAMES = { glass = "Glass", split = "Split", outline = "Outline" }
 ns.BAR_COLOUR_KEYS = { "orange", "charcoal", "blue", "green", "purple", "class" } -- your class colour last
 ns.BAR_COLOUR_NAMES = { orange = "Orange", class = "Class", charcoal = "Charcoal", blue = "Blue", green = "Green", purple = "Purple" }
+-- A channel's tick marks: white, black or a bar colour; notches or lines.
+ns.TICK_COLOUR_KEYS = { "white", "black" }
+for _, key in ipairs(ns.BAR_COLOUR_KEYS) do ns.TICK_COLOUR_KEYS[#ns.TICK_COLOUR_KEYS + 1] = key end
+ns.TICK_STYLE_KEYS = { "notches", "lines" }
+ns.TICK_STYLE_NAMES = { notches = "Notches", lines = "Lines" }
 -- The game's own fonts and bar textures, so every player has them (their
 -- files are in Style.lua).
 ns.FONT_KEYS = { "friz", "arial", "morpheus", "skurri" }
@@ -214,8 +224,10 @@ ns.TEXT_FONT_KEYS = { "look", "friz", "arial", "morpheus", "skurri" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
-    keybindPosition = {}, font = {}, barTexture = {}, readyGlow = {} }
+    keybindPosition = {}, font = {}, barTexture = {}, readyGlow = {}, castTickColour = {}, castTickStyle = {} }
 for _, key in ipairs(ns.READY_GLOW_KEYS) do CHOICES.readyGlow[key] = true end
+for _, key in ipairs(ns.TICK_COLOUR_KEYS) do CHOICES.castTickColour[key] = true end
+for _, key in ipairs(ns.TICK_STYLE_KEYS) do CHOICES.castTickStyle[key] = true end
 for _, key in ipairs(ns.ACCENT_KEYS) do CHOICES.accent[key] = true end
 for _, key in ipairs(ns.KEYBIND_POSITIONS) do CHOICES.keybindPosition[key] = true end
 for _, key in ipairs(ns.BAR_STYLE_KEYS) do CHOICES.barStyle[key] = true end
@@ -274,7 +286,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "
     "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
     "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
     "prdPowerRight", "prdTextNumbers", "prdTextSize", "prdTextFont",
-    "castColour", "castHeight", "castIcon", "castName", "castTime", "swingColour",
+    "castColour", "castHeight", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "swingColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
     "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",

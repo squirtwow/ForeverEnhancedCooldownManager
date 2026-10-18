@@ -44,6 +44,8 @@ EraUI.
   experimental)
 - Your own cast bar right under it, with the spell's icon, name and time left
   (off by default)
+- Tick marks on channelled spells, like Drain Life or Arcane Missiles, where
+  each tick lands, in the colour, style and width you like (off by default)
 - A swing timer in the same spot: your main hand and ranged swings (Auto Shot
   for hunters), in a colour of its own. A cast takes the spot while it lasts
   (off by default)

@@ -1473,6 +1473,22 @@ end)()
     ns.Set("skin", not ns.Get("skin"))
     Check("look", "look with warnings")
     cvarOn, prdOn = true, true
+    -- Cast bar, with crafting and tick marks on: both previews in the tray,
+    -- tallest, and the ticks' colour, style and width under their tick.
+    ns.Set("castBatch", true)
+    ns.Set("castTicks", true)
+    ns.Set("castHeight", ns.CAST_HEIGHT[2])
+    Check("cast", "cast with crafting and tick marks")
+    local cast = w.pages.cast
+    Equal(tostring(cast.tickSample:IsVisible()) .. " " .. tostring(cast.tickStyle:IsVisible()) .. " "
+        .. tostring(cast.tickWidth:IsVisible()) .. " " .. tostring(cast.tickSwatches[1]:IsVisible()), "true true true true",
+        "(the tick marks' preview, style, width and colours checked there)")
+    ns.Set("castTicks", false)
+    w:Select("cast")
+    Equal(tostring(cast.tickSample:IsVisible()) .. " " .. tostring(cast.tickStyle:IsVisible()), "false false",
+        "with tick marks off, their preview and choices hide")
+    ns.Set("castBatch", false)
+    ns.Set("castHeight", ns.CAST_HEIGHT[3])
     -- General, with EraUI there: Open instead of its links.
     _G.C_AddOns = { IsAddOnLoaded = function(name) return name == "EraUI" end }
     Check("general", "general with EraUI")

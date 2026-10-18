@@ -10,6 +10,10 @@ local SAMPLE = { name = "Hearthstone", icon = "Interface\\Icons\\INV_Misc_Rune_0
 -- The batch preview: a few crafts of a long batch, counting down.
 local BATCH_SAMPLE = { name = "Roasted Boar Meat", icon = "Interface\\Icons\\INV_Misc_Food_14", total = 3, count = 133, from = 4 }
 local SWING_SAMPLE = 2.8 -- seconds between the preview's swings
+-- The tick marks preview: a channel of five ticks, draining, with a mark
+-- where each of the first four lands (the last is at its end).
+local TICK_SAMPLE = { name = "Drain Life", icon = "Interface\\Icons\\Spell_Shadow_LifeDrain02", total = 5 }
+local TICK_AT = { .8, .6, .4, .2 }
 local DIM = .35 -- a preview bar whose tick is off
 
 function ns.BuildCastBarPage(window, page, width)
@@ -72,6 +76,19 @@ function ns.BuildCastBarPage(window, page, width)
         batchSample.bar.time:SetFormattedText("%d:%02d left", math.floor(left / 60), left % 60)
     end)
     page.batchSample = batchSample
+    local tickSample = C:Make(tray)
+    tickSample:SetWidth(300)
+    tickSample.icon:SetTexture(TICK_SAMPLE.icon)
+    tickSample.bar.name:SetText(TICK_SAMPLE.name)
+    tickSample.bar:SetMinMaxValues(0, TICK_SAMPLE.total)
+    local drained = 0
+    tickSample:SetScript("OnUpdate", function(_, delta)
+        drained = (drained + delta) % TICK_SAMPLE.total
+        tickSample.bar:SetValue(TICK_SAMPLE.total - drained)
+        tickSample.bar.time:SetFormattedText("%.1f", TICK_SAMPLE.total - drained)
+    end)
+    tickSample.bar:SetScript("OnSizeChanged", function(bar) C:Marks(bar, TICK_AT) end)
+    page.tickSample = tickSample
     local previewNote = T:Text(tray, "GameFontHighlightSmall", T.MUTED)
     previewNote:SetPoint("RIGHT", -12, 0)
     previewNote:SetJustifyH("RIGHT")
@@ -147,11 +164,61 @@ function ns.BuildCastBarPage(window, page, width)
     local icon = Tick("Icon", "castIcon", -146, "The spell's icon at the left end, or your weapon's for the swing timer.")
     local name = Tick("Name", "castName", -168, "The spell's name on the bar, or Main hand, Auto Shot or Ranged for the swing timer.")
     local timer = Tick("Time left", "castTime", -190, "Seconds left, at the right end.")
-    local batch = Tick("Crafting: time left for the batch", "castBatch", -146,
+    -- The right-hand column: crafting beside the height, then the tick marks
+    -- and, while they're on, their colour, style and width under them.
+    local RIGHT = 300
+    local batch = Tick("Crafting: time left for the batch", "castBatch", -114,
         "With Create All or a number of crafts, the bar shows which one you're on, like 4 / 133, and the time left for them all. (experimental)")
     batch:ClearAllPoints()
-    batch:SetPoint("TOPLEFT", 300, -146)
+    batch:SetPoint("TOPLEFT", RIGHT, -114)
+    local marks = Tick("Tick marks on channelled spells", "castTicks", -146,
+        "Marks on the bar where each tick of a channelled spell lands, like Drain Life, Mind Flay or Arcane Missiles.")
+    marks:ClearAllPoints()
+    marks:SetPoint("TOPLEFT", RIGHT, -146)
     page.shown, page.swing, page.icon, page.name, page.timer, page.batch = shown, swings, icon, name, timer, batch
+    page.marks = marks
+    local tickParts = {}
+    local tickColourLabel = T:Text(options, "GameFontHighlight")
+    tickColourLabel:SetPoint("TOPLEFT", RIGHT, -172)
+    tickColourLabel:SetText("Colour")
+    tickParts[#tickParts + 1] = tickColourLabel
+    local tickSwatches = {}
+    for i, key in ipairs(ns.TICK_COLOUR_KEYS) do
+        local swatch = ns.Swatch(options, SWATCH, function()
+            ns.Set("castTickColour", key)
+            Changed()
+        end)
+        swatch:SetPoint("TOPLEFT", RIGHT + 52 + (i - 1) * (SWATCH + SWATCH_GAP), -168)
+        swatch.key = key
+        if key == "class" then ns.ClassIcon(swatch) end
+        window:Hint(swatch, (key == "white" and "White" or key == "black" and "Black" or ns.BAR_COLOUR_NAMES[key])
+            .. " tick marks.")
+        tickSwatches[i] = swatch
+        tickParts[#tickParts + 1] = swatch
+    end
+    local styleLabel = T:Text(options, "GameFontHighlight")
+    styleLabel:SetPoint("TOPLEFT", RIGHT, -194)
+    styleLabel:SetText("Style")
+    tickParts[#tickParts + 1] = styleLabel
+    local styles = {}
+    for _, key in ipairs(ns.TICK_STYLE_KEYS) do styles[#styles + 1] = { key = key, label = ns.TICK_STYLE_NAMES[key] } end
+    local tickStyle = T:Segmented(options, styles, 120, function(key)
+        ns.Set("castTickStyle", key)
+        Changed()
+    end)
+    tickStyle:SetPoint("TOPLEFT", RIGHT + 52, -190)
+    for _, button in ipairs(tickStyle.buttons) do
+        window:Hint(button, "Notches: short marks at the bar's top and bottom edges. Lines: right across the bar.")
+    end
+    tickParts[#tickParts + 1] = tickStyle
+    local tickWidth = T:Slider(options, "Width", ns.CAST_TICK_WIDTH, 1, inner - RIGHT - 184, function(value)
+        ns.Set("castTickWidth", value)
+        Changed()
+    end, 44)
+    tickWidth:SetPoint("TOPLEFT", RIGHT + 184, -190)
+    window:Hint(tickWidth, "How wide each tick mark is, in screen pixels.")
+    tickParts[#tickParts + 1] = tickWidth
+    page.tickSwatches, page.tickStyle, page.tickWidth = tickSwatches, tickStyle, tickWidth
     -- The height and the three ticks under it as one part, for the walkthrough.
     local parts = CreateFrame("Frame", nil, options)
     parts:SetPoint("TOPLEFT", 0, -114)
@@ -190,6 +257,7 @@ function ns.BuildCastBarPage(window, page, width)
         name:SetChecked(ns.Get("castName"))
         timer:SetChecked(ns.Get("castTime"))
         batch:SetChecked(ns.Get("castBatch"))
+        marks:SetChecked(ns.Get("castTicks"))
         height:Set(ns.Get("castHeight"))
         Paint(swatches, chosen, "castColour", "Blizzard's gold")
         Paint(swingSwatches, swingChosen, "swingColour", "Silver")
@@ -203,13 +271,32 @@ function ns.BuildCastBarPage(window, page, width)
         -- Each preview bar dims while its tick is off.
         sample:SetAlpha(casts and 1 or DIM)
         swingSample:SetAlpha(swinging and 1 or DIM)
-        -- The batch preview only while its tick is on: the tray grows for it.
+        -- The tick marks' choices and preview only while they're on.
+        local ticking = ns.Get("castTicks") and true or false
+        for _, piece in ipairs(tickParts) do piece:SetShown(ticking) end
+        local tickColour = ns.Get("castTickColour")
+        for _, swatch in ipairs(tickSwatches) do
+            ns.PaintSwatch(swatch, C:MarkColour(swatch.key), swatch.key == tickColour)
+        end
+        tickStyle:SetSelected(ns.Get("castTickStyle"))
+        tickWidth:Set(ns.Get("castTickWidth"))
+        C:Look(tickSample, true)
+        tickSample:SetAlpha(casts and 1 or DIM)
+        C:Marks(tickSample.bar, TICK_AT)
+        -- The batch and tick previews only while their ticks are on, under
+        -- the swing timer: the tray grows for them, and the rows stay in its
+        -- middle (for two, at any height).
         local batching = ns.Get("castBatch") and true or false
         batchSample:SetShown(batching)
-        tray:SetHeight(batching and 120 or 92)
+        tickSample:SetShown(ticking)
+        local extras = (batching and 1 or 0) + (ticking and 1 or 0)
+        tray:SetHeight(extras == 2 and 156 or extras == 1 and 120 or 92)
+        local shift = extras == 2 and ns.Get("castHeight") + 6 or extras == 1 and 14 or 0
         sample:ClearAllPoints()
-        sample:SetPoint("BOTTOMLEFT", tray, "LEFT", 12, batching and 17 or 3)
+        sample:SetPoint("BOTTOMLEFT", tray, "LEFT", 12, 3 + shift)
         swingSample:ClearAllPoints()
-        swingSample:SetPoint("TOPLEFT", tray, "LEFT", 12, batching and 11 or -3)
+        swingSample:SetPoint("TOPLEFT", tray, "LEFT", 12, -3 + shift)
+        tickSample:ClearAllPoints()
+        tickSample:SetPoint("TOPLEFT", batching and batchSample or swingSample, "BOTTOMLEFT", 0, -6)
     end
 end

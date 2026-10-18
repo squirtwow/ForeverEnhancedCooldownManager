@@ -10,6 +10,17 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.7.3",
+        sections = {
+            { "Added", {
+                "Tick marks on channelled spells, on the Cast bar page, in the colour, style and width you like.",
+            } },
+            { "Fixed", {
+                "Channelled spells show their name on the cast bar instead of \"Channeling\".",
+            } },
+        },
+    },
+    {
         version = "1.7.2",
         sections = {
             { "Added", {
