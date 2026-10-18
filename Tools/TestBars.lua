@@ -5756,6 +5756,31 @@ do
     Equal(Marks(), 0, "and the marks go with the channel")
     ns.Set("castTicks", false)
 end
+-- Latency (off by default): a zone at the end of a cast, timed from your
+-- press to the cast starting, with its ms; and the time as left / the whole cast.
+do
+    ns.Set("castLatency", true)
+    ns.Set("castTimeFormat", "total")
+    local saved = _G.UnitCastingInfo
+    local wrath = { "Wrath", "Wrath", 136006, 200000, 202000, false, "cast-9" }
+    _G.UnitCastingInfo = function() return table.unpack(wrath) end
+    clock = 199.82
+    Fire("UNIT_SPELLCAST_SENT", "player", "target", "cast-9", 5176)
+    clock = 200
+    Fire("UNIT_SPELLCAST_START", "player", "cast-9", 5176)
+    Equal(tostring(S[cb.bar.lag].shown) .. " " .. string.format("%.1f", S[cb.bar.lag].width) .. " " .. S[cb.bar.lag].points[1][1] .. " "
+        .. Last(cb.bar.ms, "SetFormattedText", 2) .. " " .. tostring(S[cb.bar.ms].shown), "true 18.0 TOPRIGHT 180 true",
+        "latency: a zone at the cast's end, from your press to it starting (0.18s of 2s), with its ms")
+    clock = 200.5
+    S[cb].scripts.OnUpdate(cb, .5)
+    Equal(Last(cb.bar.time, "SetFormattedText", 1) .. " " .. string.format("%g %g", Last(cb.bar.time, "SetFormattedText", 2),
+        Last(cb.bar.time, "SetFormattedText", 3)), "%.1f / %.1f 1.5 2", "the time as left / the whole cast")
+    Fire("UNIT_SPELLCAST_INTERRUPTED", "player", "cast-9", 5176)
+    Equal(tostring(S[cb.bar.lag].shown) .. " " .. tostring(S[cb.bar.ms].shown), "false false", "broken off, the zone goes")
+    _G.UnitCastingInfo = saved
+    ns.Set("castLatency", false)
+    ns.Set("castTimeFormat", "left")
+end
 _G.UnitChannelInfo = function() return nil end
 -- Times the game keeps secret: Blizzard's own bar shows that cast.
 casting = { "Wrath", "Wrath", 136006, SECRETS.number, SECRETS.number, false, "cast-4" }

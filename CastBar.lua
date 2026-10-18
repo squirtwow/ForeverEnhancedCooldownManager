@@ -188,6 +188,16 @@ function C:Make(parent)
     bar.time:SetFontObject(Style:Font(10))
     bar.time:SetJustifyH("RIGHT")
     bar.time:SetPoint("RIGHT", -4, 0)
+    -- Your latency: a zone at the end of a cast (the start of a channel, as
+    -- it drains), drawn like the fill (its texture, under Glass's shine),
+    -- and how long it is at the right end.
+    bar.lag = bar:CreateTexture(nil, "ARTWORK", nil, 7)
+    bar.lag:Hide()
+    bar.ms = bar:CreateFontString(nil, "OVERLAY")
+    bar.ms:SetFontObject(Style:Font(8))
+    bar.ms:SetJustifyH("RIGHT")
+    bar.ms:SetPoint("RIGHT", -4, 0)
+    bar.ms:Hide()
     frame.bar = bar
     -- A soft shadow round the whole cast bar while shadows are on, and no
     -- extra border: its own 1px edges are one (Dress places the shadow).
@@ -208,14 +218,16 @@ local function Fit(frame)
     local withIcon, withTime, withName = ns.Get("castIcon"), ns.Get("castTime"), ns.Get("castName")
     local shadow, border = ns.Get("iconShadow"), ns.Get("iconBorder")
     local dark, thick = ns.Get("barDarkness"), ns.Get("thickEdges")
+    local whole, ms = ns.Get("castTimeFormat") == "total", ns.Get("castLatency") and ns.Get("castLatencyText")
     local fit = frame.fit
     if fit.height == height and fit.design == design and fit.texture == texture and fit.icon == withIcon
         and fit.time == withTime and fit.name == withName and fit.shadow == shadow and fit.border == border
-        and fit.dark == dark and fit.thick == thick then
+        and fit.dark == dark and fit.thick == thick and fit.whole == whole and fit.ms == ms then
         return false
     end
     fit.height, fit.design, fit.texture, fit.icon, fit.time = height, design, texture, withIcon, withTime
     fit.name, fit.shadow, fit.border, fit.dark, fit.thick = withName, shadow, border, dark, thick
+    fit.whole, fit.ms = whole, ms
     local bar = frame.bar
     frame:SetHeight(height)
     frame.icon:SetSize(height, height)
@@ -235,9 +247,15 @@ local function Fit(frame)
     local font = Style:Font(math.max(9, height * .55))
     bar.name:SetFontObject(font)
     bar.time:SetFontObject(font)
+    -- The ms at the right end, smaller, and the time just left of it: the
+    -- name keeps clear of both.
+    bar.ms:SetFontObject(Style:Font(math.max(8, height * .4)))
+    bar.time:ClearAllPoints()
+    if ms then bar.time:SetPoint("RIGHT", bar.ms, "LEFT", -4, 0) else bar.time:SetPoint("RIGHT", -4, 0) end
+    local room = (withTime and (whole and 70 or 40) or 4) + (ms and 34 or 0)
     bar.name:ClearAllPoints()
     bar.name:SetPoint("LEFT", 4, 0)
-    bar.name:SetPoint("RIGHT", withTime and -40 or -4, 0)
+    bar.name:SetPoint("RIGHT", -room, 0)
     bar.name:SetShown(withName)
     bar.time:SetShown(withTime)
     -- The shadow reaches as far out as your rows' does: it starts on the
@@ -274,12 +292,63 @@ function C:SwingLook(frame)
     Dress(frame, self:SwingColour())
 end
 
+-- The time on a bar: seconds left, or left / the whole cast, as chosen.
+function C:Time(text, left, total)
+    if ns.Get("castTimeFormat") == "total" then
+        text:SetFormattedText("%.1f / %.1f", left, total)
+    else
+        text:SetFormattedText("%.1f", left)
+    end
+end
+
+-- The latency zone's colour, nearly solid like the fill, in the same red as
+-- a broken cast.
+local LAG_COLOURS = { red = { RED[1], RED[2], RED[3], .85 }, white = { 1, 1, 1, .7 }, black = { 0, 0, 0, .7 } }
+
+function C:LagColour(key)
+    key = key or ns.Get("castLatencyColour")
+    if LAG_COLOURS[key] then return LAG_COLOURS[key] end
+    local colour = Style:BarColour(key)
+    return { colour[1], colour[2], colour[3], .85 }
+end
+
+-- The latency zone on a cast bar, while it's on: this share of the bar, at
+-- the right end of a cast or the left of a channel (where each ends), and
+-- its ms at the right end if that's ticked. Nil hides it.
+function C:Lag(frame, share, ms, channel)
+    local bar = frame.bar
+    local width = bar:GetWidth()
+    if not (share and ns.Get("castLatency") and type(width) == "number" and width > 0) then
+        bar.lag:Hide()
+        bar.ms:Hide()
+        return
+    end
+    local colour = self:LagColour()
+    local side = channel and "LEFT" or "RIGHT"
+    -- The bar's own texture, set only when it changes; Outline's see-through
+    -- fill gets a see-through zone.
+    local texture = Style:BarTexture()
+    if bar.lag.texture ~= texture then
+        bar.lag.texture = texture
+        bar.lag:SetTexture(texture)
+    end
+    bar.lag:SetVertexColor(colour[1], colour[2], colour[3], ns.Get("barStyle") == "outline" and .45 or colour[4])
+    bar.lag:ClearAllPoints()
+    bar.lag:SetPoint("TOP" .. side)
+    bar.lag:SetPoint("BOTTOM" .. side)
+    bar.lag:SetWidth(math.max(1, math.min(1, share) * width))
+    bar.lag:Show()
+    bar.ms:SetFormattedText("%dms", ms)
+    bar.ms:SetShown(ns.Get("castLatencyText") == true)
+end
+
 -- Drawing ------------------------------------------------------------------------------
 -- One bar, drawn for a cast or a swing. It only ticks while something shows
 -- or fades.
 
 local function DrawSwing()
     drawn = "swing"
+    C:Lag(row, nil)
     C:SwingLook(row)
     row.bar:SetMinMaxValues(0, swing.total)
     row.icon:SetTexture(C:WeaponIcon(swing.ranged))
@@ -429,6 +498,29 @@ local function HideMarks()
     C:Marks(row.bar, NONE)
 end
 
+-- Your latency -------------------------------------------------------------------------
+-- From pressing a spell (UNIT_SPELLCAST_SENT) to the game starting it, when
+-- the game waits for the server: what the zone at its end shows. Otherwise
+-- (Forever usually starts a cast as you press it, after a loading screen, or
+-- one pressed too long before) the game's own figure, your world latency.
+local sent -- when you last pressed a spell
+local LAG_LONGEST = 2 -- seconds: a press any longer before its cast isn't its own
+local LAG_SHORTEST = .01 -- seconds: any less and the cast started without waiting for the server
+
+local function NetLag()
+    if not GetNetStats then return nil end
+    local _, _, home, world = GetNetStats()
+    local ms = world or home
+    if not (Open(ms) and type(ms) == "number" and ms > 0) then return nil end
+    return ms / 1000
+end
+
+local function ShowLag()
+    local lag = cast and cast.lag
+    if not lag then return C:Lag(row, nil) end
+    C:Lag(row, lag / cast.total, math.floor(lag * 1000 + .5), cast.channel)
+end
+
 -- The bar is the time left (full to empty), so the tick k periods in sits as
 -- far along as the time left at that moment.
 local function PlaceMarks()
@@ -448,7 +540,7 @@ local function Tick()
         if cast.batch then
             bar.time:SetText(Clock(left + cast.batch.left * cast.total))
         else
-            bar.time:SetFormattedText("%.1f", left)
+            C:Time(bar.time, left, cast.total)
         end
         return
     end
@@ -466,13 +558,13 @@ local function Tick()
         local left = swing.finish - now
         if left > 0 then
             row.bar:SetValue(swing.total - left)
-            row.bar.time:SetFormattedText("%.1f", left)
+            C:Time(row.bar.time, left, swing.total)
             return
         end
         -- Run out with no new swing yet: full and held, then it fades, so it
         -- never blinks out between shots.
         row.bar:SetValue(swing.total)
-        row.bar.time:SetFormattedText("%.1f", 0)
+        C:Time(row.bar.time, 0, swing.total)
         swing, swingEnd = nil, swing.finish
     end
     if swingEnd and drawn == "swing" then
@@ -498,6 +590,7 @@ local function DropCast()
     if not (cast or fading) then return end
     cast, fading = nil, nil
     HideMarks()
+    C:Lag(row, nil)
     Handover(GetTime())
     Wake()
 end
@@ -565,6 +658,22 @@ local function Begin(channel, fresh)
         row.bar.name:SetText(text)
     end
     PlaceMarks()
+    -- Its latency, while that's on: timed from your press as it starts; a
+    -- delay or pushback keeps what it had.
+    local waited = fresh and sent and GetTime() - sent
+    if fresh then sent = nil end
+    if not ns.Get("castLatency") then
+        cast.lag = nil
+    elseif fresh then
+        -- Forever starts a cast on your screen as you press it, so the time
+        -- between is often nothing: then the game's own figure.
+        cast.lag = waited and waited >= LAG_SHORTEST and waited < LAG_LONGEST and waited or NetLag()
+    elseif previous and previous.channel == channel and previous.lag then
+        cast.lag = previous.lag
+    else
+        cast.lag = NetLag()
+    end
+    ShowLag()
     row:SetAlpha(1)
     row:SetScript("OnUpdate", Tick)
     Tick()
@@ -582,6 +691,7 @@ local function Broken(text)
     local channel, total = cast.channel, cast.total
     cast, fading = nil, GetTime()
     HideMarks()
+    C:Lag(row, nil)
     drawn = "broken"
     C:Look(row, channel, true)
     row.bar:SetValue(total)
@@ -593,6 +703,11 @@ local INTERRUPT_TEXT, FAIL_TEXT = INTERRUPTED or "Interrupted", FAILED or "Faile
 
 function C:Event(event, id, interruptedBy)
     if not row then return end
+    -- You pressed a spell: its latency is timed from now.
+    if event == "UNIT_SPELLCAST_SENT" then
+        sent = GetTime()
+        return
+    end
     -- A new world or weapon: the last swing is over.
     if event == "PLAYER_ENTERING_WORLD" or event == "WEAPON_SLOT_CHANGED" then DropSwing() end
     if event == "WEAPON_SLOT_CHANGED" or not ns.Get("castBar") then return end
@@ -701,8 +816,9 @@ function C:Apply()
     Native(not casts)
     Restyle()
     if ns.Layout then ns.Layout:Stack() else self:Place() end
-    -- A channel's marks in the colour, style and width just chosen.
+    -- A channel's marks, and the latency zone, as just chosen.
     if cast and cast.ticks then PlaceMarks() end
+    ShowLag()
 end
 
 function C:Start()
@@ -710,10 +826,15 @@ function C:Start()
     self.started = true
     row = self:Make(UIParent)
     row:SetAlpha(0)
-    -- A channel's tick marks move with the bar's width (a layout, the display's size).
-    row.bar:SetScript("OnSizeChanged", function() if cast and cast.ticks then PlaceMarks() end end)
+    -- A channel's tick marks and the latency zone move with the bar's width
+    -- (a layout, the display's size).
+    row.bar:SetScript("OnSizeChanged", function()
+        if not cast then return end
+        if cast.ticks then PlaceMarks() end
+        ShowLag()
+    end)
     local events = CreateFrame("Frame")
-    for _, event in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
+    for _, event in ipairs({ "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
         "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_DELAYED", "UNIT_SPELLCAST_CHANNEL_START",
         "UNIT_SPELLCAST_CHANNEL_UPDATE", "UNIT_SPELLCAST_CHANNEL_STOP" }) do
         events:RegisterUnitEvent(event, "player")

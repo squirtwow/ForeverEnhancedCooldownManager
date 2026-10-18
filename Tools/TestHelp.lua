@@ -1473,21 +1473,32 @@ end)()
     ns.Set("skin", not ns.Get("skin"))
     Check("look", "look with warnings")
     cvarOn, prdOn = true, true
-    -- Cast bar, with crafting and tick marks on: both previews in the tray,
-    -- tallest, and the ticks' colour, style and width under their tick.
+    -- Cast bar, with crafting, tick marks and latency on: both previews in
+    -- the tray, tallest, the ticks' colour, style and width under their
+    -- tick, and latency's Show ms and colours under those.
     ns.Set("castBatch", true)
     ns.Set("castTicks", true)
+    ns.Set("castLatency", true)
+    ns.Set("castTimeFormat", "total")
     ns.Set("castHeight", ns.CAST_HEIGHT[2])
-    Check("cast", "cast with crafting and tick marks")
+    Check("cast", "cast with crafting, tick marks and latency")
     local cast = w.pages.cast
     Equal(tostring(cast.tickSample:IsVisible()) .. " " .. tostring(cast.tickStyle:IsVisible()) .. " "
-        .. tostring(cast.tickWidth:IsVisible()) .. " " .. tostring(cast.tickSwatches[1]:IsVisible()), "true true true true",
-        "(the tick marks' preview, style, width and colours checked there)")
+        .. tostring(cast.tickWidth:IsVisible()) .. " " .. tostring(cast.tickSwatches[1]:IsVisible()) .. " "
+        .. tostring(cast.latencyMs:IsVisible()) .. " " .. tostring(cast.latencySwatches[1]:IsVisible()), "true true true true true true",
+        "(the tick marks' preview, style, width and colours, and latency's Show ms and colours, checked there)")
     ns.Set("castTicks", false)
     w:Select("cast")
-    Equal(tostring(cast.tickSample:IsVisible()) .. " " .. tostring(cast.tickStyle:IsVisible()), "false false",
-        "with tick marks off, their preview and choices hide")
+    Check("cast", "cast with latency, tick marks off")
+    Equal(tostring(cast.tickSample:IsVisible()) .. " " .. tostring(cast.tickStyle:IsVisible()) .. " "
+        .. tostring(S[cast.latency].points[1][3]), "false false -178",
+        "with tick marks off, their preview and choices hide, and latency moves up under them")
+    ns.Set("castLatency", false)
+    w:Select("cast")
+    Equal(tostring(cast.latencyMs:IsVisible()) .. " " .. tostring(cast.latencySwatches[1]:IsVisible()), "false false",
+        "with latency off, Show ms and its colours hide")
     ns.Set("castBatch", false)
+    ns.Set("castTimeFormat", "left")
     ns.Set("castHeight", ns.CAST_HEIGHT[3])
     -- General, with EraUI there: Open instead of its links.
     _G.C_AddOns = { IsAddOnLoaded = function(name) return name == "EraUI" end }

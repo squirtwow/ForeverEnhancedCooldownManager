@@ -14,6 +14,7 @@ local SWING_SAMPLE = 2.8 -- seconds between the preview's swings
 -- where each of the first four lands (the last is at its end).
 local TICK_SAMPLE = { name = "Drain Life", icon = "Interface\\Icons\\Spell_Shadow_LifeDrain02", total = 5 }
 local TICK_AT = { .8, .6, .4, .2 }
+local SAMPLE_LAG = .18 -- seconds: the preview's latency
 local DIM = .35 -- a preview bar whose tick is off
 
 function ns.BuildCastBarPage(window, page, width)
@@ -46,8 +47,13 @@ function ns.BuildCastBarPage(window, page, width)
     sample:SetScript("OnUpdate", function(_, delta)
         elapsed = (elapsed + delta) % SAMPLE.total
         sample.bar:SetValue(elapsed)
-        sample.bar.time:SetFormattedText("%.1f", SAMPLE.total - elapsed)
+        C:Time(sample.bar.time, SAMPLE.total - elapsed, SAMPLE.total)
     end)
+    -- Its latency zone, while that's on, as wide as the bar lets it be.
+    local function SampleLag()
+        C:Lag(sample, SAMPLE_LAG / SAMPLE.total, math.floor(SAMPLE_LAG * 1000 + .5), false)
+    end
+    sample.bar:SetScript("OnSizeChanged", SampleLag)
     page.sample = sample
     local swingSample = C:Make(tray)
     swingSample:SetPoint("TOPLEFT", tray, "LEFT", 12, 11)
@@ -57,7 +63,7 @@ function ns.BuildCastBarPage(window, page, width)
     swingSample:SetScript("OnUpdate", function(_, delta)
         swung = (swung + delta) % SWING_SAMPLE
         swingSample.bar:SetValue(swung)
-        swingSample.bar.time:SetFormattedText("%.1f", SWING_SAMPLE - swung)
+        C:Time(swingSample.bar.time, SWING_SAMPLE - swung, SWING_SAMPLE)
     end)
     page.swingSample = swingSample
     local batchSample = C:Make(tray)
@@ -85,7 +91,7 @@ function ns.BuildCastBarPage(window, page, width)
     tickSample:SetScript("OnUpdate", function(_, delta)
         drained = (drained + delta) % TICK_SAMPLE.total
         tickSample.bar:SetValue(TICK_SAMPLE.total - drained)
-        tickSample.bar.time:SetFormattedText("%.1f", TICK_SAMPLE.total - drained)
+        C:Time(tickSample.bar.time, TICK_SAMPLE.total - drained, TICK_SAMPLE.total)
     end)
     tickSample.bar:SetScript("OnSizeChanged", function(bar) C:Marks(bar, TICK_AT) end)
     page.tickSample = tickSample
@@ -96,7 +102,7 @@ function ns.BuildCastBarPage(window, page, width)
 
     local options = CreateFrame("Frame", nil, page)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
-    options:SetSize(inner, 250)
+    options:SetSize(inner, 280)
     page.options = options
     local function Tick(label, key, y, note)
         local check = T:Check(options, label, function(self)
@@ -219,17 +225,64 @@ function ns.BuildCastBarPage(window, page, width)
     window:Hint(tickWidth, "How wide each tick mark is, in screen pixels.")
     tickParts[#tickParts + 1] = tickWidth
     page.tickSwatches, page.tickStyle, page.tickWidth = tickSwatches, tickStyle, tickWidth
+    -- Latency, under the tick marks (and their choices while they show):
+    -- the tick and Show ms beside it, then, while it's on, its colour.
+    local latency = Tick("Latency on the bar", "castLatency", -178,
+        "Your latency as a zone at the end of each cast, the start of a channel: once the bar reaches it, the cast is"
+        .. " done on the server, so you can start the next.")
+    local latencyMs = Tick("Show ms", "castLatencyText", -178, "How long the zone is, in ms, at the right end of the bar.")
+    local latencyLabel = T:Text(options, "GameFontHighlight")
+    latencyLabel:SetText("Colour")
+    local latencySwatches = {}
+    for i, key in ipairs(ns.LATENCY_COLOUR_KEYS) do
+        local swatch = ns.Swatch(options, SWATCH, function()
+            ns.Set("castLatencyColour", key)
+            Changed()
+        end)
+        swatch.key = key
+        if key == "class" then ns.ClassIcon(swatch) end
+        window:Hint(swatch, (key == "red" and "Red" or key == "white" and "White" or key == "black" and "Black"
+            or ns.BAR_COLOUR_NAMES[key]) .. " latency zone, in your bar's texture.")
+        latencySwatches[i] = swatch
+    end
+    page.latency, page.latencyMs, page.latencySwatches = latency, latencyMs, latencySwatches
+    -- Where they go: under the tick marks, or under their choices.
+    local function PlaceLatency(ticking)
+        local y = ticking and -222 or -178
+        latency:ClearAllPoints()
+        latency:SetPoint("TOPLEFT", RIGHT, y)
+        latencyMs:ClearAllPoints()
+        latencyMs:SetPoint("TOPLEFT", RIGHT + 170, y)
+        latencyLabel:ClearAllPoints()
+        latencyLabel:SetPoint("TOPLEFT", RIGHT, y - 26)
+        for i, swatch in ipairs(latencySwatches) do
+            swatch:ClearAllPoints()
+            swatch:SetPoint("TOPLEFT", RIGHT + 52 + (i - 1) * (SWATCH + SWATCH_GAP), y - 22)
+        end
+    end
+    -- The time: seconds left, or left / the whole cast, beside Time left.
+    local timeFormat = T:Segmented(options, { { key = "left", label = "1.5" }, { key = "total", label = "1.5 / 3.0" } }, 180,
+        function(key)
+            ns.Set("castTimeFormat", key)
+            Changed()
+        end)
+    timeFormat:SetPoint("TOPLEFT", 100, -190)
+    for _, button in ipairs(timeFormat.buttons) do
+        window:Hint(button, "The time on the bar: seconds left, or seconds left / the whole cast.")
+    end
+    page.timeFormat = timeFormat
     -- The height and the three ticks under it as one part, for the walkthrough.
     local parts = CreateFrame("Frame", nil, options)
     parts:SetPoint("TOPLEFT", 0, -114)
-    parts:SetSize(280, 190 + 16 - 114)
+    parts:SetSize(280, 190 + 20 - 114)
     page.parts = parts
 
+    -- Under the left-hand column, clear of the right's.
     local about = T:Text(options, "GameFontHighlightSmall", T.MUTED)
     about:SetPoint("TOPLEFT", 0, -222)
-    about:SetWidth(inner)
-    about:SetText("It sits right under your Personal Resource Display, and in a layout the rows go under it. "
-        .. "It keeps its room between casts and swings, since the Buffs and Debuffs bars can't move in a fight.")
+    about:SetWidth(280)
+    about:SetText("It sits right under your resource display, and in a layout the rows go under it. "
+        .. "It keeps its room between casts, since the Buffs and Debuffs bars can't move in a fight.")
     page.about = about
 
     local function Paint(list, label, key, default)
@@ -280,6 +333,20 @@ function ns.BuildCastBarPage(window, page, width)
         end
         tickStyle:SetSelected(ns.Get("castTickStyle"))
         tickWidth:Set(ns.Get("castTickWidth"))
+        -- Latency: Show ms and the colours only while it's on.
+        local lagging = ns.Get("castLatency") and true or false
+        latency:SetChecked(lagging)
+        latencyMs:SetChecked(ns.Get("castLatencyText"))
+        latencyMs:SetShown(lagging)
+        latencyLabel:SetShown(lagging)
+        local lagColour = ns.Get("castLatencyColour")
+        for _, swatch in ipairs(latencySwatches) do
+            swatch:SetShown(lagging)
+            ns.PaintSwatch(swatch, C:LagColour(swatch.key), swatch.key == lagColour)
+        end
+        PlaceLatency(ticking)
+        timeFormat:SetSelected(ns.Get("castTimeFormat"))
+        SampleLag()
         C:Look(tickSample, true)
         tickSample:SetAlpha(casts and 1 or DIM)
         C:Marks(tickSample.bar, TICK_AT)

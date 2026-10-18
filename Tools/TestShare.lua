@@ -1137,7 +1137,7 @@ function H.Spy(ns)
 end
 
 -- Settings a shared profile never carries: switching a part on or off, and the window's own.
-H.NOT_SHARED = { "skin", "useBars", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "prdEnergy", "prdText", "castBar", "castBatch", "castTicks", "swingTimer",
+H.NOT_SHARED = { "skin", "useBars", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "prdEnergy", "prdText", "castBar", "castBatch", "castTicks", "castLatency", "swingTimer",
     "pullTimer", "raidWarnings", "bossCasts", "pulse", "keybinds", "layoutPreview", "growArrows", "minimap", "minimapAngle",
     "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice" }
 

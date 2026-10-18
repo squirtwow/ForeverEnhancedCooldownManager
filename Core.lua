@@ -88,6 +88,10 @@ ns.DEFAULTS = {
     castTickColour = "white", -- their colour: white, black or a bar colour
     castTickStyle = "notches", -- notches at the bar's top and bottom edges, or lines right across
     castTickWidth = 2, -- screen pixels
+    castTimeFormat = "left", -- the time on the bar: seconds left, or left / the whole cast
+    castLatency = false, -- your latency as a zone at the end of a cast (the start of a channel)
+    castLatencyColour = "red", -- its colour: red, white, black or a bar colour
+    castLatencyText = true, -- and how long it is, in ms
     swingTimer = false, -- a swing timer in the cast bar's spot: Auto Shot for hunters, the main hand for everyone
     swingColour = "default", -- its colour: silver, or a bar colour
     -- Raid Timers: Blizzard's own raid and dungeon timers restyled, each part on its own.
@@ -187,6 +191,11 @@ ns.TICK_COLOUR_KEYS = { "white", "black" }
 for _, key in ipairs(ns.BAR_COLOUR_KEYS) do ns.TICK_COLOUR_KEYS[#ns.TICK_COLOUR_KEYS + 1] = key end
 ns.TICK_STYLE_KEYS = { "notches", "lines" }
 ns.TICK_STYLE_NAMES = { notches = "Notches", lines = "Lines" }
+-- The latency zone: red, white, black or a bar colour.
+ns.LATENCY_COLOUR_KEYS = { "red", "white", "black" }
+for _, key in ipairs(ns.BAR_COLOUR_KEYS) do ns.LATENCY_COLOUR_KEYS[#ns.LATENCY_COLOUR_KEYS + 1] = key end
+-- The time on the cast bar: seconds left, or left / the whole cast.
+ns.TIME_FORMAT_KEYS = { "left", "total" }
 -- The game's own fonts and bar textures, so every player has them (their
 -- files are in Style.lua).
 ns.FONT_KEYS = { "friz", "arial", "morpheus", "skurri" }
@@ -224,10 +233,13 @@ ns.TEXT_FONT_KEYS = { "look", "friz", "arial", "morpheus", "skurri" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
-    keybindPosition = {}, font = {}, barTexture = {}, readyGlow = {}, castTickColour = {}, castTickStyle = {} }
+    keybindPosition = {}, font = {}, barTexture = {}, readyGlow = {}, castTickColour = {}, castTickStyle = {},
+    castLatencyColour = {}, castTimeFormat = {} }
 for _, key in ipairs(ns.READY_GLOW_KEYS) do CHOICES.readyGlow[key] = true end
 for _, key in ipairs(ns.TICK_COLOUR_KEYS) do CHOICES.castTickColour[key] = true end
 for _, key in ipairs(ns.TICK_STYLE_KEYS) do CHOICES.castTickStyle[key] = true end
+for _, key in ipairs(ns.LATENCY_COLOUR_KEYS) do CHOICES.castLatencyColour[key] = true end
+for _, key in ipairs(ns.TIME_FORMAT_KEYS) do CHOICES.castTimeFormat[key] = true end
 for _, key in ipairs(ns.ACCENT_KEYS) do CHOICES.accent[key] = true end
 for _, key in ipairs(ns.KEYBIND_POSITIONS) do CHOICES.keybindPosition[key] = true end
 for _, key in ipairs(ns.BAR_STYLE_KEYS) do CHOICES.barStyle[key] = true end
@@ -286,7 +298,8 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "
     "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
     "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
     "prdPowerRight", "prdTextNumbers", "prdTextSize", "prdTextFont",
-    "castColour", "castHeight", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "swingColour",
+    "castColour", "castHeight", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
+    "castLatencyColour", "castLatencyText", "swingColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
     "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",
