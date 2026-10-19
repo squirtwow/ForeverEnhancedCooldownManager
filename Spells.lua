@@ -101,6 +101,11 @@ local function ByName(map, name)
     return map[name] or RENAMED[name] and map[RENAMED[name]]
 end
 
+-- The same for the bars (a trap's tick pace under its old name, Bars.lua).
+function S:ByName(map, name)
+    return ByName(map, name)
+end
+
 S.LINES = { procs = "Procs", items = "Items", added = "Added" }
 
 -- Healthstones and potions come in ranks, and you carry whichever you have:
@@ -706,6 +711,18 @@ end
 local function Holds(list, mine)
     if not (Open(mine) and (type(mine) == "string" or type(mine) == "number")) then return nil end
     return (" " .. list .. " "):find(" " .. mine .. " ", 1, true) ~= nil
+end
+
+-- Whether a spell is only other classes' (its classes, or a proc's, name
+-- none of yours); false while the game won't say your class, or when no
+-- class is named.
+function S:AnotherClass(key)
+    if type(key) ~= "string" then return false end
+    local name = Base(key)
+    local classes = (ByName(ns.SPELL_CLASSES, name) or "") .. " " .. (ProcClasses()[name] or "")
+    if not classes:find("%a") then return false end
+    local _, class = UnitClass("player")
+    return Holds(classes, class) == false
 end
 
 -- Items on a bar by key: a trinket slot, a bag item, or a healthstone or

@@ -570,6 +570,9 @@ local function Environment(keepCVars)
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
                     rawset(button, method, function(_, object) supplied[method] = object end)
                 end
+                rawset(button, "SetDurationText", function(_, object, options)
+                    supplied.SetDurationText, supplied.durationTextOptions = object, options
+                end)
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
@@ -1137,7 +1140,7 @@ function H.Spy(ns)
 end
 
 -- Settings a shared profile never carries: switching a part on or off, and the window's own.
-H.NOT_SHARED = { "skin", "useBars", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "prdEnergy", "prdText", "castBar", "castBatch", "castTicks", "castLatency", "swingTimer",
+H.NOT_SHARED = { "skin", "useBars", "groupFamilies", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "prdEnergy", "prdText", "castBar", "castBatch", "castTicks", "castLatency", "swingTimer",
     "pullTimer", "raidWarnings", "bossCasts", "pulse", "keybinds", "layoutPreview", "growArrows", "minimap", "minimapAngle",
     "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice" }
 
@@ -1171,7 +1174,7 @@ do
         if not found then fields[#fields + 1] = field .. " not shared" end
     end
     Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
-        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y",
+        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,tickFrom",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
     -- On cooldown takes When ready's three choices and nothing else; its
     -- tick is a plain true or false.

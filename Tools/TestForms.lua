@@ -574,6 +574,9 @@ local function Environment(keepCVars)
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
                     rawset(button, method, function(_, object) supplied[method] = object end)
                 end
+                rawset(button, "SetDurationText", function(_, object, options)
+                    supplied.SetDurationText, supplied.durationTextOptions = object, options
+                end)
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
@@ -1530,6 +1533,9 @@ for _, case in ipairs({
         lockdown = false
     end
     Equal(ns.SwapWords().label, label, class .. ": SwapWords")
+    -- As 1.6.0 was released: later versions' steps weren't out yet.
+    local version = ns.Version
+    ns.Version = function() return "1.6.0" end
     local news = ns.Tour:News("1.5.9")
     Equal(#news .. " " .. news[1].title .. ", " .. news[2].title .. " " .. news[1].version .. " " .. news[2].version, "2 Dim on cooldown, Swap your icons 1.6.0 1.6.0",
         class .. ": after 1.5.9, What's new has exactly 1.6.0's two steps")
@@ -1542,6 +1548,7 @@ for _, case in ipairs({
         .. S[box.next.label].text, "1 of 2 cd DIM ON COOLDOWN | 2 of 2 cd SWAP YOUR ICONS | " .. case.step .. " | Done",
         class .. ": Show me what's new tours them, Swap your icons in the class's words")
     box.skip:Click()
+    ns.Version = version
     w:Hide()
     Equal(#printed, 0, class .. ": no errors")
 end
@@ -1564,9 +1571,13 @@ do
     until done or #titles > 20
     Equal(tostring(table.concat(titles, ", "):find("SWAP YOUR ICONS", 1, true)) .. " " .. titles[#titles], "nil DIM ON COOLDOWN",
         "and the page's walkthrough leaves its step out")
+    -- As 1.6.0 was released: later versions' steps weren't out yet.
+    local version = ns.Version
+    ns.Version = function() return "1.6.0" end
     local news = ns.Tour:News("1.5.9")
     Equal(#news .. " " .. news[1].title .. " " .. news[1].version .. " | " .. #ns.Tour:News(nil), "1 Dim on cooldown 1.6.0 | 1",
         "and What's new after 1.5.9 too: only Dim on cooldown, by hand the same")
+    ns.Version = version
     Equal(#printed, 0, "no errors")
 end
 

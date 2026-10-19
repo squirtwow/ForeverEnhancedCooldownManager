@@ -163,6 +163,12 @@ function S:Count(iconSize)
     return self:Font(math.max(12, iconSize * .36))
 end
 
+-- A Debuffs bar icon's tick count (Buffs.lua): smaller, so in its corner it
+-- stays clear of the countdown, times the size picked for it (percent).
+function S:Ticks(iconSize, percent)
+    return self:Font(iconSize * .28 * (percent or 100) / 100)
+end
+
 function S:Zoom(texture)
     texture:SetTexCoord(S.ZOOM[1], S.ZOOM[2], S.ZOOM[3], S.ZOOM[4])
 end

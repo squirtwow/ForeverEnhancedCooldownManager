@@ -54,6 +54,9 @@ local FONT = ns.GAME_FONT_FIRST and "game" or "friz"
 ns.DEFAULTS = {
     skin = true,
     useBars = false, -- the addon's own bars
+    -- On the Buffs and Debuffs bars, one family's one-at-a-time spells side
+    -- by side are one icon (Seals, Curses...; General page; a player's idea).
+    groupFamilies = true,
     listItems = false, -- show trinkets and bag items in the /ccm spell list
     listRanks = false, -- show every rank you know as its own row
     accent = "purple", -- the /ccm window's accent colour (orange until 1.4.4; purple keeps it apart from other addons)
@@ -361,7 +364,7 @@ ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- and so is Swap with my form, beside the lists it swaps between).
 ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x",
-    "y" }
+    "y", "tickAt", "tickSize", "tickColour", "tickFrom" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -372,6 +375,17 @@ ns.OUT_OF_COMBAT_NAMES = { show = "Show", fade = "Fade", hide = "Hide" }
 ns.WHEN_READY = { "show", "dim", "hide" }
 ns.WHEN_READY_NAMES = { show = "Show", dim = "Dim", hide = "Hide" }
 ns.BUFF_SLOTS = 16 -- the Buffs bar has one secure slot per buff
+-- The Debuffs bar's tick count (Count ticks, a player's idea): where on the
+-- icon, its size as a share of the automatic size, its colour, and whether
+-- it starts at 0 or 1 (1 reads like stacks: Bane of Agony's).
+ns.TICK_AT_KEYS = { "TOPLEFT", "TOP", "TOPRIGHT", "CENTER", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" } -- down the icon
+ns.TICK_AT_NAMES = { TOPLEFT = "Top left", TOP = "Top centre", TOPRIGHT = "Top right", BOTTOMLEFT = "Bottom left",
+    BOTTOM = "Bottom centre", BOTTOMRIGHT = "Bottom right", CENTER = "Centre" }
+ns.TICK_SIZE = { 50, 200, 100 } -- min, max, default (percent)
+ns.COUNT_COLOUR_KEYS = { "white", "gold", "green", "red", "purple" }
+ns.COUNT_COLOUR_NAMES = { white = "White", gold = "Gold", green = "Green", red = "Red", purple = "Purple" }
+ns.COUNT_COLOURS = { white = { 1, 1, 1 }, gold = { 1, .82, 0 }, green = { .35, .9, .35 }, red = { 1, .25, .2 },
+    purple = { .72, .52, 1 } }
 
 local db
 ns.loaded = {}
@@ -548,6 +562,23 @@ local function Lists(profile)
     for _, key in ipairs(ns.BAR_KEYS) do
         if type(profile[key]) ~= "table" then profile[key] = {} end
         Repair(profile[key])
+    end
+    -- The picked icon for a joined group while none is up, the buffs that
+    -- glow while they're missing and the debuffs that count their ticks:
+    -- only names on that aura bar's list.
+    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks" }) do
+        if type(profile[field]) ~= "table" then profile[field] = {} end
+        for key, set in pairs(profile[field]) do
+            if not ns.AURA_BARS[key] or type(set) ~= "table" then
+                profile[field][key] = nil
+            else
+                local listed = {}
+                for _, name in ipairs(profile[key]) do listed[name] = true end
+                for name, on in pairs(set) do
+                    if on ~= true or not listed[name] then set[name] = nil end
+                end
+            end
+        end
     end
     if type(profile.joins) ~= "table" then profile.joins = {} end
     for key, joins in pairs(profile.joins) do
@@ -955,6 +986,36 @@ function ns.Joins(key)
     return store.joins[key]
 end
 
+-- This character's picks for an aura bar: the entry of a joined icon shown,
+-- faded, while none of them is up (by name, true each).
+function ns.MissingPicks(key)
+    local profile = active and db and Profiles()[active]
+    local store = profile or scratch
+    if type(store.missingPicks) ~= "table" then store.missingPicks = {} end
+    if type(store.missingPicks[key]) ~= "table" then store.missingPicks[key] = {} end
+    return store.missingPicks[key]
+end
+
+-- This character's buffs on an aura bar that glow while they're missing
+-- (a player's idea: a Seal that fell off), by name, true each.
+function ns.GlowMissing(key)
+    local profile = active and db and Profiles()[active]
+    local store = profile or scratch
+    if type(store.glowMissing) ~= "table" then store.glowMissing = {} end
+    if type(store.glowMissing[key]) ~= "table" then store.glowMissing[key] = {} end
+    return store.glowMissing[key]
+end
+
+-- This character's debuffs on an aura bar whose icons count their ticks (a
+-- player's idea: Bane of Agony's), by name, true each.
+function ns.CountTicks(key)
+    local profile = active and db and Profiles()[active]
+    local store = profile or scratch
+    if type(store.countTicks) ~= "table" then store.countTicks = {} end
+    if type(store.countTicks[key]) ~= "table" then store.countTicks[key] = {} end
+    return store.countTicks[key]
+end
+
 local function PlayerGUID()
     local guid = UnitGUID and UnitGUID("player")
     return type(guid) == "string" and guid ~= "" and guid or nil
@@ -1165,6 +1226,15 @@ local function Duplicate(from)
     for key, joins in pairs(type(from.joins) == "table" and from.joins or {}) do
         profile.joins[key] = {}
         for name in pairs(joins) do profile.joins[key][name] = true end
+    end
+    -- And which entry each joined icon shows, faded, while none is up, which
+    -- buffs glow while they're missing and which debuffs count their ticks.
+    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks" }) do
+        profile[field] = {}
+        for key, set in pairs(type(from[field]) == "table" and from[field] or {}) do
+            profile[field][key] = {}
+            for name in pairs(type(set) == "table" and set or {}) do profile[field][key][name] = true end
+        end
     end
     for field in pairs(PULSE_LISTS) do
         profile[field] = {}
@@ -1898,6 +1968,13 @@ function ns.BarData(key)
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
     bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
+    -- The Debuffs bar's tick count: top left, its automatic size, white,
+    -- from 1, unless you choose.
+    local debuff = key == "debuff"
+    bar.tickAt = debuff and ns.TICK_AT_NAMES[bar.tickAt] and bar.tickAt or "TOPLEFT"
+    bar.tickSize = debuff and Limit(bar.tickSize, ns.TICK_SIZE) or ns.TICK_SIZE[3]
+    bar.tickColour = debuff and ns.COUNT_COLOURS[bar.tickColour] and bar.tickColour or "white"
+    bar.tickFrom = debuff and bar.tickFrom == 0 and 0 or 1
     bar.perRow = Limit(bar.perRow, ns.BAR_LIMITS.perRow)
     if not ns.GROW_NAMES[bar.grow] then bar.grow = "centre" end
     if not ns.WRAP_NAMES[bar.wrap] then bar.wrap = "down" end
@@ -2292,6 +2369,7 @@ local function Load()
     if db.welcomeDue ~= true then db.welcomeDue = nil end -- the welcome not shown yet: true, or not saved at all
     if ns.firstInstall then db.welcomeDue = true end
     db.probe = nil -- results of a development check the released addon doesn't have
+    db.devTickTest, db.devTickProbe, db.devTickPace = nil, nil, nil -- and of the tick count's test (/ccm ticks)
     db.session = nil -- a login count earlier builds kept
     db.pulseMin, db.pulseAdd = nil, nil -- the Cooldown pulse's first test build: a shortest cooldown, and spells added by name
     db.pulseSkip = nil -- and its second: items pulsed unless unticked

@@ -506,6 +506,37 @@ local NEWS = {
         side = "below",
         align = function(w) return select(2, SwapParts(w)) and "end" or nil end,
     },
+    {
+        version = "1.8.1",
+        page = "general",
+        title = "One icon each",
+        text = "Only one Seal, Aura, Aspect, Curse, Bane, Sting or Judgement can be up, so side by side they share one icon."
+            .. " Right-click one in a bar's tray to pick which shows greyed while none is up.",
+        -- No Try it: it's on already.
+        target = function(w) return w.groupFamilies end,
+        side = "below",
+    },
+    {
+        version = "1.8.1",
+        page = "buff",
+        bars = { buff = true },
+        title = "Glow when missing",
+        text = "Tick Glow when missing beside a buff in this list and its icon glows while the buff is missing,"
+            .. " like a Seal that fell off. It needs Show missing buffs greyed.",
+        -- The list, where the tick is at each buff's row end; the box above it.
+        target = function(w) return w.pages.bar.listPanel end,
+        side = "above",
+    },
+    {
+        version = "1.8.1",
+        page = "debuff",
+        bars = { debuff = true },
+        title = "Count ticks",
+        text = "Tick Count ticks beside a debuff that ticks and its icon counts the ticks like stacks, from 1, like Bane of Agony."
+            .. " Then pick where the count sits, its size and colour above the list.",
+        target = function(w) return w.pages.bar.listPanel end,
+        side = "above",
+    },
 }
 
 -- Steps only a page's own walkthrough shows (the ? in the title bar), for

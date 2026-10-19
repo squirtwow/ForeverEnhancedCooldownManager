@@ -568,6 +568,9 @@ local function Environment(keepCVars)
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
                     rawset(button, method, function(_, object) supplied[method] = object end)
                 end
+                rawset(button, "SetDurationText", function(_, object, options)
+                    supplied.SetDurationText, supplied.durationTextOptions = object, options
+                end)
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
@@ -1738,12 +1741,12 @@ do
     Equal(Has(added[3].text, "Edit Mode button", "Boss Frames", "boss fight") .. " " .. tostring(added[3].try),
         "3 nil", "the third: the Edit Mode button and Boss Frames, no Try it (Edit Mode closes the window)")
 
-    -- After an update from 1.3.0: What's new offers them.
+    -- After an update from 1.3.0: What's new, then Got it tours them.
     for _, timer in ipairs(timers) do timer() end
     local notes = FECMNotes
-    Equal(tostring(S[notes].shown) .. " " .. tostring(notes.seen) .. " " .. tostring(S[notes.tour].shown), "true 1.3.0 true",
-        "What's new after an update from 1.3.0 offers Show me what's new")
-    notes.tour:Click()
+    Equal(tostring(S[notes].shown) .. " " .. tostring(notes.seen) .. " " .. tostring(notes.autoTour), "true 1.3.0 true",
+        "What's new after an update from 1.3.0, its Got it going on into their tour")
+    notes.done:Click()
     local w, box = FECMFrame, FECMTour
     local raid = w.pages.raid
     Equal(tostring(S[notes].shown) .. " " .. S[box.count].text .. " " .. w.selected .. " " .. S[box.title].text .. " "

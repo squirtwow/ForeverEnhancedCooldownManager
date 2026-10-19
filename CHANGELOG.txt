@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.1
+
+### Added
+- Group one-at-a-time spells: Seals, Auras, Aspects, Curses, Banes, Stings and Judgements share one icon (General page).
+- Glow when missing: a buff's icon glows while it's missing, like a Seal that fell off.
+- Count ticks: a debuff's icon counts its ticks like stacks, with your pick of spot, size and colour.
+
+### Fixed
+- Missing spells and ranks (Seal of Command, Holy Shock, Curse of Exhaustion and more) can now be added.
+- The Buffs list no longer shows other classes' spells.
+
 ## 1.8.0
 
 ### Added

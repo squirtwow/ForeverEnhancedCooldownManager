@@ -1365,6 +1365,19 @@ local function BuildGeneral(window, page)
     bars:SetPoint("TOPLEFT", 16, -36)
     window:Hint(bars, "Your own Cooldowns, Utility, Buffs and Debuffs bars. Off, none of them show.")
     window.useBars = bars
+    -- Beside it (a player's idea, on by default): on the Buffs and Debuffs
+    -- bars, one family's spells side by side are one icon, and one added goes
+    -- beside its family, since only one can be up. Turned away (a full bar),
+    -- says why.
+    local families = T:Check(page, "Group one-at-a-time spells", function(self)
+        local _, message = B:SetFamilies(self:GetChecked())
+        if message then window:Say(message) end
+        window:Refresh()
+    end)
+    families:SetPoint("TOPLEFT", 260, -36)
+    window:Hint(families, "Only one Seal, Aura or Aspect, or Curse, Bane, Sting or Judgement, can be up, so side by side"
+        .. " they're one icon on Buffs and Debuffs.")
+    window.groupFamilies = families
     Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left. Move and arrange them on the Layout page.", 34, -56)
 
     T:Heading(page, "Minimap button"):SetPoint("TOPLEFT", 16, -96)
@@ -1460,6 +1473,7 @@ local function BuildGeneral(window, page)
         moreState:SetText(installed and "Installed. Type /era, or click Open."
             or "Get it on CurseForge or GitHub: click one for its link.")
         bars:SetChecked(B:Enabled())
+        families:SetChecked(ns.Get("groupFamilies"))
         minimap:SetChecked(ns.Get("minimap"))
         free:SetChecked(ns.Get("minimapFree"))
         updates:SetChecked(ns.Get("updateNotice"))

@@ -564,6 +564,9 @@ local function Environment(keepCVars)
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
                     rawset(button, method, function(_, object) supplied[method] = object end)
                 end
+                rawset(button, "SetDurationText", function(_, object, options)
+                    supplied.SetDurationText, supplied.durationTextOptions = object, options
+                end)
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
@@ -2463,6 +2466,20 @@ local pwf = ns.Spells:Find("Power Word: Fortitude")
 Equal(pwf and pwf.line, "Added", "added spells listed under Added")
 local slotIDs = S[containers[1]].groups.g1.filters.includeSpellIDs
 Equal(slotIDs[1243] and slotIDs[10938] and slotIDs[21564], true, "any rank, and Prayer of Fortitude, counts")
+-- Another class's spell another character added to another bar (a hunter's
+-- Call Pet, in a shared profile) stays off this druid's Buffs page; Fortitude,
+-- on the Buffs bar, stays on it (1.8.1, the user's druid).
+ns.AddCustom("Call Pet", { 883 })
+table.insert(ns.BarData("cd").spells, "Call Pet")
+ns.Spells:Stale()
+ns.Bars:Changed()
+Search("")
+Equal(tostring(Row("Call Pet") == nil) .. " " .. tostring(Row("Power Word: Fortitude") ~= nil), "true true",
+    "the Buffs page: another class's spell added to another bar left off, one on this bar kept")
+table.remove(ns.BarData("cd").spells)
+ns.PruneCustom()
+ns.Spells:Stale()
+ns.Bars:Changed()
 Search("minor heal")
 Equal(Row("item:118") == nil and Other("Minor Healing Potion") == nil, true, "items never offered on the Buffs bar")
 Search("zzzz")
@@ -7264,22 +7281,27 @@ end)()
         and nextSteps[1].version == "1.2.0", true,
         "1.2.0's steps, Healthstones and potions and Dim when ready among them")
     Equal(Titles(Tour:News("1.0.0")), NEW .. ", " .. NEXT, "from 1.0.0 to this copy: the three new steps, then the next update's")
-    -- The newest steps there are: 1.6.0's, numbered before their release. Here only Dim on cooldown,
+    -- The newest steps there are: 1.8.1's three. 1.6.0's before them: here only Dim on cooldown,
     -- on the Cooldowns page: this druid knows no form, so Swap your icons stays out (Tools/TestForms.lua
-    -- and Tools/TestPulse.lua tour it). 1.5.0's before them: here only Ready glow, as the Cooldown
+    -- and Tools/TestPulse.lua tour it). 1.5.0's before those: here only Ready glow, as the Cooldown
     -- pulse's page isn't loaded (Tools/TestPulse.lua tours its steps).
-    local latest, pulse = {}, {}
+    local latest, six, pulse = {}, {}, {}
     for _, step in ipairs(nextSteps) do
-        if step.version == "1.6.0" then latest[#latest + 1] = step end
+        if step.version == "1.8.1" then latest[#latest + 1] = step end
+        if step.version == "1.6.0" then six[#six + 1] = step end
         if step.version == "1.5.0" then pulse[#pulse + 1] = step end
     end
     local LATEST = Titles(latest)
-    Equal(tostring(#ns.KnownForms()) .. " " .. LATEST .. " | " .. Titles(pulse) .. " | " .. tostring(NEXT:sub(-#LATEST) == LATEST)
-        .. " " .. tostring(NEXT:sub(-#LATEST - 12) == "Ready glow, " .. LATEST), "0 Dim on cooldown | Ready glow | true true",
-        "1.6.0's: Dim on cooldown, the last of them, straight after 1.5.0's Ready glow (no form known here)")
-    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News("1.4.4")),
-        LATEST .. "|" .. LATEST .. "|" .. LATEST .. "|Ready glow, " .. LATEST,
-        "no version seen, or one that isn't: the latest update's, the newest steps there are, as after 1.5.9; after 1.4.4 1.5.0's too")
+    local BEFORE = "Ready glow, Dim on cooldown, "
+    Equal(tostring(#ns.KnownForms()) .. " " .. LATEST .. " | " .. Titles(six) .. " | " .. Titles(pulse) .. " | "
+        .. tostring(NEXT:sub(-#LATEST - #BEFORE) == BEFORE .. LATEST),
+        "0 One icon each, Glow when missing, Count ticks | Dim on cooldown | Ready glow | true",
+        "1.8.1's three, the last of them, straight after 1.6.0's Dim on cooldown and 1.5.0's Ready glow (no form known here)")
+    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.6.0")) .. "|"
+        .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News("1.4.4")),
+        LATEST .. "|" .. LATEST .. "|" .. LATEST .. "|Dim on cooldown, " .. LATEST .. "|" .. BEFORE .. LATEST,
+        "no version seen, or one that isn't: the latest update's, the newest steps there are, as after 1.6.0; after 1.5.9"
+        .. " 1.6.0's too, after 1.4.4 1.5.0's too")
     Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW .. ", " .. NEXT,
         "versions skipped come together: the basics from 1.0.0, then the new ones")
     Equal(Titles(Tour:News("dev")) .. "|" .. Titles(Tour:News(U)), "|", "nothing when nothing is newer than what was seen")
@@ -7318,25 +7340,44 @@ end)()
     -- 1.6.0's steps, numbered before their release: from the source, after
     -- 1.5.9, just them; 1.5.9 itself (or any release before 1.6.0) never
     -- shows them; 1.6.0, once released, does, after 1.5.9 and by hand.
+    local SIXTH = Titles(six)
     Running(nil)
     local fromSource = Titles(Tour:News("1.5.9"))
     Running("1.5.9")
     local before = Titles(Tour:News("1.5.8")) .. "|" .. Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("1.4.4"))
     Running("1.6.0")
     Equal(fromSource .. "|" .. before .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News(nil)),
-        LATEST .. "||Ready glow|Ready glow|" .. LATEST .. "|" .. LATEST,
-        "after 1.5.9: 1.6.0's steps from the source; 1.5.9 never shows them (by hand its last, 1.5.0's); 1.6.0 shows them, by hand too")
-    Equal(Titles(Tour:News("1.4.4")) .. "|" .. Titles(Tour:News("0.9.0")):sub(-#LATEST - 12), "Ready glow, " .. LATEST .. "|Ready glow, " .. LATEST,
+        SIXTH .. ", " .. LATEST .. "||Ready glow|Ready glow|" .. SIXTH .. "|" .. SIXTH,
+        "after 1.5.9: 1.6.0's steps and the later ones from the source; 1.5.9 never shows them (by hand its last, 1.5.0's);"
+        .. " 1.6.0 shows its own, by hand too")
+    Equal(Titles(Tour:News("1.4.4")) .. "|" .. Titles(Tour:News("0.9.0")):sub(-#SIXTH - 12), "Ready glow, " .. SIXTH .. "|Ready glow, " .. SIXTH,
         "1.6.0 after an older version: 1.5.0's then 1.6.0's, the same at the end of everything")
     Running("1.6.1")
-    Equal(Titles(Tour:News("1.6.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. LATEST, "1.6.1 after 1.6.0: nothing new; by hand 1.6.0's")
+    Equal(Titles(Tour:News("1.6.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. SIXTH, "1.6.1 after 1.6.0: nothing new; by hand 1.6.0's")
+    -- 1.8.1's, numbered before their release: 1.8.0 never shows them; 1.8.1 does.
+    Running("1.8.0")
+    local older = Titles(Tour:News("1.6.0")) .. "|" .. Titles(Tour:News(nil))
+    Running("1.8.1")
+    Equal(older .. "|" .. Titles(Tour:News("1.8.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. SIXTH .. "|" .. LATEST .. "|" .. LATEST,
+        "1.8.0 never shows 1.8.1's (by hand 1.6.0's); 1.8.1 after 1.8.0 shows its three, by hand too")
     Running(nil)
 
-    -- After an update: What's new offers the tour beside Got it.
+    -- After an update that added steps: What's new by itself, and Got it goes
+    -- on into their tour (the user: show me what's new by itself), so Show me
+    -- what's new isn't beside it.
     Fresh({ useBars = true, notesSeen = "1.0.0" })
     local notes = FECMNotes
     Equal(ns.NotesSeen() .. " " .. tostring(S[notes].shown) .. " " .. tostring(notes.seen), "dev true 1.0.0",
         "What's new after an update, knowing the version seen before it")
+    Equal(tostring(S[notes.tour].shown) .. " " .. tostring(notes.autoTour) .. " " .. tostring(S[notes.discord].points[1][2] == notes.done),
+        "false true true", "Got it tours what's new, so no Show me what's new beside it: the Discord button beside Got it")
+    notes.done:Click()
+    Equal(tostring(S[notes].shown) .. " " .. tostring(S[FECMTour].shown) .. " " .. S[FECMTour.count].text, "false true 1 of " .. TOTAL,
+        "Got it closes What's new and starts the tour of every step since")
+    FECMTour.skip:Click()
+    -- Shown again (by hand, or a test of the old way): Show me what's new
+    -- beside Got it, which then only closes it.
+    ns.ShowNotes("1.0.0")
     Equal(tostring(S[notes.tour].shown) .. " " .. S[notes.tour.label].text, "true Show me what's new", "offering Show me what's new")
     Equal(S[notes.tour].points[1][1] .. " " .. S[notes.tour].points[1][3] .. " " .. S[notes.tour].points[1][4] .. " | "
         .. S[notes.discord].points[1][1] .. " " .. tostring(S[notes.discord].points[1][2] == notes.tour) .. " "

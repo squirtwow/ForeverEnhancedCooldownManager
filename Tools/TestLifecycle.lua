@@ -571,6 +571,9 @@ local function Environment(keepCVars)
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
                     rawset(button, method, function(_, object) supplied[method] = object end)
                 end
+                rawset(button, "SetDurationText", function(_, object, options)
+                    supplied.SetDurationText, supplied.durationTextOptions = object, options
+                end)
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end

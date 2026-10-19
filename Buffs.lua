@@ -72,10 +72,99 @@ local function Fit(parts, size, showTimer)
     parts.count:SetFontObject(Style:Count(size))
 end
 
+-- Count ticks (a player's idea: how many times Bane of Agony has ticked),
+-- ticked per debuff on the Debuffs page: how often each debuff of yours
+-- ticks on a target, in seconds, from the game's data (printed by
+-- node Tools/MakeTickPeriods.mjs).
+ns.TICK_PERIODS = {
+    ["Arcane Missiles"] = 1,
+    ["Bane of Agony"] = 2,
+    ["Black Arrow"] = 2,
+    ["Corruption"] = 3,
+    ["Curse of Idiocy"] = 3,
+    ["Devouring Plague"] = 3,
+    ["Drain Life"] = 1,
+    ["Drain Mana"] = 1,
+    ["Drain Soul"] = 3,
+    ["Entangling Roots"] = 3,
+    ["Fireball"] = 2,
+    ["Flame Shock"] = 3,
+    ["Frostfire Bolt"] = 3,
+    ["Garrote"] = 3,
+    ["Holy Fire"] = 2,
+    ["Immolate"] = 3,
+    ["Immolation Trap"] = 3,
+    ["Insect Swarm"] = 2,
+    ["Lacerate"] = 3,
+    ["Living Bomb"] = 3,
+    ["Living Flame"] = 1,
+    ["Mind Flay"] = 1,
+    ["Mind Sear"] = 1,
+    ["Moonfire"] = 3,
+    ["Pounce Bleed"] = 3,
+    ["Pyroblast"] = 3,
+    ["Rake"] = 3,
+    ["Rend"] = 3,
+    ["Rip"] = 2,
+    ["Rupture"] = 2,
+    ["Saber Slash"] = 2,
+    ["Savage Rend"] = 3,
+    ["Scorpid Poison"] = 2,
+    ["Serpent Sting"] = 3,
+    ["Shadow Word: Pain"] = 3,
+    ["Shadowflame"] = 2,
+    ["Siphon Life"] = 3,
+    ["Starshards"] = 1,
+    ["Sunfire"] = 3,
+    ["Tendon Rip"] = 3,
+    ["Vampiric Touch"] = 3,
+    ["Viper Sting"] = 2,
+    ["Void Plague"] = 3,
+    ["Web"] = 1,
+    ["Wrack"] = 1,
+}
+
+-- A tick count's rule: the aura's time so far over its pace, rounded down
+-- (from 0), or up (from 1, like stacks: 1 as it lands, 2 after the first
+-- tick). From 1, the time is taken as at least a moment, so it never reads
+-- 0 as it lands.
+local function Ticking(seconds, from)
+    local rounding = Enum.NumericRuleFormatRounding
+    if from == 1 then
+        return { threshold = 0, min = .01, format = "%d", components = { { div = seconds, step = 1, rounding = rounding.Up } } }
+    end
+    return { threshold = 0, format = "%d", components = { { div = seconds, step = 1, rounding = rounding.Down } } }
+end
+
+-- A Debuffs bar icon's tick count. The addon can't read an aura's time in a
+-- fight (nor the combat log), so the game draws it: the aura's time so far,
+-- through a rule the addon sets out of combat (F:Ticks), which starts again
+-- as the debuff is put back on. Hidden until its entry counts; where it
+-- sits, its size and colour are the bar's (F:Ticks). Nil when the game can't.
+local function TickCount(button, top)
+    local util, enum = C_StringUtil, Enum
+    if not (type(util) == "table" and type(util.CreateNumericRuleFormatter) == "function" and type(enum) == "table"
+        and enum.DurationTextBindingProperty and enum.NumericRuleFormatRounding) then return nil end
+    local ok, ticks = pcall(function()
+        local formatter = util.CreateNumericRuleFormatter()
+        formatter:AddBreakpoint(Ticking(2, 0))
+        local frame = CreateFrame("Frame", nil, top)
+        frame:SetAllPoints()
+        frame:Hide()
+        local text = frame:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+        text:SetPoint("TOPLEFT", 1, -1)
+        button:SetDurationText(text, { textFormat = { formatString = "{}", components = {
+            { property = enum.DurationTextBindingProperty.ElapsedDuration, formatter = formatter } } } })
+        return { frame = frame, text = text, formatter = formatter, rule = "2:0" }
+    end)
+    return ok and ticks or nil
+end
+
 -- Runs once per icon, before the client restricts it in combat. Everything
 -- supplied to the icon must be a descendant of its button. A packed icon
--- carries its own border and shadow; a fixed one's holder has them.
-local function Look(button, size, showTimer, decorate)
+-- carries its own border and shadow; a fixed one's holder has them. A
+-- Debuffs bar entry's icon can count ticks too (counts).
+local function Look(button, size, showTimer, decorate, counts)
     button:EnableMouse(false)
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -97,6 +186,7 @@ local function Look(button, size, showTimer, decorate)
     count:SetPoint("BOTTOMRIGHT", -1, 1)
     button:SetApplicationCount(count)
     local parts = { cooldown = cooldown, count = count }
+    if counts then parts.ticks = TickCount(button, top) end
     if decorate then
         -- Made now: the container's icons only take art as they're made.
         parts.decor = Style:Decor(button, button, 0, true)
@@ -134,17 +224,24 @@ function F.Guard(look)
 end
 
 -- A slot's numbers take its holder's size; a later size change refits them.
-local function SlotLook(holder)
+local function SlotLook(holder, key)
     return function(button)
         button:SetAllPoints(holder)
-        holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false)
+        holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, key == "debuff")
     end
 end
 
-local function GroupLook(bar)
+-- A packed entry's group (index: its place) keeps its icons' tick counts;
+-- the group of your debuffs on you has none.
+local function GroupLook(bar, index)
     return function(button)
         button:SetSize(BASE, BASE)
-        bar.groupParts[#bar.groupParts + 1] = Look(button, BASE, bar.data.showTimer, true)
+        local parts = Look(button, BASE, bar.data.showTimer, true, bar.key == "debuff" and index ~= nil)
+        bar.groupParts[#bar.groupParts + 1] = parts
+        if parts.ticks then
+            bar.groupTicks[index] = bar.groupTicks[index] or {}
+            table.insert(bar.groupTicks[index], parts.ticks)
+        end
     end
 end
 
@@ -160,6 +257,7 @@ end
 function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
     bar.groupParts, bar.names, bar.up, bar.spots = {}, {}, {}, {}
+    bar.tickPaces, bar.groupTicks = {}, {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -192,7 +290,7 @@ function F:Create(bar)
         container:SetEditModePreviewEnabled(false)
         container:SetUnit(aura.unit)
         for i = 1, ns.BUFF_SLOTS do
-            F.Add(container, "AddAuraSlot", "b" .. i, aura.filter, { initializeFrame = F.Guard(SlotLook(bar.holders[i])) })
+            F.Add(container, "AddAuraSlot", "b" .. i, aura.filter, { initializeFrame = F.Guard(SlotLook(bar.holders[i], bar.key)) })
             container:SetAuraSlotEnabled("b" .. i, false)
         end
         bar.container = container
@@ -332,20 +430,57 @@ function F:Spots(bar)
     return spots
 end
 
+-- Glow when missing (a player's idea: a Seal that fell off): the glow picked
+-- on the Look page on a buff's greyed spot, kept inside it (clipped) and
+-- under the game's icon. The addon can't tell in a fight whether the buff is
+-- up, and needn't: while it's on you the game's icon covers the glow. Made
+-- the first time it's wanted.
+local function MissingGlow(holder, on, size)
+    local host = holder.glowHost
+    if not on then
+        if host then ns.SetGlow(host, false) end
+        return
+    end
+    if not host then
+        host = CreateFrame("Frame", nil, holder)
+        host:SetPoint("CENTER")
+        host:SetClipsChildren(true)
+        host.top, host.glows = host, {}
+        holder.glowHost = host
+    end
+    host:SetSize(size, size)
+    ns.UseGlow(host)
+    ns.SetGlow(host, true)
+end
+
 -- Places the holders for the bar's entries and works out each one's spell
 -- IDs; joined entries count as one, with every linked spell's IDs.
 function F:Layout(bar, data)
     local size, spacing = ns.IconSize(data), data.spacing
     local count = 0
+    local picks, glows = ns.MissingPicks(bar.key), bar.key == "buff" and ns.GlowMissing(bar.key) or {}
+    local counts = bar.key == "debuff" and ns.CountTicks(bar.key) or {}
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
-        local ids, entry = {}, nil
+        local ids, entry, picked, glow, counted, shared = {}, nil, nil, false, false, nil
         for _, name in ipairs(group) do
             local found = ns.Spells:Find(name)
             if found and found.ids and ns.Spells:ForMe(name, bar.key) then
                 entry = entry or found
+                if picks[name] and not picked then picked = found end -- the first picked, as B:Picked
+                glow = glow or glows[name] == true
+                -- An icon counts ticks only while all its debuffs tick at one
+                -- pace: the game shows whichever is up, and the addon can't
+                -- tell which in a fight (B:TickClash).
+                counted = counted or counts[name] == true
+                local tick = ns.Bars:TickPace(name) or false
+                if shared == nil then shared = tick elseif shared ~= tick then shared = false end
                 for _, id in ipairs(found.ids) do ids[id] = true end
             end
         end
+        local pace = counted and shared or nil
+        -- A joined icon shows its picked entry (on the bar's page), faded,
+        -- while none is up; else its first of yours.
+        entry = picked or entry
         if entry and next(ids) and count < ns.BUFF_SLOTS then
             count = count + 1
             local holder = bar.holders[count]
@@ -356,13 +491,16 @@ function F:Layout(bar, data)
             holder.label:SetWidth(size + spacing)
             holder.label:SetText(#group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name)
             holder.label:SetShown(data.showNames)
+            MissingGlow(holder, glow, size)
             bar.slotIDs[count] = ids
             bar.names[count] = table.concat(group, "+")
+            bar.tickPaces[count] = pace
         end
     end
     for i = count + 1, ns.BUFF_SLOTS do
         bar.holders[i]:Hide()
-        bar.slotIDs[i], bar.names[i] = nil, nil
+        MissingGlow(bar.holders[i], false)
+        bar.slotIDs[i], bar.names[i], bar.tickPaces[i] = nil, nil, nil
     end
     for _, parts in ipairs(bar.groupParts) do parts.cooldown:SetHideCountdownNumbers(not data.showTimer) end
     bar.count = count
@@ -528,7 +666,7 @@ function F:Apply(bar)
     end
     if on and packed then
         for i = bar.groups + 1, bar.count do
-            AddGroup(container, "g" .. i, ns.AURA_BARS[bar.key].filter, { initializeFrame = F.Guard(GroupLook(bar)), maxFrameCount = 1,
+            AddGroup(container, "g" .. i, ns.AURA_BARS[bar.key].filter, { initializeFrame = F.Guard(GroupLook(bar, i)), maxFrameCount = 1,
                 candidateFilters = Filters(bar, bar.slotIDs[i]), layout = { layoutIndex = Index(i), groupSpacing = spacing } })
             bar.groups = i
             bar.appliedGroups[i] = Signature(bar.slotIDs[i]) .. "|" .. spacing .. "|" .. Index(i)
@@ -553,5 +691,52 @@ function F:Apply(bar)
     if bar.appliedScale ~= scale then
         bar.appliedScale = scale
         container:SetScale(scale)
+    end
+    self:Ticks(bar)
+end
+
+-- Count ticks: each Debuffs bar icon's count set going at its entry's pace,
+-- from 0 or 1, or hidden, and placed, sized and coloured as the Debuffs page
+-- says. Fixed slot i and packed group i are entry i's (a packed icon is
+-- drawn at BASE, then scaled). Out of combat only (F:Apply), as the icons
+-- are the game's; each is only sent as it changes, and a rule the game
+-- turns down leaves the count hidden. Tucked a pixel into its corner.
+local INSET = { TOPLEFT = { 1, -1, "LEFT" }, TOP = { 0, -1, "CENTER" }, TOPRIGHT = { -1, -1, "RIGHT" },
+    BOTTOMLEFT = { 1, 1, "LEFT" }, BOTTOM = { 0, 1, "CENTER" }, BOTTOMRIGHT = { -1, 1, "RIGHT" }, CENTER = { 0, 0, "CENTER" } }
+
+local function SetCount(ticks, seconds, data, size)
+    if seconds then
+        local rule = seconds .. ":" .. data.tickFrom
+        if ticks.rule ~= rule then
+            local ok = pcall(function()
+                ticks.formatter:ClearBreakpoints()
+                ticks.formatter:AddBreakpoint(Ticking(seconds, data.tickFrom))
+            end)
+            ticks.rule = ok and rule or nil
+            if not ok then seconds = nil end
+        end
+    end
+    ticks.frame:SetShown(seconds ~= nil)
+    if not seconds then return end
+    local font = Style:Ticks(size, data.tickSize)
+    local look = data.tickAt .. "|" .. font .. "|" .. data.tickColour
+    if ticks.look == look then return end
+    ticks.look = look
+    local at = INSET[data.tickAt] or INSET.TOPLEFT
+    local colour = ns.COUNT_COLOURS[data.tickColour] or ns.COUNT_COLOURS.white
+    local text = ticks.text
+    text:SetFontObject(font)
+    text:SetTextColor(colour[1], colour[2], colour[3])
+    text:ClearAllPoints()
+    text:SetPoint(INSET[data.tickAt] and data.tickAt or "TOPLEFT", at[1], at[2])
+    text:SetJustifyH(at[3])
+end
+
+function F:Ticks(bar)
+    local data = bar.data
+    for i = 1, ns.BUFF_SLOTS do
+        local seconds, holder = bar.tickPaces[i], bar.holders[i]
+        if holder.slot and holder.slot.ticks then SetCount(holder.slot.ticks, seconds, data, holder.size or BASE) end
+        for _, ticks in ipairs(bar.groupTicks[i] or {}) do SetCount(ticks, seconds, data, BASE) end
     end
 end

@@ -10,6 +10,20 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.8.1",
+        sections = {
+            { "Added", {
+                "Group one-at-a-time spells: Seals, Auras, Aspects, Curses, Banes, Stings and Judgements share one icon (General page).",
+                "Glow when missing: a buff's icon glows while it's missing, like a Seal that fell off.",
+                "Count ticks: a debuff's icon counts its ticks like stacks, with your pick of spot, size and colour.",
+            } },
+            { "Fixed", {
+                "Missing spells and ranks (Seal of Command, Holy Shock, Curse of Exhaustion and more) can now be added.",
+                "The Buffs list no longer shows other classes' spells.",
+            } },
+        },
+    },
+    {
         version = "1.8.0",
         sections = {
             { "Added", {
@@ -545,7 +559,12 @@ local function Build()
     local done = T:Button(window, "Got it", 100, 24)
     done:SetPoint("BOTTOMRIGHT", -16, 14)
     T:Paint(function(accent) done:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
-    done:SetScript("OnClick", function() window:Hide() end)
+    -- Shown by itself after an update that added steps (the user: show me
+    -- what's new by itself), Got it goes on into their tour.
+    done:SetScript("OnClick", function()
+        window:Hide()
+        if window.autoTour and ns.Tour then ns.Tour:StartNews(window.seen) end
+    end)
     window.done = done
     -- Closes this for the tour, which opens the settings. Its tooltip says
     -- what it does, as the label has no room to.
@@ -568,15 +587,17 @@ end
 
 -- seen: after an update, the version whose notes were seen before it, so
 -- the tour takes in every step since. Opened by hand, the tour offered is
--- the latest update's.
-function ns.ShowNotes(seen)
+-- the latest update's. auto: shown by itself after the update; with steps
+-- to tour, Got it starts them, so Show me what's new isn't needed beside it.
+function ns.ShowNotes(seen, auto)
     if #ns.NOTES == 0 then return end
     if not window then Build() end
     window.seen = type(seen) == "string" and seen or nil
     local tour = ns.Tour ~= nil and #ns.Tour:News(window.seen) > 0
-    window.tour:SetShown(tour)
+    window.autoTour = auto == true and tour
+    window.tour:SetShown(tour and not window.autoTour)
     window.discord:ClearAllPoints()
-    window.discord:SetPoint("RIGHT", tour and window.tour or window.done, "LEFT", -8, 0)
+    window.discord:SetPoint("RIGHT", window.tour:IsShown() and window.tour or window.done, "LEFT", -8, 0)
     -- Raid Timers' secure Edit Mode button taken away first, or it would sit
     -- on top of this and take its clicks (RaidTimersPage.lua).
     if ns.EditModeAway then ns.EditModeAway() end
@@ -605,7 +626,7 @@ function N:Start()
         due = false
         events:UnregisterAllEvents()
         ns.SetNotesSeen(version)
-        if not welcome then return ns.ShowNotes(seen) end
+        if not welcome then return ns.ShowNotes(seen, true) end
         ns.SetWelcomeDue(false)
         if ns.Tour then ns.Tour:Welcome() else ns.ShowWindow() end
     end

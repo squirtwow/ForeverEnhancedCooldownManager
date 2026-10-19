@@ -568,6 +568,9 @@ local function Environment(keepCVars)
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
                     rawset(button, method, function(_, object) supplied[method] = object end)
                 end
+                rawset(button, "SetDurationText", function(_, object, options)
+                    supplied.SetDurationText, supplied.durationTextOptions = object, options
+                end)
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
@@ -2893,6 +2896,328 @@ end)()
     Equal(tostring(ns.BarData("buff").onlyMissing) .. " " .. tostring(ns.BarData("buff").showMissing) .. " "
         .. tostring(ns.BarData("debuff").onlyMissing) .. " " .. tostring(S[ns.Bars.driver].events.UNIT_AURA),
         "false true false nil", "saved before it: off, missing buffs greyed as it was; on the Debuffs bar: off")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- One icon per Curse, Bane or Sting (1.8.1, a player's idea): only one of
+-- each family can be yours on a target, so on the Debuffs bar ones side by
+-- side are one icon, and one added goes beside its family, on by default;
+-- nothing in the lists changes, so it can be unticked any time. A
+-- right-click on the bar's page picks the one shown, faded, while none is up.
+;(function()
+    -- A warlock who knows these curses and banes, and Corruption.
+    local WARLOCK = { { "Curse of Weakness", 702 }, { "Curse of Tongues", 1714 }, { "Curse of Recklessness", 704 },
+        { "Bane of Agony", 980 }, { "Bane of Doom", 603 }, { "Corruption", 172 } }
+    local function Warlock()
+        Fresh()
+        for _, spell in ipairs(WARLOCK) do
+            table.insert(book[2].items, { name = spell[1], subName = "Rank 1", spellID = spell[2], iconID = spell[2] })
+        end
+        _G.UnitClass = function() return "Warlock", "WARLOCK" end
+    end
+    local class = _G.UnitClass
+    Warlock()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B, db = ns.Bars, ForeverEnhancedCooldownManagerDB
+    local function List() return table.concat(ns.BarData("debuff").spells, ",") end
+    local function Joins()
+        local out = {}
+        for i, name in ipairs(ns.BarData("debuff").spells) do
+            if B:Joined("debuff", i) then out[#out + 1] = name end
+        end
+        return table.concat(out, ",")
+    end
+    Equal(tostring(ns.Get("groupFamilies")), "true", "on by default")
+    for _, name in ipairs({ "Curse of Weakness", "Corruption", "Bane of Agony", "Curse of Tongues", "Bane of Doom" }) do
+        B:SetAura("debuff", name, true)
+    end
+    Equal(List() .. " | " .. Joins() .. " | " .. B:Get("debuff").count .. " | " .. tostring(next(ns.Joins("debuff"))),
+        "Curse of Weakness,Curse of Tongues,Corruption,Bane of Agony,Bane of Doom | Curse of Tongues,Bane of Doom | 3 | nil",
+        "each added beside its family, one icon with it: the Curses one, the Banes one, Corruption its own; no join saved")
+    local exhaustion, weakness, pinned = B:Family("Curse of Exhaustion"), B:Family("Curse of Weakness@2"), B:Family("Curse of Weakness#702")
+    Equal(tostring(exhaustion and exhaustion.key) .. " " .. tostring(weakness and weakness.key) .. " " .. tostring(pinned and pinned.key)
+        .. " " .. tostring(B:Family("Corruption")), "curses curses curses nil",
+        "by the spell's name at a rank or ID too; Curse of Exhaustion one of them")
+    -- The join button can't split a family while ticked, and says why.
+    local split, why = B:SetJoined("debuff", 2, false)
+    Equal(tostring(split) .. " " .. tostring(why) .. " | " .. Joins(), "false " .. B.FAMILY_TIED .. " | Curse of Tongues,Bane of Doom",
+        "the join button: no split, and why")
+
+    -- A Judgement is one family too; a Seal is the Buffs bar's, not this one's.
+    local judgement, seal, aspect = B:Family("Judgement of Light"), B:Family("Seal of Command"), B:Family("Aspect of the Hawk")
+    Equal(tostring(judgement and judgement.bar) .. " " .. tostring(seal and seal.bar) .. " " .. tostring(aspect and aspect.key) .. " "
+        .. tostring(B:Kindred("debuff", "Seal of Light", "Seal of Wisdom")) .. " " .. tostring(B:Kindred("buff", "Seal of Light",
+        "Seal of Wisdom")) .. " " .. tostring(B:Kindred("buff", "Curse of Weakness", "Curse of Tongues")),
+        "debuff buff aspects false true false", "Judgements on Debuffs; Seals, Auras and Aspects on Buffs, one icon there only")
+    for _, name in ipairs({ "Seal of Light", "Blessing of Might", "Seal of Wisdom" }) do B:SetAura("buff", name, true) end
+    Equal(table.concat(ns.BarData("buff").spells, ",") .. " | " .. tostring(B:Joined("buff", 2)) .. " " .. tostring(B:Joined("buff", 3)),
+        "Seal of Light,Seal of Wisdom,Blessing of Might | true false", "on Buffs: a Seal added goes beside the other, one icon")
+    for _, name in ipairs({ "Seal of Light", "Blessing of Might", "Seal of Wisdom" }) do B:SetAura("buff", name, false) end
+
+    -- Unticked: each its own icon where it is, and a new one at the end.
+    B:SetFamilies(false)
+    B:SetAura("debuff", "Curse of Recklessness", true)
+    Equal(List() .. " | " .. Joins() .. " | " .. B:Get("debuff").count, "Curse of Weakness,Curse of Tongues,Corruption,Bane of Agony,"
+        .. "Bane of Doom,Curse of Recklessness |  | 6", "unticked: each its own icon, in place, a new one at the end")
+    -- Ticked again: side by side ones are one icon; one apart stays apart
+    -- until moved beside them.
+    B:SetFamilies(true)
+    Equal(List() .. " | " .. Joins(), "Curse of Weakness,Curse of Tongues,Corruption,Bane of Agony,Bane of Doom,Curse of Recklessness"
+        .. " | Curse of Tongues,Bane of Doom", "ticked again: the ones side by side one icon, Curse of Recklessness apart")
+    B:MoveTo("debuff", 6, 3)
+    Equal(List() .. " | " .. Joins() .. " | " .. B:Get("debuff").count, "Curse of Weakness,Curse of Tongues,Curse of Recklessness,"
+        .. "Corruption,Bane of Agony,Bane of Doom | Curse of Tongues,Curse of Recklessness,Bane of Doom | 3", "moved beside them: joined")
+
+    -- A full bar: one more of a family still fits (it shares the icon), any
+    -- other spell doesn't, and unticking (more icons than fit) is refused.
+    local slots = ns.BUFF_SLOTS
+    ns.BUFF_SLOTS = 3
+    local idiocy, corruption = B:SetAura("debuff", "Curse of Idiocy", true), B:SetAura("debuff", "Immolate", true)
+    local untick, room = B:SetFamilies(false)
+    Equal(tostring(idiocy) .. " " .. tostring(corruption) .. " | " .. List() .. " | " .. tostring(untick) .. " " .. tostring(room)
+        .. " " .. tostring(ns.Get("groupFamilies")), "true false | Curse of Weakness,Curse of Tongues,Curse of Recklessness,"
+        .. "Curse of Idiocy,Corruption,Bane of Agony,Bane of Doom | false Debuffs has no room to split them: take a spell or two off"
+        .. " it first. true", "full: a curse fits beside its family, Immolate doesn't, and unticking says why")
+    ns.BUFF_SLOTS = slots
+    B:SetAura("debuff", "Curse of Idiocy", false)
+
+    -- The faded icon: the first of the group, or the one picked.
+    B:SetOption("debuff", "showNames", true)
+    local bar = B:Get("debuff")
+    Equal(S[bar.holders[1].label].text, "Curse of Weakness +2", "the first's icon and name while none is up")
+    Equal(tostring(B:PickMissing("debuff", 3)) .. " " .. tostring(B:Picked("debuff", 3)) .. " " .. S[bar.holders[1].label].text,
+        "true true Curse of Recklessness +2", "Curse of Recklessness picked: its icon and name instead")
+    B:PickMissing("debuff", 2)
+    Equal(tostring(B:Picked("debuff", 3)) .. " " .. tostring(B:Picked("debuff", 2)) .. " " .. S[bar.holders[1].label].text,
+        "false true Curse of Tongues +2", "another picked: only one at a time")
+    B:PickMissing("debuff", 2)
+    Equal(tostring(B:Picked("debuff", 2)) .. " " .. S[bar.holders[1].label].text .. " " .. tostring(B:PickMissing("debuff", 4)),
+        "false Curse of Weakness +2 false", "picked again: unpicked, the first again; an icon on its own has nothing to pick")
+    -- Two picked in one icon (after a move): the first counts, one dot.
+    B:PickMissing("debuff", 3)
+    ns.MissingPicks("debuff")["Curse of Tongues"] = true
+    B:Changed()
+    Equal(tostring(B:Picked("debuff", 2)) .. " " .. tostring(B:Picked("debuff", 3)) .. " " .. S[bar.holders[1].label].text,
+        "true false Curse of Tongues +2", "two picked in one icon: the first is the one")
+    ns.MissingPicks("debuff")["Curse of Tongues"] = nil
+    B:Changed()
+
+    -- Kept over a reload, and in a copy of the profile; a new profile's
+    -- curses side by side are one icon too (the option is everyone's).
+    local saved = db
+    Warlock()
+    ns = Load(saved)
+    B = ns.Bars
+    Equal(Joins() .. " | " .. tostring(B:Picked("debuff", 3)), "Curse of Tongues,Curse of Recklessness,Bane of Doom | true",
+        "after a reload: one icon each, the pick kept")
+    ns.CopyProfile("Raid")
+    Equal(tostring(ns.ProfileName()) .. " " .. tostring(B:Picked("debuff", 3)) .. " | " .. Joins(),
+        "Raid true | Curse of Tongues,Curse of Recklessness,Bane of Doom", "a copy keeps the pick")
+    ns.NewProfile("Fresh")
+    B:SetAura("debuff", "Curse of Tongues", true)
+    B:SetAura("debuff", "Immolate", true)
+    B:SetAura("debuff", "Curse of Weakness", true)
+    Equal(List() .. " | " .. Joins(), "Curse of Tongues,Curse of Weakness,Immolate | Curse of Weakness",
+        "a new profile: a curse added goes beside the other, one icon")
+    Equal(#printed, 0, "no errors")
+    _G.UnitClass = class
+end)()
+
+-- Glow when missing (1.8.1, a player's idea: a Seal that fell off): a buff
+-- on the Buffs bar ticked to glow shows the Look page's glow on its greyed
+-- spot, kept inside it (clipped) and under the game's icon, which covers it
+-- while the buff is on you; the addon never reads whether it is.
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetOption("buff", "showMissing", true)
+    local bar = B:Get("buff")
+    local holder = bar.holders[1]
+    Equal(tostring(holder.glowHost) .. " " .. tostring(B:GlowsMissing("buff", "Thorns")), "nil false", "off at first: no glow made")
+    Equal(tostring(B:SetGlowMissing("buff", "Thorns", true)) .. " " .. tostring(B:SetGlowMissing("debuff", "Thorns", true)) .. " "
+        .. tostring(B:SetGlowMissing("buff", "Wrath", true)), "true false false",
+        "ticked for a buff on the Buffs bar; not the Debuffs bar, nor a spell not on the bar")
+    local host = holder.glowHost
+    Equal(tostring(host ~= nil and S[host.glow].shown) .. " " .. tostring(Last(host, "SetClipsChildren")) .. " "
+        .. tostring(S[host].parent == holder) .. " " .. tostring(Last(host, "SetFrameLevel")) .. " "
+        .. tostring(bar.container and Last(bar.container, "SetFrameLevel")),
+        "true true true nil 6", "its spot glows, the glow clipped to the spot, at the spot's own level: under the game's icons"
+        .. " (their container 5 above the bar)")
+    B:SetGlowMissing("buff", "Thorns", false)
+    Equal(tostring(S[host.glow].shown), "false", "unticked: no glow")
+    B:SetGlowMissing("buff", "Thorns", true)
+    -- Kept over a reload; a name taken off the bar goes from the list too.
+    local saved = ForeverEnhancedCooldownManagerDB
+    Fresh()
+    ns = Load(saved)
+    B = ns.Bars
+    Equal(tostring(B:GlowsMissing("buff", "Thorns")) .. " " .. tostring(B:Get("buff").holders[1].glowHost ~= nil),
+        "true true", "after a reload: still glows")
+    B:SetAura("buff", "Thorns", false)
+    Fresh()
+    ns = Load(saved)
+    Equal(tostring(ns.GlowMissing("buff").Thorns), "nil", "taken off the bar: no longer kept")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Count ticks (1.8.1, a player's idea: Bane of Agony's ticks): each Debuffs
+-- bar icon asks the game to draw its aura's time so far over its debuff's
+-- pace, rounded down, at its top left, as the addon can't read it in a
+-- fight. Hidden until ticked for its debuff; the pace is set out of combat.
+;(function()
+    local util, enum = _G.C_StringUtil, { _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    local function Game()
+        _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+            return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end,
+                ClearBreakpoints = function(self) self.rules = {} end }
+        end }
+        _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = { Up = 1, Down = 2 }, { ElapsedDuration = 2 }
+    end
+    -- What slot i's icon (fixed) and group i's (packed) show: "hidden", or
+    -- "every N" seconds.
+    local function Shows(bar, i)
+        local out = {}
+        local ticks = { bar.holders[i].slot and bar.holders[i].slot.ticks, (bar.groupTicks[i] or {})[1] }
+        for n = 1, 2 do
+            local t = ticks[n]
+            local rules = t and t.formatter.rules
+            out[n] = not t and "none" or not S[t.frame].shown and "hidden" or ("every " .. tostring(rules[#rules].components[1].div)
+                .. (#rules == 1 and "" or " (" .. #rules .. " rules)"))
+        end
+        return table.concat(out, " / ")
+    end
+    -- Without the game's number rules (an older build): nothing asked, no errors.
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(tostring(S[B:Get("debuff").container].slots.b1.supplied.SetDurationText) .. " " .. tostring(B:Get("debuff").holders[1].slot.ticks),
+        "nil nil", "no number rules in the game: no count asked for")
+    Fresh()
+    Game()
+    ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    B = ns.Bars
+    local bar = B:Get("debuff")
+    local slot = S[bar.container].slots.b1
+    local options = slot.supplied.durationTextOptions
+    local component = options and options.textFormat.components[1]
+    Equal(table.concat({ tostring(slot.supplied.SetDurationText ~= nil), tostring(S[B:Get("buff").container].slots.b1.supplied.SetDurationText),
+        tostring(options and options.textFormat.formatString), tostring(component and component.property),
+        tostring((S[slot.supplied.SetDurationText].points[1] or {})[1]), tostring(S[bar.holders[1].slot.ticks.frame].shown) }, " "),
+        "true nil {} 2 TOPLEFT false", "each Debuffs bar icon asks for its time so far (not the Buffs bar's), at its top left, hidden")
+    -- Ticked for a debuff on the bar that ticks; not for the Buffs bar, a
+    -- spell not on the bar, nor one that doesn't tick.
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetAura("debuff", "Wrath", true)
+    Equal(Shows(bar, 1), "hidden / hidden", "packed (the default): the group's icon made, still hidden")
+    B:SetAura("buff", "Moonfire", true)
+    Equal(table.concat({ tostring(B:SetCountTicks("debuff", "Moonfire", true)), tostring(B:SetCountTicks("buff", "Moonfire", true)),
+        tostring(B:SetCountTicks("debuff", "Corruption", true)), tostring(B:SetCountTicks("debuff", "Wrath", true)) }, " "),
+        "true false false false", "ticked for Moonfire on the Debuffs bar only; not on the Buffs bar (it's on there too), nor"
+        .. " Corruption (it ticks, but isn't on the bar), nor Wrath (no ticks)")
+    B:SetAura("buff", "Moonfire", false)
+    -- Paces from the game's data: one that ticks once, as it ends, isn't
+    -- offered (its count would read 0 throughout); a trap kept under its old
+    -- name still is.
+    Equal(tostring(B:TickPace("Bane of Agony")) .. " " .. tostring(B:TickPace("Bane of Doom")) .. " "
+        .. tostring(B:TickPace("Immolation Trap Effect")) .. " " .. tostring(B:TickPace("Rupture@3")), "2 nil 3 2",
+        "Agony every 2 s; not Bane of Doom; the trap by its old name; a fixed rank by its spell's")
+    Equal(Shows(bar, 1) .. " | " .. Shows(bar, 2), "every 3 / every 3 | hidden / hidden",
+        "Moonfire's icon counts every 3 seconds, its pace in the game's data, fixed and packed; Wrath's doesn't")
+    -- Fixed spots (Show missing ... greyed): the same.
+    B:SetOption("debuff", "showMissing", true)
+    Equal(Shows(bar, 1), "every 3 / every 3", "fixed spots count too, one rule each (the old one cleared)")
+    -- Taken off and put back: it starts afresh, unticked, as after a reload;
+    -- ticked again, the count follows it to its new place, after Wrath.
+    B:SetAura("debuff", "Moonfire", false)
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " | " .. Shows(bar, 1) .. " | " .. Shows(bar, 2),
+        "false | hidden / hidden | hidden / hidden", "taken off and put back: unticked, as after a reload")
+    B:SetCountTicks("debuff", "Moonfire", true)
+    Equal(Shows(bar, 1) .. " | " .. Shows(bar, 2), "hidden / hidden | every 3 / every 3", "ticked again: counting in its new place")
+    -- In a fight, the change waits for it to end (the icons are the game's).
+    lockdown = true
+    B:SetCountTicks("debuff", "Moonfire", false)
+    Equal(Shows(bar, 2), "every 3 / every 3", "unticked in a fight: still counting until it ends")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Shows(bar, 2), "hidden / hidden", "the fight over: hidden")
+    B:SetCountTicks("debuff", "Moonfire", true)
+    -- Joined into one icon with Wrath, which doesn't tick: the game shows
+    -- whichever is up and the addon can't tell which in a fight, so that
+    -- icon can't count; the Debuffs page says why (B:TickClash).
+    B:SetJoined("debuff", 2, true)
+    Equal(Shows(bar, 1) .. " | " .. tostring(B:TickClash("debuff", "Moonfire")) .. " " .. tostring(B:TickClash("debuff", "Wrath")),
+        "hidden / hidden | Wrath Moonfire", "joined with Wrath (no ticks): hidden, and each names the other")
+    B:SetJoined("debuff", 2, false)
+    Equal(Shows(bar, 2) .. " | " .. tostring(B:TickClash("debuff", "Moonfire")), "every 3 / every 3 | nil", "apart again: counting")
+    -- Its count is smaller than the stack count, tucked in the corner, clear
+    -- of the countdown.
+    Equal(tostring(Last(bar.holders[2].slot.ticks.text, "SetFontObject")) .. " " .. tostring(Last(bar.holders[2].slot.count, "SetFontObject")),
+        ns.Style:Ticks(bar.holders[2].size) .. " " .. ns.Style:Count(bar.holders[2].size), "the tick count's own smaller font")
+    Equal(ns.Style:Ticks(36) .. " " .. ns.Style:Ticks(20), "FECMFont10 FECMFont8", "10 at 36, 8 at the smallest icons")
+    -- From 1 by default, like stacks (a player's ask: Bane of Agony): rounded
+    -- up, the time taken as at least a moment so it never reads 0 as it
+    -- lands; from 0, rounded down, the old rule cleared each time.
+    local ticks = bar.holders[2].slot.ticks
+    local function Rule()
+        local rules = ticks.formatter.rules
+        local rule = rules[#rules]
+        return rule.components[1].rounding .. " " .. tostring(rule.min) .. " " .. #rules
+    end
+    Equal(Rule(), "1 0.01 1", "from 1: rounded up, never 0 as it lands")
+    B:SetOption("debuff", "tickFrom", 0)
+    Equal(Rule(), "2 nil 1", "from 0: rounded down")
+    B:SetOption("debuff", "tickFrom", 1)
+    -- Where it sits, its size and colour: the Debuffs page's, on fixed spots
+    -- and packed icons alike (the packed one at its drawn size, then scaled).
+    B:SetOption("debuff", "tickAt", "BOTTOMRIGHT")
+    B:SetOption("debuff", "tickColour", "gold")
+    B:SetOption("debuff", "tickSize", 200)
+    local function Look(t, size)
+        local point = S[t.text].points[1] or {}
+        return table.concat({ tostring(point[1]), tostring(point[2]), tostring(point[3]), tostring(Last(t.text, "SetJustifyH")),
+            tostring((S[t.text].colour or {})[1]), tostring((S[t.text].colour or {})[2]),
+            tostring(Last(t.text, "SetFontObject") == ns.Style:Ticks(size, 200)) }, " ")
+    end
+    Equal(Look(ticks, bar.holders[2].size) .. " | " .. Look(bar.groupTicks[2][1], 36),
+        "BOTTOMRIGHT -1 1 RIGHT 1 0.82 true | BOTTOMRIGHT -1 1 RIGHT 1 0.82 true",
+        "bottom right, gold, twice the size: on the fixed spot and the packed icon")
+    B:SetOption("debuff", "tickAt", "CENTER")
+    Equal(tostring((S[ticks.text].points[1] or {})[1]) .. " " .. tostring(#S[ticks.text].points) .. " " .. tostring(Last(ticks.text, "SetJustifyH")),
+        "CENTER 1 CENTER", "the centre: one point, moved, not added")
+    B:SetOption("debuff", "tickAt", "TOP")
+    local top = S[ticks.text].points[1] or {}
+    Equal(tostring(top[1]) .. " " .. tostring(top[2]) .. " " .. tostring(top[3]) .. " " .. tostring(Last(ticks.text, "SetJustifyH")),
+        "TOP 0 -1 CENTER", "top centre (a player's pick): tucked a pixel in from the top")
+    for field, value in pairs({ tickAt = "TOPLEFT", tickColour = "white", tickSize = 100 }) do B:SetOption("debuff", field, value) end
+    -- Kept over a reload; a name taken off the bar goes from the list too.
+    local saved = ForeverEnhancedCooldownManagerDB
+    Fresh()
+    Game()
+    ns = Load(saved)
+    B = ns.Bars
+    Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. Shows(B:Get("debuff"), 2), "true every 3 / none",
+        "after a reload: still counting (fixed spots, so no packed groups made)")
+    local own = ns.ProfileName()
+    ns.CopyProfile("Raid")
+    Equal(tostring(ns.ProfileName()) .. " " .. tostring(B:CountsTicks("debuff", "Moonfire")), "Raid true", "a copy of the profile counts too")
+    ns.UseProfile(own)
+    B:SetAura("debuff", "Moonfire", false)
+    Fresh()
+    Game()
+    ns = Load(saved)
+    Equal(tostring(ns.CountTicks("debuff").Moonfire), "nil", "taken off the bar: no longer kept")
+    -- The old test's settings (/ccm ticks) go, and the command with them.
+    saved.devTickTest, saved.devTickProbe, saved.devTickPace = true, {}, {}
+    Fresh()
+    Game()
+    ns = Load(saved)
+    Equal(tostring(saved.devTickTest) .. " " .. tostring(saved.devTickProbe) .. " " .. tostring(saved.devTickPace) .. " "
+        .. tostring(ns.ToggleTickTest), "nil nil nil nil", "the old test's settings cleared")
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = util, enum[1], enum[2]
     Equal(#printed, 0, "no errors")
 end)()
 

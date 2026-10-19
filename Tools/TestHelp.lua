@@ -570,6 +570,9 @@ local function Environment(keepCVars)
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
                     rawset(button, method, function(_, object) supplied[method] = object end)
                 end
+                rawset(button, "SetDurationText", function(_, object, options)
+                    supplied.SetDurationText, supplied.durationTextOptions = object, options
+                end)
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
@@ -1526,6 +1529,96 @@ end)()
     Equal(tostring(bp.options.keepGreyed:IsVisible()) .. " " .. tostring(bp.options.showSelf:IsVisible()) .. " "
         .. tostring(bp.options.showNames:IsVisible()) .. " " .. tostring(bp.options.keepGreyed.usable),
         "true true true true", "(Keep them greyed with no target, usable, beside Show your debuffs on you, checked there)")
+    -- Group one-at-a-time spells: the General page's, beside Use my bars,
+    -- ticked by default, saying what it does.
+    w:Select("general")
+    local families = w.groupFamilies
+    local note = type(families.hint) == "function" and families.hint(families) or tostring(families.hint)
+    Equal(tostring(families:IsVisible()) .. " " .. tostring(families:GetChecked()) .. " " .. S[families.text].text .. " | " .. note,
+        "true true Group one-at-a-time spells | Only one Seal, Aura or Aspect, or Curse, Bane, Sting or Judgement, can be up,"
+        .. " so side by side they're one icon on Buffs and Debuffs.", "(on the General page, ticked, with its note)")
+    w:Select("debuff")
+    -- Count ticks: a ticked debuff that ticks has its own tick at its row's
+    -- end on the Debuffs page (not Wrath, which doesn't tick), saying its
+    -- pace; ticking it keeps the debuff on. Joined with one that ticks
+    -- differently, it says why it can't count, and greys once unticked.
+    local B = ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetAura("debuff", "Wrath", true)
+    w:Refresh()
+    local function RowOf(name)
+        for _, row in ipairs(bp.rows) do
+            if row:IsVisible() and row.spell == name then return row end
+        end
+    end
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local moonfire = RowOf("Moonfire")
+    local opts = bp.options
+    Equal(tostring(moonfire.ticks:IsVisible()) .. " " .. S[moonfire.ticks.text].text .. " " .. tostring(RowOf("Wrath").ticks:IsVisible())
+        .. " " .. tostring(opts.tickAt:IsVisible()) .. " | " .. Note(moonfire.ticks), "true Count ticks false false | Counts its ticks on"
+        .. " its icon, every 3 seconds for Moonfire, starting again when you reapply it.",
+        "(Count ticks beside Moonfire, not Wrath, with its pace; the tick count's own options not yet)")
+    moonfire.ticks:Click()
+    Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. tostring(B:HasAura("debuff", "Moonfire")) .. " "
+        .. tostring(RowOf("Moonfire").ticks:GetChecked()), "true true true", "(ticked: it counts, and Moonfire stays on the bar)")
+    -- Then the tick count's two rows under the options: where, from 1,
+    -- its size and colour, each clear of the next.
+    Check("debuff", "debuff with the tick count's options")
+    Equal(table.concat({ tostring(opts.tickAt:IsVisible()), tostring(opts.tickFrom:IsVisible()), tostring(opts.tickSize:IsVisible()),
+        tostring(opts.tickSwatches[1]:IsVisible()), tostring(opts.tickFrom:GetChecked()), opts.tickAt.selected, S[opts.tickSize.value].text },
+        " "), "true true true true true TOPLEFT 100%", "(they show: top left, from 1, at 100%)")
+    opts.tickAt.buttons[2]:Click()
+    Equal(ns.BarData("debuff").tickAt .. " " .. S[opts.tickAt.buttons[2].label].text, "TOP Top centre", "(top centre, a player's pick)")
+    opts.tickAt.buttons[4]:Click()
+    opts.tickFrom:Click()
+    opts.tickSwatches[2]:Click()
+    local debuffs = ns.BarData("debuff")
+    Equal(debuffs.tickAt .. " " .. debuffs.tickFrom .. " " .. debuffs.tickColour .. " | " .. Note(opts.tickAt.buttons[4]),
+        "CENTER 0 gold | Where the tick count sits on each icon. The centre is the countdown's: untick Show countdown numbers to keep"
+        .. " it clear.", "(the centre, from 0, gold: saved, and the centre says it's the countdown's)")
+    opts.tickAt.buttons[1]:Click()
+    opts.tickFrom:Click()
+    opts.tickSwatches[1]:Click()
+    local wrathAt
+    for i, name in ipairs(ns.BarData("debuff").spells) do if name == "Wrath" then wrathAt = i end end
+    B:SetJoined("debuff", wrathAt, true)
+    w:Refresh()
+    moonfire = RowOf("Moonfire")
+    Equal(tostring(moonfire.ticks.usable) .. " | " .. Note(moonfire.ticks), "true | Can't count while it shares an icon with Wrath,"
+        .. " which ticks differently.", "(joined with Wrath: says why it can't count, still untickable)")
+    moonfire.ticks:Click()
+    w:Refresh()
+    Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. tostring(RowOf("Moonfire").ticks.usable), "false false",
+        "(unticked, it greys while it can't count)")
+    B:SetJoined("debuff", wrathAt, false)
+    B:SetAura("debuff", "Wrath", false)
+    B:SetAura("debuff", "Moonfire", false)
+    w:Refresh()
+    -- Glow when missing (the user: say what it needs): greyed, saying why,
+    -- until Show missing buffs greyed or Only show missing is ticked.
+    local buffs = ns.BarData("buff")
+    local only, missing = buffs.onlyMissing, buffs.showMissing
+    B:SetOption("buff", "onlyMissing", false)
+    B:SetOption("buff", "showMissing", false)
+    B:SetAura("buff", "Thorns", true)
+    w:Select("buff")
+    local thorns = RowOf("Thorns")
+    Equal(tostring(thorns.glow:IsVisible()) .. " " .. tostring(thorns.glow.usable) .. " | " .. Note(thorns.glow), "true false | Tick Show"
+        .. " missing buffs greyed first: the glow shows on a missing buff's greyed spot.", "(greyed, saying what it needs)")
+    thorns.glow:Click()
+    Equal(tostring(B:GlowsMissing("buff", "Thorns")), "false", "(a click does nothing while greyed)")
+    B:SetOption("buff", "showMissing", true)
+    w:Refresh()
+    thorns = RowOf("Thorns")
+    Equal(tostring(thorns.glow.usable) .. " | " .. Note(thorns.glow), "true | Its icon glows while it's missing, so you see to recast it,"
+        .. " like a Seal that fell off.", "(with Show missing buffs greyed: usable, saying what it does)")
+    thorns.glow:Click()
+    Equal(tostring(B:GlowsMissing("buff", "Thorns")), "true", "(ticked)")
+    B:SetGlowMissing("buff", "Thorns", false)
+    B:SetAura("buff", "Thorns", false)
+    B:SetOption("buff", "showMissing", missing)
+    B:SetOption("buff", "onlyMissing", only)
+    w:Select("debuff")
     -- Cooldowns with Swap with my form ticked (a druid with Bear Form): the
     -- tick, and Editing under it on the longest name it shows.
     table.insert(book[2].items, { name = "Bear Form", spellID = 5487, iconID = 132276 })

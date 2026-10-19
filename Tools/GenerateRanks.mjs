@@ -85,9 +85,34 @@ for (const row of await table('SpellEffect')) {
 }
 const teaching = row => +row.SkillLine === BEAST_TRAINING && teaches.has(+row.Spell);
 const skillRows = await table('SkillLineAbility');
+// Learnable class spells whose only SkillLineAbility rows carry no class
+// (ClassMask 0): Curse of Exhaustion (a talent, TraitDefinition), Forever's
+// four ranks of Curse of the Elements and Bane of Agony's rank 2 (from a
+// Grimoire); Seal of Command (a talent) and its four ranks, Holy Light's
+// rank 5 and Holy Shock's four ranks; Forever's ranks 2 to 4 of Arcane
+// Wrath; Forever's four ranks of Shadow Word: Death. They count as the
+// class's own. Most ClassMask-0 rows are talent ranks, hidden helpers, procs
+// and pet passives (500 names and more), so only these are let in: not
+// Lightning Shield's 26363-26370, its orbs' lightning bolts, nor the other
+// Lacerate (24118-24120, 1299332, a bleed on a hunter's skill line, not the
+// druid's), nor the Season of Discovery IDs (402792, 11723, 11724), which
+// have no row. The build fails once the game gives a listed row a class, so
+// the list goes when it isn't needed.
+const CLASSLESS = new Map([
+    [18223, 256], [440892, 256], [1311676, 256], [1311677, 256], [1311680, 256], [1014, 256], // Warlock
+    [20375, 2], [20915, 2], [20918, 2], [20919, 2], [20920, 2], [1042, 2], // Paladin
+    [1311606, 2], [20473, 2], [20929, 2], [20930, 2],
+    [1326080, 128], [1326081, 128], [1326082, 128], // Mage
+    [1309595, 16], [1309633, 16], [1309635, 16], [1309636, 16], // Priest
+]);
+for (const id of CLASSLESS.keys()) {
+    const rows = skillRows.filter(row => +row.Spell === id);
+    assert(rows.length > 0 && rows.every(row => +row.ClassMask === 0), `${names.get(id)} (${id}): drop it from CLASSLESS`);
+}
 const petNames = new Set(skillRows.filter(row => +row.ClassMask > 0 && teaching(row)).map(row => names.get(+row.Spell)));
-const abilities = skillRows.filter(row => +row.ClassMask > 0 || (teaching(row) && petNames.has(names.get(+row.Spell))))
+const abilities = skillRows.filter(row => +row.ClassMask > 0 || CLASSLESS.has(+row.Spell) || (teaching(row) && petNames.has(names.get(+row.Spell))))
     .map(row => {
+        if (CLASSLESS.has(+row.Spell)) return { ...row, ClassMask: String(CLASSLESS.get(+row.Spell)) };
         if (!teaching(row)) return row;
         const pet = teaches.get(+row.Spell);
         assert.equal(names.get(pet), names.get(+row.Spell), `${names.get(+row.Spell)} (${row.Spell}) teaches a spell of another name`);

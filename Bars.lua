@@ -207,6 +207,9 @@ local function UseGlow(icon)
     icon.glow = glow
     if lit then SetGlow(icon, true) end
 end
+-- Shared with the Buffs bar's missing buffs (Buffs.lua), on any frame with a
+-- top for the glow and a glows table.
+ns.UseGlow, ns.SetGlow = UseGlow, SetGlow
 
 local function NewIcon(bar)
     local icon = CreateFrame("Frame", nil, bar)
@@ -1041,6 +1044,10 @@ end
 function B:ApplyGlow()
     for _, bar in pairs(bars) do
         for _, icon in ipairs(bar.icons or {}) do UseGlow(icon) end
+        -- And the Buffs bar's missing buffs that glow, in the new style.
+        for _, holder in ipairs(bar.holders or {}) do
+            if holder.glowHost then UseGlow(holder.glowHost) end
+        end
     end
 end
 
@@ -1317,9 +1324,77 @@ end
 -- On the Buffs and Debuffs bars an entry can be joined to the one before it;
 -- a run of joined entries shows as one icon. The first entry never joins.
 
+-- One at a time: only one of a warlock's Curses, one Bane, one of a hunter's
+-- Stings or one of a paladin's Judgements can be yours on a target, and only
+-- one Seal, Aura or Aspect on you (each spell says so). With an aura bar's
+-- families option (a player's idea, on by default) one beside another of its
+-- family on that bar is joined to it as if by hand, and one added there goes
+-- beside its family. Nothing in the lists changes, so the option can be
+-- unticked at any time. The names are the spells', at any rank or ID; the
+-- one-at-a-time rule is the server's, so the list is ours (from Forever's
+-- spell texts; Judgements only the ones that leave a debuff).
+B.FAMILIES = {
+    { key = "banes", name = "Banes", bar = "debuff", spells = { "Bane of Agony", "Bane of Doom", "Bane of Havoc" } },
+    { key = "curses", name = "Curses", bar = "debuff", spells = { "Curse of Weakness", "Curse of Recklessness",
+        "Curse of Tongues", "Curse of the Elements", "Curse of Exhaustion", "Curse of Idiocy" } },
+    { key = "stings", name = "Stings", bar = "debuff", spells = { "Serpent Sting", "Viper Sting", "Scorpid Sting" } },
+    { key = "judgements", name = "Judgements", bar = "debuff", spells = { "Judgement of the Crusader", "Judgement of Light",
+        "Judgement of Wisdom", "Judgement of Justice", "Judgement of Martyrdom" } },
+    { key = "seals", name = "Seals", bar = "buff", spells = { "Seal of Righteousness", "Seal of the Crusader", "Seal of Light",
+        "Seal of Wisdom", "Seal of Justice", "Seal of Command", "Seal of Fury", "Seal of Martyrdom" } },
+    { key = "auras", name = "Auras", bar = "buff", spells = { "Devotion Aura", "Retribution Aura", "Concentration Aura",
+        "Shadow Resistance Aura", "Frost Resistance Aura", "Fire Resistance Aura", "Sanctity Aura" } },
+    { key = "aspects", name = "Aspects", bar = "buff", spells = { "Aspect of the Hawk", "Aspect of the Monkey",
+        "Aspect of the Cheetah", "Aspect of the Pack", "Aspect of the Beast", "Aspect of the Wild", "Aspect of the Viper",
+        "Aspect of the Falcon" } },
+}
+B.FAMILY_OF = {}
+for _, family in ipairs(B.FAMILIES) do
+    for _, name in ipairs(family.spells) do B.FAMILY_OF[name] = family end
+end
+
+-- An entry's family by its spell's name ("Name", "Name@rank", "Name#ID"); nil for none.
+function B:Family(name)
+    return type(name) == "string" and B.FAMILY_OF[name:match("^[^@#]+")] or nil
+end
+
+-- An entry's family that this bar keeps as one icon now: its own bar's, with
+-- the option ticked; nil otherwise.
+function B:FamilyHere(key, name)
+    if not (ns.AURA_BARS[key] and ns.Get("groupFamilies")) then return nil end
+    local family = self:Family(name)
+    return family and family.bar == key and family or nil
+end
+
+-- Group one-at-a-time spells (the General page) ticked or unticked: unticked
+-- splits each family into its own icons, so not past a bar's slots (false
+-- and why). True when done.
+function B:SetFamilies(on)
+    on = on == true
+    if ns.Get("groupFamilies") == on then return true end
+    ns.Set("groupFamilies", on)
+    if not on then
+        for key in pairs(ns.AURA_BARS) do
+            if self:SlotsUsed(key) > ns.BUFF_SLOTS then
+                ns.Set("groupFamilies", true)
+                return false, ns.BAR_NAMES[key] .. " has no room to split them: take a spell or two off it first."
+            end
+        end
+    end
+    self:Changed()
+    return true
+end
+
+-- Whether two entries are one family this bar keeps as one icon now.
+function B:Kindred(key, a, b)
+    local family = self:FamilyHere(key, a)
+    return family ~= nil and family == self:Family(b)
+end
+
 function B:Joined(key, index)
     local spells = ns.BarData(key).spells
-    return ns.AURA_BARS[key] ~= nil and index > 1 and spells[index] ~= nil and ns.Joins(key)[spells[index]] == true
+    if not (ns.AURA_BARS[key] ~= nil and index > 1 and spells[index] ~= nil) then return false end
+    return ns.Joins(key)[spells[index]] == true or self:Kindred(key, spells[index - 1], spells[index])
 end
 
 local function Full(key)
@@ -1339,6 +1414,8 @@ end
 local function Space(key, name)
     if OnBar(key, name) or IndexOf(key, name) then return true end
     if #ns.BarData(key).spells >= ns.BAR_MAX_SPELLS then return false end
+    -- One that goes beside its family on the Debuffs bar shares its icon.
+    if B:Beside(key, name) then return true end
     return not ns.AURA_BARS[key] or B:SlotsUsed(key) < ns.BUFF_SLOTS
 end
 
@@ -1374,6 +1451,8 @@ end
 function B:SetJoined(key, index, on)
     local spells = ns.BarData(key).spells
     if not ns.AURA_BARS[key] or index < 2 or not spells[index] then return false end
+    -- A Curse, Bane or Sting beside its family stays one icon with it.
+    if not on and self:Kindred(key, spells[index - 1], spells[index]) then return false, B.FAMILY_TIED end
     local joins, name = ns.Joins(key), spells[index]
     local was, used = joins[name], self:SlotsUsed(key)
     joins[name] = on and true or nil
@@ -1400,6 +1479,15 @@ local function Take(key, index)
         joins[name] = nil
     end
     table.remove(spells, index)
+    return name
+end
+
+-- An aura bar's entry gone from its list (not just moved along it): its own
+-- choices go with it (the icon shown faded, Glow when missing, Count ticks),
+-- so putting it back starts afresh, as after a reload (Core.lua Lists).
+local function Forget(key, name)
+    if not (ns.AURA_BARS[key] and name) then return name end
+    ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
     return name
 end
 
@@ -1442,9 +1530,11 @@ function B:SetAura(key, name, on)
     local spells = ns.BarData(key).spells
     if on then
         if not Space(key, name) then return false end
-        spells[#spells + 1] = name
+        -- A Curse, Bane or Sting goes beside its family on the Debuffs bar
+        -- (the families option), joining its icon; anything else at the end.
+        table.insert(spells, self:Beside(key, name) or #spells + 1, name)
     else
-        Take(key, index)
+        Forget(key, Take(key, index))
     end
     self:Changed()
     return true
@@ -1760,7 +1850,7 @@ function B:MoveTo(key, from, to)
 end
 
 function B:Remove(key, index)
-    if not Take(key, index) then return end
+    if not Forget(key, Take(key, index)) then return end
     self:Changed()
 end
 
@@ -1834,6 +1924,106 @@ local function Tied(key, index)
     end
     if yours > 1 then return "Joined icons only swap on their own bar." end
     return Named(spells[index]) .. " is joined to another character's spell, so it only swaps on " .. ns.BAR_NAMES[key] .. "."
+end
+
+-- One at a time (above, by Joins): said when the join button would split a
+-- spell from its family.
+B.FAMILY_TIED = "One family's spells side by side stay one icon while Group one-at-a-time spells (General page) is ticked."
+
+-- Where on an aura bar one of a family added now goes (a Curse on the
+-- Debuffs bar, a Seal on the Buffs bar): just after its family's last icon,
+-- so it joins it (the families option). Nil when it has no family there, or
+-- the option is off.
+function B:Beside(key, name)
+    local family, spells = self:FamilyHere(key, name), ns.BarData(key).spells
+    if not family then return nil end
+    for i = #spells, 1, -1 do
+        if spells[i] ~= name and self:Family(spells[i]) == family then
+            local _, last = Group(key, i)
+            return last + 1
+        end
+    end
+    return nil
+end
+
+-- Which entry of a joined icon shows, faded, while none of them is up (a
+-- player's idea): the one picked, or else the first of yours. Picking it
+-- again unpicks it.
+function B:PickMissing(key, index)
+    local spells = ns.BarData(key).spells
+    if not (ns.AURA_BARS[key] and spells[index]) then return false end
+    local first, last = Group(key, index)
+    if first == last then return false end
+    local picks, name = ns.MissingPicks(key), spells[index]
+    local was = self:Picked(key, index)
+    for i = first, last do picks[spells[i]] = nil end
+    picks[name] = not was or nil
+    self:Changed()
+    return true
+end
+
+-- Glow when missing (a player's idea: a Seal that fell off): a buff on the
+-- Buffs bar whose icon glows while it's missing, so you see to recast it.
+function B:SetGlowMissing(key, name, on)
+    if key ~= "buff" or not IndexOf(key, name) then return false end
+    ns.GlowMissing(key)[name] = on and true or nil
+    self:Changed()
+    return true
+end
+
+function B:GlowsMissing(key, name)
+    return key == "buff" and ns.GlowMissing(key)[name] == true
+end
+
+-- Count ticks (a player's idea: Bane of Agony's ticks): a debuff on the
+-- Debuffs bar whose icon counts its ticks so far, at its own pace (in
+-- seconds, from the game's data: ns.TICK_PERIODS, Buffs.lua). Only debuffs
+-- that tick; a trap kept under its old name too.
+function B:TickPace(name)
+    if type(name) ~= "string" or type(ns.TICK_PERIODS) ~= "table" then return nil end
+    return ns.Spells:ByName(ns.TICK_PERIODS, name:match("^[^@#]+"))
+end
+
+function B:SetCountTicks(key, name, on)
+    if key ~= "debuff" or not IndexOf(key, name) or not self:TickPace(name) then return false end
+    ns.CountTicks(key)[name] = on and true or nil
+    self:Changed()
+    return true
+end
+
+function B:CountsTicks(key, name)
+    return key == "debuff" and ns.CountTicks(key)[name] == true
+end
+
+-- Another of yours in a debuff's icon that ticks at another pace, or not at
+-- all (Bane of Havoc beside Agony, joined as one-at-a-time spells): that
+-- icon can't count, as the game shows whichever is up and the addon can't
+-- tell which in a fight (F:Layout). The first such, or nil.
+function B:TickClash(key, name)
+    local index = IndexOf(key, name)
+    if not (index and ns.AURA_BARS[key]) then return nil end
+    local spells, pace = ns.BarData(key).spells, self:TickPace(name)
+    local first, last = Group(key, index)
+    for i = first, last do
+        local other = spells[i]
+        local found = other ~= name and ns.Spells:Find(other)
+        if found and found.ids and ns.Spells:ForMe(other, key) and self:TickPace(other) ~= pace then return other end
+    end
+    return nil
+end
+
+-- Whether the entry at index is the one its icon shows while none is up:
+-- picked, and the first picked in its icon (two can meet there after a move).
+function B:Picked(key, index)
+    local spells = ns.BarData(key).spells
+    if not (ns.AURA_BARS[key] and spells[index]) then return false end
+    local picks = ns.MissingPicks(key)
+    if picks[spells[index]] ~= true then return false end
+    local first = Group(key, index)
+    for i = first, index - 1 do
+        if picks[spells[i]] == true then return false end
+    end
+    return true
 end
 
 -- Whether two icons can trade places (B:Trade): true, or false and why not.
@@ -2012,7 +2202,7 @@ function B:Clear(key)
     for i, name in ipairs(ns.BarData(key).spells) do
         if ns.Spells:ForMe(name, key) or ns.Spells:Leftover(name, key) then places[#places + 1] = i end
     end
-    for n = #places, 1, -1 do Take(key, places[n]) end
+    for n = #places, 1, -1 do Forget(key, Take(key, places[n])) end
     self:Changed()
 end
 

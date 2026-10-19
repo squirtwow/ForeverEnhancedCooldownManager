@@ -572,6 +572,9 @@ local function Environment(keepCVars)
                 for _, method in ipairs({ "SetIcon", "SetDurationCooldown", "SetApplicationCount" }) do
                     rawset(button, method, function(_, object) supplied[method] = object end)
                 end
+                rawset(button, "SetDurationText", function(_, object, options)
+                    supplied.SetDurationText, supplied.durationTextOptions = object, options
+                end)
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
@@ -2281,6 +2284,8 @@ end
     end
     local NEW = "Turn it on, Pick your cooldowns, Quick and Long, Where it shows, Ready glow"
     local SIX = "Dim on cooldown, Swap your icons"
+    -- As 1.6.0 was released: later versions' steps weren't out yet (Tools/TestBars.lua has the newest).
+    tns.Version = function() return "1.6.0" end
     local versions = {}
     for _, step in ipairs(Tour:News("1.4.4")) do versions[#versions + 1] = step.version end
     Equal(Titles(Tour:News("1.4.4")) .. " | " .. table.concat(versions, " ") .. " | " .. Titles(Tour:News(nil)),
@@ -2310,11 +2315,11 @@ end
     end
     Equal(table.concat(leaked, ", "), "", "no page help step in What's new, from any version")
 
-    -- After an update from 1.4.4: Show me what's new tours them.
+    -- After an update from 1.4.4: What's new, then Got it tours them.
     for _, timer in ipairs(timers) do timer() end
     local notes = FECMNotes
-    Equal(tostring(S[notes].shown) .. " " .. tostring(S[notes.tour].shown), "true true", "What's new after 1.4.4 offers its tour")
-    notes.tour:Click()
+    Equal(tostring(S[notes].shown) .. " " .. tostring(notes.autoTour), "true true", "What's new after 1.4.4, Got it going on into its tour")
+    notes.done:Click()
     local w, box = FECMFrame, FECMTour
     local pulse = w.pages.pulse
     local seen = {}
@@ -2432,12 +2437,13 @@ end
     local expected = {
         cd = SPELL .. " | cd true",
         util = SPELL .. " | util true",
-        buff = BAR .. ", MISSING ONES GREYED, ONLY MISSING ONES, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 6 | buff true",
-        debuff = BAR .. ", MISSING ONES GREYED, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 5 | debuff true",
+        buff = BAR .. ", GLOW WHEN MISSING, MISSING ONES GREYED, ONLY MISSING ONES, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 7"
+            .. " | buff true",
+        debuff = BAR .. ", COUNT TICKS, MISSING ONES GREYED, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 6 | debuff true",
         look = "THE LOOK, KEYBINDS ON ICONS, FONT AND BAR TEXTURE, READY GLOW | 4 | look true",
         layout = "LAYOUTS, LIVE PREVIEW, ALL BARS, GROW ARROWS | 4 | layout true",
         cast = "CAST BAR, COLOURS, HEIGHT AND PARTS | 3 | cast true",
-        general = "SWITCH YOUR BARS ON, MINIMAP BUTTON, HELP | 3 | general true",
+        general = "SWITCH YOUR BARS ON, ONE ICON EACH, MINIMAP BUTTON, HELP | 4 | general true",
         raid = "RAID TIMERS, SIZES, EDIT MODE | 3 | raid true",
         pulse = "TURN IT ON, PICK YOUR COOLDOWNS, QUICK AND LONG, WHERE IT SHOWS | 4 | pulse true",
     }
@@ -2561,28 +2567,32 @@ end)()
     -- Buffs: each of its own steps points at its own part, the box hung from it.
     w:Select("buff")
     help:Click()
-    local parts = { bp.listPanel, bp.optionsArea, bp.options.showMissing, bp.options.onlyMissing, bp.tray, bp.options.showSelf }
+    -- (1.8.1's Glow when missing points at the list, after the options.)
+    local parts = { bp.listPanel, bp.optionsArea, bp.listPanel, bp.options.showMissing, bp.options.onlyMissing, bp.tray, bp.options.showSelf }
     local right = 0
     for i, part in ipairs(parts) do
         local o, p = S[box.outline].points, S[box].points[1]
         if o[1][2] == part and o[2][2] == part and p[2] == part and S[part].shown then right = right + 1 end
         if i == 3 then
+            Equal(S[box.title].text, "GLOW WHEN MISSING", "1.8.1's Glow when missing, on the list")
+        elseif i == 4 then
             Equal(S[box.text].text, "Ticked, each buff keeps its spot, greyed while it's missing from you. Unticked, only the ones up show, in one row.",
                 "the Buffs bar's missing ones: from you")
-        elseif i == 4 then
+        elseif i == 5 then
             Equal(S[box.title].text .. " | " .. S[box.text].text, "ONLY MISSING ONES | Ticked, a buff shows only while it's not on you,"
                 .. " so you see what to cast again. Changes in a fight show once it ends.",
                 "then Only show missing, in plain words, with its in-combat limit")
-        elseif i == 6 then
+        elseif i == 7 then
             Equal(S[box.text].text, "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, after your buffs."
                 .. " Not with missing buffs greyed or Only show missing.", "the Buffs bar's debuffs on you: not with either")
         end
         box.next:Click()
     end
-    Equal(right, 6, "every Buffs step outlines its own part, there to see, the box hung from it")
+    Equal(right, 7, "every Buffs step outlines its own part, there to see, the box hung from it")
     w:Select("debuff")
     help:Click()
-    for _ = 1, 2 do box.next:Click() end
+    -- Past Add spells, This bar's options and 1.8.1's Count ticks.
+    for _ = 1, 3 do box.next:Click() end
     Equal(S[box.text].text, "Ticked, each debuff keeps its spot, greyed while it's missing from your target."
         .. " Unticked, only the ones up show, in one row.", "the Debuffs bar's: from your target")
     -- Its own Your debuffs on you, at the end of the bar.

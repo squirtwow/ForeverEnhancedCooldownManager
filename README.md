@@ -76,6 +76,15 @@ EraUI.
   class's debuffs. It can show your debuffs on you too (off by default), and
   Keep them greyed with no target keeps your tracked debuffs faded with nothing
   targeted (off by default, experimental)
+- One icon for one-at-a-time spells: Seals, Auras and Aspects on the Buffs bar,
+  and Curses, Banes, Stings and Judgements on the Debuffs bar, share one icon
+  that lights up as whichever is up. Right-click one to pick which shows greyed
+  while none is up (on by default, General page)
+- Glow when missing: tick it beside a buff and its icon glows while the buff is
+  missing, like a Seal that fell off (off by default)
+- Count ticks: tick it beside a debuff and its icon counts its ticks like
+  stacks, like Bane of Agony, in the spot, size and colour you pick (off by
+  default)
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag
   items in from your bags, and any ammo becomes one icon for whatever you have
   equipped
