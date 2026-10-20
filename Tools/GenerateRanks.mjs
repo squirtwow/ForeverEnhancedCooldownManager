@@ -98,12 +98,29 @@ const skillRows = await table('SkillLineAbility');
 // druid's), nor the Season of Discovery IDs (402792, 11723, 11724), which
 // have no row. The build fails once the game gives a listed row a class, so
 // the list goes when it isn't needed.
+// Then (2026-10-20, a player couldn't find Innervate before learning it):
+// every class's talent abilities with no class (AcquireMethod 0 on the
+// class's own skill lines, names not already listed), from Innervate,
+// Swiftmend and Nature's Swiftness to Aimed Shot, Arcane Power, Holy Shield,
+// Adrenaline Rush, Stormstrike, Fel Domination and Death Wish. Plus Sniper
+// Shot's rank 3 (AcquireMethod 2), so the name keeps every rank its buff had.
 const CLASSLESS = new Map([
     [18223, 256], [440892, 256], [1311676, 256], [1311677, 256], [1311680, 256], [1014, 256], // Warlock
     [20375, 2], [20915, 2], [20918, 2], [20919, 2], [20920, 2], [1042, 2], // Paladin
     [1311606, 2], [20473, 2], [20929, 2], [20930, 2],
     [1326080, 128], [1326081, 128], [1326082, 128], // Mage
     [1309595, 16], [1309633, 16], [1309635, 16], [1309636, 16], // Priest
+    // Talent abilities (2026-10-20):
+    [17116, 1024], [18562, 1024], [29166, 1024], // Druid
+    [1299346, 4], [1299348, 4], [1310617, 4], [1310687, 4], [1310785, 4], [1310786, 4], [19263, 4], [19434, 4], [19503, 4], // Hunter
+    [19506, 4], [19574, 4], [20900, 4], [20901, 4], [20902, 4], [20903, 4], [20904, 4], [20905, 4], [20906, 4],
+    [12042, 128], [12043, 128], [12051, 128], [12536, 128], [24530, 128], // Mage
+    [1310897, 2], [1311015, 2], [20216, 2], [20925, 2], [20927, 2], [20928, 2], // Paladin
+    [14751, 16], // Priest
+    [13750, 8], [13877, 8], [14093, 8], [14177, 8], [14183, 8], [14185, 8], [14251, 8], // Rogue
+    [16166, 64], [16188, 64], [16269, 64], [17364, 64], // Shaman
+    [18093, 256], [18288, 256], [18708, 256], [18788, 256], // Warlock
+    [12281, 1], [12284, 1], [12292, 1], [12323, 1], [12328, 1], [12700, 1], [12705, 1], [12809, 1], // Warrior
 ]);
 for (const id of CLASSLESS.keys()) {
     const rows = skillRows.filter(row => +row.Spell === id);

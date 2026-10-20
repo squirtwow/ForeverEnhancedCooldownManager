@@ -1961,11 +1961,17 @@ end)()
         .. " | 3355,14308,14309 | 13810", "Read Leyline to both Energized, Skysight to both Elemental Blessing, a totem to its"
         .. " buff (not Windfury's moment's extra attack, 8516), Arcane Blast to its stacks, Prayer of Mending to every rank's buff,"
         .. " the traps to theirs")
-    Equal(Joined(FamilyOf(8076)) .. " | " .. Joined(FamilyOf(19506)) .. " | " .. tostring(Has(FamilyOf(1248406), 1248420, 19709))
+    Equal(Joined(FamilyOf(8076)) .. " | " .. Joined(FamilyOf(24118)) .. " | " .. tostring(Has(FamilyOf(1248406), 1248420, 19709))
         .. " | " .. tostring(FamilyOf(1259691)) .. " " .. tostring(FamilyOf(1270842)) .. " " .. tostring(FamilyOf(1259688)),
-        "8076,8162,8163,10441,25362 | 19506,20905,20906,1299346,1299348 | true | nil nil nil",
-        "one aura in several IDs: a totem buff's ranks, a talent aura's, Well Fed from any food; never the two Energized"
+        "8076,8162,8163,10441,25362 | 24118,24119,24120,1299332 | true | nil nil nil",
+        "one aura in several IDs: a totem buff's ranks, a bleed no class lists, Well Fed from any food; never the two Energized"
         .. " or the two Elemental Blessing")
+    -- A talent ability's ranks are its own name's in ns.RANKS now (2026-10-20),
+    -- every rank its buff had as a family before.
+    Equal(tostring(FamilyOf(19506)) .. " " .. Joined(data.RANKS["Trueshot Aura"]) .. " | " .. tostring(FamilyOf(1310687)) .. " "
+        .. Joined(data.RANKS["Sniper Shot"]) .. " | " .. tostring(FamilyOf(20925)) .. " " .. Joined(data.RANKS["Holy Shield"]),
+        "nil 1299346,1299348,19506,20905,20906 | nil 1310687,1310785,1310786 | nil 20925,20927,20928",
+        "a talent aura's ranks all in ns.RANKS (Trueshot Aura, Sniper Shot's three, Holy Shield), no family needed")
     Equal(Joined(FamilyOf(8182)) .. " | " .. Joined(FamilyOf(8185)) .. " | " .. Joined(FamilyOf(10596)),
         "8182,10476,10477 | 8185,10534,10535 | 10596,10598,10599",
         "a totem's Frost, Fire and Nature Resistance too, though a hunter's pet's passives hold those names")
@@ -3150,7 +3156,8 @@ end)()
     -- icon can't count; the Debuffs page says why (B:TickClash).
     B:SetJoined("debuff", 2, true)
     Equal(Shows(bar, 1) .. " | " .. tostring(B:TickClash("debuff", "Moonfire")) .. " " .. tostring(B:TickClash("debuff", "Wrath")),
-        "hidden / hidden | Wrath Moonfire", "joined with Wrath (no ticks): hidden, and each names the other")
+        "hidden / hidden | Wrath nil", "joined with Wrath (no ticks; this game has no colour curves to tell them apart): hidden,"
+        .. " and Moonfire's row names Wrath (Wrath's has no Count ticks)")
     B:SetJoined("debuff", 2, false)
     Equal(Shows(bar, 2) .. " | " .. tostring(B:TickClash("debuff", "Moonfire")), "every 3 / every 3 | nil", "apart again: counting")
     -- Its count is smaller than the stack count, tucked in the corner, clear
@@ -3192,7 +3199,21 @@ end)()
     local top = S[ticks.text].points[1] or {}
     Equal(tostring(top[1]) .. " " .. tostring(top[2]) .. " " .. tostring(top[3]) .. " " .. tostring(Last(ticks.text, "SetJustifyH")),
         "TOP 0 -1 CENTER", "top centre (a player's pick): tucked a pixel in from the top")
-    for field, value in pairs({ tickAt = "TOPLEFT", tickColour = "white", tickSize = 100 }) do B:SetOption("debuff", field, value) end
+    -- On the edge (the same player): centred on the border at its spot,
+    -- half outside; the centre stays the centre.
+    B:SetOption("debuff", "tickEdge", true)
+    top = S[ticks.text].points[1] or {}
+    Equal(tostring(top[1]) .. " " .. tostring(top[2] == ticks.frame) .. " " .. tostring(top[3]) .. " " .. tostring(top[4]) .. " "
+        .. tostring(top[5]) .. " " .. tostring(#S[ticks.text].points), "CENTER true TOP 0 0 1", "on the edge: centred on the top border")
+    B:SetOption("debuff", "tickAt", "TOPRIGHT")
+    top = S[ticks.text].points[1] or {}
+    Equal(tostring(top[1]) .. " " .. tostring(top[3]), "CENTER TOPRIGHT", "a corner: centred on the corner")
+    B:SetOption("debuff", "tickAt", "CENTER")
+    top = S[ticks.text].points[1] or {}
+    Equal(tostring(top[1]) .. " " .. tostring(top[2]) .. " " .. tostring(top[3]), "CENTER 0 0", "the centre: as before")
+    for field, value in pairs({ tickAt = "TOPLEFT", tickColour = "white", tickSize = 100, tickEdge = false }) do
+        B:SetOption("debuff", field, value)
+    end
     -- Kept over a reload; a name taken off the bar goes from the list too.
     local saved = ForeverEnhancedCooldownManagerDB
     Fresh()
@@ -3218,6 +3239,100 @@ end)()
     Equal(tostring(saved.devTickTest) .. " " .. tostring(saved.devTickProbe) .. " " .. tostring(saved.devTickPace) .. " "
         .. tostring(ns.ToggleTickTest), "nil nil nil nil", "the old test's settings cleared")
     _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = util, enum[1], enum[2]
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Count ticks in a joined icon (a player's case: Bane of Doom beside Agony):
+-- with the game's colour curves, the count runs at the counted debuff's pace
+-- and goes see-through for the others, told apart by how long each lasts;
+-- two as long, or a length not known, can't be told apart. And Glow when
+-- missing on the Debuffs bar (the same player as the Buffs bar's), only
+-- with an enemy targeted.
+;(function()
+    local before = { _G.C_StringUtil, _G.C_CurveUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    Fresh()
+    _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+        return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end,
+            ClearBreakpoints = function(self) self.rules = {} end }
+    end }
+    _G.C_CurveUtil = { CreateColorCurve = function()
+        return { points = {}, AddPoint = function(self, x, c) table.insert(self.points, { x, c }) end,
+            ClearPoints = function(self) self.points = {} end }
+    end }
+    _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = { Up = 1, Down = 2 }, { ElapsedDuration = 2, TotalDuration = 4 }
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    local bar = B:Get("debuff")
+    local options = S[bar.container].slots.b1.supplied.durationTextOptions
+    local color = options and options.textColor
+    Equal(tostring(color and color.property) .. " " .. tostring(color ~= nil and color.curve == bar.holders[1].slot.ticks.curve), "4 true",
+        "each count coloured by a curve on how long its aura lasts")
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetAura("debuff", "Wrath", true)
+    B:SetOption("debuff", "showMissing", true)
+    B:SetCountTicks("debuff", "Moonfire", true)
+    B:SetJoined("debuff", 2, true)
+    ns.DEBUFF_LASTS.Wrath = { 30 } -- Wrath as a debuff lasting 30 s
+    B:Changed()
+    local ticks = bar.holders[1].slot.ticks
+    local function Curve()
+        local out = {}
+        for _, point in ipairs(ticks.curve.points) do out[#out + 1] = point[1] .. "=" .. point[2].a end
+        return table.concat(out, " ")
+    end
+    Equal(tostring(S[ticks.frame].shown) .. " | " .. Curve() .. " | " .. tostring(B:TickClash("debuff", "Moonfire")),
+        "true | 0=1 20.99=1 21.01=0 100000=0 | nil",
+        "joined with Wrath (30 s): counting, see-through from half way between Moonfire's 12 s and Wrath's 30")
+    ns.DEBUFF_LASTS.Wrath = { 12 }
+    B:Changed()
+    Equal(tostring(S[ticks.frame].shown) .. " " .. tostring(B:TickClash("debuff", "Moonfire")), "false Wrath",
+        "as long as Moonfire's: can't be told apart, hidden, and the row says why")
+    ns.DEBUFF_LASTS.Wrath = nil
+    B:Changed()
+    Equal(tostring(S[ticks.frame].shown) .. " " .. tostring(B:TickClash("debuff", "Moonfire")), "false Wrath", "a length not known: the same")
+    -- Two ticked at different paces (a review's case: Serpent then Viper
+    -- Sting): the later one's row names the earlier, whichever is asked.
+    ns.TICK_PERIODS.Wrath, ns.DEBUFF_LASTS.Wrath = 2, { 30 }
+    Equal(tostring(B:TickClash("debuff", "Wrath")) .. " " .. tostring(B:TickClash("debuff", "Moonfire")), "Moonfire nil",
+        "Moonfire counted: Wrath's row (second, another pace) names Moonfire; Moonfire's own row is fine")
+    ns.TICK_PERIODS.Wrath = nil
+    -- The one in the way is the one as long as a counted one, not just the
+    -- first other (a review's case: Curses of Tongues, Weakness, Idiocy).
+    ns.DEBUFF_LASTS.Thorns = { 12 }
+    Equal(select(3, B:IconTicks({ "Wrath", "Thorns", "Moonfire" }, { Moonfire = true })), "Thorns",
+        "as long as Moonfire: Thorns is named, not Wrath")
+    ns.DEBUFF_LASTS.Thorns, ns.DEBUFF_LASTS.Wrath = nil, nil
+    -- Rupture's lengths with each combo point (a review's case).
+    Equal(table.concat(ns.DEBUFF_LASTS.Rupture, ","), "6,8,10,12,14,16", "Rupture lasts 6 to 16 s with combo points")
+    B:SetJoined("debuff", 2, false)
+    Equal(tostring(S[ticks.frame].shown) .. " " .. Curve(), "true 0=1 100000=1", "apart again: counting, its colour throughout")
+    -- Glow when missing on the Debuffs bar: only with an enemy targeted.
+    Equal(tostring(B:SetGlowMissing("debuff", "Moonfire", true)) .. " " .. tostring(B:GlowsMissing("debuff", "Moonfire")), "true true",
+        "ticked for a debuff on the Debuffs bar")
+    local host = bar.holders[1].glowHost
+    target, hostile = false, false
+    Fire("PLAYER_TARGET_CHANGED")
+    local none = host and S[host].alpha
+    target, hostile = true, true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(tostring(host ~= nil) .. " " .. tostring(none) .. " " .. tostring(host and S[host].alpha) .. " "
+        .. tostring(host and S[host.glow].shown), "true 0 1 true", "its spot glows only with an enemy targeted")
+    B:SetOption("debuff", "greyedNoTarget", true)
+    target, hostile = false, false
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(tostring(S[host].alpha) .. " " .. tostring(S[bar.holders[1].icon].alpha), "0 0.45",
+        "kept greyed with no target: the spot stays greyed, but no glow with nothing to put it on")
+    -- Not on a corpse (a review's case): your target dying puts it out.
+    target, hostile = true, true
+    Fire("PLAYER_TARGET_CHANGED")
+    local dead = _G.UnitIsDeadOrGhost
+    _G.UnitIsDeadOrGhost = function(unit) return unit == "target" end
+    Fire("UNIT_FLAGS", "target")
+    local corpse = S[host].alpha
+    _G.UnitIsDeadOrGhost = dead
+    Equal(tostring(corpse) .. " " .. tostring(S[B.driver].events.UNIT_FLAGS), "0 true", "your target dead: no glow (heard as it dies)")
+    _G.C_StringUtil, _G.C_CurveUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty =
+        before[1], before[2], before[3], before[4]
     Equal(#printed, 0, "no errors")
 end)()
 

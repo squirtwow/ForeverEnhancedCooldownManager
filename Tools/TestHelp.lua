@@ -1565,8 +1565,19 @@ end)()
     -- its size and colour, each clear of the next.
     Check("debuff", "debuff with the tick count's options")
     Equal(table.concat({ tostring(opts.tickAt:IsVisible()), tostring(opts.tickFrom:IsVisible()), tostring(opts.tickSize:IsVisible()),
-        tostring(opts.tickSwatches[1]:IsVisible()), tostring(opts.tickFrom:GetChecked()), opts.tickAt.selected, S[opts.tickSize.value].text },
-        " "), "true true true true true TOPLEFT 100%", "(they show: top left, from 1, at 100%)")
+        tostring(opts.tickSwatches[1]:IsVisible()), tostring(opts.tickFrom:GetChecked()), opts.tickAt.selected, S[opts.tickSize.value].text,
+        tostring(opts.tickEdge:IsVisible()), tostring(opts.tickEdge:GetChecked()) }, " "),
+        "true true true true true TOPLEFT 100% true false", "(they show: top left, from 1, at 100%, not on the edge)")
+    opts.tickEdge:Click()
+    Equal(tostring(ns.BarData("debuff").tickEdge) .. " | " .. Note(opts.tickEdge), "true | Centres the count on the icon's edge at its"
+        .. " spot, half outside, so it covers less of the icon. Not for the centre.", "(On the edge ticks, saying what it does)")
+    opts.tickEdge:Click()
+    -- Glow when missing on the Debuffs page too, Count ticks just left of it.
+    moonfire = RowOf("Moonfire")
+    local tp = S[moonfire.ticks].points[1]
+    Equal(tostring(moonfire.glow:IsVisible()) .. " " .. tostring(tp[2] == moonfire.glow) .. " " .. tp[1] .. " " .. tp[3] .. " | "
+        .. Note(moonfire.glow), "true true RIGHT LEFT | Its icon glows while it's missing from an enemy you target, like a Judgement"
+        .. " that fell off.", "(Glow when missing on the Debuffs page, Count ticks left of it)")
     opts.tickAt.buttons[2]:Click()
     Equal(ns.BarData("debuff").tickAt .. " " .. S[opts.tickAt.buttons[2].label].text, "TOP Top centre", "(top centre, a player's pick)")
     opts.tickAt.buttons[4]:Click()
@@ -1584,8 +1595,8 @@ end)()
     B:SetJoined("debuff", wrathAt, true)
     w:Refresh()
     moonfire = RowOf("Moonfire")
-    Equal(tostring(moonfire.ticks.usable) .. " | " .. Note(moonfire.ticks), "true | Can't count while it shares an icon with Wrath,"
-        .. " which ticks differently.", "(joined with Wrath: says why it can't count, still untickable)")
+    Equal(tostring(moonfire.ticks.usable) .. " | " .. Note(moonfire.ticks), "true | Can't count while it shares an icon with Wrath:"
+        .. " the game can't tell the two apart.", "(joined with Wrath: says why it can't count, still untickable)")
     moonfire.ticks:Click()
     w:Refresh()
     Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. tostring(RowOf("Moonfire").ticks.usable), "false false",

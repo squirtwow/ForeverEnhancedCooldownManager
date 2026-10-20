@@ -606,11 +606,20 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end)
     -- Under the spots, after the size and colours (the seven spots take the row).
-    tickFrom:SetPoint("TOPLEFT", 476, -153)
+    tickFrom:SetPoint("TOPLEFT", 398, -153)
     window:Hint(tickFrom, "1 as the debuff lands, 2 after its first tick, like stacks. Unticked, it counts the ticks so far, from 0.")
-    local tickSize = T:Slider(options, "Size", ns.TICK_SIZE, 10, 270, function(value)
+    -- And beside it, On the edge (a player's ask): the count centred on the
+    -- icon's border at its spot, half outside, like durations on nameplates.
+    local tickEdge = T:Check(options, "On the edge", function(self)
+        B:SetOption(state.bar, "tickEdge", self:GetChecked())
+        window:Refresh()
+    end)
+    tickEdge:SetPoint("TOPLEFT", 492, -153)
+    window:Hint(tickEdge, "Centres the count on the icon's edge at its spot, half outside, so it covers less of the icon."
+        .. " Not for the centre.")
+    local tickSize = T:Slider(options, "Size", ns.TICK_SIZE, 10, 200, function(value)
         B:SetOption(state.bar, "tickSize", value)
-    end, sliderLabel)
+    end, 44)
     tickSize:SetPoint("TOPLEFT", 0, -151)
     -- Its value as a share, "100%", with room for it up to the track.
     tickSize.value:SetWidth(36)
@@ -621,7 +630,7 @@ function ns.BuildBarPage(window, page, width)
     end
     window:Hint(tickSize, "How big the tick count is: 100% follows the icon's size.")
     local tickColour = T:Text(options, "GameFontHighlight")
-    tickColour:SetPoint("TOPLEFT", 290, -155)
+    tickColour:SetPoint("TOPLEFT", 216, -155)
     tickColour:SetText("Colour")
     local tickSwatches = {}
     for i, key in ipairs(ns.COUNT_COLOUR_KEYS) do
@@ -629,7 +638,7 @@ function ns.BuildBarPage(window, page, width)
             B:SetOption(state.bar, "tickColour", key)
             window:Refresh()
         end)
-        swatch:SetPoint("TOPLEFT", 342 + (i - 1) * 24, -151)
+        swatch:SetPoint("TOPLEFT", 266 + (i - 1) * 24, -151)
         swatch.key = key
         window:Hint(swatch, ns.COUNT_COLOUR_NAMES[key] .. " tick count.")
         tickSwatches[i] = swatch
@@ -648,7 +657,8 @@ function ns.BuildBarPage(window, page, width)
         onlyMissing = onlyMissing, showNames = showNames, showTimer = showTimer, showAuras = showAuras, swapForm = swapForm,
         editing = editing,
         showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap,
-        tickAt = tickAt, tickFrom = tickFrom, tickSize = tickSize, tickColour = tickColour, tickSwatches = tickSwatches }
+        tickAt = tickAt, tickFrom = tickFrom, tickEdge = tickEdge, tickSize = tickSize, tickColour = tickColour,
+        tickSwatches = tickSwatches }
 
     -- The spell list -------------------------------------------------------------------
     local listPanel = CreateFrame("Frame", nil, page, "BackdropTemplate")
@@ -770,8 +780,8 @@ function ns.BuildBarPage(window, page, width)
         row.where:SetPoint("LEFT", row.name, "RIGHT", 10, 0)
         row.header = T:Text(row, "GameFontHighlightSmall", T.MUTED)
         row.header:SetPoint("BOTTOMLEFT", 4, 3)
-        -- On the Buffs page, a ticked buff's own tick at the row's end (a
-        -- player's idea): its icon glows while it's missing. Over the row's
+        -- On the Buffs and Debuffs pages, a ticked aura's own tick at the row's
+        -- end (a player's idea): its icon glows while it's missing. Over the row's
         -- tick, whose click covers the whole row. A missing buff only shows
         -- (and glows) in its own spot, so it's greyed, saying why, until
         -- Show missing buffs greyed or Only show missing is ticked (the user:
@@ -784,8 +794,13 @@ function ns.BuildBarPage(window, page, width)
         row.glow:SetPoint("RIGHT", -8, 0)
         row.glow:SetFrameLevel(row.check:GetFrameLevel() + 2)
         window:Hint(row.glow, function()
+            local debuffs = state.bar == "debuff"
             if ns.BuffBar:Packed(ns.BarData(state.bar)) then
-                return "Tick Show missing buffs greyed first: the glow shows on a missing buff's greyed spot."
+                return debuffs and "Tick Show missing debuffs greyed first: the glow shows on a missing debuff's greyed spot."
+                    or "Tick Show missing buffs greyed first: the glow shows on a missing buff's greyed spot."
+            end
+            if debuffs then
+                return "Its icon glows while it's missing from an enemy you target, like a Judgement that fell off."
             end
             return "Its icon glows while it's missing, so you see to recast it, like a Seal that fell off."
         end)
@@ -805,7 +820,7 @@ function ns.BuildBarPage(window, page, width)
             local found = clash and ns.Spells:Find(clash)
             if clash then
                 return "Can't count while it shares an icon with " .. (found and found.name or clash)
-                    .. ", which ticks differently."
+                    .. ": the game can't tell the two apart."
             end
             return "Counts its ticks on its icon, every " .. pace .. (pace == 1 and " second" or " seconds")
                 .. " for " .. (row.label or "it") .. ", starting again when you reapply it."
@@ -859,17 +874,22 @@ function ns.BuildBarPage(window, page, width)
         if ns.AURA_BARS[state.bar] then
             local on = B:HasAura(state.bar, entry.key)
             row.check:SetChecked(on)
-            -- Glow when missing, on the Buffs page for a buff on the bar.
-            row.glow:SetShown(state.bar == "buff" and on)
+            -- Glow when missing, for a buff or debuff on the bar.
+            row.glow:SetShown(on)
             row.glow:SetChecked(B:GlowsMissing(state.bar, entry.key))
-            if state.bar == "buff" and on then row.glow:SetUsable(not ns.BuffBar:Packed(ns.BarData(state.bar))) end
+            if on then row.glow:SetUsable(not ns.BuffBar:Packed(ns.BarData(state.bar))) end
             -- Count ticks, on the Debuffs page for a debuff on the bar that
-            -- ticks; greyed while its icon can't count (its hint says why),
-            -- unless it's ticked, so it can be unticked.
+            -- ticks, just left of Glow when missing; greyed while its icon
+            -- can't count (its hint says why), unless it's ticked, so it can
+            -- be unticked.
             local ticks = state.bar == "debuff" and on and B:TickPace(entry.key) ~= nil
             row.ticks:SetShown(ticks)
             row.ticks:SetChecked(B:CountsTicks(state.bar, entry.key))
-            if ticks then row.ticks:SetUsable(row.ticks:GetChecked() or not B:TickClash(state.bar, entry.key)) end
+            if ticks then
+                row.ticks:SetUsable(row.ticks:GetChecked() or not B:TickClash(state.bar, entry.key))
+                row.ticks:ClearAllPoints()
+                row.ticks:SetPoint("RIGHT", row.glow, "LEFT", -14, 0)
+            end
         else
             local on = B:Find(entry.key)
             row.check:SetChecked(on == state.bar)
@@ -1066,13 +1086,14 @@ function ns.BuildBarPage(window, page, width)
         end
         -- The tick count's two rows, while the Debuffs bar counts any.
         local counting = key == "debuff" and Counting()
-        for _, part in ipairs({ tickAt, tickAt.label, tickFrom, tickSize, tickColour }) do part:SetShown(counting) end
+        for _, part in ipairs({ tickAt, tickAt.label, tickFrom, tickEdge, tickSize, tickColour }) do part:SetShown(counting) end
         for _, swatch in ipairs(tickSwatches) do
             swatch:SetShown(counting)
             ns.PaintSwatch(swatch, ns.COUNT_COLOURS[swatch.key], swatch.key == data.tickColour)
         end
         tickAt:SetSelected(data.tickAt)
         tickFrom:SetChecked(data.tickFrom == 1)
+        tickEdge:SetChecked(data.tickEdge == true)
         tickSize:Set(data.tickSize)
         options:SetHeight(aura and not counting and OPTIONS or OPTIONS_TALL)
         onCooldown:SetSelected(data.onCooldown)

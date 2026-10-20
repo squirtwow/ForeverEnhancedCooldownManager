@@ -36,12 +36,20 @@ for (const m of debuffBlock.matchAll(/"([^"]+)"/g)) names.add(m[1]);
 
 // How long each spell's aura lasts (ms), to leave out one that ticks only
 // once, as it ends (Bane of Doom): its count would read 0 the whole time.
-const durationOf = new Map(); // duration index -> ms
-for (const d of csv('SpellDuration.csv')) durationOf.set(d.ID, Number(d.Duration));
-const lasts = new Map(); // spell ID -> ms
+const durationOf = new Map(); // duration index -> its row
+for (const d of csv('SpellDuration.csv')) durationOf.set(d.ID, d);
+const lasts = new Map(); // spell ID -> ms (the base length)
+const allLasts = new Map(); // spell ID -> every length it can have (ms)
 for (const m of csv('SpellMisc.csv')) {
-  const ms = durationOf.get(m.DurationIndex);
-  if (ms) lasts.set(Number(m.SpellID), ms);
+  const d = durationOf.get(m.DurationIndex);
+  const ms = d ? Number(d.Duration) : 0;
+  if (!ms) continue;
+  lasts.set(Number(m.SpellID), ms);
+  // Longer with each combo point spent (Rupture 6 s to 16 s, 2 s a point).
+  const all = [ms];
+  const max = Number(d.MaxDuration), step = Number(d.DurationPerResource);
+  if (step > 0 && max > ms) for (let x = ms + step; x <= max; x += step) all.push(x);
+  allLasts.set(Number(m.SpellID), all);
 }
 
 const periodOf = new Map(); // spell ID -> ms
@@ -69,3 +77,18 @@ for (const name of [...names].sort()) {
   lines.push(`    [${JSON.stringify(name)}] = ${ms / 1000},`);
 }
 console.log(`ns.TICK_PERIODS = {\n${lines.join('\n')}\n}`);
+
+// And how long each debuff lasts (seconds, each length its ranks have), so a
+// joined icon holding debuffs that tick at different paces counts only while
+// one of the counted ones is up (told apart by length: Bane of Agony 24 s,
+// Bane of Doom 60 s). Lasting forever or no time: left out.
+const lastsLines = [];
+for (const name of [...names].sort()) {
+  const all = new Set();
+  for (const id of idsOf.get(name) || []) {
+    for (const ms of allLasts.get(id) || []) if (ms > 0) all.add(ms / 1000);
+  }
+  if (all.size === 0) continue;
+  lastsLines.push(`    [${JSON.stringify(name)}] = { ${[...all].sort((a, b) => a - b).join(', ')} },`);
+}
+console.log(`ns.DEBUFF_LASTS = {\n${lastsLines.join('\n')}\n}`);

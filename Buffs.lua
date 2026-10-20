@@ -124,6 +124,156 @@ ns.TICK_PERIODS = {
     ["Wrack"] = 1,
 }
 
+-- And how long each debuff of yours lasts, in seconds (each length its ranks
+-- have, and each a combo point more makes: Rupture), from the same data: a joined icon holding debuffs that tick at
+-- different paces counts only while a counted one is up, told apart by its
+-- length (Bane of Agony 24, Bane of Doom 60; B:IconTicks).
+ns.DEBUFF_LASTS = {
+    ["Arcane Missiles"] = { 3, 4, 5 },
+    ["Bane of Agony"] = { 24 },
+    ["Bane of Doom"] = { 60 },
+    ["Bane of Havoc"] = { 300 },
+    ["Banish"] = { 20, 30 },
+    ["Bash"] = { 2, 3, 4 },
+    ["Black Arrow"] = { 30 },
+    ["Blast Wave"] = { 6 },
+    ["Blind"] = { 10 },
+    ["Challenging Roar"] = { 6 },
+    ["Challenging Shout"] = { 6 },
+    ["Chastise"] = { 2 },
+    ["Cheap Shot"] = { 4 },
+    ["Chilled"] = { 1.5 },
+    ["Chimera Shot - Scorpid"] = { 10 },
+    ["Concussion Blow"] = { 5 },
+    ["Concussive Shot"] = { 4 },
+    ["Cone of Cold"] = { 6 },
+    ["Confounding Flash"] = { 3 },
+    ["Corruption"] = { 12, 15, 18 },
+    ["Counterattack"] = { 5 },
+    ["Curse of Exhaustion"] = { 12 },
+    ["Curse of Idiocy"] = { 120 },
+    ["Curse of Recklessness"] = { 120 },
+    ["Curse of Tongues"] = { 30 },
+    ["Curse of Weakness"] = { 120 },
+    ["Curse of the Elements"] = { 300 },
+    ["Death Coil"] = { 3 },
+    ["Demonic Howl"] = { 6 },
+    ["Demoralizing Roar"] = { 30 },
+    ["Demoralizing Screech"] = { 30 },
+    ["Demoralizing Shout"] = { 45 },
+    ["Devouring Plague"] = { 24 },
+    ["Disarm"] = { 10 },
+    ["Dismember"] = { 6 },
+    ["Distract"] = { 10 },
+    ["Drain Life"] = { 5, 15 },
+    ["Drain Mana"] = { 5 },
+    ["Drain Soul"] = { 15 },
+    ["Dust Cloud"] = { 30 },
+    ["Entangling Roots"] = { 12, 15, 18, 21, 24, 27 },
+    ["Expose Armor"] = { 30 },
+    ["Faerie Fire"] = { 40 },
+    ["Fear"] = { 10, 15, 20 },
+    ["Fire Vulnerability"] = { 30 },
+    ["Fireball"] = { 4, 6, 8 },
+    ["Flame Shock"] = { 12 },
+    ["Frost Blast"] = { 9 },
+    ["Frost Nova"] = { 8 },
+    ["Frost Shock"] = { 8 },
+    ["Frostbite"] = { 5 },
+    ["Frostbolt"] = { 5, 6, 7, 8, 9 },
+    ["Frostfire Bolt"] = { 9 },
+    ["Frozen Orb"] = { 5, 16 },
+    ["Garrote"] = { 18 },
+    ["Gouge"] = { 4 },
+    ["Growl"] = { 3 },
+    ["Hammer of Justice"] = { 3, 4, 5, 6 },
+    ["Hamstring"] = { 15 },
+    ["Harass"] = { 10, 20, 30 },
+    ["Hemorrhage"] = { 15 },
+    ["Hex of Weakness"] = { 120 },
+    ["Hibernate"] = { 20, 30, 40 },
+    ["Holy Fire"] = { 10 },
+    ["Howl of Terror"] = { 10, 15 },
+    ["Hunter's Mark"] = { 120 },
+    ["Immolate"] = { 15 },
+    ["Immolation Trap"] = { 15, 60 },
+    ["Impact"] = { 2 },
+    ["Insect Swarm"] = { 12 },
+    ["Intimidating Shout"] = { 8 },
+    ["Judgement of Justice"] = { 10 },
+    ["Judgement of Light"] = { 40 },
+    ["Judgement of Wisdom"] = { 40 },
+    ["Judgement of the Crusader"] = { 40 },
+    ["Kidney Shot"] = { 1, 2, 3, 4, 5, 6 },
+    ["Lacerate"] = { 15 },
+    ["Lava Breath"] = { 10 },
+    ["Living Bomb"] = { 12 },
+    ["Living Flame"] = { 2, 10 },
+    ["Long Daze"] = { 6 },
+    ["Menace"] = { 3 },
+    ["Mind Control"] = { 60 },
+    ["Mind Flay"] = { 3 },
+    ["Mind Sear"] = { 6 },
+    ["Mind Soothe"] = { 15 },
+    ["Mind Spike"] = { 10 },
+    ["Mine!"] = { 3 },
+    ["Mocking Blow"] = { 6 },
+    ["Moonfire"] = { 9, 12 },
+    ["Mortal Strike"] = { 10 },
+    ["Piercing Howl"] = { 6 },
+    ["Pinch"] = { 9 },
+    ["Polymorph"] = { 20, 30, 40, 50 },
+    ["Polymorph: Cow"] = { 50 },
+    ["Pounce"] = { 2 },
+    ["Pounce Bleed"] = { 18 },
+    ["Psychic Scream"] = { 8 },
+    ["Pyroblast"] = { 12 },
+    ["Pyroclasm"] = { 3 },
+    ["Quick Draw"] = { 6 },
+    ["Rake"] = { 9 },
+    ["Rend"] = { 9, 12, 15, 18, 21 },
+    ["Repentance"] = { 6 },
+    ["Rip"] = { 12 },
+    ["Riposte"] = { 6 },
+    ["Rupture"] = { 6, 8, 10, 12, 14, 16 },
+    ["Saber Slash"] = { 12 },
+    ["Sap"] = { 25, 35, 45 },
+    ["Savage Rend"] = { 18 },
+    ["Scare Beast"] = { 10, 15, 20 },
+    ["Scatter Shot"] = { 4 },
+    ["Scorpid Poison"] = { 10 },
+    ["Scorpid Sting"] = { 20 },
+    ["Serpent Sting"] = { 12, 15 },
+    ["Shackle Undead"] = { 30, 40, 50 },
+    ["Shadow Word: Pain"] = { 18 },
+    ["Shadowburn"] = { 8 },
+    ["Shadowflame"] = { 8, 15 },
+    ["Shockwave"] = { 4 },
+    ["Silence"] = { 5 },
+    ["Siphon Life"] = { 30 },
+    ["Soothe Animal"] = { 15 },
+    ["Spellfrost Bolt"] = { 9 },
+    ["Starshards"] = { 6 },
+    ["Stormstrike"] = { 12 },
+    ["Subjugate Demon"] = { 300 },
+    ["Sunder Armor"] = { 30 },
+    ["Sunfire"] = { 12 },
+    ["Tame Beast"] = { 20 },
+    ["Taunt"] = { 3 },
+    ["Tendon Rip"] = { 9 },
+    ["Thunder Clap"] = { 10, 14, 18, 22, 26, 30 },
+    ["Touch of Weakness"] = { 120, 600 },
+    ["Turn Undead"] = { 10, 15, 20 },
+    ["Vampiric Embrace"] = { 30 },
+    ["Vampiric Touch"] = { 15 },
+    ["Vindication"] = { 10 },
+    ["Viper Sting"] = { 8 },
+    ["Void Plague"] = { 18 },
+    ["Web"] = { 4 },
+    ["Wing Clip"] = { 10 },
+    ["Wrack"] = { 6 },
+}
+
 -- A tick count's rule: the aura's time so far over its pace, rounded down
 -- (from 0), or up (from 1, like stacks: 1 as it lands, 2 after the first
 -- tick). From 1, the time is taken as at least a moment, so it never reads
@@ -136,11 +286,27 @@ local function Ticking(seconds, from)
     return { threshold = 0, format = "%d", components = { { div = seconds, step = 1, rounding = rounding.Down } } }
 end
 
+-- A colour curve for a count's colour by how long its aura lasts (TotalDuration),
+-- where the game has them: its colour while shown, see-through for a joined
+-- icon's other debuffs (F:Ticks). Nil where it can't.
+local function TickCurve()
+    local util = C_CurveUtil
+    if type(util) ~= "table" or type(util.CreateColorCurve) ~= "function" or type(CreateColor) ~= "function" then return nil end
+    local ok, curve = pcall(function()
+        local curve = util.CreateColorCurve()
+        curve:AddPoint(0, CreateColor(1, 1, 1, 1))
+        return curve
+    end)
+    return ok and curve or nil
+end
+
 -- A Debuffs bar icon's tick count. The addon can't read an aura's time in a
 -- fight (nor the combat log), so the game draws it: the aura's time so far,
 -- through a rule the addon sets out of combat (F:Ticks), which starts again
--- as the debuff is put back on. Hidden until its entry counts; where it
--- sits, its size and colour are the bar's (F:Ticks). Nil when the game can't.
+-- as the debuff is put back on, coloured by a curve on how long the aura
+-- lasts where the game has them (ticks.curve). Hidden until its entry counts;
+-- where it sits, its size and colour are the bar's (F:Ticks). Nil when the
+-- game can't. A curve the game turns down leaves the count without one.
 local function TickCount(button, top)
     local util, enum = C_StringUtil, Enum
     if not (type(util) == "table" and type(util.CreateNumericRuleFormatter) == "function" and type(enum) == "table"
@@ -153,9 +319,17 @@ local function TickCount(button, top)
         frame:Hide()
         local text = frame:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         text:SetPoint("TOPLEFT", 1, -1)
-        button:SetDurationText(text, { textFormat = { formatString = "{}", components = {
-            { property = enum.DurationTextBindingProperty.ElapsedDuration, formatter = formatter } } } })
-        return { frame = frame, text = text, formatter = formatter, rule = "2:0" }
+        local format = { formatString = "{}", components = {
+            { property = enum.DurationTextBindingProperty.ElapsedDuration, formatter = formatter } } }
+        local curve = enum.DurationTextBindingProperty.TotalDuration and TickCurve()
+        if curve and not pcall(button.SetDurationText, button, text, { textFormat = format,
+            textColor = { curve = curve, property = enum.DurationTextBindingProperty.TotalDuration } }) then
+            curve = nil
+        end
+        -- Whether the game took them: joined icons count only where it does (B:IconTicks).
+        if curve then F.curves = true elseif F.curves == nil then F.curves = false end
+        if not curve then button:SetDurationText(text, { textFormat = format }) end
+        return { frame = frame, text = text, formatter = formatter, rule = "2:0", curve = curve }
     end)
     return ok and ticks or nil
 end
@@ -257,7 +431,7 @@ end
 function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
     bar.groupParts, bar.names, bar.up, bar.spots = {}, {}, {}, {}
-    bar.tickPaces, bar.groupTicks = {}, {}
+    bar.tickPaces, bar.tickShows, bar.groupTicks = {}, {}, {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -315,6 +489,23 @@ function F:HolderDecor(bar)
     for _, holder in ipairs(bar.holders) do Style:ShowDecor(holder.decor, border, shadow) end
 end
 
+-- The Debuffs bar's Glow when missing: only on a living enemy you target
+-- (not with nothing targeted, a friend or a corpse, kept greyed or not).
+-- A secret answer counts as yes. Only FECM's own frames change, so any time
+-- (your target dying: UNIT_FLAGS, Bars.lua).
+function F:TargetGlow(bar)
+    if not (bar and bar.holders) then return end
+    local living = UnitExists("target") and UnitCanAttack("player", "target")
+    if not Open(living) then living = true end
+    if living and UnitIsDeadOrGhost then
+        local dead = UnitIsDeadOrGhost("target")
+        if Open(dead) and dead then living = false end
+    end
+    for _, holder in ipairs(bar.holders) do
+        if holder.glowHost then holder.glowHost:SetAlpha(living and 1 or 0) end
+    end
+end
+
 -- The Debuffs bar's greyed spots only show while you have a target you can
 -- attack, or always with Keep them greyed with no target, and its icons
 -- follow a new target at once. Only the addon's own textures change here,
@@ -329,6 +520,7 @@ function F:UpdateTarget(bar)
     if self:KeepGreyed(bar.data) then hostile = true end
     bar.enemy = hostile and true or false
     for _, holder in ipairs(bar.holders) do holder.icon:SetAlpha(bar.enemy and .45 or 0) end
+    self:TargetGlow(bar)
     self:HolderDecor(bar)
     if bar.container then bar.container:UpdateAllAuras() end
 end
@@ -458,26 +650,23 @@ end
 function F:Layout(bar, data)
     local size, spacing = ns.IconSize(data), data.spacing
     local count = 0
-    local picks, glows = ns.MissingPicks(bar.key), bar.key == "buff" and ns.GlowMissing(bar.key) or {}
+    local picks, glows = ns.MissingPicks(bar.key), ns.GlowMissing(bar.key)
     local counts = bar.key == "debuff" and ns.CountTicks(bar.key) or {}
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
-        local ids, entry, picked, glow, counted, shared = {}, nil, nil, false, false, nil
+        local ids, entry, picked, glow, yours = {}, nil, nil, false, {}
         for _, name in ipairs(group) do
             local found = ns.Spells:Find(name)
             if found and found.ids and ns.Spells:ForMe(name, bar.key) then
                 entry = entry or found
                 if picks[name] and not picked then picked = found end -- the first picked, as B:Picked
                 glow = glow or glows[name] == true
-                -- An icon counts ticks only while all its debuffs tick at one
-                -- pace: the game shows whichever is up, and the addon can't
-                -- tell which in a fight (B:TickClash).
-                counted = counted or counts[name] == true
-                local tick = ns.Bars:TickPace(name) or false
-                if shared == nil then shared = tick elseif shared ~= tick then shared = false end
+                yours[#yours + 1] = name
                 for _, id in ipairs(found.ids) do ids[id] = true end
             end
         end
-        local pace = counted and shared or nil
+        -- Its tick count: the counted debuffs' pace, and for a joined icon
+        -- with others at another pace, the lengths it shows on (B:IconTicks).
+        local pace, shows = ns.Bars:IconTicks(yours, counts)
         -- A joined icon shows its picked entry (on the bar's page), faded,
         -- while none is up; else its first of yours.
         entry = picked or entry
@@ -494,13 +683,13 @@ function F:Layout(bar, data)
             MissingGlow(holder, glow, size)
             bar.slotIDs[count] = ids
             bar.names[count] = table.concat(group, "+")
-            bar.tickPaces[count] = pace
+            bar.tickPaces[count], bar.tickShows[count] = pace, shows
         end
     end
     for i = count + 1, ns.BUFF_SLOTS do
         bar.holders[i]:Hide()
         MissingGlow(bar.holders[i], false)
-        bar.slotIDs[i], bar.names[i], bar.tickPaces[i] = nil, nil, nil
+        bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i] = nil, nil, nil, nil
     end
     for _, parts in ipairs(bar.groupParts) do parts.cooldown:SetHideCountdownNumbers(not data.showTimer) end
     bar.count = count
@@ -700,11 +889,44 @@ end
 -- says. Fixed slot i and packed group i are entry i's (a packed icon is
 -- drawn at BASE, then scaled). Out of combat only (F:Apply), as the icons
 -- are the game's; each is only sent as it changes, and a rule the game
--- turns down leaves the count hidden. Tucked a pixel into its corner.
+-- turns down leaves the count hidden. Tucked a pixel into its corner, or
+-- On the edge (a player's ask): centred on the border there, half outside.
 local INSET = { TOPLEFT = { 1, -1, "LEFT" }, TOP = { 0, -1, "CENTER" }, TOPRIGHT = { -1, -1, "RIGHT" },
     BOTTOMLEFT = { 1, 1, "LEFT" }, BOTTOM = { 0, 1, "CENTER" }, BOTTOMRIGHT = { -1, 1, "RIGHT" }, CENTER = { 0, 0, "CENTER" } }
 
-local function SetCount(ticks, seconds, data, size)
+-- The count's colour by how long its aura lasts: its colour throughout, or
+-- for a joined icon (shows: its debuffs' lengths in order, each counted or
+-- not; B:IconTicks) see-through for the others, stepping half way between.
+local function Paint(curve, colour, shows)
+    curve:ClearPoints()
+    local function Add(x, on) curve:AddPoint(x, CreateColor(colour[1], colour[2], colour[3], on and 1 or 0)) end
+    if not shows then
+        Add(0, true)
+        Add(100000, true)
+        return
+    end
+    Add(0, shows[1][2])
+    for i = 1, #shows - 1 do
+        local a, b = shows[i], shows[i + 1]
+        if a[2] ~= b[2] then
+            local half = (a[1] + b[1]) / 2
+            Add(half - .01, a[2])
+            Add(half + .01, b[2])
+        end
+    end
+    Add(100000, shows[#shows][2])
+end
+
+local function Shows(shows)
+    if not shows then return "" end
+    local parts = {}
+    for i, show in ipairs(shows) do parts[i] = show[1] .. (show[2] and "+" or "-") end
+    return table.concat(parts, ",")
+end
+
+local function SetCount(ticks, seconds, shows, data, size)
+    -- Telling a joined icon's debuffs apart needs the game's colour curve.
+    if shows and not ticks.curve then seconds = nil end
     if seconds then
         local rule = seconds .. ":" .. data.tickFrom
         if ticks.rule ~= rule then
@@ -719,24 +941,36 @@ local function SetCount(ticks, seconds, data, size)
     ticks.frame:SetShown(seconds ~= nil)
     if not seconds then return end
     local font = Style:Ticks(size, data.tickSize)
-    local look = data.tickAt .. "|" .. font .. "|" .. data.tickColour
+    local look = data.tickAt .. "|" .. tostring(data.tickEdge) .. "|" .. font .. "|" .. data.tickColour .. "|" .. Shows(shows)
     if ticks.look == look then return end
-    ticks.look = look
     local at = INSET[data.tickAt] or INSET.TOPLEFT
+    local point = INSET[data.tickAt] and data.tickAt or "TOPLEFT"
     local colour = ns.COUNT_COLOURS[data.tickColour] or ns.COUNT_COLOURS.white
+    if ticks.curve and not pcall(Paint, ticks.curve, colour, shows) then
+        -- Turned down: a joined icon can't tell its debuffs apart, so no count.
+        ticks.look = nil
+        if shows then return ticks.frame:Hide() end
+    else
+        ticks.look = look
+    end
     local text = ticks.text
     text:SetFontObject(font)
     text:SetTextColor(colour[1], colour[2], colour[3])
     text:ClearAllPoints()
-    text:SetPoint(INSET[data.tickAt] and data.tickAt or "TOPLEFT", at[1], at[2])
-    text:SetJustifyH(at[3])
+    if data.tickEdge and point ~= "CENTER" then
+        text:SetPoint("CENTER", ticks.frame, point, 0, 0)
+        text:SetJustifyH("CENTER")
+    else
+        text:SetPoint(point, at[1], at[2])
+        text:SetJustifyH(at[3])
+    end
 end
 
 function F:Ticks(bar)
     local data = bar.data
     for i = 1, ns.BUFF_SLOTS do
-        local seconds, holder = bar.tickPaces[i], bar.holders[i]
-        if holder.slot and holder.slot.ticks then SetCount(holder.slot.ticks, seconds, data, holder.size or BASE) end
-        for _, ticks in ipairs(bar.groupTicks[i] or {}) do SetCount(ticks, seconds, data, BASE) end
+        local seconds, shows, holder = bar.tickPaces[i], bar.tickShows[i], bar.holders[i]
+        if holder.slot and holder.slot.ticks then SetCount(holder.slot.ticks, seconds, shows, data, holder.size or BASE) end
+        for _, ticks in ipairs(bar.groupTicks[i] or {}) do SetCount(ticks, seconds, shows, data, BASE) end
     end
 end

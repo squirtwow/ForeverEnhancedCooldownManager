@@ -81,10 +81,11 @@ EraUI.
   that lights up as whichever is up. Right-click one to pick which shows greyed
   while none is up (on by default, General page)
 - Glow when missing: tick it beside a buff and its icon glows while the buff is
-  missing, like a Seal that fell off (off by default)
+  missing, like a Seal that fell off; beside a debuff of yours, it glows while
+  the debuff is missing from the enemy you target (off by default)
 - Count ticks: tick it beside a debuff and its icon counts its ticks like
-  stacks, like Bane of Agony, in the spot, size and colour you pick (off by
-  default)
+  stacks, like Bane of Agony, in the spot, size and colour you pick, inside the
+  icon or on its edge (off by default)
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag
   items in from your bags, and any ammo becomes one icon for whatever you have
   equipped

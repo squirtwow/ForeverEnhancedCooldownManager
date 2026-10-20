@@ -364,7 +364,7 @@ ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- and so is Swap with my form, beside the lists it swaps between).
 ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x",
-    "y", "tickAt", "tickSize", "tickColour", "tickFrom" }
+    "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -1975,6 +1975,7 @@ function ns.BarData(key)
     bar.tickSize = debuff and Limit(bar.tickSize, ns.TICK_SIZE) or ns.TICK_SIZE[3]
     bar.tickColour = debuff and ns.COUNT_COLOURS[bar.tickColour] and bar.tickColour or "white"
     bar.tickFrom = debuff and bar.tickFrom == 0 and 0 or 1
+    bar.tickEdge = debuff and bar.tickEdge == true -- On the edge: centred on the icon's border, off unless ticked
     bar.perRow = Limit(bar.perRow, ns.BAR_LIMITS.perRow)
     if not ns.GROW_NAMES[bar.grow] then bar.grow = "centre" end
     if not ns.WRAP_NAMES[bar.wrap] then bar.wrap = "down" end

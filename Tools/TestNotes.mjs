@@ -406,8 +406,10 @@ const README_WORDS = {
 
 test('the README covers every highlight on the CurseForge page', async () => {
   const html = await read('Tools/CurseForgeDescription.html');
+  // Every list under the Highlights heading (grouped under small headings
+  // since 1.8.2), up to the image rows after the last one.
   const start = html.indexOf('Highlights');
-  const list = html.slice(start, html.indexOf('</ul>', start));
+  const list = html.slice(start, html.indexOf('<hr>', start)).replace(/<h3>.*?<\/h3>/g, '').replace(/<img [^>]*>/g, '');
   const readme = (await read('README.md')).replace(/\s+/g, ' ').toLowerCase();
   const names = [...list.matchAll(/<strong>(.*?)<\/strong>/g)].map(match => match[1].replace(/&amp;/g, '&'));
   assert.ok(names.length > 20, 'the highlights found');

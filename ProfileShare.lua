@@ -279,13 +279,14 @@ local BAR_CHECKS = {
     tickSize = function(v) return Within(v, ns.TICK_SIZE) end,
     tickColour = function(v) return ns.COUNT_COLOURS[v] ~= nil end,
     tickFrom = function(v) return v == 0 or v == 1 end,
+    tickEdge = Bool,
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], spacing = ns.BAR_LIMITS.spacing[3], perRow = ns.BAR_LIMITS.perRow[3],
     whenReady = "show", onCooldown = "show", dimUnusable = false, dimOpacity = ns.BAR_LIMITS.dimOpacity[3],
     outOfCombat = "show", showMissing = false, onlyMissing = false, greyedNoTarget = false, showNames = false, showTimer = true,
     showAuras = false, selfDebuffs = false, grow = "centre", wrap = "down",
-    tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1 }
+    tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false }
 -- The layout's own settings; its rows and the bars taken out are lists.
 local LAYOUT_CHECKS = {
     on = Bool, preset = Preset, base = Preset, left = BarKey, right = BarKey,

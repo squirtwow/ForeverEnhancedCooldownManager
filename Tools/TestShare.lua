@@ -1174,7 +1174,7 @@ do
         if not found then fields[#fields + 1] = field .. " not shared" end
     end
     Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
-        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,tickFrom",
+        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,tickFrom,tickEdge",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
     -- On cooldown takes When ready's three choices and nothing else; its
     -- tick is a plain true or false.

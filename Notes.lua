@@ -10,6 +10,19 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.8.2",
+        sections = {
+            { "Added", {
+                "On the edge for Count ticks: the number sits centred on the icon's border, half outside.",
+                "Glow when missing on the Debuffs bar: a debuff of yours glows while it's missing from the enemy you target.",
+            } },
+            { "Fixed", {
+                "Count ticks now works on a joined icon, like Bane of Agony with Bane of Doom.",
+                "Talent spells (Innervate, Cold Blood, Preparation and more) now show in the spell search before you learn them.",
+            } },
+        },
+    },
+    {
         version = "1.8.1",
         sections = {
             { "Added", {

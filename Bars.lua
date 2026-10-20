@@ -1963,16 +1963,18 @@ function B:PickMissing(key, index)
 end
 
 -- Glow when missing (a player's idea: a Seal that fell off): a buff on the
--- Buffs bar whose icon glows while it's missing, so you see to recast it.
+-- Buffs bar whose icon glows while it's missing, so you see to recast it,
+-- or a debuff of yours on the Debuffs bar while it's missing from your
+-- target (the same player: Judgement of the Crusader fallen off a mob).
 function B:SetGlowMissing(key, name, on)
-    if key ~= "buff" or not IndexOf(key, name) then return false end
+    if not ns.AURA_BARS[key] or not IndexOf(key, name) then return false end
     ns.GlowMissing(key)[name] = on and true or nil
     self:Changed()
     return true
 end
 
 function B:GlowsMissing(key, name)
-    return key == "buff" and ns.GlowMissing(key)[name] == true
+    return ns.AURA_BARS[key] ~= nil and ns.GlowMissing(key)[name] == true
 end
 
 -- Count ticks (a player's idea: Bane of Agony's ticks): a debuff on the
@@ -1995,21 +1997,80 @@ function B:CountsTicks(key, name)
     return key == "debuff" and ns.CountTicks(key)[name] == true
 end
 
--- Another of yours in a debuff's icon that ticks at another pace, or not at
--- all (Bane of Havoc beside Agony, joined as one-at-a-time spells): that
--- icon can't count, as the game shows whichever is up and the addon can't
--- tell which in a fight (F:Layout). The first such, or nil.
+-- How long a debuff lasts, each length its ranks have (seconds; Buffs.lua's
+-- ns.DEBUFF_LASTS), or nil when not known.
+local function Lasts(name)
+    if type(name) ~= "string" or type(ns.DEBUFF_LASTS) ~= "table" then return nil end
+    return ns.Spells:ByName(ns.DEBUFF_LASTS, name:match("^[^@#]+"))
+end
+
+-- How an icon counts ticks, given its debuffs of yours (names) and which
+-- are ticked to count (counts): the pace, and, when others share the icon at
+-- another pace or none (a player's case: Bane of Doom beside Agony), which
+-- lengths it shows on, as a list of { seconds, shown } by length. The game
+-- shows whichever debuff is up and the addon can't tell which in a fight,
+-- but the count's colour can follow how long the aura lasts (Agony 24 s,
+-- Doom 60 s), so the others' counts go see-through (Buffs.lua Paint). No
+-- pace when it can't count, with the debuff in the way: none counted, the
+-- counted at different paces, or another as long as a counted one, of a
+-- length not known, or the game without colour curves.
+function B:IconTicks(names, counts)
+    local pace, counted
+    for _, name in ipairs(names) do
+        local own = counts[name] and self:TickPace(name)
+        if own then
+            -- Two counted at different paces: each is in the other's way.
+            if pace and own ~= pace then return nil, nil, name, counted end
+            pace, counted = own, counted or name
+        end
+    end
+    if not pace then return nil end
+    local others = {}
+    for _, name in ipairs(names) do
+        if self:TickPace(name) ~= pace then others[#others + 1] = name end
+    end
+    if #others == 0 then return pace end
+    -- Only where the game took the counts' colour curves (Buffs.lua TickCount).
+    if not (ns.BuffBar and ns.BuffBar.curves) then return nil, nil, others[1] end
+    local shown, length, owner = {}, {}, {}
+    for _, name in ipairs(names) do
+        local lasts = Lasts(name)
+        local on = self:TickPace(name) == pace
+        if not lasts then return nil, nil, on and others[1] or name end
+        for _, seconds in ipairs(lasts) do
+            -- As long as one on the other side: the one in the way is the other.
+            if length[seconds] ~= nil and length[seconds] ~= on then return nil, nil, on and owner[seconds] or name end
+            if length[seconds] == nil then
+                length[seconds], owner[seconds] = on, name
+                shown[#shown + 1] = seconds
+            end
+        end
+    end
+    table.sort(shown)
+    local shows = {}
+    for i, seconds in ipairs(shown) do shows[i] = { seconds, length[seconds] } end
+    return pace, shows
+end
+
+-- Another of yours in a debuff's icon that keeps it from counting its
+-- ticks, were it ticked (B:IconTicks), or nil.
 function B:TickClash(key, name)
     local index = IndexOf(key, name)
     if not (index and ns.AURA_BARS[key]) then return nil end
-    local spells, pace = ns.BarData(key).spells, self:TickPace(name)
+    local spells, names, counts = ns.BarData(key).spells, {}, {}
     local first, last = Group(key, index)
     for i = first, last do
-        local other = spells[i]
-        local found = other ~= name and ns.Spells:Find(other)
-        if found and found.ids and ns.Spells:ForMe(other, key) and self:TickPace(other) ~= pace then return other end
+        local found = ns.Spells:Find(spells[i])
+        if found and found.ids and ns.Spells:ForMe(spells[i], key) then names[#names + 1] = spells[i] end
     end
-    return nil
+    for k, v in pairs(ns.CountTicks(key)) do counts[k] = v end
+    counts[name] = true
+    local pace, _, blocker, other = self:IconTicks(names, counts)
+    if pace then return nil end
+    -- Counted at another pace than one already counted: that one's in the way.
+    if blocker == name then blocker = other end
+    if blocker == name then return nil end
+    return blocker
 end
 
 -- Whether the entry at index is the one its icon shows while none is up:
@@ -2286,6 +2347,10 @@ local shifting = false
 local function OnEvent(_, event, arg)
     if event == "UNIT_AURA" then
         checking = true
+    elseif event == "UNIT_FLAGS" then
+        -- Your target died (or came back): the Debuffs bar's Glow when
+        -- missing goes out on a corpse. FECM's own frames only.
+        ns.BuffBar:TargetGlow(bars.debuff)
     elseif FORM_EVENTS[event] then
         shifting = true
     elseif event == "ADDON_RESTRICTION_STATE_CHANGED" or event == "ENCOUNTER_END" then
@@ -2479,6 +2544,8 @@ local function Switch()
         -- A client without range events still checks range on a new target
         -- and as spells become usable or not.
         pcall(driver.RegisterEvent, driver, "SPELL_RANGE_CHECK_UPDATE")
+        -- Your target dying or coming back (the Debuffs bar's glow).
+        pcall(driver.RegisterUnitEvent, driver, "UNIT_FLAGS", "target")
         driver:SetScript("OnUpdate", Tick)
     else
         driver:UnregisterAllEvents()
