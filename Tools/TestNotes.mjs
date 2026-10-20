@@ -419,10 +419,14 @@ test('the README covers every highlight on the CurseForge page', async () => {
 
 // The swing timer shows the main hand for everyone, hunters too, and ranged
 // swings for any class: Auto Shot for hunters, Ranged for the rest.
+// The CurseForge page only names it since its highlights went short (1.8.2),
+// so there it just mustn't be described wrong.
 test('the swing timer is described as it works wherever players read about it', async () => {
   for (const name of ['CHANGELOG.txt', 'README.md', 'Tools/CurseForgeDescription.html']) {
     const text = (await read(name)).replace(/\s+/g, ' ');
-    assert.match(text, /main hand and ranged swings \(Auto Shot for hunters\)/, name);
+    if (name !== 'Tools/CurseForgeDescription.html') {
+      assert.match(text, /main hand and ranged swings \(Auto Shot for hunters\)/, name);
+    }
     assert.doesNotMatch(text, /main hand for everyone else/, name);
   }
 });
