@@ -6,7 +6,7 @@
 local _, ns = ...
 local T = ns.Theme
 
-local SWATCH, SWATCH_GAP = 20, 6
+local SWATCH = 20 -- a colour's swatch, which opens its colours
 local DIM = .35 -- a preview whose part is off, or a control that doesn't apply
 local COLUMN = 312 -- the raid warnings' column
 local LABEL = 64 -- room for a row's label before its choices
@@ -223,25 +223,26 @@ function ns.BuildRaidTimersPage(window, page, width)
         window:Hint(check, note)
         return check
     end
-    -- A row of colour swatches for one setting: click the chosen one again
-    -- for its own (Blizzard's, or gold). colourOf gives each swatch's colour.
-    local function Colours(caption, key, keys, colourOf, x, y, note)
+    -- A colour for one setting: its swatch opens the colours, and the chosen
+    -- one clicked again goes back to its own (Blizzard's, or gold).
+    -- colourOf gives each one's colour, shown the colour in use.
+    local function Colours(caption, key, keys, colourOf, shown, x, y, note, about)
         Label(caption, x, y)
-        local swatches = {}
-        for i, colour in ipairs(keys) do
-            local swatch = ns.Swatch(options, SWATCH, function()
+        local choice = ns.ColourChoice(window, options, SWATCH, ns.SettingChoice(key, {
+            keys = keys,
+            colourOf = colourOf,
+            shown = shown,
+            pick = function(colour)
                 ns.Set(key, ns.Get(key) ~= colour and colour or "default")
                 Changed()
-            end)
-            swatch:SetPoint("TOPLEFT", x + LABEL + (i - 1) * (SWATCH + SWATCH_GAP), y)
-            swatch.key = colour
-            if colour == "class" then ns.ClassIcon(swatch) end
-            window:Hint(swatch, note)
-            swatches[i] = swatch
-        end
+            end,
+            note = note,
+            about = about,
+        }, Changed))
+        choice:SetPoint("TOPLEFT", x + LABEL, y)
         local chosen = T:Text(options, "GameFontHighlightSmall", T.MUTED)
-        chosen:SetPoint("TOPLEFT", x + LABEL + #keys * (SWATCH + SWATCH_GAP) + 2, y - 4)
-        return { swatches = swatches, chosen = chosen, key = key, colourOf = colourOf }
+        chosen:SetPoint("TOPLEFT", x + LABEL + choice:GetWidth() + 8, y - 4)
+        return { choice = choice, swatches = choice.swatches, chosen = chosen, key = key, colourOf = colourOf }
     end
     local function Pills(keys, names, setting, pillsWidth, x, y, note)
         local items = { fit = setting == "warningFont" } -- the fonts, by their names' length
@@ -275,8 +276,8 @@ function ns.BuildRaidTimersPage(window, page, width)
     -- The pull and start countdown.
     local pullTick = Tick("Pull and start countdown", "pullTimer", 0, -4,
         "Blizzard's countdown bar for a pull or a battleground's gates, in the Look page's design, texture and font, and its big numbers.")
-    local pullColours = Colours("Colour", "pullColour", ns.BAR_COLOUR_KEYS, BarColour, 0, -28,
-        "A colour for the countdown bar. Click it again for Blizzard's red.")
+    local pullColours = Colours("Colour", "pullColour", ns.BAR_COLOUR_KEYS, BarColour, function() return R:PullColour() end, 0, -28,
+        "A colour for the countdown bar. Click it again for Blizzard's red.", "The countdown bar's colour. Click for the colours.")
     Label("Numbers", 0, -56)
     local numbers = Pills(ns.NUMBER_KEYS, ns.NUMBER_NAMES, "pullNumbers", 200, LABEL, -56,
         "The big numbers for the last seconds: Blizzard's gold, white, or in the bar's colour.")
@@ -297,8 +298,9 @@ function ns.BuildRaidTimersPage(window, page, width)
             or "Opens Edit Mode, as /editmode does, and closes this window. Tick Boss Frames there to see the boss cast bars, empty."
     end)
     EditModeButton(window, editMode)
-    local bossColours = Colours("Colour", "bossColour", ns.BAR_COLOUR_KEYS, BarColour, 0, -158,
-        "A colour for boss casts. Click it again for gold, green while channelling. Broken off is red, and casts you can't interrupt grey, when the game shows which.")
+    local bossColours = Colours("Colour", "bossColour", ns.BAR_COLOUR_KEYS, BarColour, function() return R:BossColour() end, 0, -158,
+        "A colour for boss casts. Click it again for gold, green while channelling. Broken off is red, and casts you can't interrupt grey, when the game shows which.",
+        "Boss casts' colour. Broken off is red, and casts you can't interrupt grey, when the game shows which. Click for the colours.")
     local bossNote = T:Text(options, "GameFontHighlightSmall", T.MUTED)
     bossNote:SetPoint("TOPLEFT", 0, -186)
     bossNote:SetWidth(COLUMN - 16)
@@ -319,10 +321,18 @@ function ns.BuildRaidTimersPage(window, page, width)
         "A dark outline round each letter, thin or thick, so the text reads over anything.")
     local shadow = Tick("Shadow", "warningShadow", COLUMN + LABEL + 162, -58,
         "A soft drop shadow under the text, as Blizzard's has.")
-    local warningColours = Colours("Warnings", "warningColour", ns.TEXT_COLOUR_KEYS, TextColour, COLUMN, -84,
-        "A colour for raid warnings. Click it again for Blizzard's.")
-    local emoteColours = Colours("Emotes", "emoteColour", ns.TEXT_COLOUR_KEYS, TextColour, COLUMN, -112,
-        "A colour for what bosses say and whisper to you. Click it again for Blizzard's.")
+    -- The colour of each kind of line now: yours, or Blizzard's.
+    local function TextShown(setting, emote)
+        return function()
+            local key = ns.ColourKey(setting)
+            return key ~= "default" and R:TextColour(key) or R:PlainTextColour(emote)
+        end
+    end
+    local warningColours = Colours("Warnings", "warningColour", ns.TEXT_COLOUR_KEYS, TextColour, TextShown("warningColour", false),
+        COLUMN, -84, "A colour for raid warnings. Click it again for Blizzard's.", "Raid warnings' colour. Click for the colours.")
+    local emoteColours = Colours("Emotes", "emoteColour", ns.TEXT_COLOUR_KEYS, TextColour, TextShown("emoteColour", true),
+        COLUMN, -112, "A colour for what bosses say and whisper to you. Click it again for Blizzard's.",
+        "The colour of what bosses say and whisper to you. Click for the colours.")
     local WARNING_OFF = "Tick Raid warnings and boss emotes first."
     local warningSize = Size("Warning size", "warningSize", ns.RAID_SIZE, COLUMN, -140, Warning,
         "How big raid warnings are: 100 is Blizzard's size. Each still grows a little as it arrives, as Blizzard's do."
@@ -349,11 +359,9 @@ function ns.BuildRaidTimersPage(window, page, width)
 
     local function Paint(row, default)
         local chosen = ns.Get(row.key)
-        for _, swatch in ipairs(row.swatches) do
-            ns.PaintSwatch(swatch, row.colourOf(swatch.key), swatch.key == chosen)
-        end
+        row.choice:Paint()
         local names = row.colourOf == TextColour and ns.TEXT_COLOUR_NAMES or ns.BAR_COLOUR_NAMES
-        row.chosen:SetText(chosen == "default" and default or names[chosen])
+        row.chosen:SetText(chosen == "default" and default or chosen == ns.CUSTOM and ns.CUSTOM_NAME or names[chosen])
     end
 
     function page:Refresh()

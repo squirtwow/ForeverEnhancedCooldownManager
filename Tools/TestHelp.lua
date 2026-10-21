@@ -931,6 +931,7 @@ function Fit.Name(obj)
     if s.kind == "FontString" then return '"' .. tostring(s.text) .. '"' end
     if rawget(obj, "box") and rawget(obj, "text") then return "tick " .. tostring(S[obj.text].text) end
     if rawget(obj, "buttons") then return "choice " .. tostring(S[obj.buttons[1].label].text) .. "..." end
+    if rawget(obj, "popup") then return "colour swatch" end
     if rawget(obj, "label") then return s.kind .. " " .. tostring(S[obj.label].text) end
     return s.kind
 end
@@ -955,6 +956,8 @@ function Fit.Pieces(root)
                 piece = true
             elseif s.kind == "Button" and rawget(obj, "label") then
                 piece = not (parent and rawget(parent, "buttons"))
+            elseif s.kind == "Button" and rawget(obj, "popup") then
+                piece = true -- a colour's swatch, which opens its colours
             elseif s.kind == "EditBox" then
                 piece = true
             elseif parent and rawget(parent, "track") == obj then
@@ -1023,8 +1026,8 @@ function Fit.LookBoxes(w)
 end
 -- The Each bar box's rows, which scroll (so the page's check leaves them
 -- out): each shown one across the list and clear of the list's note and
--- its button under them, and its icon, name, swatches and colour's name
--- inside it, none on another.
+-- its button under them, and its icon, name, colour swatch and colour's
+-- name inside it, none on another.
 function Fit.Rows(w)
     local found = {}
     for i, row in ipairs(w.eachRows) do
@@ -1037,8 +1040,7 @@ function Fit.Rows(w)
                 if under[1]:IsVisible() and not Fit.Clear(row, under[1]) then found[#found + 1] = ("row %d on %s"):format(i, under[2]) end
             end
             local parts = { { row.icon, "icon" }, { row.name, "name " .. tostring(S[row.name].text) },
-                { row.chosen, "colour's name " .. tostring(S[row.chosen].text) } }
-            for s, swatch in ipairs(row.swatches) do parts[#parts + 1] = { swatch, "swatch " .. s } end
+                { row.chosen, "colour's name " .. tostring(S[row.chosen].text) }, { row.colour, "colour swatch" } }
             for p, part in ipairs(parts) do
                 local pl, pt, pr, pb = Fit.Rect(part[1])
                 if pl < l or pr > r or pt < t or pb > b then found[#found + 1] = ("row %d: %s out of its row"):format(i, part[2]) end
@@ -1320,7 +1322,7 @@ end)()
     local box = FECMTour
     Step(w, 0)
     Equal(tostring(db.helpSeen) .. " " .. S[box.title].text .. " " .. S[box.count].text .. " | " .. Nudge(w),
-        "true THE LOOK 1 of 4 | false false", "? clicked: the Look page's walkthrough, the pulse and note gone, saved")
+        "true THE LOOK 1 of 8 | false false", "? clicked: the Look page's walkthrough, the pulse and note gone, saved")
     box.skip:Click()
     Step(w, 0)
     Equal(Nudge(w) .. " " .. tostring(w.helpNudge.driver:IsVisible()), "false false false", "gone for good after it")
@@ -1487,9 +1489,9 @@ end)()
     Check("cast", "cast with crafting, tick marks and latency")
     local cast = w.pages.cast
     Equal(tostring(cast.tickSample:IsVisible()) .. " " .. tostring(cast.tickStyle:IsVisible()) .. " "
-        .. tostring(cast.tickWidth:IsVisible()) .. " " .. tostring(cast.tickSwatches[1]:IsVisible()) .. " "
-        .. tostring(cast.latencyMs:IsVisible()) .. " " .. tostring(cast.latencySwatches[1]:IsVisible()), "true true true true true true",
-        "(the tick marks' preview, style, width and colours, and latency's Show ms and colours, checked there)")
+        .. tostring(cast.tickWidth:IsVisible()) .. " " .. tostring(cast.tickColour:IsVisible()) .. " "
+        .. tostring(cast.latencyMs:IsVisible()) .. " " .. tostring(cast.latencyColour:IsVisible()), "true true true true true true",
+        "(the tick marks' preview, style, width and colour, and latency's Show ms and colour, checked there)")
     ns.Set("castTicks", false)
     w:Select("cast")
     Check("cast", "cast with latency, tick marks off")
@@ -1498,8 +1500,8 @@ end)()
         "with tick marks off, their preview and choices hide, and latency moves up under them")
     ns.Set("castLatency", false)
     w:Select("cast")
-    Equal(tostring(cast.latencyMs:IsVisible()) .. " " .. tostring(cast.latencySwatches[1]:IsVisible()), "false false",
-        "with latency off, Show ms and its colours hide")
+    Equal(tostring(cast.latencyMs:IsVisible()) .. " " .. tostring(cast.latencyColour:IsVisible()), "false false",
+        "with latency off, Show ms and its colour hide")
     ns.Set("castBatch", false)
     ns.Set("castTimeFormat", "left")
     ns.Set("castHeight", ns.CAST_HEIGHT[3])
@@ -1565,7 +1567,7 @@ end)()
     -- its size and colour, each clear of the next.
     Check("debuff", "debuff with the tick count's options")
     Equal(table.concat({ tostring(opts.tickAt:IsVisible()), tostring(opts.tickFrom:IsVisible()), tostring(opts.tickSize:IsVisible()),
-        tostring(opts.tickSwatches[1]:IsVisible()), tostring(opts.tickFrom:GetChecked()), opts.tickAt.selected, S[opts.tickSize.value].text,
+        tostring(opts.tickChoice:IsVisible()), tostring(opts.tickFrom:GetChecked()), opts.tickAt.selected, S[opts.tickSize.value].text,
         tostring(opts.tickEdge:IsVisible()), tostring(opts.tickEdge:GetChecked()) }, " "),
         "true true true true true TOPLEFT 100% true false", "(they show: top left, from 1, at 100%, not on the edge)")
     opts.tickEdge:Click()
@@ -1615,9 +1617,53 @@ end)()
     w:Select("buff")
     local thorns = RowOf("Thorns")
     Equal(tostring(thorns.glow:IsVisible()) .. " " .. tostring(thorns.glow.usable) .. " | " .. Note(thorns.glow), "true false | Tick Show"
-        .. " missing buffs greyed first: the glow shows on a missing buff's greyed spot.", "(greyed, saying what it needs)")
+        .. " missing buffs greyed or Only when missing first: the glow shows on a missing buff's greyed spot.", "(greyed, saying what it needs)")
     thorns.glow:Click()
     Equal(tostring(B:GlowsMissing("buff", "Thorns")), "false", "(a click does nothing while greyed)")
+    -- Only when missing (a player's ask): on a ticked buff's row, just left
+    -- of Glow when missing, off, saying what it does (seen working in game,
+    -- so no longer marked experimental). Its
+    -- row's name, it and Glow when missing each clear of the next, inside
+    -- the row, with room for a long buff name.
+    local op = S[thorns.only].points[1]
+    Equal(table.concat({ tostring(thorns.only:IsVisible()), S[thorns.only.text].text, tostring(thorns.only:GetChecked()),
+        tostring(thorns.only.usable), tostring(op[2] == thorns.glow), op[1], op[3], tostring(op[4]) }, " ") .. " | " .. Note(thorns.only),
+        "true Only when missing false true true RIGHT LEFT -14 | Shows this buff only while it's missing from you, so you see to recast it."
+        .. " The game hides your buffs from addons in a fight, so changes then show once it ends.",
+        "(Only when missing beside Glow when missing, off, saying what it does)")
+    local rl, _, rr = Fit.Rect(thorns)
+    local nl = Fit.Rect(thorns.name)
+    local ol, _, orr = Fit.Rect(thorns.only)
+    local gl, _, gr = Fit.Rect(thorns.glow)
+    Equal(tostring(Fit.Clear(thorns.name, thorns.only)) .. " " .. tostring(Fit.Clear(thorns.only, thorns.glow)) .. " "
+        .. tostring(ol >= rl and gr <= rr and orr < gl) .. " " .. tostring(ol - nl >= 200), "true true true true",
+        "(the name, Only when missing and Glow when missing clear of each other in the row, room for a 26-letter name)")
+    thorns.only:Click()
+    w:Refresh()
+    thorns = RowOf("Thorns")
+    Equal(tostring(B:OnlyWhenMissing("buff", "Thorns")) .. " " .. tostring(thorns.only:GetChecked()) .. " " .. tostring(B:HasAura("buff", "Thorns"))
+        .. " " .. tostring(thorns.glow.usable) .. " | " .. Note(thorns.glow), "true true true true | Its icon glows while it's missing,"
+        .. " so you see to recast it, like a Seal that fell off.", "(ticked: kept, Thorns stays on the bar, and its glow can go on its spot)")
+    -- Greyed while Only show missing does it for every buff, saying so,
+    -- keeping its own choice; a click does nothing then.
+    B:SetOption("buff", "onlyMissing", true)
+    w:Refresh()
+    thorns = RowOf("Thorns")
+    thorns.only:Click()
+    Equal(tostring(thorns.only.usable) .. " " .. S[thorns.only].alpha .. " " .. tostring(thorns.only:GetChecked()) .. " "
+        .. tostring(B:OnlyWhenMissing("buff", "Thorns")) .. " | " .. Note(thorns.only), "false 0.35 true true | Not needed with Only show"
+        .. " missing, which already shows every buff only while it's missing.", "(greyed with Only show missing, its choice kept, saying why)")
+    B:SetOption("buff", "onlyMissing", false)
+    w:Refresh()
+    RowOf("Thorns").only:Click()
+    Equal(tostring(B:OnlyWhenMissing("buff", "Thorns")) .. " " .. tostring(RowOf("Thorns").glow.usable), "false false",
+        "(unticked: off, and Glow when missing greyed again)")
+    -- Not on the Debuffs page.
+    B:SetAura("debuff", "Moonfire", true)
+    w:Select("debuff")
+    Equal(tostring(RowOf("Moonfire").only:IsVisible()), "false", "(no Only when missing on the Debuffs page)")
+    B:SetAura("debuff", "Moonfire", false)
+    w:Select("buff")
     B:SetOption("buff", "showMissing", true)
     w:Refresh()
     thorns = RowOf("Thorns")
@@ -2055,7 +2101,7 @@ end)()
     -- Each choice, in that fullest list, with keybinds off and on and the display's text on.
     local CHOICES = { { "barStyle", ns.BAR_STYLE_KEYS }, { "barColour", ns.BAR_COLOUR_KEYS }, { "barTexture", ns.BAR_TEXTURE_KEYS },
         { "font", ns.FONT_KEYS }, { "accent", ns.ACCENT_KEYS }, { "readyGlow", ns.READY_GLOW_KEYS },
-        { "keybindPosition", ns.KEYBIND_POSITIONS } }
+        { "keybindPosition", ns.KEYBIND_POSITIONS }, { "colourFade", { false, true } } }
     local tried = 0
     for _, keys in ipairs({ false, true }) do
         ns.Set("keybinds", keys)
@@ -2070,8 +2116,8 @@ end)()
             ns.Set(choice[1], was)
         end
     end
-    Equal(tostring(w.keyPlace:IsVisible()) .. " " .. tostring(w.prdText:GetChecked()) .. " " .. tried, "true true 58",
-        "(keybinds' choices shown, the text ticked, and every choice tried twice)")
+    Equal(tostring(w.keyPlace:IsVisible()) .. " " .. tostring(w.prdText:GetChecked()) .. " " .. tried, "true true 64",
+        "(keybinds' choices shown, the text ticked, and every choice tried twice: four designs, Colour fade off and on)")
     Equal(table.concat(found, " | "), "", "in every state, each piece on the Look page inside its box (the preview, the choices,"
         .. " the Each bar box), none on another, and each row of the list inside it")
     C_Spell.GetSpellName = spellName
@@ -2372,6 +2418,546 @@ end)()
     Equal(Note(panel.apply) .. " | " .. Note(Card("minimal")), "Keep this look, and switch on what's ticked. | Minimal: Outline bars, small"
         .. " and quiet.", "each part says what it does")
     Equal(table.concat(found, " | "), "", "the panel inside the window, under the title bar and clear of the footer, nothing overlapping")
+end)()
+
+-- Colour rows: one swatch and its pop-up ---------------------------------------------------------
+-- Every colour row but the window's accent is one swatch in the colour in
+-- use, which opens a pop-up: Custom first (a rainbow), then the row's named
+-- colours. A named one picks as the row always did and closes it; Custom
+-- opens the game's colour picker (out of combat), the row following it, its
+-- colour kept beside the named ones. The pop-up closes on Escape (alone, the
+-- window staying), a click elsewhere, another page, its row going and the
+-- window closing; one at a time.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local function Fill(choice)
+        local call = S[choice.fill].last.SetColorTexture
+        return ("%.2f,%.2f,%.2f"):format(call[1], call[2], call[3])
+    end
+    local choice = w.barColour
+    local popup = choice.popup
+    -- Closed until clicked: Custom first, then the six bar colours, each a
+    -- swatch of the same size, in a row, the class colour with its icon.
+    local keys, places = { choice.custom.key }, { S[choice.custom].points[1][2] }
+    for _, swatch in ipairs(choice.swatches) do
+        keys[#keys + 1] = swatch.key
+        places[#places + 1] = S[swatch].points[1][2]
+    end
+    Equal(tostring(popup:IsShown()) .. " | " .. table.concat(keys, " ") .. " | " .. table.concat(places, " ") .. " | " .. Fill(choice)
+        .. " " .. tostring(S[choice.icon].shown) .. " " .. tostring(Last(choice.swatches[6].icon, "SetAtlas", 1)) .. " | " .. S[popup].width,
+        "false | custom orange charcoal blue green purple class | 6 30 54 78 102 126 150 | 1.00,0.50,0.25 false classicon-druid | 176",
+        "one swatch in your colour, its pop-up closed: Custom first, then the bar colours")
+    -- Custom is a rainbow of the addon's own: six bands round the colour
+    -- wheel and a shade darker at the foot, all gradients.
+    local bands, first = 0, nil
+    for _, obj in ipairs(objects) do
+        if S[obj].parent == choice.custom and S[obj].kind == "Texture" and S[obj].last.SetGradient then
+            bands = bands + 1
+            first = first or S[obj].last.SetGradient
+        end
+    end
+    Equal(bands .. " " .. first[1] .. " " .. first[2].r .. "," .. first[2].g .. " " .. first[3].r .. "," .. first[3].g .. " | " .. Note(choice.custom),
+        "7 HORIZONTAL 1,0 1,1 | Custom: any colour you like, from the game's colour picker. It shows as you pick, and Cancel puts back"
+        .. " the one before.", "Custom drawn as a rainbow, its hover no longer marked experimental (seen working in game)")
+    -- Open, a named colour picks and closes it.
+    choice:Click()
+    Equal(tostring(popup:IsShown()) .. " " .. tostring(S[popup].events.GLOBAL_MOUSE_DOWN) .. " " .. tostring(rawequal(_G.FECMFrame, popup))
+        .. " | " .. Note(choice), "true true true | The colour for all your Tracked Bars. Click for the colours.",
+        "clicked: its pop-up opens, listening for a click elsewhere, Escape's entry its own")
+    choice.swatches[3]:Click()
+    Equal(ns.Get("barColour") .. " " .. tostring(popup:IsShown()) .. " " .. tostring(rawequal(_G.FECMFrame, w)) .. " "
+        .. tostring(S[popup].events.GLOBAL_MOUSE_DOWN) .. " | " .. S[w.barChosen].text .. " " .. Fill(choice) .. " "
+        .. S[choice.swatches[3]].border[1], "blue false true nil | Blue 0.24,0.55,0.88 1", "a named colour: picked, shown, the pop-up gone")
+    -- Escape closes the pop-up alone; the next Escape the window.
+    choice:Click()
+    CloseSpecialWindows()
+    Equal(tostring(popup:IsShown()) .. " " .. tostring(w:IsShown()) .. " " .. tostring(rawequal(_G.FECMFrame, w)), "false true true",
+        "Escape: the pop-up goes, the window stays")
+    CloseSpecialWindows()
+    Equal(tostring(w:IsShown()), "false", "and the next Escape closes the window")
+    SlashCmdList.FECM("")
+    -- A click elsewhere closes it; on it, or on its own swatch, it stays.
+    choice:Click()
+    S[popup].mouseOver = true
+    Fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    local stays = popup:IsShown()
+    S[popup].mouseOver, S[choice].mouseOver = false, true
+    Fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    stays = tostring(stays) .. " " .. tostring(popup:IsShown())
+    S[choice].mouseOver = false
+    Fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    Equal(stays .. " " .. tostring(popup:IsShown()), "true true false", "a click on it or its swatch keeps it, anywhere else closes it")
+    choice:Click()
+    choice:Click()
+    Equal(tostring(popup:IsShown()), "false", "its swatch clicked again closes it")
+    -- The window closing takes it, and it doesn't come back with the window.
+    choice:Click()
+    w:Hide()
+    local gone = tostring(popup:IsShown()) .. " " .. tostring(rawequal(_G.FECMFrame, w))
+    w:Show()
+    Equal(gone .. " " .. tostring(popup:IsShown()), "false true false", "the window closing closes it, for good")
+    -- Another page, and one pop-up at a time.
+    choice:Click()
+    w:Select("cast")
+    local cp = w.pages.cast
+    Equal(tostring(popup:IsShown()), "false", "another page closes it")
+    cp.colour:Click()
+    cp.swingColour:Click()
+    Equal(tostring(cp.colour.popup:IsShown()) .. " " .. tostring(cp.swingColour.popup:IsShown()), "false true", "one at a time")
+    cp.swingColour:Click()
+    -- A row going (latency switched off) takes its pop-up.
+    ns.Set("castLatency", true)
+    cp.latencyColour:Click()
+    ns.Set("castLatency", false)
+    Equal(tostring(cp.latencyColour:IsVisible()) .. " " .. tostring(cp.latencyColour.popup:IsShown()) .. " " .. tostring(rawequal(_G.FECMFrame, w)),
+        "false false true", "its row hidden: the pop-up goes too")
+    -- Click it again for the default, as before: through the pop-up.
+    cp.colour:Click()
+    cp.colour.swatches[3]:Click()
+    cp.colour:Click()
+    Equal(ns.Get("castColour") .. " " .. S[cp.chosen].text .. " " .. Note(cp.colour.swatches[3]), "blue Blue A colour for your cast bar."
+        .. " Click it again for Blizzard's gold, green while channelling.", "a cast colour, each swatch saying the chosen one again is gold")
+    cp.colour.swatches[3]:Click()
+    Equal(ns.Get("castColour") .. " " .. S[cp.chosen].text .. " " .. Fill(cp.colour), "default Blizzard's gold 1.00,0.70,0.00",
+        "clicked again: Blizzard's gold, the swatch in it")
+
+    -- Custom: the game's colour picker, set up through its own call. In a
+    -- fight, or without it, the footer says so and nothing opens.
+    w:Select("look")
+    lockdown = true
+    choice.custom:Click()
+    local said = S[w.note].text
+    lockdown = false
+    _G.ColorPickerFrame = nil
+    choice.custom:Click()
+    Equal(said .. " | " .. S[w.note].text .. " | " .. ns.Get("barColour"), "Finish combat first, then pick a custom colour. | The game's"
+        .. " colour picker isn't there. Pick one of the other colours instead. | blue", "in a fight or without the picker: says so, nothing changes")
+    -- The picker as the game's: its setup shows it and sets its colour,
+    -- which calls back as any colour picked does.
+    local picker = { shown = false, setups = 0 }
+    function picker:SetupColorPickerAndShow(info)
+        self.info, self.setups, self.shown = info, self.setups + 1, true
+        self.r, self.g, self.b = info.r, info.g, info.b
+        info.swatchFunc()
+    end
+    function picker:GetColorRGB() return self.r, self.g, self.b end
+    function picker:IsShown() return self.shown end
+    _G.ColorPickerFrame = picker
+    -- In gamepad mode the picker sets up gamepad buttons (bindings) as it
+    -- opens, which mustn't come from an addon's click: Custom says so and
+    -- nothing opens. With the mouse and keyboard it opens (below).
+    local style, enum, mode = _G.C_InputInterfaceStyle, _G.Enum, 1
+    _G.Enum = setmetatable({ InputDeviceInterfaceType = { Mkb = 0, Gamepad = 1 } }, { __index = enum })
+    _G.C_InputInterfaceStyle = { GetCurrentStyle = function() return mode end }
+    choice.custom:Click()
+    Equal(S[w.note].text .. " | " .. picker.setups .. " " .. tostring(picker.shown) .. " " .. ns.Get("barColour") .. " "
+        .. tostring(w.colourWatch:IsShown()), "Custom needs the mouse and keyboard, not the gamepad. Pick one of the other colours"
+        .. " instead. | 0 false blue false", "in gamepad mode: says so, the picker not opened, nothing changes")
+    mode = 0
+    local function Pick(r, g, b)
+        picker.r, picker.g, picker.b = r, g, b
+        picker.info.swatchFunc()
+    end
+    local function Close()
+        picker.shown = false
+        S[w.colourWatch].scripts.OnUpdate(w.colourWatch, 0)
+    end
+    ns.Set("barColour", "orange")
+    choice:Click()
+    choice.custom:Click()
+    local info = picker.info
+    Equal(picker.setups .. " " .. ("%.2f,%.2f,%.2f"):format(info.r, info.g, info.b) .. " " .. tostring(info.hasOpacity) .. " "
+        .. tostring(popup:IsShown()) .. " " .. Last(w, "SetFrameStrata", 1) .. " " .. tostring(w.colourWatch:IsShown()) .. " | "
+        .. ns.Get("barColour") .. " " .. ns.Get("barColourCustom"), "1 1.00,0.50,0.25 false false HIGH true | orange ",
+        "Custom: the picker opens in your colour, the pop-up gone, the window a layer under it; nothing changed yet")
+    Pick(.2, .4, .6)
+    local tint = ns.Style:BarColour(ns.ColourKey("barColour"))
+    Equal(ns.Get("barColour") .. " " .. ns.Get("barColourCustom") .. " " .. S[w.barChosen].text .. " " .. Fill(choice) .. " "
+        .. ("%.2f,%.2f,%.2f"):format(tint[1], tint[2], tint[3]) .. " " .. ("%.2f"):format(Last(w.preview.Bar, "SetStatusBarColor", 1))
+        .. " " .. S[choice.custom].border[1], "custom 336699 Custom 0.20,0.40,0.60 0.20,0.40,0.60 0.20 1",
+        "a colour picked: Custom, its colour kept beside it, on the swatch, your bars and the preview")
+    Close()
+    Equal(Last(w, "SetFrameStrata", 1) .. " " .. tostring(w.colourWatch:IsShown()) .. " " .. ns.Get("barColour"),
+        "FULLSCREEN_DIALOG false custom", "OK: the picker closed, the window back on top, the colour kept")
+    -- Again: it starts from the custom colour; Cancel puts it back.
+    choice.custom:Click()
+    info = picker.info
+    Pick(.8, .1, .1)
+    local moved = ns.Get("barColourCustom")
+    info.cancelFunc()
+    picker.shown = false
+    Equal(("%.2f,%.2f,%.2f"):format(info.r, info.g, info.b) .. " " .. moved .. " | " .. ns.Get("barColour") .. " " .. ns.Get("barColourCustom")
+        .. " " .. Last(w, "SetFrameStrata", 1), "0.20,0.40,0.60 cc1a1a | custom 336699 FULLSCREEN_DIALOG",
+        "from the custom colour; Cancel: the one before back, the window back on top")
+    -- A named colour keeps the custom one beside it, for Custom next time:
+    -- the row shows what the picker shows from the start.
+    choice.swatches[1]:Click()
+    choice.custom:Click()
+    local opened = ns.Get("barColour") .. " " .. ns.Get("barColourCustom")
+    picker.info.cancelFunc()
+    picker.shown = false
+    Equal(opened .. " | " .. ns.Get("barColour") .. " " .. ns.Get("barColourCustom"), "custom 336699 | orange 336699",
+        "orange picked, the custom colour kept; Custom starts from it, Cancel back to orange")
+    -- A stale call from a picker closed or reused for something else changes nothing.
+    info.swatchFunc()
+    info.cancelFunc()
+    Equal(ns.Get("barColour") .. " " .. Last(w, "SetFrameStrata", 1), "orange FULLSCREEN_DIALOG", "a closed session's calls do nothing")
+
+    -- The Each bar list: a Tracked Bar's own Custom, at any rank.
+    local function Tracked(id, order)
+        return { GetBaseSpellID = function() return id end, layoutIndex = order }
+    end
+    _G.BuffBarCooldownViewer = { itemFramePool = { EnumerateActive = function() return pairs({ [Tracked(1243, 1)] = true }) end } }
+    w:Refresh()
+    local row = w.eachRows[1]
+    row.colour:Click()
+    row.colour.custom:Click()
+    Pick(0, 1, 0)
+    Close()
+    local colours, custom = ns.BarColours()
+    Equal(S[row.name].text .. " | " .. tostring(colours[1243]) .. " " .. tostring(custom[1243]) .. " " .. tostring(ns.BarColourFor(1243))
+        .. " " .. S[row.chosen].text .. " " .. Fill(row.colour), "Power Word: Fortitude | custom 00ff00 #00ff00 Custom 0.00,1.00,0.00",
+        "a Tracked Bar in a custom colour: kept beside, under its own ID")
+    row.colour.swatches[4]:Click()
+    colours, custom = ns.BarColours()
+    local named = tostring(colours[1243]) .. " " .. tostring(custom[1243])
+    row.colour.swatches[4]:Click()
+    colours, custom = ns.BarColours()
+    Equal(named .. " | " .. tostring(colours[1243]) .. " " .. tostring(custom[1243]) .. " " .. S[row.chosen].text, "green 00ff00 | nil nil Default",
+        "a named colour keeps it beside; back to the colour for all, both go")
+    -- The list turned by the wheel would slide an open pop-up off with its
+    -- row: it closes.
+    row.colour:Click()
+    local before = row.colour.popup:IsShown()
+    S[w.eachScroll].scripts.OnMouseWheel(w.eachScroll, -1)
+    Equal(tostring(before) .. " " .. tostring(row.colour.popup:IsShown()) .. " " .. tostring(rawequal(_G.FECMFrame, w)), "true false true",
+        "the list scrolled: the pop-up closes, Escape's entry the window's again")
+    _G.BuffBarCooldownViewer = nil
+    w:Refresh()
+
+    -- The Debuffs bar's tick count: Custom kept on the bar (tickCustom).
+    local data = ns.BarData("debuff")
+    w:Select("debuff")
+    local tick = w.pages.bar.options.tickChoice
+    tick.custom:Click()
+    Pick(1, .5, 0)
+    Close()
+    Equal(data.tickColour .. " " .. data.tickCustom .. " " .. ns.CountColourKey(data) .. " " .. Fill(tick) .. " | " .. Note(tick),
+        "custom ff8000 #ff8000 1.00,0.50,0.00 | The tick count's colour. Click for the colours.", "the tick count in a custom colour")
+    tick.swatches[2]:Click()
+    Equal(data.tickColour .. " " .. data.tickCustom .. " " .. ns.CountColourKey(data), "gold ff8000 gold", "gold picked, the custom one kept")
+
+    -- The Presets panel's own colour: Custom shown at once, applied, undone.
+    w:Select("look")
+    w.presets:Click()
+    local panel = w.presetsPanel
+    panel.colour:Click()
+    panel.colour.custom:Click()
+    Pick(.5, 0, .5)
+    local shown = ns.Get("barColour") .. " " .. ns.Get("barColourCustom") .. " " .. ns.GetSaved("barColour") .. " " .. tostring(ns.Previewing())
+    Close()
+    panel.apply:Click()
+    local applied = ns.GetSaved("barColour") .. " " .. ns.GetSaved("barColourCustom")
+    panel.undo:Click()
+    Equal(shown .. " | " .. applied .. " | " .. ns.GetSaved("barColour") .. " " .. ns.GetSaved("barColourCustom"),
+        "custom 800080 orange true | custom 800080 | orange 336699", "Presets: Custom previewed, applied, and Undo puts both back")
+    panel.done:Click()
+
+    -- Kept over a reload; a Custom with no colour kept goes back to its default.
+    ns.Set("castColour", ns.CUSTOM)
+    ns.Set("castColourCustom", "")
+    ns.Set("swingColour", ns.CUSTOM)
+    ns.Set("swingColourCustom", "ABCDEF")
+    local kept = ForeverEnhancedCooldownManagerDB
+    kept.bars.debuff.tickColour, kept.bars.debuff.tickCustom = ns.CUSTOM, "nonsense"
+    w:Hide()
+    ns = Start(kept)
+    Equal(ns.Get("barColour") .. " " .. ns.Get("barColourCustom") .. " | " .. ns.Get("castColour") .. " " .. ns.Get("swingColour") .. " "
+        .. ns.Get("swingColourCustom") .. " | " .. ns.BarData("debuff").tickColour .. " " .. ns.BarData("debuff").tickCustom,
+        "orange 336699 | default custom abcdef | white ", "kept over a reload, a Custom with no colour of its own back to its default")
+    _G.C_InputInterfaceStyle, _G.Enum = style, enum
+    Equal(#printed, 0, "no errors from the colour rows")
+end)()
+
+-- Icon details: the Look page's button and its panel ------------------------------------------------
+-- Beside the preview's icons, Icon details opens a panel over the window:
+-- the swipe's colour and see-through, the countdown's size, colour and
+-- spot, and the edge line with its colour. Each starts as the icons always
+-- looked, changes the panel's own icons and your bars' at once, says what it
+-- does (seen working in game, so not marked experimental), fits the panel in every state, goes
+-- with another page or the window, and is kept over a reload (anything odd
+-- saved goes back to its default). Defaults puts them all back.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire", "Wrath" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local function Num4(call) return ("%g,%g,%g,%g"):format(call[1], call[2], call[3], call[4]) end
+    local icon = ns.Bars:Get("cd").icons[1]
+    -- What one of the addon's own cooldowns shows: its swipe, edge line,
+    -- countdown font and where the numbers sit.
+    local function Looks(cooldown)
+        local numbers = cooldown:GetCountdownFontString()
+        local at = S[numbers].points[1]
+        return Num4(S[cooldown].last.SetSwipeColor) .. " " .. tostring(Last(cooldown, "SetDrawEdge")) .. " "
+            .. tostring(Last(cooldown, "SetCountdownFont")) .. " " .. (at and (at[1] .. " " .. at[3] .. " " .. at[4] .. " " .. at[5]) or "-")
+    end
+    local found = {}
+    local function Check(dialog, label)
+        local problems = Fit.Problems(dialog)
+        local _, top, _, bottom = Fit.Rect(dialog)
+        if top < 42 or bottom > 560 - 28 then problems = problems .. ("the panel at %.1f to %.1f, over the title bar or the footer"):format(top, bottom) end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    local button = w.iconDetails
+    local _, _, sampleLeft = Fit.Rect(w.preview)
+    local left, _, right = Fit.Rect(button)
+    local iconsLeft = Fit.Rect(w.sampleIcons)
+    Equal(tostring(button:IsVisible()) .. " " .. S[button.label].text .. " " .. tostring(left > sampleLeft and right < iconsLeft) .. " | " .. Note(button),
+        "true Icon details true | The cooldown swipe's colour and see-through, the countdown's size, colour and spot, and an edge line,"
+        .. " on your icons and Blizzard's, with a preview.",
+        "Icon details in the preview, between the sample bar and the sample icons, no longer marked experimental")
+    Equal(Looks(icon.cooldown), "0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0", "your icons as always: a 70% black swipe, no edge line,"
+        .. " white numbers half the icon in its middle")
+
+    button:Click()
+    local panel = w.iconPanel
+    local dialog, tray = panel.dialog, panel.tray
+    local first = tray.icons[1]
+    Equal(tostring(dialog:IsVisible()) .. " " .. tostring(S[panel].points[2][3]) .. " " .. #tray.icons .. " " .. Looks(first.cooldown) .. " "
+        .. tostring(Last(first.cooldown, "SetCooldown", 2)) .. " " .. tostring(S[first.cooldown].scripts.OnCooldownDone ~= nil),
+        "true 28 4 0,0,0,0.7 false FECMFont20 CENTER CENTER 0 0 9 true",
+        "opened: its shade clear of the footer, four icons in the preview drawn as your bars', each going round and round")
+    Check(dialog, "at the start")
+    -- Each choice in the panel says what it does (seen working in game
+    -- 2026-10-21, so none is marked experimental any more).
+    local notes, marked = {}, {}
+    for _, control in ipairs({ panel.swipeColour, panel.swipeColour.custom, panel.swipeColour.swatches[1], panel.seeThrough,
+        panel.size, panel.countdownColour, panel.countdownColour.swatches[2], panel.spot.buttons[1], panel.spot.buttons[4],
+        panel.edge, panel.edgeColour, panel.edgeColour.swatches[1], panel.defaults }) do
+        local note = Note(control)
+        notes[#notes + 1] = note
+        if note == "" or note == "nil" or note:find("experimental", 1, true) then marked[#marked + 1] = note end
+    end
+    Equal(table.concat(marked, " | "), "", "every choice has a note, none marked experimental")
+    Equal(notes[1] .. " | " .. notes[3] .. " | " .. notes[4] .. " | " .. notes[8] .. " | " .. notes[11] .. " | " .. notes[12],
+        "The colour of the swipe going round each icon as it cools down. Click for the colours. | Black for the swipe over"
+        .. " each icon as it cools down. | How much of each icon shows through the swipe: 30% as it's always been, 100% no"
+        .. " swipe at all. | The countdown at the top left of each icon. It can sit over a keybind or a count in the same"
+        .. " spot. | Tick Edge line first. | Game's own for the edge line.",
+        "what the swipe, see-through, a spot and the edge line's colour say (greyed until it's ticked)")
+    Equal(S[panel.swipeColour.name].text .. " " .. S[panel.seeThrough.value].text .. " " .. S[panel.size.value].text .. " "
+        .. S[panel.countdownColour.name].text .. " " .. panel.spot.selected .. " " .. tostring(panel.edge:GetChecked()) .. " "
+        .. S[panel.edgeColour.name].text .. " " .. tostring(Last(panel.edgeColour, "SetEnabled")) .. " " .. S[panel.defaults].alpha,
+        "Black 30% 100% White CENTER false Game's own false 0.45",
+        "the defaults: black at 30%, 100% white numbers in the middle, no edge line (its colour greyed), Defaults greyed")
+
+    -- The swipe: white, half see-through, at once on the preview and your bars.
+    panel.swipeColour:Click()
+    panel.swipeColour.swatches[2]:Click()
+    panel.seeThrough:Choose(50)
+    Equal(ns.Get("swipeColour") .. " " .. ns.Get("swipeSeeThrough") .. " " .. S[panel.swipeColour.name].text .. " | " .. Looks(first.cooldown)
+        .. " | " .. Looks(icon.cooldown), "white 50 White | 1,1,1,0.5 false FECMFont20 CENTER CENTER 0 0 | 1,1,1,0.5 false FECMFont18"
+        .. " CENTER CENTER 0 0", "a white swipe at 50%: on the preview and your icons")
+    -- The countdown: half as big again, gold, in the top left.
+    panel.size:Choose(150)
+    panel.countdownColour:Click()
+    panel.countdownColour.swatches[2]:Click()
+    S[panel.spot.buttons[1]].scripts.OnClick(panel.spot.buttons[1])
+    local font = _G.FECMCountdown27
+    Equal(ns.Get("countdownSize") .. " " .. ns.Get("countdownColour") .. " " .. ns.Get("countdownSpot") .. " | " .. Looks(icon.cooldown)
+        .. " | " .. Looks(first.cooldown) .. " | " .. ("%.2f,%.2f,%.2f"):format(S[font].colour[1], S[font].colour[2], S[font].colour[3])
+        .. " " .. tostring(Last(icon.count, "SetFontObject")), "150 gold TOPLEFT | 1,1,1,0.5 false FECMCountdown27 TOPLEFT TOPLEFT 1 -1"
+        .. " | 1,1,1,0.5 false FECMCountdown30 TOPLEFT TOPLEFT 1 -1 | 1.00,0.82,0.00 FECMFont13",
+        "the numbers 150% in their own gold font, in the top left corner just in from the edge; item counts keep theirs")
+    Check(dialog, "gold numbers in the top left")
+    -- The edge line, then its colour: blue.
+    panel.edge:Click()
+    local edgeOn = tostring(Last(icon.cooldown, "SetDrawEdge")) .. " " .. Num4(S[icon.cooldown].last.SetEdgeColor) .. " "
+        .. tostring(Last(panel.edgeColour, "SetEnabled")) .. " " .. Note(panel.edgeColour)
+    panel.edgeColour:Click()
+    panel.edgeColour.swatches[4]:Click()
+    Equal(edgeOn .. " | " .. ns.Get("edgeColour") .. " " .. Num4(S[icon.cooldown].last.SetEdgeColor) .. " "
+        .. Num4(S[first.cooldown].last.SetEdgeColor) .. " " .. S[panel.edgeColour.name].text,
+        "true 1,1,1,1 true The edge line's colour: the game's own, or tinted. Click for the colours. | blue"
+        .. " 0.24,0.55,0.88,1 0.24,0.55,0.88,1 Blue", "the edge line on: the game's own line, then tinted blue, its colour no longer greyed")
+    Check(dialog, "the edge line in blue")
+    -- A countdown colour of your own, from the game's colour picker.
+    local picker = { shown = false }
+    function picker:SetupColorPickerAndShow(info)
+        self.info, self.shown = info, true
+        self.r, self.g, self.b = info.r, info.g, info.b
+        info.swatchFunc()
+    end
+    function picker:GetColorRGB() return self.r, self.g, self.b end
+    function picker:IsShown() return self.shown end
+    _G.ColorPickerFrame = picker
+    panel.countdownColour:Click()
+    panel.countdownColour.custom:Click()
+    picker.r, picker.g, picker.b = 0, 1, 1
+    picker.info.swatchFunc()
+    picker.shown = false
+    S[w.colourWatch].scripts.OnUpdate(w.colourWatch, 0)
+    Equal(ns.Get("countdownColour") .. " " .. ns.Get("countdownColourCustom") .. " " .. S[panel.countdownColour.name].text .. " "
+        .. ("%.2f,%.2f,%.2f"):format(S[font].colour[1], S[font].colour[2], S[font].colour[3]),
+        "custom 00ffff Custom 0.00,1.00,1.00", "Custom: the numbers in any colour, kept beside the named ones")
+    Check(dialog, "custom colours")
+    Equal(tostring(Last(panel.defaults, "SetEnabled")) .. " " .. S[panel.defaults].alpha, "true 1", "Defaults usable once anything's changed")
+
+    -- Another page, the window closing and the window opened again each put it away.
+    local said = {}
+    for _, step in ipairs({ { "a page", function() w:Select("general") end }, { "the window closing", function() w:Hide() end },
+        { "the window opened", function() ns.ShowWindow() end } }) do
+        ns.ShowWindow()
+        w:Select("look")
+        button:Click()
+        local open = dialog:IsVisible()
+        step[2]()
+        said[#said + 1] = step[1] .. " " .. tostring(open) .. " " .. tostring(S[panel].shown)
+    end
+    Equal(table.concat(said, " | "), "a page true false | the window closing true false | the window opened true false",
+        "another page, the window closing or opened again: the panel goes")
+
+    -- Kept over a reload: your bars' new icons come in the details picked.
+    local kept = ForeverEnhancedCooldownManagerDB
+    w:Hide()
+    ns = Start(kept)
+    icon = ns.Bars:Get("cd").icons[1]
+    Equal(Looks(icon.cooldown) .. " " .. Num4(S[icon.cooldown].last.SetEdgeColor), "1,1,1,0.5 true FECMCountdown27 TOPLEFT TOPLEFT 1 -1"
+        .. " 0.24,0.55,0.88,1", "kept over a reload: your icons made with them")
+    -- Defaults: all back, the custom colour kept beside for next time.
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    w:Select("look")
+    w.iconDetails:Click()
+    panel = w.iconPanel
+    panel.defaults:Click()
+    local back = {}
+    for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
+    Equal(table.concat(back, " ") .. " " .. ns.Get("countdownColourCustom") .. " | " .. Looks(icon.cooldown) .. " | "
+        .. Looks(panel.tray.icons[1].cooldown) .. " " .. S[panel.defaults].alpha, "black 30 100 white CENTER false game 00ffff |"
+        .. " 0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0 | 0,0,0,0.7 false FECMFont20 CENTER CENTER 0 0 0.45",
+        "Defaults: every detail back, on your icons and the preview, the custom colour kept beside")
+    -- Anything odd saved goes back to its default.
+    kept = ForeverEnhancedCooldownManagerDB
+    kept.swipeColour, kept.swipeSeeThrough, kept.countdownSize, kept.countdownColour = "pink", 101, 49.5, ns.CUSTOM
+    kept.countdownColourCustom, kept.countdownSpot, kept.swipeEdge, kept.edgeColour = "zzzzzz", "MIDDLE", "yes", "gold"
+    w:Hide()
+    ns = Start(kept)
+    back = {}
+    for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
+    Equal(table.concat(back, " ") .. " " .. tostring(ForeverEnhancedCooldownManagerDB.countdownColourCustom),
+        "black 30 100 white CENTER false game nil", "odd values saved: each back to its default, a Custom with no colour too")
+    _G.ColorPickerFrame = nil
+    Equal(table.concat(found, " | "), "", "in every state: every piece inside the panel and none on another, under the title bar, clear of the footer")
+    Equal(#printed, 0, "no errors from Icon details")
+end)()
+
+-- Block and Colour fade on the Look page -------------------------------------------------------------
+-- Block, a fourth pill beside Glass, Split and Outline, and Colour fade, a
+-- tick level with the colour past its name, clear of the keybinds' choices:
+-- off by default (Glass and flat, today's look), each saying what it does
+-- on hover (seen working in game 2026-10-21, so no longer marked
+-- experimental; the other designs as before). Each shows at once on the
+-- preview's Tracked Bar (slimmer for Block, its fill faded) and the Presets
+-- panel's bars; a preset leaves the fade as it is; both stay over a reload.
+-- (The page's fit with each design and the fade off and on is checked with
+-- the Look page's other choices, above.)
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local function Note(control)
+        S[control].scripts.OnEnter(control)
+        local text = S[w.note].text
+        S[control].scripts.OnLeave(control)
+        return text
+    end
+    local design, fade, bar = w.barDesign, w.colourFade, w.preview.Bar
+    local labels = {}
+    for i, button in ipairs(design.buttons) do labels[i] = S[button.label].text end
+    Equal(table.concat(labels, " ") .. " | " .. design.selected .. " | " .. tostring(fade:IsVisible()) .. " " .. tostring(fade:GetChecked())
+        .. " " .. S[fade.text].text .. " | " .. ns.Get("barStyle") .. " " .. tostring(ns.Get("colourFade")),
+        "Glass Split Outline Block | glass | true false Colour fade | glass false", "four designs, Glass picked; Colour fade there, off")
+    local DESIGN = "The design for Blizzard's Tracked Bars, your cast bar and, with its look on, your resource display."
+    Equal(Note(design.buttons[1]) .. " | " .. Note(design.buttons[3]) .. " | " .. Note(design.buttons[4]), DESIGN .. " | " .. DESIGN .. " | "
+        .. DESIGN .. " Block: slimmer Tracked Bars, each bar in a black edge with a thin warm line inside.",
+        "the three designs as before; Block says what it is, no longer marked experimental")
+    Equal(Note(fade), "Every bar fades from a deeper shade of its colour into a lighter one, in any design: Tracked Bars, the resource"
+        .. " display, your cast bar and Raid Timers.", "Colour fade says what it does, no longer marked experimental")
+    local fadeLeft, fadeTop, fadeRight, fadeBottom = Fit.Rect(fade)
+    local _, swatchTop, _, swatchBottom = Fit.Rect(w.barColour)
+    local _, _, chosenRight = Fit.Rect(w.barChosen)
+    local keysLeft, keysTop = Fit.Rect(w.keyPlace)
+    Equal(tostring(math.abs((fadeTop + fadeBottom) / 2 - (swatchTop + swatchBottom) / 2) <= 2) .. " " .. tostring(fadeLeft > chosenRight + 8)
+        .. " " .. tostring(fadeRight < keysLeft - 8) .. " " .. tostring(math.abs(keysTop - swatchTop) <= 1),
+        "true true true true", "level with the colour's swatch, past its name, clear of the keybinds' choices on the same row")
+
+    -- Block: picked, saved, and on the preview at once.
+    design.buttons[4]:Click()
+    Equal(ns.Get("barStyle") .. " " .. design.selected .. " " .. tostring(S[bar].height) .. " " .. Last(bar.Name, "SetFontObject") .. " "
+        .. Last(bar.Duration, "SetFontObject") .. " " .. Last(bar.BarBG, "SetColorTexture", 4),
+        "block block 18 FECMFont12 FECMFont13 0.92", "Block picked: the preview's bar slimmer, its text a size smaller, on the warmer track")
+    -- Your cast bar too, straight away rather than on its next cast.
+    local castRow = ns.CastBar.row
+    Equal(tostring(castRow ~= nil) .. " " .. tostring(castRow and castRow.bar.line.shown) .. " " .. tostring(castRow and castRow.fit.design),
+        "true true block", "Block picked: your cast bar redrawn at once, its warm line showing")
+    -- Colour fade: ticked, saved, the preview's fill faded over its colour.
+    local fill = bar:CreateTexture()
+    rawset(bar, "GetStatusBarTexture", function() return fill end)
+    fade:Click()
+    local function Fade(texture)
+        local how, from, to = Last(texture, "SetGradient", 1), Last(texture, "SetGradient", 2), Last(texture, "SetGradient", 3)
+        if not how then return "flat" end
+        return ("%s %.2f %.2f %.2f > %.2f %.2f %.2f"):format(how, from.r, from.g, from.b, to.r, to.g, to.b)
+    end
+    Equal(tostring(ns.Get("colourFade")) .. " " .. tostring(fade:GetChecked()) .. " | " .. Fade(fill) .. " | "
+        .. ("%g"):format(Last(bar, "SetStatusBarColor", 1)), "true true | HORIZONTAL 0.94 0.51 0.12 > 1.00 0.75 0.24 | 1",
+        "ticked: saved, and the preview's bar in Orange's own fade, over its flat colour")
+    -- The Presets panel's bars show both; a preset leaves the fade as it is.
+    w.presets:Click()
+    local panel = w.presetsPanel
+    local tray = panel.tray or panel.preview
+    local health = tray and tray.bars and tray.bars[1]
+    local healthFill = health and health:CreateTexture()
+    if health then
+        rawset(health, "GetStatusBarTexture", function() return healthFill end)
+        for _, card in ipairs(panel.cards) do if card.key == "keep" then card:Click() end end
+    end
+    local warm = 0
+    for _, obj in ipairs(objects) do
+        if health and S[obj].parent == health and Last(obj, "SetColorTexture", 4) == .35 and obj:IsVisible() then warm = warm + 1 end
+    end
+    Equal(tostring(health ~= nil) .. " " .. warm .. " " .. Fade(healthFill), "true 4 HORIZONTAL 0.00 0.64 0.00 > 0.40 0.88 0.40",
+        "the Presets panel's health bar in Block's warm line, its green faded")
+    for _, card in ipairs(panel.cards) do if card.key == "bold" then card:Click() end end
+    panel.apply:Click()
+    Equal(ns.Get("barStyle") .. " " .. tostring(ns.Get("colourFade")), "glass true", "a preset sets its design, and leaves Colour fade as it is")
+    panel.undo:Click()
+    panel.done:Click()
+    Equal(ns.Get("barStyle") .. " " .. tostring(ns.Get("colourFade")), "block true", "Undo: Block back")
+    rawset(bar, "GetStatusBarTexture", nil)
+    if health then rawset(health, "GetStatusBarTexture", nil) end
+    -- Kept over a reload; anything else saved is ignored.
+    local kept = ForeverEnhancedCooldownManagerDB
+    ns = Start(kept)
+    Equal(ns.Get("barStyle") .. " " .. tostring(ns.Get("colourFade")), "block true", "both kept over a reload")
+    kept.barStyle, kept.colourFade = "blocky", "yes"
+    ns = Start(kept)
+    Equal(ns.Get("barStyle") .. " " .. tostring(ns.Get("colourFade")), "glass false", "odd values saved: back to Glass and flat")
+    Equal(#printed, 0, "no errors from Block and Colour fade")
 end)()
 
 Equal(#printed, 0, "no errors")

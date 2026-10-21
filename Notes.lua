@@ -10,6 +10,20 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.9.0",
+        sections = {
+            { "Added", {
+                "Only when missing for single buffs: tick it beside a buff and its icon shows only while that buff is missing.",
+                "Icon details (Look page): swipe colour and see-through, countdown size, colour and spot, and the edge line.",
+                "Block design for bars: slimmer bars with a thin warm line inside a black edge.",
+                "Colour fade: bars fill with a soft gradient of their colour.",
+            } },
+            { "Changed", {
+                "Colour rows are one swatch now: click it for the colours, or Custom for any colour.",
+            } },
+        },
+    },
+    {
         version = "1.8.2",
         sections = {
             { "Added", {

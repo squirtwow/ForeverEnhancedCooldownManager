@@ -220,8 +220,7 @@ local function NewIcon(bar)
     icon.cooldown = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
     icon.cooldown:SetAllPoints(icon.texture)
     icon.cooldown:SetSwipeTexture(Style.FLAT)
-    icon.cooldown:SetSwipeColor(0, 0, 0, .7)
-    icon.cooldown:SetDrawEdge(false)
+    Style:CooldownLook(icon.cooldown) -- the swipe and edge line picked in Icon details
     icon.cooldown:SetDrawBling(false)
     -- Events arrive when a cooldown starts, not when it ends; this catches the
     -- end, so the icon ungreys (and dims, hides or shows again, as chosen) on time.
@@ -603,14 +602,16 @@ local function Drop(bar)
 end
 
 -- The border and shadow round a whole bar, when chosen, only go round icons
--- that stay put. Packed Buffs and Debuffs, Only show missing and a bar that
--- hides when ready or on cooldown come and go (like Blizzard's Tracked
--- Buffs), so they'd leave an empty box behind, as would the greyed Debuffs
--- spots while there's no enemy (unless kept greyed with no target: then
--- bar.enemy stays true). A bar that dims its icons keeps them in place, and
--- its box.
-local function Steady(key, data)
-    if ns.AURA_BARS[key] then return ns.BuffBar:Fixed(data) end
+-- that stay put. Packed Buffs and Debuffs, Only show missing (or Only when
+-- missing on any buff) and a bar that hides when ready or on cooldown come
+-- and go (like Blizzard's Tracked Buffs), so they'd leave an empty box
+-- behind, as would the greyed Debuffs spots while there's no enemy (unless
+-- kept greyed with no target: then bar.enemy stays true). A bar that dims
+-- its icons keeps them in place, and its box. (bar: the bar as laid out,
+-- when it has been: a tick on another character's buff in a shared profile
+-- moves nothing here.)
+local function Steady(key, data, bar)
+    if ns.AURA_BARS[key] then return ns.BuffBar:Fixed(data) and not ns.BuffBar:Ticked(bar, key, data) end
     return not Hides(data)
 end
 
@@ -619,7 +620,7 @@ local function BarDecor(bar)
     -- box as it is until then.
     if bar.pendingLayout then return end
     local border, shadow = Style:DecorFor("bar")
-    local steady = Steady(bar.key, bar.data) and bar.enemy ~= false
+    local steady = Steady(bar.key, bar.data, bar) and bar.enemy ~= false
     border, shadow = border and steady, shadow and steady
     -- A short last row gets its own, round just its icons (Outline).
     local short = bar.short == true
@@ -644,6 +645,19 @@ local function GroupDecor(bar)
     bar.pendingDecor = nil
     local border, shadow = Style:DecorFor("icon")
     for _, parts in ipairs(bar.groupParts) do Style:ShowDecor(parts.decor, border, shadow) end
+end
+
+-- Icon details on an aura bar's icons, or on the buff and debuff times over
+-- a cooldown bar's icons: the game's aura containers' own icons, changed
+-- only out of a fight, as their borders are. One made in a fight waits for
+-- it to end.
+local function AuraDetails(bar)
+    if InCombatLockdown() then
+        bar.pendingDetails = true
+        return
+    end
+    bar.pendingDetails = nil
+    if bar.kind == "aura" then ns.BuffBar:Details(bar) else ns.IconAuras:Details(bar) end
 end
 
 -- Grow arrows -----------------------------------------------------------------------
@@ -819,10 +833,11 @@ local function LayoutAuras(bar, data)
         ns.BuffBar:Create(bar)
     end
     ns.BuffBar:Layout(bar, data)
-    if ns.BuffBar:OnlyMissing(data) then Again(bar) end
+    if ns.BuffBar:Watches(bar.key, data) then Again(bar) end
     -- Fixed spots go in rows like icons; packed buffs are laid out by the
-    -- game in one row. With Only show missing the spots showing close up,
-    -- in a bar kept the size of all of them.
+    -- game in one row (after the spots of buffs ticked Only when missing,
+    -- placed by Buffs.lua). With Only show missing the spots showing close
+    -- up, in a bar kept the size of all of them.
     if ns.BuffBar:Packed(data) then
         local slots, size = bar.count > 0 and bar.count or 3, ns.IconSize(data)
         bar:SetSize(slots * size + (slots - 1) * data.spacing, size)
@@ -930,15 +945,16 @@ local function Relay()
     end
 end
 
--- The Buffs bar with Only show missing: your buffs read again and, when one
--- came or went (or with all, as the bars are arranged or put back), its
--- spots shown or hidden, its slots switched to match and the spots showing
--- closed up, in the room it keeps for all of them: the bar itself keeps its
--- size and place. Out of combat only: in a fight it all waits for the end,
--- as every change to that bar does. Buffs the game wouldn't answer for
--- are read again a moment later (Again).
+-- The Buffs bar with Only show missing (or buffs ticked Only when missing):
+-- your buffs read again and, when one came or went (or with all, as the
+-- bars are arranged or put back), its spots shown or hidden, its slots
+-- switched to match and the spots showing closed up, in the room it keeps
+-- for all of them: the bar itself keeps its size and place. (A packed bar's
+-- spots are placed with its slots, Buffs.lua.) Out of combat only: in a
+-- fight it all waits for the end, as every change to that bar does. Buffs
+-- the game wouldn't answer for are read again a moment later (Again).
 local function Missing(bar, all)
-    if not (bar and bar.holders and B:Enabled() and ns.BuffBar:OnlyMissing(bar.data)) then return end
+    if not (bar and bar.holders and B:Enabled() and ns.BuffBar:Watches(bar.key, bar.data)) then return end
     if inCombat or InCombatLockdown() then
         bar.pendingLayout = true
         return
@@ -949,7 +965,7 @@ local function Missing(bar, all)
     if not changed and not all then return end
     local spots = ns.BuffBar:Spots(bar)
     ns.BuffBar:Apply(bar)
-    B:Arrange(bar, spots, #spots, bar.data, bar.count)
+    if not ns.BuffBar:Packed(bar.data) then B:Arrange(bar, spots, #spots, bar.data, bar.count) end
 end
 
 -- Public ------------------------------------------------------------------------------
@@ -960,12 +976,17 @@ end
 
 -- One Buffs or Debuffs bar entry for the report: its name and the spell IDs
 -- its icon shows. These bars keep their entries in holders, not icons. With
--- Only show missing, whether it was last read as on you.
+-- Only show missing, or ticked Only when missing, whether it was last read
+-- as on you.
 local function ReportEntry(bar, i, say)
     local holder, ids = bar.holders and bar.holders[i], {}
     for id in pairs(bar.slotIDs and bar.slotIDs[i] or {}) do ids[#ids + 1] = id end
     table.sort(ids)
-    local only = ns.BuffBar:OnlyMissing(bar.data) and (" | on you " .. tostring(bar.up and bar.up[i] == true)) or ""
+    local only = ""
+    if ns.BuffBar:Hides(bar, i) then
+        only = (ns.BuffBar:OnlyMissing(bar.data) and "" or " | only when missing")
+            .. " | on you " .. tostring(bar.up ~= nil and bar.up[i] == true)
+    end
     return ("  %d. %s | spells %s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only)
 end
 
@@ -1024,7 +1045,7 @@ end
 -- drawing: as chosen on the Look page, round a bar whose icons stay put.
 function B:BarDecorFor(key)
     local border, shadow = Style:DecorFor("bar")
-    local steady = Steady(key, ns.BarData(key))
+    local steady = Steady(key, ns.BarData(key), bars[key])
     return border and steady, shadow and steady
 end
 
@@ -1089,6 +1110,24 @@ end
 -- The keys again after a binding or page change; text only, so in combat too.
 function B:ShowKeys()
     EachKey(ShowKey)
+end
+
+-- Icon details picked on the Look page, on every icon, those not in use
+-- too: the swipe and edge line, and the countdown's size, colour and spot
+-- (still clear of a key in the middle). The addon's own icons at once, in a
+-- fight too; the aura containers' as AuraDetails allows.
+function B:ApplyIconDetails()
+    for _, bar in pairs(bars) do
+        local size = bar.data and ns.IconSize(bar.data)
+        for _, icon in ipairs(bar.icons or {}) do
+            Style:CooldownLook(icon.cooldown)
+            if size then
+                icon.cooldown:SetCountdownFont(Style:Countdown(size))
+                KeyLook(icon, size)
+            end
+        end
+        AuraDetails(bar)
+    end
 end
 
 function B:Get(key)
@@ -1260,6 +1299,7 @@ local function Rebuild()
             -- A Look page change made in a fight while the bars were off:
             -- the driver didn't hear that fight end, so it's done now.
             if bar.pendingDecor then GroupDecor(bar) end
+            if bar.pendingDetails then AuraDetails(bar) end
         end
     end
     B:UpdateShown()
@@ -1483,11 +1523,13 @@ local function Take(key, index)
 end
 
 -- An aura bar's entry gone from its list (not just moved along it): its own
--- choices go with it (the icon shown faded, Glow when missing, Count ticks),
--- so putting it back starts afresh, as after a reload (Core.lua Lists).
+-- choices go with it (the icon shown faded, Glow when missing, Count ticks,
+-- Only when missing), so putting it back starts afresh, as after a reload
+-- (Core.lua Lists).
 local function Forget(key, name)
     if not (ns.AURA_BARS[key] and name) then return name end
     ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
+    if key == "buff" then ns.OnlyWhenMissing(key)[name] = nil end
     return name
 end
 
@@ -1977,6 +2019,38 @@ function B:GlowsMissing(key, name)
     return ns.AURA_BARS[key] ~= nil and ns.GlowMissing(key)[name] == true
 end
 
+-- Only when missing (asked for by a player): one buff on the Buffs bar shown
+-- only while it's missing from you, in a spot of its own, as Only show
+-- missing does for every buff (Buffs.lua). Not on the Debuffs bar: your
+-- target's debuffs change in a fight, when the addon can't read them.
+function B:SetOnlyWhenMissing(key, name, on)
+    if key ~= "buff" or not IndexOf(key, name) then return false end
+    ns.OnlyWhenMissing(key)[name] = on and true or nil
+    self:Changed()
+    return true
+end
+
+function B:OnlyWhenMissing(key, name)
+    return key == "buff" and ns.OnlyWhenMissing(key)[name] == true
+end
+
+-- Whether a buff's icon has a greyed spot while it's missing (for Glow when
+-- missing): with missing ones greyed or Only show missing, or with it or a
+-- buff of yours joined to it ticked Only when missing (another character's,
+-- in a shared profile, gives the icon no spot here: Buffs.lua F:Layout).
+function B:MissingSpot(key, name)
+    local data = ns.BarData(key)
+    if not ns.BuffBar:Packed(data) then return true end
+    local index = IndexOf(key, name)
+    if key ~= "buff" or not index then return false end
+    local first, last = Group(key, index)
+    for i = first, last do
+        local spell = data.spells[i]
+        if self:OnlyWhenMissing(key, spell) and ns.Spells:ForMe(spell, key) then return true end
+    end
+    return false
+end
+
 -- Count ticks (a player's idea: Bane of Agony's ticks): a debuff on the
 -- Debuffs bar whose icon counts its ticks so far, at its own pace (in
 -- seconds, from the game's data: ns.TICK_PERIODS, Buffs.lua). Only debuffs
@@ -2392,9 +2466,11 @@ local function OnEvent(_, event, arg)
             if bar and bar.pendingDecor then GroupDecor(bar) end
             if bar then bar.pendingShown = nil end
         end
-        -- And the buff and debuff times on the cooldown icons.
+        -- And the buff and debuff times on the cooldown icons. Then Icon
+        -- details changed in the fight, on the aura containers' icons.
         for _, key in ipairs(ns.BAR_KEYS) do
             if bars[key] then ns.IconAuras:CombatEnded(bars[key]) end
+            if bars[key] and bars[key].pendingDetails then AuraDetails(bars[key]) end
         end
         -- Items used up or picked up in the fight come off or go on now,
         -- and families move on to the best one you carry.
@@ -2473,12 +2549,13 @@ local function Tick()
 end
 
 -- Your buffs coming and going (UNIT_AURA for you) are heard only while the
--- Buffs bar shows only missing ones, your bars are on and you're out of a
--- fight. In one the bar stays as it is (your buffs are secret then), so
--- nothing is heard; they're read again as it ends.
+-- Buffs bar shows only missing ones (all, or those ticked Only when
+-- missing), your bars are on and you're out of a fight. In one the bar
+-- stays as it is (your buffs are secret then), so nothing is heard; they're
+-- read again as it ends.
 local hearing = false
 HearAuras = function()
-    local want = listening and not inCombat and ns.BuffBar:OnlyMissing(ns.BarData("buff")) or false
+    local want = listening and not inCombat and ns.BuffBar:Watches("buff", ns.BarData("buff")) or false
     if want == hearing then return end
     hearing = want
     if want then

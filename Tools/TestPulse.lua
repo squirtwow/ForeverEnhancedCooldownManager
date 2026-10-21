@@ -2437,10 +2437,11 @@ end
     local expected = {
         cd = SPELL .. " | cd true",
         util = SPELL .. " | util true",
-        buff = BAR .. ", GLOW WHEN MISSING, MISSING ONES GREYED, ONLY MISSING ONES, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 7"
-            .. " | buff true",
+        buff = BAR .. ", GLOW WHEN MISSING, ONLY WHEN MISSING, MISSING ONES GREYED, ONLY MISSING ONES, JOIN TWO INTO ONE,"
+            .. " YOUR DEBUFFS ON YOU | 8 | buff true",
         debuff = BAR .. ", COUNT TICKS, MISSING ONES GREYED, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 6 | debuff true",
-        look = "THE LOOK, KEYBINDS ON ICONS, FONT AND BAR TEXTURE, READY GLOW | 4 | look true",
+        look = "THE LOOK, KEYBINDS ON ICONS, FONT AND BAR TEXTURE, READY GLOW, COLOUR SWATCH, ICON DETAILS, BLOCK DESIGN,"
+            .. " COLOUR FADE | 8 | look true",
         layout = "LAYOUTS, LIVE PREVIEW, ALL BARS, GROW ARROWS | 4 | layout true",
         cast = "CAST BAR, COLOURS, HEIGHT AND PARTS | 3 | cast true",
         general = "SWITCH YOUR BARS ON, ONE ICON EACH, MINIMAP BUTTON, HELP | 4 | general true",
@@ -2567,8 +2568,10 @@ end)()
     -- Buffs: each of its own steps points at its own part, the box hung from it.
     w:Select("buff")
     help:Click()
-    -- (1.8.1's Glow when missing points at the list, after the options.)
-    local parts = { bp.listPanel, bp.optionsArea, bp.listPanel, bp.options.showMissing, bp.options.onlyMissing, bp.tray, bp.options.showSelf }
+    -- (1.8.1's Glow when missing and 1.9.0's Only when missing point at the
+    -- list, after the options.)
+    local parts = { bp.listPanel, bp.optionsArea, bp.listPanel, bp.listPanel, bp.options.showMissing, bp.options.onlyMissing, bp.tray,
+        bp.options.showSelf }
     local right = 0
     for i, part in ipairs(parts) do
         local o, p = S[box.outline].points, S[box].points[1]
@@ -2576,19 +2579,39 @@ end)()
         if i == 3 then
             Equal(S[box.title].text, "GLOW WHEN MISSING", "1.8.1's Glow when missing, on the list")
         elseif i == 4 then
+            Equal(S[box.title].text .. " | " .. S[box.text].text, "ONLY WHEN MISSING | Tick Only when missing beside a buff in this list"
+                .. " and its icon shows only while that buff is missing, so you see what to cast again.",
+                "1.9.0's Only when missing, on the list too")
+        elseif i == 5 then
             Equal(S[box.text].text, "Ticked, each buff keeps its spot, greyed while it's missing from you. Unticked, only the ones up show, in one row.",
                 "the Buffs bar's missing ones: from you")
-        elseif i == 5 then
+        elseif i == 6 then
             Equal(S[box.title].text .. " | " .. S[box.text].text, "ONLY MISSING ONES | Ticked, a buff shows only while it's not on you,"
                 .. " so you see what to cast again. Changes in a fight show once it ends.",
                 "then Only show missing, in plain words, with its in-combat limit")
-        elseif i == 7 then
+        elseif i == 8 then
             Equal(S[box.text].text, "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, after your buffs."
                 .. " Not with missing buffs greyed or Only show missing.", "the Buffs bar's debuffs on you: not with either")
         end
         box.next:Click()
     end
-    Equal(right, 7, "every Buffs step outlines its own part, there to see, the box hung from it")
+    Equal(right, 8, "every Buffs step outlines its own part, there to see, the box hung from it")
+    -- Look: 1.9.0's four each outline their own part (the colour's swatch,
+    -- Icon details, the designs, Colour fade), the box hung from it.
+    w:Select("look")
+    help:Click()
+    for _ = 1, 4 do box.next:Click() end
+    local lookParts = { { "COLOUR SWATCH", w.barColour }, { "ICON DETAILS", w.iconDetails }, { "BLOCK DESIGN", w.barDesign },
+        { "COLOUR FADE", w.colourFade } }
+    local lookRight = {}
+    for _, want in ipairs(lookParts) do
+        local o, p = S[box.outline].points, S[box].points[1]
+        lookRight[#lookRight + 1] = S[box.title].text .. " " .. tostring(o[1][2] == want[2] and o[2][2] == want[2] and p[2] == want[2]
+            and S[want[2]].shown and BoxFits(w.pages.look) == "")
+        box.next:Click()
+    end
+    Equal(table.concat(lookRight, ", "), "COLOUR SWATCH true, ICON DETAILS true, BLOCK DESIGN true, COLOUR FADE true",
+        "on the Look page, 1.9.0's steps each outline their own part, the box hung from it, inside the page and clear of it")
     w:Select("debuff")
     help:Click()
     -- Past Add spells, This bar's options and 1.8.1's Count ticks.

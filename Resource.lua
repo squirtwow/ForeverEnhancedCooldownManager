@@ -52,7 +52,7 @@ end
 -- The colour you picked for the bar, or nil on Blizzard's (state.blizzard,
 -- the one Blizzard gave it).
 local function Own(state)
-    local key = ns.Get(state.setting)
+    local key = ns.ColourKey(state.setting)
     if key ~= "default" then return Style:BarColour(key) end
 end
 
@@ -180,11 +180,12 @@ local function Fill(bar, state)
     if state.flash then state.flash:SetTexture(texture) end
 end
 
--- The track's darkness chosen on the Look page, set only when it changes.
+-- The track's darkness chosen on the Look page (and Block's warmer track),
+-- set only when either changes.
 local function Track(state)
-    local dark = Style:Darkness()
-    if state.dark == dark then return end
-    state.dark = dark
+    local dark, block = Style:Darkness(), Style:Block()
+    if state.dark == dark and state.block == block then return end
+    state.dark, state.block = dark, block
     for _, track in ipairs(state.tracks) do track:SetColorTexture(Style:TrackColour()) end
 end
 
@@ -194,14 +195,17 @@ local function Look(bar, state)
     Fill(bar, state)
     Track(state)
     Style:ShowSheen(state.sheen, design == "glass")
+    -- Flat, or faded with Colour fade (the fade's put on again each time
+    -- Blizzard recolours the bar, as its colour wipes the fade).
     painting[bar] = true
-    bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
+    Style:FillColour(bar, colour, outline and .45 or 1)
     painting[bar] = nil
     -- A 1px edge round the bar: black, or the bar's colour for Outline; with
-    -- Thick edges, a second pixel inside it.
+    -- Thick edges, a second pixel inside it, and Block's warm line inside those.
     local edge = outline and colour or { 0, 0, 0 }
     Solid(state.edge, edge)
     Style:ShowInnerEdge(state.inner, edge)
+    Style:ShowBlockLine(state.line)
     -- Blizzard's pieces beside the fill as see-through as it for Outline
     -- (set only when that changes), the spent flash in the bar's colour, and
     -- what a cast will cost in a lighter shade of yours (darker on white).
@@ -240,6 +244,7 @@ local function Restyle(bar, setting, pieces, main)
     state.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
     Inset(state.edge, bar, -1)
     state.inner = Style:InnerEdge(bar, bar)
+    state.line = Style:BlockLine(bar, bar)
     -- Glass: a soft shine over the top half.
     local shine = bar:CreateTexture(nil, "OVERLAY", nil, -8)
     shine:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
@@ -308,11 +313,12 @@ local ENERGY = Enum and Enum.PowerType and Enum.PowerType.Energy or 3
 local COMBO_MAX = 5
 local COMBO_GAP = 3 -- between segments, clear of each one's 1px edge
 local COMBO_RED = { .87, .2, .13 } -- the colour they start in
+R.COMBO_RED = COMBO_RED -- and on the Look page's swatch for them
 local combo -- the row, made once the display is there
 local comboShown = false
 
 local function ComboColour()
-    local key = ns.Get("prdComboColour")
+    local key = ns.ColourKey("prdComboColour")
     if key ~= "default" then return Style:BarColour(key) end
     return COMBO_RED
 end
@@ -328,6 +334,7 @@ local function MakeOwn(parent, texture)
     bar.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
     Inset(bar.edge, bar, -1)
     bar.inner = Style:InnerEdge(bar, bar)
+    bar.line = Style:BlockLine(bar, bar)
     local shine = bar:CreateTexture(nil, "OVERLAY", nil, -8)
     shine:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
     shine:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
@@ -336,17 +343,18 @@ local function MakeOwn(parent, texture)
     return bar
 end
 
--- The design chosen, in this colour; the texture only when it changes
--- (retexture), as for the display's own bars.
+-- The design chosen, in this colour, flat or faded; the texture only when it
+-- changes (retexture), as for the display's own bars.
 local function OwnLook(bar, colour, texture, retexture)
     local design = ns.Get("barStyle")
     local outline = design == "outline"
     local edge = outline and colour or { 0, 0, 0 }
     if retexture then bar:SetStatusBarTexture(texture) end
-    bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
+    Style:FillColour(bar, colour, outline and .45 or 1)
     bar.background:SetColorTexture(Style:TrackColour())
     Solid(bar.edge, edge)
     Style:ShowInnerEdge(bar.inner, edge)
+    Style:ShowBlockLine(bar.line)
     Style:ShowSheen(bar.sheen, design == "glass")
 end
 

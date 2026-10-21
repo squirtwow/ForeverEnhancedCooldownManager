@@ -69,6 +69,22 @@ local function Swatch(parent, size, onClick)
     return swatch
 end
 
+-- Your class icon on a texture; false where there's none to show.
+local function ClassArt(icon)
+    local _, class = UnitClass("player")
+    if not class then return false end
+    local atlas, coords = "classicon-" .. class:lower(), CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+        icon:SetAtlas(atlas)
+    elseif coords then
+        icon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
+        icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+    else
+        return false
+    end
+    return true
+end
+
 -- Your class icon on the Class swatch, so it isn't taken for a second orange
 -- (or whichever colour your class shares).
 local function ClassIcon(swatch)
@@ -77,13 +93,7 @@ local function ClassIcon(swatch)
     local icon = swatch:CreateTexture(nil, "ARTWORK")
     icon:SetPoint("TOPLEFT", 2, -2)
     icon:SetPoint("BOTTOMRIGHT", -2, 2)
-    local atlas, coords = "classicon-" .. class:lower(), CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
-    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
-        icon:SetAtlas(atlas)
-    elseif coords then
-        icon:SetTexture("Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES")
-        icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
-    else
+    if not ClassArt(icon) then
         icon:Hide()
         return
     end
@@ -95,8 +105,328 @@ local function PaintSwatch(swatch, colour, chosen)
     local border = chosen and { 1, 1, 1, 1 } or T.CONTROL_BORDER
     T:Flat(swatch, { colour[1], colour[2], colour[3], 1 }, border)
 end
--- Shared with the Cast bar page.
-ns.Swatch, ns.ClassIcon, ns.PaintSwatch = Swatch, ClassIcon, PaintSwatch
+
+-- Colour rows ------------------------------------------------------------------------
+-- Every colour row but the window's accent is one small swatch in the colour
+-- in use, with a small arrow. Clicking it opens a pop-up under it, in the
+-- window's flat look: Custom first, drawn as a rainbow, then the row's
+-- named colours, the one chosen outlined in white. A named one is picked
+-- the way the row always picked it (click it again for the row's default)
+-- and the pop-up closes; Custom opens the game's colour picker for any
+-- colour, kept beside the named ones (ns.CUSTOM). One pop-up at a time: it
+-- closes on Escape, a click anywhere else, another page, its row going, or
+-- the window closing.
+local POP_SWATCH, POP_PAD, POP_GAP = 20, 6, 4
+local POP_LEVEL = 68 -- over the Presets panel (64), under the tour (70) and Are you sure? (80)
+local ARROW_ROOM = 12 -- a row's swatch: its colour, then its arrow
+local WINDOW_STRATA = "FULLSCREEN_DIALOG"
+-- Custom's rainbow: round the colour wheel, red back to red.
+local RAINBOW = { { 1, 0, 0 }, { 1, 1, 0 }, { 0, 1, 0 }, { 0, 1, 1 }, { 0, 0, 1 }, { 1, 0, 1 }, { 1, 0, 0 } }
+local CUSTOM_NOTE = "Custom: any colour you like, from the game's colour picker. It shows as you pick, and Cancel puts back the one before."
+local popupOpen -- the pop-up showing, if one is
+local picking -- while the game's colour picker is open for a row: what the row had, and the colour last set
+
+-- A texture fading from one colour to another, across or up.
+local function Shade(texture, orientation, from, to)
+    if CreateColor and texture.SetGradient then
+        texture:SetGradient(orientation, CreateColor(from[1], from[2], from[3], from[4] or 1), CreateColor(to[1], to[2], to[3], to[4] or 1))
+    elseif texture.SetGradientAlpha then
+        texture:SetGradientAlpha(orientation, from[1], from[2], from[3], from[4] or 1, to[1], to[2], to[3], to[4] or 1)
+    end
+end
+
+-- Custom's swatch: bands of the rainbow side by side, each fading into the
+-- next, and darker toward the foot, inside its 1px edge.
+local function Rainbow(swatch)
+    local inner = POP_SWATCH - 2
+    local band = inner / (#RAINBOW - 1)
+    for i = 1, #RAINBOW - 1 do
+        local strip = swatch:CreateTexture(nil, "ARTWORK")
+        strip:SetTexture(ns.Style.FLAT)
+        strip:SetPoint("TOPLEFT", 1 + (i - 1) * band, -1)
+        strip:SetSize(band, inner)
+        Shade(strip, "HORIZONTAL", RAINBOW[i], RAINBOW[i + 1])
+    end
+    local dark = swatch:CreateTexture(nil, "ARTWORK", nil, 1)
+    dark:SetTexture(ns.Style.FLAT)
+    dark:SetPoint("TOPLEFT", 1, -1)
+    dark:SetPoint("BOTTOMRIGHT", -1, 1)
+    Shade(dark, "VERTICAL", { 0, 0, 0, .5 }, { 0, 0, 0, 0 })
+end
+
+-- However the pop-up closes (Escape hides it itself): forgotten, and the
+-- window's name is the window's again.
+local function Forget(popup)
+    if popupOpen == popup then popupOpen = nil end
+    local name = popup.escape
+    popup.escape = nil
+    if name and _G[name] == popup then _G[name] = popup.window end
+    pcall(popup.UnregisterEvent, popup, "GLOBAL_MOUSE_DOWN")
+end
+
+local function ClosePopup()
+    local popup = popupOpen
+    if not popup then return end
+    Forget(popup)
+    popup:Hide()
+end
+
+-- A row's swatch in the colour in use, with your class icon on it for
+-- Class, and its pop-up's swatches, the one chosen outlined.
+local function PaintChoice(button)
+    local spec = button.spec
+    local chosen, colour = spec.chosen(), spec.shown()
+    button.fill:SetColorTexture(colour[1], colour[2], colour[3], 1)
+    button.icon:SetShown(chosen == "class" and button.icon.art == true)
+    for _, swatch in ipairs(button.swatches) do PaintSwatch(swatch, spec.colourOf(swatch.key), swatch.key == chosen) end
+    local edge = chosen == ns.CUSTOM and { 1, 1, 1, 1 } or T.CONTROL_BORDER
+    button.custom:SetBackdropBorderColor(edge[1], edge[2], edge[3], 1)
+end
+
+-- Under its swatch, or over it where the window's foot is too close (the
+-- Each bar list's last rows).
+local function OpenPopup(button)
+    ClosePopup()
+    local popup, window = button.popup, button.window
+    PaintChoice(button)
+    popup:ClearAllPoints()
+    local bottom, floor = button:GetBottom(), window:GetBottom()
+    if type(bottom) == "number" and type(floor) == "number" and bottom - popup:GetHeight() - 4 < floor + FOOTER then
+        popup:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, 4)
+    else
+        popup:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -4)
+    end
+    popup:Show()
+    popupOpen = popup
+    -- Escape closes the pop-up alone. The game's Escape hides every window
+    -- on its list by name (UISpecialFrames, read in its own secure call), so
+    -- while the pop-up is up the window's name stands for the pop-up: one
+    -- Escape hides only that, and the name is the window's again as it closes.
+    local name = window:GetName()
+    if name and _G[name] == window then
+        _G[name] = popup
+        popup.escape = name
+    end
+    -- And a click anywhere else, which the game tells any frame that asks.
+    pcall(popup.RegisterEvent, popup, "GLOBAL_MOUSE_DOWN")
+end
+
+-- The game's colour picker, open for a row's Custom. While it's open the
+-- window steps down a layer, under it (the picker is one of the game's
+-- dialogs), and back up as it closes. Only its own setup call is used.
+local function EndPicking(window)
+    picking = nil
+    window.colourWatch:Hide()
+    if window.stepped then
+        window.stepped = nil
+        window:SetFrameStrata(WINDOW_STRATA)
+    end
+end
+
+-- Whether the game's interface is in gamepad mode now. Then the picker sets
+-- up gamepad buttons as it opens (override bindings), and bindings changed
+-- from an addon's click leave the game's own code erroring in Forever, so
+-- Custom waits for the mouse and keyboard.
+local function GamepadMode()
+    local style = C_InputInterfaceStyle and C_InputInterfaceStyle.GetCurrentStyle
+    local pad = Enum and Enum.InputDeviceInterfaceType and Enum.InputDeviceInterfaceType.Gamepad
+    if type(style) ~= "function" or pad == nil then return false end
+    local ok, current = pcall(style)
+    return ok and current == pad
+end
+
+-- The row's colour follows the picker as you pick (each new colour Custom,
+-- kept beside the named ones), from the custom colour it kept or else the
+-- one in use; Cancel or a click outside the picker puts back what the row
+-- had. (Escape, by the game's source, hides the picker through its Escape
+-- list, which calls neither: the colour picked so far stays, as for the
+-- game's own pickers.)
+-- Out of combat, and not in gamepad mode.
+local function PickCustom(button)
+    local window, spec = button.window, button.spec
+    ClosePopup()
+    if InCombatLockdown() then
+        window:Say("Finish combat first, then pick a custom colour.")
+        return window:Refresh()
+    end
+    local picker = _G.ColorPickerFrame
+    if type(picker) ~= "table" or (type(picker.SetupColorPickerAndShow) ~= "function" and type(picker.SetColorRGB) ~= "function") then
+        window:Say("The game's colour picker isn't there. Pick one of the other colours instead.")
+        return window:Refresh()
+    end
+    if GamepadMode() then
+        window:Say("Custom needs the mouse and keyboard, not the gamepad. Pick one of the other colours instead.")
+        return window:Refresh()
+    end
+    if picking then EndPicking(window) end -- one row at a time: the one before keeps its colour
+    local kept = ns.Hex(spec.custom())
+    local start = kept and ns.HexColour("#" .. kept) or spec.shown()
+    local session = { key = spec.chosen(), hex = spec.custom(), last = T:Hex(spec.shown()) }
+    picking = session
+    local function Follow()
+        if picking ~= session then return end
+        local ok, r, g, b = pcall(picker.GetColorRGB, picker)
+        if not (ok and type(r) == "number" and type(g) == "number" and type(b) == "number") then return end
+        local hex = T:Hex({ r, g, b })
+        if hex == session.last then return end
+        session.last = hex
+        spec.setCustom(hex)
+    end
+    local function Cancel()
+        if picking ~= session then return end
+        spec.restore(session.key, session.hex)
+        EndPicking(window)
+    end
+    window.stepped = true
+    window:SetFrameStrata("HIGH")
+    local info = { r = start[1], g = start[2], b = start[3], hasOpacity = false, swatchFunc = Follow, cancelFunc = Cancel }
+    local opened
+    if type(picker.SetupColorPickerAndShow) == "function" then
+        opened = pcall(picker.SetupColorPickerAndShow, picker, info)
+    else
+        -- An older picker: its own fields, then shown.
+        picker.func, picker.swatchFunc, picker.cancelFunc, picker.hasOpacity = Follow, Follow, Cancel, false
+        picker.previousValues = { r = start[1], g = start[2], b = start[3] }
+        opened = pcall(picker.SetColorRGB, picker, start[1], start[2], start[3]) and pcall(picker.Show, picker)
+    end
+    if not opened then
+        Cancel()
+        window:Say("The game's colour picker didn't open. Pick one of the other colours instead.")
+        return window:Refresh()
+    end
+    window.colourWatch:Show()
+end
+
+-- Watches for the picker closing (OK keeps the colour), on the screen
+-- rather than the window, so it still sees it with the window shut.
+local function Watch(window)
+    if window.colourWatch then return end
+    local watch = CreateFrame("Frame", nil, UIParent)
+    watch:SetSize(1, 1)
+    watch:SetPoint("TOPLEFT")
+    watch:Hide()
+    watch:SetScript("OnUpdate", function()
+        local picker = _G.ColorPickerFrame
+        if not (type(picker) == "table" and picker:IsShown()) then EndPicking(window) end
+    end)
+    window.colourWatch = watch
+end
+
+-- A colour row's swatch and its pop-up; the row places the swatch. spec:
+-- keys (its named colours, in order), colourOf(key) (each one's colour),
+-- chosen() (the key in use: a named one, Custom, or the row's default),
+-- shown() (the colour in use now), pick(key) (a named one clicked, the row's
+-- own way), note (each named one's hover: text, or a function of its key),
+-- about (the swatch's own hover), and for Custom: custom() (the colour kept
+-- beside, six hex digits or ""), setCustom(hex) (Custom, in that colour)
+-- and restore(key, hex) (both back as they were). The pop-up's swatches are
+-- .custom and .swatches (the named ones, in order); :Paint() shows the
+-- choice, as the row's page refreshes.
+local function ColourChoice(window, parent, size, spec)
+    local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    button:SetSize(size + ARROW_ROOM, size)
+    T:Flat(button, T.CONTROL, T.CONTROL_BORDER)
+    button.window, button.spec, button.Paint = window, spec, PaintChoice
+    local fill = button:CreateTexture(nil, "ARTWORK")
+    fill:SetPoint("TOPLEFT", 2, -2)
+    fill:SetSize(size - 4, size - 4)
+    button.fill = fill
+    local icon = button:CreateTexture(nil, "OVERLAY")
+    icon:SetAllPoints(fill)
+    icon.art = ClassArt(icon)
+    icon:Hide()
+    button.icon = icon
+    local arrow = button:CreateTexture(nil, "ARTWORK")
+    arrow:SetTexture(ns.MEDIA .. "TourArrow.tga")
+    arrow:SetTexCoord(0, 1, 1, 0) -- pointing down
+    arrow:SetSize(8, 5)
+    arrow:SetPoint("RIGHT", -3, 0)
+    arrow:SetVertexColor(T.MUTED[1], T.MUTED[2], T.MUTED[3], 1)
+    local hover = button:CreateTexture(nil, "HIGHLIGHT")
+    hover:SetAllPoints()
+    hover:SetColorTexture(1, 1, 1, .06)
+    window:Hint(button, spec.about)
+
+    -- The pop-up: on the window, so nothing on the page covers it.
+    local count = #spec.keys + 1
+    local popup = CreateFrame("Frame", nil, window, "BackdropTemplate")
+    popup:SetSize(POP_PAD * 2 + count * POP_SWATCH + (count - 1) * POP_GAP, POP_PAD * 2 + POP_SWATCH)
+    popup:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -4)
+    popup:SetFrameLevel(window:GetFrameLevel() + POP_LEVEL)
+    popup:SetClampedToScreen(true)
+    popup:EnableMouse(true) -- what's under it isn't clicked by mistake
+    T:Flat(popup, T.PANEL, T.CONTROL_BORDER)
+    T:Paint(function(accent) popup:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
+    popup:Hide()
+    popup.window, popup.owner = window, button
+    popup:SetScript("OnHide", function(self)
+        Forget(self)
+        -- Gone with the window: hidden itself too, so it doesn't come back with it.
+        if self:IsShown() then self:Hide() end
+    end)
+    popup:SetScript("OnEvent", function(self)
+        -- A click outside it and its swatch (which opens and closes it).
+        if popupOpen == self and not self:IsMouseOver() and not button:IsMouseOver() then ClosePopup() end
+    end)
+    window:Hint(popup, "Pick a colour: Custom for any colour, or one of these. Escape or a click elsewhere closes this.")
+    button.popup = popup
+    local custom = Swatch(popup, POP_SWATCH, function() PickCustom(button) end)
+    custom:SetPoint("TOPLEFT", POP_PAD, -POP_PAD)
+    T:Flat(custom, { 0, 0, 0, 1 }, T.CONTROL_BORDER)
+    Rainbow(custom)
+    custom.key = ns.CUSTOM
+    window:Hint(custom, CUSTOM_NOTE)
+    button.custom = custom
+    local swatches, note = {}, spec.note
+    for i, key in ipairs(spec.keys) do
+        local swatch = Swatch(popup, POP_SWATCH, function()
+            ClosePopup()
+            spec.pick(key)
+        end)
+        swatch:SetPoint("TOPLEFT", POP_PAD + i * (POP_SWATCH + POP_GAP), -POP_PAD)
+        swatch.key = key
+        if key == "class" then ClassIcon(swatch) end
+        window:Hint(swatch, type(note) == "function" and function() return note(key) end or note)
+        swatches[i] = swatch
+    end
+    button.swatches = swatches
+
+    button:SetScript("OnClick", function(self)
+        if popupOpen == self.popup then ClosePopup() else OpenPopup(self) end
+    end)
+    -- Its row gone (another page, its part switched off): the pop-up goes too.
+    button:HookScript("OnHide", function(self)
+        if popupOpen == self.popup then ClosePopup() end
+    end)
+    Watch(window)
+    return button
+end
+
+-- A colour row for one of the look's settings (ns.COLOUR_SETTINGS): what
+-- spec needs to read it and keep Custom's colour beside it, and changed()
+-- after each change (to show it on your bars).
+local function SettingChoice(setting, spec, changed)
+    local kept = setting .. "Custom"
+    spec.chosen = spec.chosen or function() return ns.Get(setting) end
+    spec.custom = function() return ns.Get(kept) end
+    spec.setCustom = function(hex)
+        ns.SetMany(function()
+            ns.Set(kept, hex)
+            ns.Set(setting, ns.CUSTOM)
+        end)
+        changed()
+    end
+    spec.restore = function(key, hex)
+        ns.SetMany(function()
+            ns.Set(kept, hex)
+            ns.Set(setting, key)
+        end)
+        changed()
+    end
+    return spec
+end
+-- Shared with the Cast bar, Raid Timers and bar pages.
+ns.ColourChoice, ns.SettingChoice = ColourChoice, SettingChoice
 
 -- Health and power text --------------------------------------------------------------
 -- A panel over the window from the Look page's Set up: where the text goes
@@ -366,16 +696,295 @@ local function TextPanel(window)
         local texture = ns.Style:BarTexture()
         for kind, bar in pairs(preview) do
             local look = SAMPLE_BARS[kind]
-            local key = look.setting and ns.Get(look.setting) or "default"
+            local key = look.setting and ns.ColourKey(look.setting) or "default"
             local colour = key ~= "default" and ns.Style:BarColour(key) or look.colour
             bar:SetStatusBarTexture(texture)
-            bar:SetStatusBarColor(colour[1], colour[2], colour[3], 1)
+            ns.Style:FillColour(bar, colour, 1)
             bar.track:SetColorTexture(ns.Style:TrackColour())
             ns.Resource:WriteSample(bar.slots, kind)
         end
     end
     function shade:Open()
         self:Show()
+        self:Refresh()
+    end
+    return shade
+end
+
+-- Icon details -----------------------------------------------------------------------
+-- A panel over the window from the Look page's Icon details, beside the
+-- preview's icons: the cooldown swipe's colour and how much of the icon
+-- shows through it, the countdown numbers' size, colour and spot, and a
+-- line along the swipe's edge (Style.lua's Icon details). Each shows at once
+-- on the panel's own icons (their cooldowns running round, drawn by the
+-- calls your bars' icons use), on your bars and on Blizzard's icons.
+-- Everything starts as the icons always looked; Defaults puts it all back.
+-- Like the Health and power text panel, its shade leaves the footer clear.
+-- Made the first time it opens.
+local DETAIL = { width = 540, at = 110, row = 25, icon = 40, gap = 14, tray = { 38, 64 } }
+local DETAIL_TIMES = { 9, 15, 24, 40 } -- each preview icon's cooldown, in seconds, round and round
+local DETAIL_NOTE = "On your bars, and on Blizzard's icons while Apply this look to the Cooldown Manager is on."
+    .. " Each change shows at once."
+
+-- The preview: four icons in a row, each with a cooldown of the addon's
+-- own going round, its key on it as on your bars.
+local function DetailTray(dialog)
+    local tray = CreateFrame("Frame", nil, dialog, "BackdropTemplate")
+    tray:SetPoint("TOPLEFT", 16, -DETAIL.tray[1])
+    tray:SetSize(DETAIL.width - 32, DETAIL.tray[2])
+    T:Flat(tray, T.FIELD, T.BORDER)
+    tray.icons = {}
+    local across = #DETAIL_TIMES * (DETAIL.icon + DETAIL.gap) - DETAIL.gap
+    for i, seconds in ipairs(DETAIL_TIMES) do
+        local icon = CreateFrame("Frame", nil, tray)
+        icon:SetSize(DETAIL.icon, DETAIL.icon)
+        icon:SetPoint("LEFT", tray, "CENTER", -across / 2 + (i - 1) * (DETAIL.icon + DETAIL.gap), 0)
+        local art = icon:CreateTexture(nil, "ARTWORK")
+        art:SetAllPoints()
+        art:SetTexture("Interface\\Icons\\" .. SAMPLE_ICONS[i])
+        ns.Style:Zoom(art)
+        local cooldown = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
+        cooldown:SetAllPoints(art)
+        cooldown:SetSwipeTexture(ns.Style.FLAT)
+        cooldown:SetDrawBling(false)
+        cooldown:SetHideCountdownNumbers(false)
+        -- Each starts again as it ends, while the panel shows.
+        cooldown:SetScript("OnCooldownDone", function(self)
+            if tray:IsVisible() then self:SetCooldown(GetTime(), seconds) end
+        end)
+        local top = CreateFrame("Frame", nil, icon)
+        top:SetAllPoints()
+        top:SetFrameLevel(cooldown:GetFrameLevel() + 1)
+        icon.cooldown, icon.seconds = cooldown, seconds
+        icon.key = ns.Style:KeyText(top)
+        icon.decor = ns.Style:Decor(icon, icon)
+        tray.icons[i] = icon
+    end
+    return tray
+end
+
+-- The preview in the details picked, drawn by the calls your bars' icons use.
+local function PaintDetails(tray)
+    local S = ns.Style
+    local border, shadow = S:DecorFor("icon")
+    for i, icon in ipairs(tray.icons) do
+        local cooldown = icon.cooldown
+        S:CooldownLook(cooldown)
+        cooldown:SetCountdownFont(S:Countdown(DETAIL.icon))
+        local lift = S:KeyLook(icon.key, icon, DETAIL.icon, S:CountdownSize(DETAIL.icon))
+        local keyed = S:SetKey(icon.key, SAMPLE_KEYS[i])
+        local get = cooldown.GetCountdownFontString
+        S:KeyRoom(nil, nil, nil, type(get) == "function" and get(cooldown) or nil, cooldown, lift, keyed)
+        S:ShowDecor(icon.decor, border, shadow)
+    end
+end
+
+-- A row's label, at its left.
+local function DetailLabel(dialog, text)
+    local label = T:Text(dialog, "GameFontHighlight")
+    label:SetText(text)
+    return label
+end
+
+-- A slider whose value is a percent, "30%", with room for it up to its track.
+local function DetailSlider(dialog, label, limits, width, labelWidth, onChange)
+    local slider = T:Slider(dialog, label, limits, 5, width, onChange, labelWidth)
+    slider.value:SetWidth(36)
+    local set = slider.Set
+    function slider:Set(value)
+        set(self, value)
+        self.value:SetText(value .. "%")
+    end
+    return slider
+end
+
+-- A colour row's swatch for one of the details, and the colour's name
+-- beside it. Changed(): after each pick.
+local function DetailColour(window, dialog, setting, keys, colourOf, names, about, note, Changed)
+    local choice = ColourChoice(window, dialog, SWATCH, SettingChoice(setting, {
+        keys = keys,
+        colourOf = colourOf,
+        shown = function() return colourOf(ns.ColourKey(setting)) end,
+        pick = function(key)
+            ns.Set(setting, key)
+            Changed()
+        end,
+        note = function(key) return (key == "class" and "Your class colour" or names[key]) .. note end,
+        about = about,
+    }, Changed))
+    choice.name = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
+    choice.name:SetPoint("LEFT", choice, "RIGHT", 8, 0)
+    choice.names = names
+    return choice
+end
+
+-- The swipe's row: its colour, and how much of the icon shows through it.
+local function SwipeRow(window, dialog, Changed)
+    local colour = DetailColour(window, dialog, "swipeColour", ns.SWIPE_COLOUR_KEYS, function(key) return ns.Style:SwipeColour(key) end,
+        ns.SWIPE_COLOUR_NAMES, "The colour of the swipe going round each icon as it cools down. Click for the colours.",
+        " for the swipe over each icon as it cools down.", Changed)
+    local seeThrough = DetailSlider(dialog, "See-through", ns.SWIPE_SEE_THROUGH, 292, 92, function(value)
+        ns.Set("swipeSeeThrough", value)
+        Changed()
+    end)
+    window:Hint(seeThrough, "How much of each icon shows through the swipe: 30% as it's always been, 100% no swipe at all.")
+    return colour, seeThrough
+end
+
+-- The countdown's rows: its size and colour, then its spot on the icon.
+local function CountdownRows(window, dialog, Changed)
+    local size = DetailSlider(dialog, "Size", ns.COUNTDOWN_SIZE, 230, 40, function(value)
+        ns.Set("countdownSize", value)
+        Changed()
+    end)
+    window:Hint(size, "How big the countdown's numbers are: 100% is about half the icon, as it's always been. In the middle they"
+        .. " still move clear of a keybind.")
+    local colourLabel = DetailLabel(dialog, "Colour")
+    local colour = DetailColour(window, dialog, "countdownColour", ns.COUNT_COLOUR_KEYS, ns.CountColour, ns.COUNT_COLOUR_NAMES,
+        "The colour of the countdown's numbers. Click for the colours.", " for the countdown's numbers.", Changed)
+    local items = { fit = true }
+    for _, key in ipairs(ns.COUNTDOWN_SPOTS) do items[#items + 1] = { key = key, label = ns.COUNTDOWN_SPOT_NAMES[key] } end
+    local spot = T:Segmented(dialog, items, DETAIL.width - 16 - DETAIL.at, function(key)
+        ns.Set("countdownSpot", key)
+        Changed()
+    end)
+    for _, button in ipairs(spot.buttons) do
+        window:Hint(button, button.key == "CENTER" and "The countdown in the middle of each icon, as it's always been."
+            or ("The countdown at the " .. ns.COUNTDOWN_SPOT_NAMES[button.key]:lower() .. " of each icon. It can sit over a keybind"
+                .. " or a count in the same spot."))
+    end
+    return size, colourLabel, colour, spot
+end
+
+-- The edge line's row: the tick, and its colour while it's ticked.
+local function EdgeRow(window, dialog, Changed)
+    local tick = T:Check(dialog, "Edge line", function(self)
+        ns.Set("swipeEdge", self:GetChecked())
+        Changed()
+    end)
+    window:Hint(tick, "A bright line along the edge of the swipe as it goes round, on every icon. Off, your bars have none and"
+        .. " Blizzard's icons keep their own.")
+    -- The game's own line shown in the pop-up as a pale gold, for the line it
+    -- draws untinted.
+    local colour = DetailColour(window, dialog, "edgeColour", ns.EDGE_COLOUR_KEYS, function(key)
+        return key == "game" and { 1, .9, .62 } or ns.Style:EdgeColour(key)
+    end, ns.EDGE_COLOUR_NAMES, function()
+        if not ns.Get("swipeEdge") then return "Tick Edge line first." end
+        return "The edge line's colour: the game's own, or tinted. Click for the colours."
+    end, " for the edge line.", Changed)
+    -- Greyed out and unclickable while the line is off; it still says why on hover.
+    colour:SetMotionScriptsWhileDisabled(true)
+    return tick, colour
+end
+
+local function IconPanel(window)
+    local shade = CreateFrame("Frame", nil, window)
+    shade:SetPoint("TOPLEFT")
+    shade:SetPoint("BOTTOMRIGHT", 0, FOOTER)
+    -- Over the profile menu (60), under the tour (70) and Are you sure? (80).
+    shade:SetFrameLevel(window:GetFrameLevel() + 64)
+    shade:EnableMouse(true) -- nothing behind it can be clicked meanwhile
+    local dim = shade:CreateTexture(nil, "BACKGROUND")
+    dim:SetAllPoints()
+    dim:SetColorTexture(0, 0, 0, .45)
+    shade:Hide()
+    local dialog = CreateFrame("Frame", nil, shade, "BackdropTemplate")
+    dialog:SetSize(DETAIL.width, 300)
+    dialog:SetPoint("CENTER", 0, -HEADER / 2)
+    T:Flat(dialog, T.PANEL, T.CONTROL_BORDER)
+    shade.dialog = dialog
+    local title = T:Heading(dialog, "Icon details")
+    title:SetPoint("TOPLEFT", 16, -16)
+    local quiet = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
+    quiet:SetPoint("LEFT", title, "RIGHT", 8, 0)
+    quiet:SetText("the swipe, the countdown and the edge line")
+    local tray = DetailTray(dialog)
+    shade.tray = tray
+    local function Changed()
+        ns.Style:ApplyDetails()
+        shade:Refresh()
+        window:Refresh()
+    end
+
+    -- The rows, each a label at the left and its choices from DETAIL.at.
+    local y = -(DETAIL.tray[1] + DETAIL.tray[2] + 14)
+    local function At(region, x, row, down)
+        region:SetPoint("TOPLEFT", x, y - row * DETAIL.row - (down or 0))
+    end
+    At(DetailLabel(dialog, "Swipe"), 16, 0, 4)
+    local swipeColour, seeThrough = SwipeRow(window, dialog, Changed)
+    At(swipeColour, DETAIL.at, 0)
+    At(seeThrough, DETAIL.width - 16 - 292, 0)
+    At(DetailLabel(dialog, "Countdown"), 16, 1, 4)
+    local size, colourLabel, countdownColour, spot = CountdownRows(window, dialog, Changed)
+    At(size, DETAIL.at, 1)
+    At(colourLabel, DETAIL.at + 248, 1, 4)
+    At(countdownColour, DETAIL.at + 298, 1)
+    local spotLabel = DetailLabel(dialog, "Spot")
+    spotLabel:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
+    At(spotLabel, 28, 2, 4)
+    At(spot, DETAIL.at, 2)
+    local edge, edgeColour = EdgeRow(window, dialog, Changed)
+    At(edge, 16, 3, 2)
+    At(edgeColour, DETAIL.at, 3)
+    shade.swipeColour, shade.seeThrough, shade.size, shade.countdownColour = swipeColour, seeThrough, size, countdownColour
+    shade.spot, shade.edge, shade.edgeColour = spot, edge, edgeColour
+
+    local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
+    note:SetWidth(DETAIL.width - 32)
+    note:SetText(DETAIL_NOTE)
+    At(note, 16, 4, 4)
+    local done = T:Button(dialog, "Done", 90, 22)
+    done:SetPoint("BOTTOMRIGHT", -16, 14)
+    done:SetScript("OnClick", function() shade:Hide() end)
+    window:Hint(done, "Close this panel. Every choice is kept as you make it.")
+    local defaults = T:Button(dialog, "Defaults", 90, 22)
+    defaults:SetPoint("RIGHT", done, "LEFT", -6, 0)
+    defaults:SetScript("OnClick", function()
+        ns.SetMany(function()
+            for _, key in ipairs(ns.ICON_DETAILS) do ns.Set(key, ns.DEFAULTS[key]) end
+        end)
+        Changed()
+    end)
+    window:Hint(defaults, "Every detail here back as the icons always looked: a 70% black swipe, white numbers in the middle"
+        .. " and no edge line. A custom colour you picked is kept for next time.")
+    shade.done, shade.defaults = done, defaults
+    window:HookScript("OnHide", function() shade:Hide() end)
+    -- Tall enough for the note's lines: sized as it's made, and again each
+    -- time it shows, as the other panels are (a hidden note may not have
+    -- measured its lines yet).
+    local function Height()
+        dialog:SetHeight(math.ceil(-y + 4 * DETAIL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
+    end
+    Height()
+
+    -- The choices as they are now, and the preview.
+    function shade:Refresh()
+        Height()
+        for _, choice in ipairs({ swipeColour, countdownColour, edgeColour }) do
+            choice:Paint()
+            local key = choice.spec.chosen()
+            choice.name:SetText(key == ns.CUSTOM and ns.CUSTOM_NAME or choice.names[key] or "")
+        end
+        seeThrough:Set(ns.Get("swipeSeeThrough"))
+        size:Set(ns.Get("countdownSize"))
+        spot:SetSelected(ns.Get("countdownSpot"))
+        local edgeOn = ns.Get("swipeEdge") == true
+        edge:SetChecked(edgeOn)
+        edgeColour:SetEnabled(edgeOn)
+        edgeColour:SetAlpha(edgeOn and 1 or .35)
+        edgeColour.name:SetAlpha(edgeOn and 1 or .35)
+        local changed = false
+        for _, key in ipairs(ns.ICON_DETAILS) do changed = changed or ns.Get(key) ~= ns.DEFAULTS[key] end
+        defaults:SetEnabled(changed)
+        defaults:SetAlpha(changed and 1 or .45)
+        PaintDetails(tray)
+    end
+    -- Open: the preview's cooldowns start, each part way round.
+    function shade:Open()
+        self:Show()
+        local now = GetTime()
+        for i, icon in ipairs(tray.icons) do icon.cooldown:SetCooldown(now - icon.seconds * i / 5, icon.seconds) end
         self:Refresh()
     end
     return shade
@@ -438,6 +1047,7 @@ local function PresetTray(dialog)
         bar.edge:SetPoint("TOPLEFT", -1, 1)
         bar.edge:SetPoint("BOTTOMRIGHT", 1, -1)
         bar.edge:SetColorTexture(0, 0, 0, 1)
+        bar.line = ns.Style:BlockLine(bar, bar, true)
         bar.kind = kind
         bar.slots = ns.Resource:TextSlots(bar, kind)
         tray.bars[i] = bar
@@ -470,8 +1080,9 @@ local function PaintTray(tray)
     for _, bar in ipairs(tray.bars) do
         local colour = bar.kind == "health" and { 0, .8, 0 } or { 0, 0, 1 }
         bar:SetStatusBarTexture(texture)
-        bar:SetStatusBarColor(colour[1], colour[2], colour[3], 1)
+        S:FillColour(bar, colour, 1)
         bar.track:SetColorTexture(S:TrackColour())
+        S:ShowBlockLine(bar.line)
         ns.Resource:WriteSample(bar.slots, bar.kind)
     end
     local cast = tray.cast
@@ -556,20 +1167,42 @@ local function PresetsPanel(window)
     OwnLabel("Colour", PRESET_OWN + 26)
     local colourKeys = { "look" }
     for _, key in ipairs(ns.BAR_COLOUR_KEYS) do colourKeys[#colourKeys + 1] = key end
-    local swatches = {}
-    for i, key in ipairs(colourKeys) do
-        local swatch = Swatch(dialog, PRESET_SWATCH, function()
+    -- The colour the look picked comes with (yours, for Keep mine).
+    local function LookColour()
+        local look = P.LookValues(picked) or {}
+        return ns.Style:BarColour(look.barColour or ns.ColourKey("barColour", ns.GetSaved))
+    end
+    local colour = ColourChoice(window, dialog, PRESET_SWATCH, {
+        keys = colourKeys,
+        colourOf = function(key) return key == "look" and LookColour() or ns.Style:BarColour(key) end,
+        chosen = function() return own.colour or "look" end,
+        shown = function()
+            if own.colour == ns.CUSTOM then return ns.HexColour("#" .. tostring(own.colourCustom)) or LookColour() end
+            return own.colour and ns.Style:BarColour(own.colour) or LookColour()
+        end,
+        pick = function(key)
             own.colour = key ~= "look" and key or nil
             Show()
-        end)
-        swatch:SetPoint("TOPLEFT", 100 + (i - 1) * (PRESET_SWATCH + 6), -(PRESET_OWN + 26))
-        swatch.key = key
-        if key == "class" then ClassIcon(swatch) end
-        window:Hint(swatch, key == "look" and "The colour the look comes with." or (ns.BAR_COLOUR_NAMES[key]
-            .. (key == "class" and " (your class colour)" or "") .. " for your bars, in place of the look's."))
-        swatches[i] = swatch
-    end
-    shade.fonts, shade.swatches = fonts, swatches
+        end,
+        note = function(key)
+            return key == "look" and "The colour the look comes with." or (ns.BAR_COLOUR_NAMES[key]
+                .. (key == "class" and " (your class colour)" or "") .. " for your bars, in place of the look's.")
+        end,
+        about = "A colour for your bars in place of the look's. Click for the colours.",
+        -- Custom starts from the custom colour you have, if any.
+        custom = function() return own.colourCustom or ns.GetSaved("barColourCustom") end,
+        setCustom = function(hex)
+            own.colour, own.colourCustom = ns.CUSTOM, hex
+            Show()
+        end,
+        restore = function(key, hex)
+            own.colour = key ~= "look" and key or nil
+            own.colourCustom = ns.Hex(hex)
+            Show()
+        end,
+    })
+    colour:SetPoint("TOPLEFT", 100, -(PRESET_OWN + 26))
+    shade.fonts, shade.colour, shade.swatches = fonts, colour, colour.swatches
 
     -- What to switch on with it: those for your class, in two columns,
     -- ticked as the look suggests; one already on shows ticked and can't be
@@ -643,11 +1276,7 @@ local function PresetsPanel(window)
         end
         about:SetText(selected and selected.about or "")
         fonts:SetSelected(own.font or "look")
-        local look = P.LookValues(picked) or {}
-        for _, swatch in ipairs(swatches) do
-            local key = swatch.key == "look" and (look.barColour or ns.GetSaved("barColour")) or swatch.key
-            PaintSwatch(swatch, ns.Style:BarColour(key), swatch.key == (own.colour or "look"))
-        end
+        colour:Paint()
         for _, check in ipairs(ticks) do
             local already = P.ExtraOn(check.extra)
             check:SetChecked(already or chosen[check.extra.key] == true)
@@ -698,6 +1327,77 @@ local function TextRow(window, Choice, x)
         if panel and panel:IsShown() then panel:Refresh() end
     end
     return row
+end
+
+-- A row of the Each bar list: its colour, for the bar it shows now
+-- (row.entry: a Tracked Bar's spell, or one of the display's settings).
+-- Picking the bar's own colour again goes back: to the colour for all
+-- Tracked Bars, or Blizzard's own for the personal bars (entry.back, in
+-- entry.base). Redraw shows each change.
+local function EachChoice(row, Redraw)
+    local function Entry() return row.entry or {} end
+    local function SetBoth(setting, key, hex)
+        ns.SetMany(function()
+            ns.Set(setting .. "Custom", hex)
+            ns.Set(setting, key)
+        end)
+    end
+    return {
+        keys = ns.BAR_COLOUR_KEYS,
+        colourOf = function(key) return ns.Style:BarColour(key) end,
+        chosen = function()
+            local entry = Entry()
+            if entry.spell then return (ns.BarChoiceFor(entry.spell)) end
+            return entry.setting and ns.Get(entry.setting) or nil
+        end,
+        shown = function()
+            local entry = Entry()
+            if entry.spell then return ns.Style:BarColour(ns.BarColourFor(entry.spell) or ns.ColourKey("barColour")) end
+            local key = entry.setting and ns.ColourKey(entry.setting) or "default"
+            return key ~= "default" and ns.Style:BarColour(key) or entry.base or { 0, 0, 0 }
+        end,
+        pick = function(key)
+            local entry = Entry()
+            if entry.spell then
+                ns.SetBarColour(entry.spell, ns.BarChoiceFor(entry.spell) ~= key and key or nil)
+            elseif entry.setting then
+                ns.Set(entry.setting, ns.Get(entry.setting) ~= key and key or "default")
+            end
+            Redraw()
+        end,
+        note = function()
+            local entry = Entry()
+            return entry.back and ("A colour for this bar. Click it again for " .. entry.back .. ".")
+                or "A colour for this bar. Click it again to use the colour for all bars."
+        end,
+        about = function() return (row.name:GetText() or "This bar") .. ": its own colour. Click for the colours." end,
+        custom = function()
+            local entry = Entry()
+            if entry.spell then
+                local _, hex = ns.BarChoiceFor(entry.spell)
+                return hex or ""
+            end
+            return entry.setting and ns.Get(entry.setting .. "Custom") or ""
+        end,
+        setCustom = function(hex)
+            local entry = Entry()
+            if entry.spell then
+                ns.SetBarColour(entry.spell, ns.CUSTOM, hex)
+            elseif entry.setting then
+                SetBoth(entry.setting, ns.CUSTOM, hex)
+            end
+            Redraw()
+        end,
+        restore = function(key, hex)
+            local entry = Entry()
+            if entry.spell then
+                ns.SetBarColour(entry.spell, key, hex)
+            elseif entry.setting then
+                SetBoth(entry.setting, key, hex)
+            end
+            Redraw()
+        end,
+    }
 end
 
 local function BuildLook(window, page, width)
@@ -787,6 +1487,17 @@ local function BuildLook(window, page, width)
         sample.icons[i] = icon
     end
     window.sampleIcons = sample
+    -- Beside them, Icon details: the swipe, the countdown and the edge line
+    -- on your icons and Blizzard's, in a panel over the window.
+    local details = T:Button(tray, "Icon details", 96, 20)
+    details:SetPoint("RIGHT", sample, "LEFT", -14, 0)
+    details:SetScript("OnClick", function()
+        window.iconPanel = window.iconPanel or IconPanel(window)
+        window.iconPanel:Open()
+    end)
+    window:Hint(details, "The cooldown swipe's colour and see-through, the countdown's size, colour and spot, and an edge line,"
+        .. " on your icons and Blizzard's, with a preview.")
+    window.iconDetails = details
 
     -- The choices: the design and colour, then what the look applies to.
     local options = CreateFrame("Frame", nil, page)
@@ -798,35 +1509,47 @@ local function BuildLook(window, page, width)
         label:SetPoint("TOPLEFT", 0, y)
         label:SetText(text)
     end
+    -- The design and Colour fade reach every bar at once: the Tracked Bars
+    -- and the preview's, the resource display, your cast bar and Raid
+    -- Timers' bars.
+    local function Restyle()
+        if ns.CastBar then ns.CastBar:Apply() end
+        if ns.RaidTimers and ns.RaidTimers.started then ns.RaidTimers:Apply() end
+        Redraw()
+    end
     Label("Design", -4)
     local designs = {}
     for _, key in ipairs(ns.BAR_STYLE_KEYS) do designs[#designs + 1] = { key = key, label = ns.BAR_STYLE_NAMES[key] } end
     local design = T:Segmented(options, designs, 210, function(key)
         ns.Set("barStyle", key)
-        Redraw()
+        Restyle()
     end)
     design:SetPoint("TOPLEFT", 100, 0)
+    local DESIGN_NOTES = { block = " Block: slimmer Tracked Bars, each bar in a black edge with a thin warm line inside." }
     for _, button in ipairs(design.buttons) do
-        window:Hint(button, "The design for Blizzard's Tracked Bars, your cast bar and, with its look on, your resource display.")
+        window:Hint(button, "The design for Blizzard's Tracked Bars, your cast bar and, with its look on, your resource display."
+            .. (DESIGN_NOTES[button.key] or ""))
     end
     window.barDesign = design
     Label("Colour", -32)
-    local barSwatches = {}
-    for i, key in ipairs(ns.BAR_COLOUR_KEYS) do
-        local swatch = Swatch(options, SWATCH, function()
+    local barColour = ColourChoice(window, options, SWATCH, SettingChoice("barColour", {
+        keys = ns.BAR_COLOUR_KEYS,
+        colourOf = function(key) return ns.Style:BarColour(key) end,
+        shown = function() return ns.Style:BarColour(ns.ColourKey("barColour")) end,
+        pick = function(key)
             ns.Set("barColour", key)
             Redraw()
-        end)
-        swatch:SetPoint("TOPLEFT", 100 + (i - 1) * (SWATCH + SWATCH_GAP), -28)
-        swatch.key = key
-        if key == "class" then ClassIcon(swatch) end
-        window:Hint(swatch, (key == "class" and "Your class colour" or ns.BAR_COLOUR_NAMES[key])
-            .. " for all your Tracked Bars. Each bar can have its own below.")
-        barSwatches[i] = swatch
-    end
-    window.barSwatches = barSwatches
+        end,
+        note = function(key)
+            return (key == "class" and "Your class colour" or ns.BAR_COLOUR_NAMES[key]) .. " for all your Tracked Bars. Each bar can have its own below."
+        end,
+        about = "The colour for all your Tracked Bars. Click for the colours.",
+    }, Redraw))
+    barColour:SetPoint("TOPLEFT", 100, -28)
+    window.barColour, window.barSwatches = barColour, barColour.swatches
     local barChosen = T:Text(options, "GameFontHighlightSmall", T.MUTED)
-    barChosen:SetPoint("TOPLEFT", 100 + #ns.BAR_COLOUR_KEYS * (SWATCH + SWATCH_GAP) + 2, -32)
+    barChosen:SetPoint("TOPLEFT", 100 + SWATCH + ARROW_ROOM + 8, -32)
+    window.barChosen = barChosen
 
     -- A border and a shadow, each round every icon or round whole bars.
     local decorItems = {}
@@ -877,6 +1600,11 @@ local function BuildLook(window, page, width)
     energyTick:SetShown(myClass == "DRUID")
     window.look, window.personal, window.repeatMana, window.combo = look, personal, repeatMana, combo
     window.energyTick = energyTick
+    -- Colour fade, level with the colour and past its name, clear of the
+    -- keybinds' choices on the right.
+    window.colourFade = Choice("Colour fade", "colourFade", -30,
+        "Every bar fades from a deeper shade of its colour into a lighter one, in any design: Tracked Bars, the resource"
+        .. " display, your cast bar and Raid Timers.", Restyle, 210)
 
     -- Keybinds on the icons, in the right-hand column clear of the rows on
     -- the left: the tick, then where on each icon (level with Colour) and how
@@ -1058,19 +1786,23 @@ local function BuildLook(window, page, width)
     end
     Pin()
     page:HookScript("OnShow", function() C_Timer.After(0, Pin) end)
+    -- The wheel would slide a row's pop-up off with its row, out of the
+    -- list's view: it closes (dragging the bar is a click, which closes it).
+    scroll:HookScript("OnMouseWheel", function() ClosePopup() end)
     window:Hint(scroll.thumb, ns.SCROLL_NOTE)
     local rows = {}
     window.eachRows = rows
+    window.eachScroll = scroll
     local SWATCHES_AT = 260
     local function Row(i)
         if rows[i] then return rows[i] end
         local row = CreateFrame("Frame", nil, scroll.content)
         row:SetSize(listWidth, ROW)
         row:SetPoint("TOPLEFT", 0, -(i - 1) * ROW)
-        -- The row says what it's for round its swatches, which say their own.
+        -- The row says what it's for round its swatch, which says its own.
         row:EnableMouse(true)
         window:Hint(row, function()
-            return (row.name:GetText() or "This bar") .. ": click a colour on the right for this bar alone."
+            return (row.name:GetText() or "This bar") .. ": click the swatch on the right for a colour for this bar alone."
         end)
         row.icon = row:CreateTexture(nil, "ARTWORK")
         row.icon:SetSize(18, 18)
@@ -1079,31 +1811,11 @@ local function BuildLook(window, page, width)
         row.name = T:Text(row, "GameFontHighlight")
         row.name:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
         row.name:SetWidth(SWATCHES_AT - 40)
-        row.swatches = {}
-        for s, key in ipairs(ns.BAR_COLOUR_KEYS) do
-            -- Picking the bar's own colour again goes back: to the colour for
-            -- all Tracked Bars, or Blizzard's own for the personal bars.
-            local swatch = Swatch(row, ROW_SWATCH, function()
-                local entry = row.entry
-                if entry.spell then
-                    ns.SetBarColour(entry.spell, ns.BarColourFor(entry.spell) ~= key and key or nil)
-                else
-                    ns.Set(entry.setting, ns.Get(entry.setting) ~= key and key or "default")
-                end
-                Redraw()
-            end)
-            swatch:SetPoint("LEFT", SWATCHES_AT + (s - 1) * (ROW_SWATCH + 6), 0)
-            swatch.key = key
-            if key == "class" then ClassIcon(swatch) end
-            window:Hint(swatch, function()
-                local entry = row.entry
-                return entry and entry.back and ("A colour for this bar. Click it again for " .. entry.back .. ".")
-                    or "A colour for this bar. Click it again to use the colour for all bars."
-            end)
-            row.swatches[s] = swatch
-        end
+        row.colour = ColourChoice(window, row, ROW_SWATCH, EachChoice(row, Redraw))
+        row.colour:SetPoint("LEFT", SWATCHES_AT, 0)
+        row.swatches = row.colour.swatches
         row.chosen = T:Text(row, "GameFontHighlightSmall", T.MUTED)
-        row.chosen:SetPoint("LEFT", SWATCHES_AT + #ns.BAR_COLOUR_KEYS * (ROW_SWATCH + 6) + 4, 0)
+        row.chosen:SetPoint("LEFT", SWATCHES_AT + ROW_SWATCH + ARROW_ROOM + 8, 0)
         rows[i] = row
         return row
     end
@@ -1219,14 +1931,13 @@ local function BuildLook(window, page, width)
             ns.Style:KeyLook(icon.key, icon, ICON, ns.Style:CountdownSize(ICON))
             ns.Style:SetKey(icon.key, SAMPLE_KEYS[i])
         end
-        local barColour = ns.Get("barColour")
-        for _, swatch in ipairs(barSwatches) do
-            PaintSwatch(swatch, ns.Style:BarColour(swatch.key), swatch.key == barColour)
-        end
-        barChosen:SetText(ns.BAR_COLOUR_NAMES[barColour])
+        local chosenColour = ns.Get("barColour")
+        barColour:Paint()
+        window.colourFade:SetChecked(ns.Get("colourFade"))
+        barChosen:SetText(chosenColour == ns.CUSTOM and ns.CUSTOM_NAME or ns.BAR_COLOUR_NAMES[chosenColour])
         -- The font, and each texture in the colour for all bars.
         font:SetSelected(ns.Get("font"))
-        local texture, tint = ns.Get("barTexture"), ns.Style:BarColour(barColour)
+        local texture, tint = ns.Get("barTexture"), ns.Style:BarColour(ns.ColourKey("barColour"))
         for _, swatch in ipairs(fills) do
             PaintSwatch(swatch, { 0, 0, 0 }, swatch.key == texture)
             swatch.fill:SetVertexColor(tint[1], tint[2], tint[3])
@@ -1240,18 +1951,22 @@ local function BuildLook(window, page, width)
         end
         chosen:SetText(T.ACCENTS[accent].name)
         readyGlow:SetSelected(ns.Get("readyGlow"))
+        if window.iconPanel and window.iconPanel:IsShown() then window.iconPanel:Refresh() end
 
         -- The Personal Resource Display's bars first, then your Tracked Bars.
         local entries = {}
         local display = ns.Resource and ns.Resource:Shown()
+        -- Each with the colour its swatch shows while it's Blizzard's own or red.
         if ns.loaded.prdSkin and display then
-            entries[1] = { setting = "prdHealth", name = "Personal health", icon = "Interface\\Icons\\INV_Potion_54", back = "Blizzard's own" }
-            entries[2] = { setting = "prdPower", name = "Personal power", icon = "Interface\\Icons\\INV_Potion_76", back = "Blizzard's own" }
+            entries[1] = { setting = "prdHealth", name = "Personal health", icon = "Interface\\Icons\\INV_Potion_54", back = "Blizzard's own",
+                base = SAMPLE_BARS.health.colour }
+            entries[2] = { setting = "prdPower", name = "Personal power", icon = "Interface\\Icons\\INV_Potion_76", back = "Blizzard's own",
+                base = SAMPLE_BARS.power.colour }
         end
         local _, class = UnitClass("player")
         if display and ns.Get("prdCombo") and (class == "ROGUE" or class == "DRUID") then
             entries[#entries + 1] = { setting = "prdComboColour", name = "Combo points",
-                icon = "Interface\\Icons\\Ability_Rogue_Eviscerate", back = "red" }
+                icon = "Interface\\Icons\\Ability_Rogue_Eviscerate", back = "red", base = ns.Resource.COMBO_RED }
         end
         local personalRows = #entries
         local spells = ns.loaded.skin and on and ns.Skin and ns.Skin:TrackedBars() or {}
@@ -1278,17 +1993,15 @@ local function BuildLook(window, page, width)
                 local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(entry.spell)
                 row.name:SetText(type(name) == "string" and name or ("Spell " .. entry.spell))
                 row.icon:SetTexture(C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.spell) or 134400)
-                chosen = ns.BarColourFor(entry.spell) -- saved at any rank of its spell
+                chosen = ns.BarChoiceFor(entry.spell) -- saved at any rank of its spell
             else
                 row.name:SetText(entry.name)
                 row.icon:SetTexture(entry.icon)
                 chosen = ns.Get(entry.setting)
                 if chosen == "default" then chosen = nil end
             end
-            for _, swatch in ipairs(row.swatches) do
-                PaintSwatch(swatch, ns.Style:BarColour(swatch.key), swatch.key == chosen)
-            end
-            row.chosen:SetText(chosen and ns.BAR_COLOUR_NAMES[chosen] or "Default")
+            row.colour:Paint()
+            row.chosen:SetText(chosen == ns.CUSTOM and ns.CUSTOM_NAME or chosen and ns.BAR_COLOUR_NAMES[chosen] or "Default")
             row:Show()
         end
         for i = #entries + 1, #rows do rows[i]:Hide() end
@@ -1854,7 +2567,7 @@ local function BuildWindow()
     local window = CreateFrame("Frame", "FECMFrame", UIParent, "BackdropTemplate")
     window:SetSize(WIDTH, HEIGHT)
     window:SetPoint("CENTER", 0, 40)
-    window:SetFrameStrata("FULLSCREEN_DIALOG")
+    window:SetFrameStrata(WINDOW_STRATA)
     window:SetToplevel(true)
     window:SetClampedToScreen(true)
     window:EnableMouse(true)
@@ -1873,6 +2586,8 @@ local function BuildWindow()
         -- Closed mid-drag, it never hears the mouse let go: stop moving now.
         self:StopMovingOrSizing()
         if ns.Bars then ns.Bars:SetUnlocked(false) end
+        -- A colour row's pop-up goes with it.
+        ClosePopup()
     end)
     ns.CloseOnEscape(window)
 
@@ -1986,10 +2701,12 @@ local function BuildWindow()
     function window:Select(key)
         self.selected = key
         self.profilePanel:Hide()
+        ClosePopup()
         -- And the Health and power text panel, whose shade would leave the
         -- new page dimmed and blocked (the tour, /ccm reset, What's new).
         if self.textPanel then self.textPanel:Hide() end
         if self.presetsPanel then self.presetsPanel:Hide() end
+        if self.iconPanel then self.iconPanel:Hide() end
         self:Refresh()
         if ns.Tour then ns.Tour:Sync() end
     end
@@ -2042,6 +2759,7 @@ function ns.ShowWindow()
     -- tour's first step points at the menu under it, and picks no page).
     if window.textPanel then window.textPanel:Hide() end
     if window.presetsPanel then window.presetsPanel:Hide() end
+    if window.iconPanel then window.iconPanel:Hide() end
     window:Show()
     window:Raise()
 end

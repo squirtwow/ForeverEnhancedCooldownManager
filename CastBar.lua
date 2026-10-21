@@ -103,14 +103,19 @@ end
 
 -- Your colour, or Blizzard's: gold while casting, green while channelling.
 local function Colour(channel)
-    local key = ns.Get("castColour")
+    local key = ns.ColourKey("castColour")
     if key ~= "default" then return Style:BarColour(key) end
     return channel and GREEN or GOLD
 end
 
+-- The cast bar's own colour, for its swatch on the Cast bar page.
+function C:CastColour()
+    return Colour(false)
+end
+
 -- The swing timer's colour: yours, or silver.
 function C:SwingColour()
-    local key = ns.Get("swingColour")
+    local key = ns.ColourKey("swingColour")
     if key ~= "default" then return Style:BarColour(key) end
     return SILVER
 end
@@ -157,8 +162,10 @@ function C:Make(parent)
     frame.iconEdge:SetPoint("TOPLEFT", frame.icon, "TOPLEFT", -EDGE, EDGE)
     frame.iconEdge:SetPoint("BOTTOMRIGHT", frame.icon, "BOTTOMRIGHT", EDGE, -EDGE)
     frame.iconEdge:SetColorTexture(0, 0, 0, 1)
-    -- Thick edges: a second black pixel just inside the icon's edge.
+    -- Thick edges: a second black pixel just inside the icon's edge; Block's
+    -- warm line inside those.
     frame.iconInner = Style:InnerEdge(frame, frame.icon)
+    frame.iconLine = Style:BlockLine(frame, frame.icon)
     local bar = CreateFrame("StatusBar", nil, frame)
     bar.fill = Style:BarTexture()
     bar:SetStatusBarTexture(bar.fill)
@@ -170,11 +177,13 @@ function C:Make(parent)
     bar.background:SetAllPoints()
     bar.background:SetColorTexture(Style:TrackColour())
     -- A 1px edge round the bar (and with Thick edges a second pixel inside
-    -- it), and Glass's shine over its top half.
+    -- it, and Block's warm line inside those), and Glass's shine over its
+    -- top half.
     bar.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
     bar.edge:SetPoint("TOPLEFT", -EDGE, EDGE)
     bar.edge:SetPoint("BOTTOMRIGHT", EDGE, -EDGE)
     bar.inner = Style:InnerEdge(bar, bar)
+    bar.line = Style:BlockLine(bar, bar)
     local shine = bar:CreateTexture(nil, "OVERLAY", nil, -8)
     shine:SetPoint("TOPLEFT")
     shine:SetPoint("BOTTOMRIGHT", bar, "RIGHT")
@@ -210,30 +219,32 @@ end
 local BLACK = { 0, 0, 0 }
 
 -- Sizes a cast bar from your choices: its height, the design, the texture,
--- the darkness and edges, which parts show and its shadow. A cast or a swing
--- starts every second or two, so it's only done again when one of these has
--- changed since. True when it was done.
+-- the darkness, edges and fade, which parts show and its shadow. A cast or a
+-- swing starts every second or two, so it's only done again when one of
+-- these has changed since. True when it was done.
 local function Fit(frame)
     local height, design, texture = ns.Get("castHeight"), ns.Get("barStyle"), Style:BarTexture()
     local withIcon, withTime, withName = ns.Get("castIcon"), ns.Get("castTime"), ns.Get("castName")
     local shadow, border = ns.Get("iconShadow"), ns.Get("iconBorder")
-    local dark, thick = ns.Get("barDarkness"), ns.Get("thickEdges")
+    local dark, thick, fade = ns.Get("barDarkness"), ns.Get("thickEdges"), Style:Fades()
     local whole, ms = ns.Get("castTimeFormat") == "total", ns.Get("castLatency") and ns.Get("castLatencyText")
     local fit = frame.fit
     if fit.height == height and fit.design == design and fit.texture == texture and fit.icon == withIcon
         and fit.time == withTime and fit.name == withName and fit.shadow == shadow and fit.border == border
-        and fit.dark == dark and fit.thick == thick and fit.whole == whole and fit.ms == ms then
+        and fit.dark == dark and fit.thick == thick and fit.whole == whole and fit.ms == ms and fit.fade == fade then
         return false
     end
     fit.height, fit.design, fit.texture, fit.icon, fit.time = height, design, texture, withIcon, withTime
     fit.name, fit.shadow, fit.border, fit.dark, fit.thick = withName, shadow, border, dark, thick
-    fit.whole, fit.ms = whole, ms
+    fit.whole, fit.ms, fit.fade = whole, ms, fade
     local bar = frame.bar
     frame:SetHeight(height)
     frame.icon:SetSize(height, height)
     frame.icon:SetShown(withIcon)
     frame.iconEdge:SetShown(withIcon)
     Style:ShowInnerEdge(frame.iconInner, BLACK, withIcon)
+    Style:ShowBlockLine(frame.iconLine, withIcon)
+    Style:ShowBlockLine(bar.line)
     bar:ClearAllPoints()
     bar:SetPoint("TOPLEFT", withIcon and height + 3 or 0, 0)
     bar:SetPoint("BOTTOMRIGHT")
@@ -277,7 +288,7 @@ local function Dress(frame, colour)
     paint.r, paint.g, paint.b = r, g, b
     local outline = frame.fit.design == "outline"
     local bar = frame.bar
-    bar:SetStatusBarColor(r, g, b, outline and .45 or 1)
+    Style:FillColour(bar, colour, outline and .45 or 1)
     local edge = outline and colour or BLACK
     bar.edge:SetColorTexture(edge[1], edge[2], edge[3], 1)
     Style:ShowInnerEdge(bar.inner, edge)
@@ -308,7 +319,7 @@ local LAG_COLOURS = { red = { RED[1], RED[2], RED[3], .85 }, white = { 1, 1, 1, 
 local PALER = .5 -- Paler: this much of the way from the cast bar's colour to white
 
 function C:LagColour(key, channel)
-    key = key or ns.Get("castLatencyColour")
+    key = key or ns.ColourKey("castLatencyColour")
     if LAG_COLOURS[key] then return LAG_COLOURS[key] end
     if key == "paler" then
         local own = Colour(channel)
@@ -428,9 +439,9 @@ local MARK_COLOURS = { white = { 1, 1, 1, .8 }, black = { 0, 0, 0, .85 } }
 local NOTCH = .35 -- each notch's share of the bar's height
 local NONE = {}
 
--- White, black or a bar colour, as chosen on the Cast bar page.
+-- White, black, a bar colour or Custom's, as chosen on the Cast bar page.
 function C:MarkColour(key)
-    key = key or ns.Get("castTickColour")
+    key = key or ns.ColourKey("castTickColour")
     if MARK_COLOURS[key] then return MARK_COLOURS[key] end
     local colour = Style:BarColour(key)
     return { colour[1], colour[2], colour[3], 1 }

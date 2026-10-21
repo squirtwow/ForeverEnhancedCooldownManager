@@ -982,8 +982,8 @@ function H.Sane(ns, shared)
         return type(v) == "string" and #v >= 1 and #v <= 64 and not v:find("[%c|]") and v == v:match("^%s*(.-)%s*$")
     end
     local function ID(v) return type(v) == "number" and v == math.floor(v) and v >= 1 and v <= 2147483647 end
-    local known = { lists = true, forms = true, swap = true, joins = true, pick = true, style = true, added = true, setup = true,
-        count = true, picks = true, skipped = true, name = true, version = true }
+    local known = { lists = true, forms = true, swap = true, joins = true, only = true, pick = true, style = true, added = true,
+        setup = true, count = true, picks = true, skipped = true, name = true, version = true }
     for k in pairs(shared) do
         if not known[k] then return "an unknown key " .. tostring(k) end
     end
@@ -1037,6 +1037,16 @@ function H.Sane(ns, shared)
             if v ~= true or not on[name] or shared.lists[key][1] == name then return "a join " .. tostring(name) end
         end
     end
+    -- Only when missing: the Buffs bar's only, names on its list, true each.
+    if type(shared.only) ~= "table" then return "only" end
+    for key, set in pairs(shared.only) do
+        if key ~= "buff" or type(set) ~= "table" then return "only when missing on " .. tostring(key) end
+        local listed = {}
+        for _, v in ipairs(shared.lists.buff) do listed[v] = true end
+        for name, v in pairs(set) do
+            if v ~= true or not listed[name] then return "only when missing " .. tostring(name) end
+        end
+    end
     local picks = 0
     for name, v in pairs(shared.pick) do
         if v ~= true or not Word(name) then return "a pick" end
@@ -1082,6 +1092,14 @@ function H.Sane(ns, shared)
     end
     for id, colour in pairs(setup.colours) do
         if not ID(id) or not ns.Valid("barColour", colour) then return "a colour" end
+        -- Custom only with its own colour beside it.
+        if colour == ns.CUSTOM and ns.Hex(setup.custom[id]) ~= setup.custom[id] then return "a custom colour" end
+    end
+    for id in pairs(setup.custom) do
+        if setup.colours[id] ~= ns.CUSTOM then return "a custom colour for a bar not in Custom" end
+    end
+    for _, key in ipairs(ns.COLOUR_SETTINGS) do
+        if setup.look[key] == ns.CUSTOM and not ns.Hex(setup.look[key .. "Custom"]) then return "Custom with no colour: " .. key end
     end
     return ""
 end
@@ -1101,9 +1119,10 @@ function H.SetupNow(ns)
     for _, field in ipairs({ "on", "preset", "base", "gap", "spacing", "left", "right", "above", "below", "hidden" }) do
         layout[field] = saved[field]
     end
-    local colours = {}
-    for id, colour in pairs(ns.BarColours()) do colours[id] = colour end
-    return H.Text({ look = look, bars = bars, layout = layout, colours = colours })
+    local colours, custom, saved, kept = {}, {}, ns.BarColours()
+    for id, colour in pairs(saved) do colours[id] = colour end
+    for id, hex in pairs(kept) do custom[id] = hex end
+    return H.Text({ look = look, bars = bars, layout = layout, colours = colours, custom = custom })
 end
 
 -- The profile you're on, as its lists, and the bars swapping with your form.
@@ -1174,7 +1193,8 @@ do
         if not found then fields[#fields + 1] = field .. " not shared" end
     end
     Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
-        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,tickFrom,tickEdge",
+        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,tickFrom,tickEdge,"
+        .. "tickCustom",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
     -- On cooldown takes When ready's three choices and nothing else; its
     -- tick is a plain true or false.
@@ -1387,6 +1407,48 @@ do
     local bad = P.Read(H.String({ l = Lists(), g = { s = {}, b = { buff = { onlyMissing = "yes" } }, l = {}, k = {} } }))
     Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.buff.onlyMissing), "|1 nil",
         "anything but true or false: left out, and counted")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Only when missing in strings ------------------------------------------------------------------------
+-- The buffs ticked Only when missing go with the profile (m: "buff" ->
+-- name -> true), beside its lists: imported with or without the look, into
+-- the new profile only, and shared back the same. A string made before it
+-- has none. On the Debuffs bar (which has none), a name not on the Buffs
+-- bar's list, or anything but true: left out, and counted.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    local own = ns.ProfileName()
+    for _, name in ipairs({ "Thorns", "Mark of the Wild" }) do B:SetAura("buff", name, true) end
+    B:SetOnlyWhenMissing("buff", "Thorns", true)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. H.Text(shared.only) .. " | " .. P.Describe(shared),
+        '|0 {["buff"]={["Thorns"]=true}} | Holds 2 bar entries, with its look and layout.',
+        "Share: Thorns ticked Only when missing goes with the profile")
+    local ok = P.Import("Mine", shared, false)
+    Equal(tostring(ok) .. " " .. ns.ProfileName() .. " " .. tostring(B:OnlyWhenMissing("buff", "Thorns")) .. " "
+        .. tostring(B:OnlyWhenMissing("buff", "Mark of the Wild")) .. " " .. H.Text(db.profiles.Mine.onlyWhenMissing.buff) .. " "
+        .. H.Text(db.profiles[own].onlyWhenMissing.buff) .. " " .. tostring(S[B.driver].events.UNIT_AURA),
+        'true Mine true false {["Thorns"]=true} {["Thorns"]=true} true',
+        "imported without its look: the new profile has it (yours as it was), your buffs heard at once")
+    Equal(P.Export(), text, "and it shares the very same string back")
+    local function Lists() return { cd = {}, util = {}, buff = { "Thorns", "Mark of the Wild" }, debuff = { "Moonfire" } } end
+    local old = P.Read(H.String({ a = "1.8.2", l = Lists() }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. H.Text(old.only), "|0 {}", "a string from before it: none, nothing left out")
+    P.Import("Old", old, false)
+    Equal(ns.ProfileName() .. " " .. tostring(next(ns.OnlyWhenMissing("buff"))) .. " " .. tostring(S[B.driver].events.UNIT_AURA),
+        "Old nil nil", "imported: no buff ticked, your buffs no longer heard")
+    local odd = P.Read(H.String({ l = Lists(), m = { buff = { Thorns = true, Wrath = true, ["Mark of the Wild"] = "yes" },
+        debuff = { Moonfire = true } } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. H.Text(odd.only), '|3 {["buff"]={["Thorns"]=true}}',
+        "a name not on the list, anything but true and the Debuffs bar: left out and counted; Thorns kept")
+    local wrong = P.Read(H.String({ l = Lists(), m = "Thorns" }))
+    Equal(H.Sane(ns, wrong) .. "|" .. wrong.skipped .. " " .. H.Text(wrong.only), "|1 {}", "not a table: left out, and counted")
     Equal(#printed, 0, "no errors")
 end
 
@@ -2208,6 +2270,137 @@ do
         ns.ProfileShare.LookValues("bold").font }, " | "), "false | friz | friz | Fonts\\FRIZQT__.TTF | skurri",
         "in English: Friz Quadrata as before, Game font is Friz Quadrata, and presets keep their own fonts")
     _G.GetLocale, _G.STANDARD_TEXT_FONT = locale, standard
+end
+
+-- Custom colours, shared ------------------------------------------------------------------------
+-- A colour in Custom goes with its own colour beside it: the look's
+-- settings (each with Custom after its name), a Tracked Bar's (h, beside
+-- its colour in k) and the Debuffs bar's tick count (tickCustom). A custom
+-- colour kept beside a named one goes too. Custom with no colour of its
+-- own is left out and counted, and so is a colour with nothing in Custom.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, castColour = "custom", castColourCustom = "336699",
+        barColour = "green", barColourCustom = "ff8000", warningColour = "custom", warningColourCustom = "abcdef" })
+    local P = ns.ProfileShare
+    ns.SetBarColour(1234, ns.CUSTOM, "00ff00")
+    ns.SetBarColour(5678, "blue")
+    ns.BarData("debuff").tickCustom = "cc00cc"
+    ns.Bars:SetOption("debuff", "tickColour", ns.CUSTOM)
+    local setup = H.SetupNow(ns)
+    local text = P.Export()
+    local shared = P.Read(text)
+    local look, debuff = shared.setup.look, shared.setup.bars.debuff
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. look.castColour .. " " .. look.castColourCustom .. " " .. look.barColour
+        .. " " .. look.barColourCustom .. " " .. look.warningColour .. " " .. look.warningColourCustom .. " | " .. H.Text(shared.setup.colours)
+        .. " " .. H.Text(shared.setup.custom) .. " | " .. debuff.tickColour .. " " .. debuff.tickCustom,
+        '|0 | custom 336699 green ff8000 custom abcdef | {[1234]="custom",[5678]="blue"} {[1234]="00ff00"} | custom cc00cc',
+        "shared: each Custom with its own colour, and one kept beside a named colour")
+    -- Another account takes all of it, and shares the very same string.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.ProfileShare.Import("Custom", ns2.ProfileShare.Read(text), true)
+    Equal(H.SetupNow(ns2) == setup, true, "imported: the look, the bars' and the Tracked Bars' colours the same")
+    local cast = ns2.CastBar:CastColour()
+    Equal(ns2.ColourKey("castColour") .. " " .. ns2.ColourKey("barColour") .. " " .. ns2.BarColourFor(1234) .. " "
+        .. ns2.CountColourKey(ns2.BarData("debuff")) .. " " .. ("%.1f,%.1f,%.1f"):format(cast[1], cast[2], cast[3]),
+        "#336699 green #00ff00 #cc00cc 0.2,0.4,0.6", "each in its custom colour")
+    -- Custom with no colour of its own, a colour for a bar not in Custom,
+    -- or a colour that isn't six hex digits: left out, and counted.
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {} } end
+    local odd = P.Read(H.String({ l = Lists(), g = { s = { castColour = "custom", swingColour = "custom", swingColourCustom = "#12345",
+        pullColour = "custom", pullColourCustom = "a1b2c3" }, b = { debuff = { tickColour = "custom" } }, l = {},
+        k = { [11] = "custom", [12] = "custom", [13] = "blue" }, h = { [12] = "0000ff", [13] = "ff0000", [14] = "00ff00" } } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look) .. " | " .. H.Text(odd.setup.bars.debuff) .. " | "
+        .. H.Text(odd.setup.colours) .. " " .. H.Text(odd.setup.custom),
+        '|7 | {["pullColour"]="custom",["pullColourCustom"]="a1b2c3"} | {} | {[12]="custom",[13]="blue"} {[12]="0000ff"}',
+        "Custom only with its own colour: the rest left out, and counted")
+    -- A string from before Custom reads as it did.
+    local before = P.Read(H.String({ a = "1.8.2", l = Lists(), g = { s = { castColour = "blue" }, b = {}, l = {}, k = { [11] = "green" } } }))
+    Equal(H.Sane(ns, before) .. "|" .. before.skipped .. " " .. H.Text(before.setup.custom), "|0 {}", "a string from before reads as it did")
+    -- The checks: Custom is a choice every colour takes, its colour six
+    -- hex digits as kept, or none.
+    local checks = {}
+    for _, value in ipairs({ "abcdef", "", "ABCDEF", "#abcdef", "abcde", 123456, true }) do
+        checks[#checks + 1] = tostring(ns.Valid("castColourCustom", value)) .. "/" .. tostring(P.BAR_CHECKS.tickCustom(value))
+    end
+    Equal(table.concat(checks, " ") .. " | " .. tostring(ns.Valid("castColour", "custom")) .. " " .. tostring(ns.Valid("barColour", "custom"))
+        .. " " .. tostring(P.BAR_CHECKS.tickColour("custom")) .. " " .. tostring(ns.Valid("accent", "custom")),
+        "true/true true/true false/false false/false false/false false/false false/false | true true true false",
+        "six hex digits in lower case, or none; Custom a choice of every colour but the window's accent")
+end
+
+-- Icon details, shared ---------------------------------------------------------------------------
+-- The swipe's colour and see-through, the countdown's size, colour and spot,
+-- and the edge line go with the look, each where it differs from the
+-- default (Custom with its own colour beside it); another account takes
+-- them, on its icons too, and shares the very same string. Odd values are
+-- left out and counted, and a string from before them reads as it did.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, swipeColour = "custom", swipeColourCustom = "112233",
+        swipeSeeThrough = 55, countdownSize = 130, countdownColour = "gold", countdownSpot = "TOPRIGHT", swipeEdge = true,
+        edgeColour = "purple", bars = { cd = { spells = { "Moonfire" } } } })
+    local P = ns.ProfileShare
+    local setup = H.SetupNow(ns)
+    local text = P.Export()
+    local shared = P.Read(text)
+    local look, kept = shared.setup.look, {}
+    for _, key in ipairs(ns.ICON_DETAILS) do kept[#kept + 1] = tostring(look[key]) end
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. table.concat(kept, " ") .. " " .. tostring(look.swipeColourCustom) .. " "
+        .. tostring(look.countdownColourCustom), "|0 | custom 55 130 gold TOPRIGHT true purple 112233 nil",
+        "shared: every detail unlike the default, Custom with its own colour, nothing left out")
+    -- Another account takes all of it, on its icons too, and shares the same string.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true, bars = { cd = { spells = { "Wrath" } } } })
+    ns2.ProfileShare.Import("Details", ns2.ProfileShare.Read(text), true)
+    local cooldown = ns2.Bars:Get("cd").icons[1].cooldown
+    local swipe, edge = S[cooldown].last.SetSwipeColor, S[cooldown].last.SetEdgeColor
+    Equal(tostring(H.SetupNow(ns2) == setup) .. " " .. tostring(ns2.ProfileShare.Export() == text) .. " | "
+        .. ("%.3f,%.3f,%.3f,%g"):format(swipe[1], swipe[2], swipe[3], swipe[4]) .. " " .. tostring(Last(cooldown, "SetDrawEdge")) .. " "
+        .. ("%.2f,%.2f,%.2f"):format(edge[1], edge[2], edge[3]) .. " " .. tostring(Last(cooldown, "SetCountdownFont")),
+        "true true | 0.067,0.133,0.200,0.45 true 0.60,0.43,0.91 FECMCountdown23",
+        "imported: the same look and string, and its icons in the details at once")
+    -- Odd values left out and counted; a string from before them reads as it did.
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {} } end
+    local odd = P.Read(H.String({ l = Lists(), g = { s = { swipeColour = "custom", swipeSeeThrough = 120, countdownSize = 40,
+        countdownColour = "pink", countdownSpot = "MIDDLE", swipeEdge = "yes", edgeColour = "gold", countdownColourCustom = "#00ff00" },
+        b = {}, l = {} } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look), "|8 | {}", "odd details: all left out, and counted")
+    local before = P.Read(H.String({ a = "1.8.2", l = Lists(), g = { s = { iconBorder = "icon" }, b = {}, l = {} } }))
+    Equal(H.Sane(ns, before) .. "|" .. before.skipped .. " " .. tostring(before.setup.look.swipeColour), "|0 nil", "a string from before reads as it did")
+end
+
+-- Block and Colour fade, shared ------------------------------------------------------------------
+-- The fourth design and Colour fade go with the look like the rest of it;
+-- another account takes both and shares the very same string. A string
+-- from before them keeps its own design and leaves the fade off, and odd
+-- values are left out and counted.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, barStyle = "block", colourFade = true })
+    local P = ns.ProfileShare
+    local setup = H.SetupNow(ns)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. tostring(shared.setup.look.barStyle) .. " "
+        .. tostring(shared.setup.look.colourFade), "|0 | block true", "shared: Block and Colour fade with the look, nothing left out")
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.ProfileShare.Import("Blocky", ns2.ProfileShare.Read(text), true)
+    Equal(ns2.Get("barStyle") .. " " .. tostring(ns2.Get("colourFade")) .. " " .. tostring(H.SetupNow(ns2) == setup) .. " "
+        .. tostring(ns2.ProfileShare.Export() == text), "block true true true",
+        "imported: Block and Colour fade on another account, which shares the very same string")
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {} } end
+    local before = ns2.ProfileShare.Read(H.String({ a = "1.8.2", l = Lists(), g = { s = { barStyle = "outline" }, b = {}, l = {} } }))
+    ns2.ProfileShare.Import("Plain", before, true)
+    Equal(ns2.Get("barStyle") .. " " .. tostring(ns2.Get("colourFade")), "outline false",
+        "a string from before them: its own design, and the fade off")
+    local odd = P.Read(H.String({ l = Lists(), g = { s = { barStyle = "blocky", colourFade = "yes" }, b = {}, l = {} } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look), "|2 | {}", "odd values: left out, and counted")
 end
 
 print = _G.print

@@ -19,7 +19,11 @@
 -- Blizzard's frames is the countdown, its bar and its two big digits (never
 -- the timer frame, the glow or the logo); raid warning lines may only have
 -- their text height set, as Blizzard's times yours. Nothing is scaled or
--- sized at 100%, and the boss frames and their cast bars never are.
+-- sized at 100%, and the boss frames and their cast bars never are. Icon
+-- details: a cooldown icon's or buff icon's own cooldown allows its swipe's
+-- colour and its edge line (on, off and colour), the cosmetic setters only,
+-- never whether it draws its swipe. Colour fade: a bar's fill allows its
+-- gradient, a cosmetic setter too, and nothing else of Blizzard's does.
 local checks = 0
 -- Also fails on a secret the addon misused since the last check (below),
 -- even one its own pcall kept quiet, and on a widget method Forever lacks
@@ -102,6 +106,10 @@ local FORBIDDEN = {
     -- Its scripts, events, mouse, strata and secure attributes: Blizzard's own.
     SetScript = true, EnableMouse = true, SetFrameStrata = true, RegisterEvent = true, RegisterUnitEvent = true,
     UnregisterEvent = true, UnregisterAllEvents = true, SetAttribute = true,
+    -- A cooldown's edge line: only where a part allows it (Icon details).
+    SetDrawEdge = true, SetEdgeColor = true,
+    -- A gradient: only on a bar's fill, where it allows it (Colour fade).
+    SetGradient = true,
 }
 -- True while Blizzard's own code runs in the test: it may do what the addon may not.
 local blizzardCalling = false
@@ -248,7 +256,17 @@ end
 function Proto:SetColorTexture(r, g, b, a) S[self].color = { r, g, b, a } end
 function Proto:SetSwipeTexture(t) S[self].swipe = t end
 function Proto:SetStatusBarTexture(t) S[self].barTexture = t end
-function Proto:SetStatusBarColor(r, g, b, a) S[self].barColour = { r, g, b, a } end
+-- Like the game, a bar's colour wipes a gradient on its fill (Colour fade).
+function Proto:SetStatusBarColor(r, g, b, a)
+    S[self].barColour = { r, g, b, a }
+    local fill = S[self].fill
+    if fill and S[fill] then S[fill].gradient = nil end
+end
+-- A fill's gradient (Colour fade), and how many times one was put on.
+function Proto:SetGradient(orientation, from, to)
+    local s = S[self]
+    s.gradient, s.gradients = { orientation, from, to }, (s.gradients or 0) + 1
+end
 function Proto:SetMinMaxValues(low, high) S[self].range = low .. "-" .. high end
 function Proto:SetValue(value) S[self].value = value end
 function Proto:GetHeight() return S[self].height end
@@ -261,6 +279,12 @@ end
 function Proto:SetFontObject(o) S[self].font = o end
 function Proto:SetWordWrap(v) S[self].wordWrap = v end
 function Proto:SetCountdownFont(o) S[self].countdownFont = o end
+-- A cooldown's swipe colour and edge line (Icon details), Blizzard's or the
+-- addon's: each call the addon makes is counted.
+local function Counted(self) if not blizzardCalling then S[self].addonCalls = (S[self].addonCalls or 0) + 1 end end
+function Proto:SetSwipeColor(r, g, b, a) Counted(self); S[self].swipeColour = { r, g, b, a } end
+function Proto:SetDrawEdge(v) Counted(self); S[self].edge = v end
+function Proto:SetEdgeColor(r, g, b, a) Counted(self); S[self].edgeColour = { r, g, b, a } end
 -- The addon's own fonts: the face each one is set in.
 function Proto:SetFont(file, size, flags) S[self].face = file .. " " .. size .. " " .. flags end
 function Proto:SetTexCoord(...)
@@ -398,6 +422,7 @@ local function CooldownItem()
     item.CooldownFlash = New("Frame", item)
     Seal(item)
     KeepsPlace(item)
+    S[item.Cooldown].allow = { SetSwipeColor = true, SetDrawEdge = true, SetEdgeColor = true } -- Icon details
     return item, overlay
 end
 
@@ -410,6 +435,7 @@ local function BuffItem()
     item.Applications.Applications = New("FontString", item.Applications)
     Seal(item)
     KeepsPlace(item)
+    S[item.Cooldown].allow = { SetSwipeColor = true, SetDrawEdge = true, SetEdgeColor = true } -- Icon details
     return item, overlay
 end
 
@@ -952,7 +978,36 @@ do
     ns.SetBarColour(16870, "blue")
     Equal(ns.BarColours()[16870] .. " " .. ns.BarColours()[1126] .. " " .. ns.BarColourFor(16870), "blue green blue",
         "a spell with no ranks listed keeps its own ID, and finds it there")
+    -- Custom (the colour pop-up): its own colour kept beside it, found from
+    -- any rank as the colour is, and drawn; a named colour keeps it beside
+    -- (moved with it), Custom again takes it, and the colour for all lets
+    -- both go.
     colours.barColours = {}
+    ns.SetBarColour(782, ns.CUSTOM, "336699")
+    ns.Skin:ApplyBarLook()
+    local saved, custom = ns.BarColours()
+    Equal(tostring(saved[782]) .. " " .. tostring(custom[782]) .. " " .. ns.BarColourFor(467) .. " " .. S[bar.Bar].barColour[3],
+        "custom 336699 #336699 0.6", "Custom: kept beside, found from any rank, drawn")
+    ns.SetBarColour(9910, "green")
+    saved, custom = ns.BarColours()
+    Equal(tostring(saved[782]) .. " " .. tostring(saved[9910]) .. " " .. tostring(custom[9910]) .. " " .. ns.BarColourFor(467),
+        "nil green 336699 green", "a named colour at another rank: under that ID, the custom one moved beside it")
+    ns.SetBarColour(467, ns.CUSTOM)
+    Equal(ns.BarColourFor(467), "#336699", "Custom again: the one kept")
+    ns.SetBarColour(467, nil)
+    saved, custom = ns.BarColours()
+    Equal(tostring(next(saved)) .. " " .. tostring(next(custom)), "nil nil", "the colour for all: both go")
+    -- Repaired as read: Custom with none kept goes; one kept beside a named
+    -- colour stays, in lower case; one for no bar goes.
+    colours.barColours = { [467] = "custom", [782] = "custom", [1126] = "blue" }
+    colours.barCustom = { [782] = "ABCDEF", [1126] = "00ff00", [5] = "zz" }
+    saved, custom = ns.BarColours()
+    local list = {}
+    for id, key in pairs(saved) do list[#list + 1] = id .. "=" .. key .. "/" .. tostring(custom[id]) end
+    for id in pairs(custom) do if not saved[id] then list[#list + 1] = id .. " kept for no bar" end end
+    table.sort(list)
+    Equal(table.concat(list, " "), "1126=blue/00ff00 782=custom/abcdef", "Custom needs its own colour; a kept one in lower case")
+    colours.barColours, colours.barCustom = {}, {}
     ns.RANKS = nil
     Equal(tostring(ns.BarColourFor(467)), "nil", "and nothing breaks without the rank list")
 end
@@ -3609,6 +3664,306 @@ do
     Equal(#printed, 0, "no errors")
     _G.issecretvalue = nil
     _G.C_AddOns, _G.EraUI = nil, nil
+end
+
+-- Icon details on Blizzard's icons -----------------------------------------------------------
+-- The swipe's colour and see-through, the countdown's size, colour and spot,
+-- and the edge line, on Blizzard's Essential, Utility and buff icons through
+-- their own cooldowns' setters only. At the defaults nothing is hooked or set:
+-- the icons stay exactly as Blizzard draws them. Changed, each icon's refresh
+-- is post-hooked to set the swipe again after Blizzard's own, leaving
+-- Blizzard's gold swipe over a buff that's up as it is; back at the defaults,
+-- Blizzard's own swipe and edge line are put back, once. A failure is
+-- reported once and never thrown into Blizzard's refresh.
+
+do
+    Environment()
+    local v = Viewers(1)
+    local GOLD, DARK = { r = 1, g = .95, b = .57, a = .7 }, { r = 0, g = 0, b = 0, a = .7 }
+    _G.CooldownViewerConstants = { ITEM_AURA_COLOR = GOLD, ITEM_COOLDOWN_COLOR = DARK }
+    local ns = Load(nil)
+    local item, buff = First(v.essentialActive), First(v.buffsActive)
+    -- Blizzard's own refreshes (CooldownViewer.lua): the swipe in the colour
+    -- it picked, and its edge line only for charges.
+    rawset(item, "RefreshSpellCooldownInfo", function(self)
+        local colour = rawget(self, "cooldownSwipeColor") or DARK
+        self.Cooldown:SetSwipeColor(colour.r, colour.g, colour.b, colour.a)
+        self.Cooldown:SetDrawEdge(rawget(self, "cooldownShowDrawEdge") == true)
+    end)
+    local refresh = rawget(item, "RefreshSpellCooldownInfo")
+    rawset(buff, "RefreshCooldownInfo", function(self)
+        self.Cooldown:SetSwipeColor(DARK.r, DARK.g, DARK.b, DARK.a)
+        self.Cooldown:SetDrawEdge(false)
+    end)
+    local function Refresh()
+        Blizzard(item, "RefreshSpellCooldownInfo")
+        Blizzard(buff, "RefreshCooldownInfo")
+    end
+    local function Swipe(frame)
+        local c = S[frame.Cooldown].swipeColour
+        return ("%g,%g,%g,%g"):format(c[1], c[2], c[3], c[4])
+    end
+    local function Edge(frame)
+        local c = S[frame.Cooldown].edgeColour
+        return tostring(S[frame.Cooldown].edge) .. (c and (" " .. ("%g,%g,%g,%g"):format(c[1], c[2], c[3], c[4])) or "")
+    end
+    local function Numbers(frame)
+        local at = S[frame.Cooldown:GetCountdownFontString()].points[1]
+        return at and (at[1] .. " " .. tostring(at[2] == frame.Cooldown) .. " " .. at[3] .. " " .. at[4] .. " " .. at[5]) or "Blizzard's"
+    end
+    local function Calls() return (S[item.Cooldown].addonCalls or 0) + (S[buff.Cooldown].addonCalls or 0) end
+    Refresh()
+    ns.Skin:ApplyIconDetails()
+    Equal(Swipe(item) .. " " .. Edge(item) .. " " .. Swipe(buff) .. " | " .. Calls() .. " " .. tostring(rawget(item, "RefreshSpellCooldownInfo") == refresh)
+        .. " | " .. S[item.Cooldown].countdownFont .. " " .. S[buff.Cooldown].countdownFont .. " " .. Numbers(item) .. " " .. Numbers(buff),
+        "0,0,0,0.7 false 0,0,0,0.7 | 0 true | FECMFont25 FECMFont20 Blizzard's Blizzard's",
+        "at the defaults: Blizzard's own swipe and numbers, nothing set by the addon, no refresh hooked")
+
+    -- A purple swipe, 40% see-through: at once, and again after each of Blizzard's refreshes.
+    ns.Set("swipeColour", "purple")
+    ns.Set("swipeSeeThrough", 40)
+    ns.Skin:ApplyIconDetails()
+    local now = Swipe(item) .. " " .. Swipe(buff)
+    Refresh()
+    Equal(now .. " | " .. Swipe(item) .. " " .. Swipe(buff) .. " " .. tostring(rawget(item, "RefreshSpellCooldownInfo") ~= refresh) .. " "
+        .. Edge(item), "0.6,0.43,0.91,0.6 0.6,0.43,0.91,0.6 | 0.6,0.43,0.91,0.6 0.6,0.43,0.91,0.6 true false",
+        "a purple swipe at 40%: at once, and after Blizzard's refreshes (hooked), its edge line left as Blizzard's")
+    -- Blizzard's gold swipe over a buff of the spell that's up stays gold.
+    rawset(item, "cooldownSwipeColor", GOLD)
+    Refresh()
+    Equal(Swipe(item) .. " " .. Swipe(buff), "1,0.95,0.57,0.7 0.6,0.43,0.91,0.6", "Blizzard's gold over a buff that's up stays as it is")
+    rawset(item, "cooldownSwipeColor", DARK)
+    -- The edge line on every icon, then tinted green; after Blizzard's refresh too.
+    ns.Set("swipeEdge", true)
+    ns.Skin:ApplyIconDetails()
+    now = Edge(item) .. " " .. Edge(buff)
+    ns.Set("edgeColour", "green")
+    ns.Skin:ApplyIconDetails()
+    Refresh()
+    Equal(now .. " | " .. Edge(item) .. " " .. Edge(buff), "true 1,1,1,1 true 1,1,1,1 | true 0.38,0.74,0.3,1 true 0.38,0.74,0.3,1",
+        "the edge line: the game's own on every icon, then green, kept after Blizzard's refreshes")
+    -- The countdown: 120%, red, along the bottom; the buff icon's too, and the charge count stays put.
+    ns.Set("countdownSize", 120)
+    ns.Set("countdownColour", "red")
+    ns.Set("countdownSpot", "BOTTOM")
+    ns.Skin:ApplyIconDetails()
+    local font = _G.FECMCountdown30
+    Equal(S[item.Cooldown].countdownFont .. " " .. S[buff.Cooldown].countdownFont .. " " .. table.concat(S[font].textColour, ",") .. " | "
+        .. Numbers(item) .. " | " .. Numbers(buff) .. " | " .. S[item.ChargeCount.Current].points[1][1],
+        "FECMCountdown30 FECMCountdown24 1,0.25,0.2 | BOTTOM true BOTTOM 0 1 | BOTTOM true BOTTOM 0 1 | BOTTOMRIGHT",
+        "the numbers 120% in red, along the bottom of each icon, the charge count where Blizzard keeps it")
+    -- A failure is reported once, never thrown into Blizzard's refresh.
+    local swipe = ns.Style.Swipe
+    ns.Style.Swipe = function() error("a broken swipe") end
+    local ok = pcall(Refresh)
+    ns.Style.Swipe = swipe
+    Equal(tostring(ok) .. " " .. #printed .. " " .. tostring(printed[1] and printed[1]:find("couldn't colour a cooldown icon's swipe", 1, true) ~= nil),
+        "true 1 true", "a failure in the hook: reported once, Blizzard's refresh carries on")
+    table.remove(printed, 1)
+    ns.Skin.lastError = nil
+    -- Edge line off while the swipe stays purple: Blizzard never colours its
+    -- own line, so the green goes at once (and the line with it), and after
+    -- Blizzard's refreshes only the swipe is set again.
+    ns.Set("swipeEdge", false)
+    ns.Skin:ApplyIconDetails()
+    local off = Edge(item) .. " " .. Edge(buff)
+    local before = Calls()
+    Refresh()
+    Equal(off .. " | " .. Edge(item) .. " " .. Edge(buff) .. " " .. Swipe(item) .. " " .. (Calls() - before),
+        "false 1,1,1,1 false 1,1,1,1 | false 1,1,1,1 false 1,1,1,1 0.6,0.43,0.91,0.6 2",
+        "edge line off with the swipe still changed: Blizzard's own line back untinted at once, then only the swipe set")
+
+    -- Back to the defaults: Blizzard's own swipe and its edge line for a
+    -- spell's charges, once; then nothing set again, nor after its refreshes.
+    rawset(item, "cooldownShowDrawEdge", true)
+    for _, key in ipairs(ns.ICON_DETAILS) do ns.Set(key, ns.DEFAULTS[key]) end
+    ns.Skin:ApplyIconDetails()
+    Equal(Swipe(item) .. " " .. Edge(item) .. " " .. Swipe(buff) .. " " .. Edge(buff) .. " | " .. S[item.Cooldown].countdownFont .. " "
+        .. S[buff.Cooldown].countdownFont .. " " .. Numbers(item) .. " | " .. Numbers(buff),
+        "0,0,0,0.7 true 1,1,1,1 0,0,0,0.7 false 1,1,1,1 | FECMFont25 FECMFont20 CENTER true CENTER 0 0 | CENTER true CENTER 0 0",
+        "defaults again: Blizzard's dark swipe, its own edge line for charges untinted, white numbers in the middle")
+    local calls = Calls()
+    ns.Skin:ApplyIconDetails()
+    Refresh()
+    Equal(Calls() - calls, 0, "and nothing set again by the addon, after Blizzard's refreshes either")
+    -- A new icon, with the details changed: made in them, hooked as it's made.
+    ns.Set("swipeColour", "white")
+    local fresh = CooldownItem()
+    rawset(fresh, "RefreshSpellCooldownInfo", refresh)
+    Blizzard(v.utility, "OnAcquireItemFrame", fresh)
+    Blizzard(fresh, "RefreshSpellCooldownInfo")
+    Equal(Swipe(fresh) .. " " .. tostring(rawget(fresh, "RefreshSpellCooldownInfo") ~= refresh), "1,1,1,0.7 true",
+        "a new icon with the details changed: in them as it's made, its refresh hooked")
+    ns.Set("swipeColour", "black")
+    ns.Skin:ApplyIconDetails()
+    _G.CooldownViewerConstants = nil
+    Equal(#printed, 0, "no errors")
+end
+
+-- Block and Colour fade (Look page) ----------------------------------------------------------
+-- Block, the fourth Design: the Tracked Bars slimmer (their own status
+-- bar's height, the one size allowed, and back) with their text a size
+-- smaller, each bar and icon in its black edge with a thin warm line just
+-- inside it (a pixel further in with Thick edges), on a warmer track, with
+-- no shine, time box or spark; the display's bars and the combo points the
+-- same at their own heights. Colour fade: each fill a gradient from a deeper
+-- shade of its colour into a lighter one, a cosmetic setter on Blizzard's
+-- fills only, put on again each time a bar is coloured (a colour wipes it,
+-- here as in the game). Both off by default: nothing made, nothing faded.
+do
+    Environment()
+    local v = Viewers(1)
+    power = 3
+    _G.UnitPowerType = function() return power, power == 3 and "ENERGY" or "MANA" end
+    _G.UnitPower = function() return 2 end
+    local prd, art = PRD()
+    _G.PersonalResourceDisplayFrame = prd
+    local made = 0
+    _G.CreateColor = function(r, g, b, a) made = made + 1; return { r = r, g = g, b = b, a = a } end
+    local ns = Load({ prdCombo = true })
+    local bar, health = First(v.barsActive), prd.HealthBarsContainer.healthBar
+    local row = assert(ns.Resource:ComboRow(), "a druid in cat form with combo points ticked")
+    local segments = S[row].children
+    -- Blizzard's fills, as the game hands them back: each allows its gradient alone.
+    local fills = {}
+    for _, owner in ipairs({ bar.Bar, health, prd.PowerBar }) do
+        local fill = New("Texture", owner)
+        Seal(fill)
+        S[fill].allow = { SetGradient = true }
+        S[owner].fill = fill
+        fills[#fills + 1] = fill
+    end
+    for _, seg in ipairs(segments) do S[seg].fill = New("Texture", seg) end
+    local function Apply()
+        ns.Skin:ApplyBarLook()
+        ns.Resource:Apply()
+    end
+    -- Block's warm line on owner: its strips (the soft cream ones), how many
+    -- show, their colour, and where the top one sits on region.
+    local function Warm(owner, region)
+        local strips, shown = {}, 0
+        for _, r in ipairs(S[owner].regions) do
+            local c = S[r].color
+            if S[r].layer == "OVERLAY" and S[r].sublevel == -6 and c and c[4] == .35 then
+                strips[#strips + 1] = r
+                if S[r].shown then shown = shown + 1 end
+            end
+        end
+        if #strips == 0 then return "none" end
+        local c, top = S[strips[1]].color, S[strips[1]].points[1]
+        return string.format("%d %d %g %g %g | %s %s %s %g %g", #strips, shown, c[1], c[2], c[3], top[1],
+            tostring(top[2] == (region or owner)), top[3], top[4], top[5])
+    end
+    local function Colour(region)
+        local c = S[region].color
+        return string.format("%g %g %g %g", c[1], c[2], c[3], c[4])
+    end
+    local function Fade(fill)
+        local g = S[fill].gradient
+        if not g then return "flat" end
+        local a, b = g[2], g[3]
+        return string.format("%s %.2f %.2f %.2f %g > %.2f %.2f %.2f %g", g[1], a.r, a.g, a.b, a.a, b.r, b.g, b.b, b.a)
+    end
+    local segTrack = Piece(segments[1], "BACKGROUND", nil)
+    Equal(ns.Get("barStyle") .. " " .. tostring(ns.Get("colourFade")) .. " | " .. Warm(bar.Bar) .. " " .. Warm(bar.Icon) .. " "
+        .. Warm(health) .. " " .. Warm(segments[1]) .. " | " .. Fade(fills[1]) .. " " .. Fade(fills[2]) .. " " .. made,
+        "glass false | none none none none | flat flat 0", "both off by default: no warm line made, nothing faded, no colour made")
+
+    -- Block.
+    ns.Set("barStyle", "block")
+    Apply()
+    local sheen, box = Piece(bar.Bar, "OVERLAY", -8), Piece(bar.Bar, "OVERLAY", -7)
+    Equal(S[bar.Bar].height .. " " .. S[bar.Bar.Name].font .. " " .. S[bar.Bar.Duration].font .. " " .. tostring(S[bar].height),
+        "18 FECMFont12 FECMFont13 nil", "Block: the Tracked Bar slimmer, its text a size smaller, the item frame never resized")
+    Equal(Warm(bar.Bar) .. " | " .. Warm(bar.Icon, bar.Icon.Icon), "4 4 1 0.84 0.59 | BOTTOMLEFT true TOPLEFT 0 -1 | 4 4 1 0.84 0.59 |"
+        .. " BOTTOMLEFT true TOPLEFT 0 -1", "a thin warm line just inside the bar's edge, and inside its icon's art")
+    Equal(Colour(bar.Bar.BarBG) .. " | " .. tostring(S[sheen].shown) .. " " .. tostring(S[box].shown) .. " " .. S[bar.Bar.Pip].alpha
+        .. " | " .. table.concat(S[bar.Bar].barColour, ",") .. " " .. Colour(Piece(bar.Bar, "BACKGROUND", -8)) .. " | "
+        .. S[bar.Bar.Duration].points[1][1], "0.11 0.085 0.075 0.92 | false false 0 | 1,0.5,0.25,1 0 0 0 1 | RIGHT",
+        "on a warmer track, no shine, time box or spark, the fill solid in a black edge, the time on the right")
+    Equal(Warm(health) .. " | " .. Warm(prd.PowerBar) .. " | " .. Colour(art) .. " " .. tostring(S[Piece(health, "OVERLAY", -8)].shown)
+        .. " " .. tostring(S[health].height), "4 4 1 0.84 0.59 | BOTTOMLEFT true TOPLEFT 0 -1 | 4 4 1 0.84 0.59 | BOTTOMLEFT true"
+        .. " TOPLEFT 0 -1 | 0.11 0.085 0.075 0.92 false nil", "the display's bars too, at their own height, on Blizzard's art made the warmer track")
+    Equal(Warm(segments[1]) .. " | " .. Colour(segTrack), "4 4 1 0.84 0.59 | BOTTOMLEFT true TOPLEFT 0 -1 | 0.11 0.085 0.075 0.92",
+        "and each combo point")
+    ns.Set("thickEdges", true)
+    Apply()
+    Equal(Warm(bar.Bar) .. " | " .. Warm(health) .. " | " .. Warm(segments[1]), "4 4 1 0.84 0.59 | BOTTOMLEFT true TOPLEFT 1 -2 | 4 4 1"
+        .. " 0.84 0.59 | BOTTOMLEFT true TOPLEFT 1 -2 | 4 4 1 0.84 0.59 | BOTTOMLEFT true TOPLEFT 1 -2",
+        "Thick edges: the warm line a pixel further in, inside the second black one")
+    ns.Set("thickEdges", false)
+    ns.Set("barStyle", "glass")
+    Apply()
+    Equal(S[bar.Bar].height .. " " .. S[bar.Bar.Name].font .. " " .. S[bar.Bar.Duration].font .. " | " .. Warm(bar.Bar):sub(1, 3) .. " "
+        .. Warm(bar.Icon):sub(1, 3) .. " " .. Warm(health):sub(1, 3) .. " " .. Warm(segments[1]):sub(1, 3) .. " | " .. Colour(bar.Bar.BarBG)
+        .. " " .. Colour(art) .. " " .. tostring(S[sheen].shown) .. " " .. S[bar.Bar.Pip].alpha,
+        "26 FECMFont13 FECMFont15 | 4 0 4 0 4 0 4 0 | 0.08 0.08 0.09 0.85 0.08 0.08 0.09 0.85 true 1",
+        "back to Glass: today's bar, text, track, shine and spark, every warm line hidden")
+
+    -- Colour fade.
+    ns.Set("colourFade", true)
+    Apply()
+    Equal(Fade(fills[1]) .. " | " .. table.concat(S[bar.Bar].barColour, ","), "HORIZONTAL 0.94 0.51 0.12 1 > 1.00 0.75 0.24 1 | 1,0.5,0.25,1",
+        "Colour fade: Orange's own fade, deeper to lighter, over its flat colour")
+    Equal(Fade(fills[2]) .. " | " .. Fade(fills[3]) .. " | " .. Fade(S[segments[1]].fill),
+        "HORIZONTAL 0.00 0.80 0.00 1 > 0.40 1.00 0.40 1 | HORIZONTAL 0.00 0.00 0.80 1 > 0.40 0.40 1.00 1 | HORIZONTAL 0.70 0.16 0.10 1 >"
+        .. " 0.92 0.52 0.48 1", "Blizzard's green and blue on the display, and the combo points' red: a step deeper and a step lighter")
+    local gradients = S[fills[1]].gradients
+    Blizzard(bar, "OnCooldownIDSet")
+    Equal(S[fills[1]].gradients - gradients, 0, "given the same spell again: nothing put on again")
+    -- Blizzard recolouring a bar wipes the fade; it's put on again in that colour.
+    health:SetStatusBarColor(0, .9, 0)
+    Equal(Fade(fills[2]), "HORIZONTAL 0.00 0.72 0.00 1 > 0.40 0.94 0.40 1", "Blizzard recolours the health bar: faded again in its new colour")
+    -- A colour the game keeps secret: flat, never worked on.
+    _G.issecretvalue = function(value) return rawequal(value, SECRETS.number) end
+    health:SetStatusBarColor(SECRETS.number, SECRETS.number, SECRETS.number)
+    Equal(Fade(fills[2]), "flat", "a secret colour stays flat")
+    _G.issecretvalue = nil
+    health:SetStatusBarColor(0, 1, 0)
+    ns.Set("barStyle", "outline")
+    ns.Set("barColour", "class")
+    Apply()
+    Equal(Fade(fills[1]) .. " | " .. Fade(fills[2]), "HORIZONTAL 0.80 0.39 0.03 0.45 > 1.00 0.69 0.42 0.45 | HORIZONTAL 0.00 0.80 0.00 0.45 >"
+        .. " 0.40 1.00 0.40 0.45", "Outline: as see-through as its fill; your class colour a step deeper and lighter")
+    ns.Set("barStyle", "block")
+    ns.Set("barColour", "purple")
+    Apply()
+    Equal(Fade(fills[1]) .. " " .. Warm(bar.Bar):sub(1, 3), "HORIZONTAL 0.42 0.42 0.97 1 > 0.77 0.43 0.97 1 4 4",
+        "with any design: Block in Purple's own fade")
+    -- Your cast bar: the warm line on the bar and its icon, each cast's
+    -- colour faded as it's given (gold, then red once broken off).
+    local cast = ns.CastBar:Make(nil)
+    S[cast.bar].fill = New("Texture", cast.bar)
+    ns.CastBar:Look(cast, false)
+    Equal(Warm(cast.bar):sub(1, 3) .. " " .. Warm(cast, cast.icon) .. " | " .. Colour(cast.bar.background) .. " | " .. Fade(S[cast.bar].fill),
+        "4 4 4 4 1 0.84 0.59 | BOTTOMLEFT true TOPLEFT 0 -1 | 0.11 0.085 0.075 0.92 | HORIZONTAL 0.80 0.56 0.00 1 > 1.00 0.82 0.40 1",
+        "your cast bar: the warm line on it and inside its icon, the warmer track, a cast's gold faded")
+    ns.CastBar:Look(cast, false, true)
+    Equal(Fade(S[cast.bar].fill), "HORIZONTAL 0.68 0.12 0.08 1 > 0.91 0.49 0.46 1", "broken off: its red faded, as it's given")
+    ns.Set("barStyle", "glass")
+    ns.Set("barColour", "orange")
+    ns.Set("colourFade", false)
+    Apply()
+    Equal(Fade(fills[1]) .. " " .. Fade(fills[2]) .. " " .. Fade(fills[3]) .. " " .. Fade(S[segments[1]].fill), "flat flat flat flat",
+        "unticked: every bar flat again")
+    -- A game with no colours to make a gradient from: flat, quietly.
+    _G.CreateColor = nil
+    ns.Set("colourFade", true)
+    Apply()
+    Equal(Fade(fills[1]) .. " " .. Fade(fills[2]) .. " " .. #printed, "flat flat 0", "no CreateColor: flat, nothing said")
+    -- The game refusing a gradient: that bar flat, kept quietly for /ccm
+    -- debug, and every bar flat for the session.
+    _G.CreateColor = function(r, g, b, a) return { r = r, g = g, b = b, a = a } end
+    local SetGradient = Proto.SetGradient
+    function Proto:SetGradient() error("no gradients here") end
+    ns.Skin:ApplyBarLook()
+    Proto.SetGradient = SetGradient
+    ns.Resource:Apply()
+    Equal(Fade(fills[1]) .. " " .. table.concat(S[bar.Bar].barColour, ",") .. " " .. Fade(fills[2]) .. " " .. tostring(ns.Style:Fades()) .. " "
+        .. tostring(ns.Style.fadeError ~= nil) .. " " .. #printed, "flat 1,0.5,0.25,1 flat false true 0",
+        "refused: flat in its colour, every bar after it flat too, nothing said")
+    _G.CreateColor = nil
+    Equal(#printed, 0, "no errors")
 end
 
 -- Nothing was ever left on a sealed frame, even by rawset, which skips the seal.

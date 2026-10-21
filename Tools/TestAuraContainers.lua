@@ -2905,6 +2905,255 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- Only when missing: single buffs only while they're not on you -----------------------------------
+-- A player asked for Only show missing buff by buff (Discord). A buff
+-- ticked Only when missing on the Buffs page shows only while it's missing
+-- from you, greyed in a fixed slot and spot of its own, as Only show missing
+-- does for every buff; the rest stay exactly as they are: the game's packed
+-- icons (only while up), or greyed in their spots with missing ones greyed.
+-- On a packed bar the spots lead the row (centred as if alone, or from the
+-- edge it grows from) and the packed icons follow just past them. Which are
+-- on you is read whenever any buff is ticked, out of a fight only, and only
+-- for the ticked ones; in a fight nothing is read, shown, hidden, moved or
+-- told to the container. Kept per profile, with the repair, a copy of the
+-- profile and a buff taken off. (In a function of its own: this file's main
+-- chunk has little room for more locals.)
+
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    for _, name in ipairs({ "Thorns", "Clearcasting", "Nature's Grace", "Walk on Air" }) do B:SetAura("buff", name, true) end
+    local bar = B:Get("buff")
+    local box = S[bar.container]
+    local function NextFrame()
+        local run = S[B.driver].scripts.OnUpdate
+        if run then run(B.driver, 0) end
+    end
+    local function Changed()
+        Fire("UNIT_AURA", "player")
+        NextFrame()
+    end
+    -- The spots showing, in order, each at its place from the bar's left edge.
+    local function Showing()
+        local out = {}
+        for i = 1, bar.count do
+            local holder = bar.holders[i]
+            if S[holder].shown then
+                local p = S[holder].points[1]
+                out[#out + 1] = S[holder.label].text .. "@" .. (p and ("%g"):format(p[4]) or "nowhere")
+            end
+        end
+        return table.concat(out, ", ")
+    end
+    -- The container's slots and groups switched on.
+    local function On()
+        local out = {}
+        for i = 1, ns.BUFF_SLOTS do
+            if box.slots["b" .. i].enabled then out[#out + 1] = "b" .. i end
+        end
+        for i = 1, bar.groups do
+            if box.groups["g" .. i].enabled then out[#out + 1] = "g" .. i end
+        end
+        return table.concat(out, " ")
+    end
+    -- Where the game's packed icons line up from: the container's point on
+    -- the bar's, and how far along (in the container's own scaled size).
+    local function Packed()
+        local p = S[bar.container].points[1]
+        return p[1] .. " " .. tostring(p[3]) .. " " .. (p[4] and ("%g"):format(p[4]) or "0")
+    end
+    local function Heard() return tostring(S[B.driver].events.UNIT_AURA == true) end
+    -- Thorns on you at another druid's rank, and Nature's Grace up.
+    PlayerAuras[9910], PlayerAuras[16886] = true, true
+
+    -- Off (the default): packed as before, nothing read or heard.
+    local reads = AuraReads
+    Equal(On() .. " | " .. Showing() .. " | " .. Packed() .. " | " .. (AuraReads - reads) .. " " .. Heard() .. " "
+        .. tostring(B:OnlyWhenMissing("buff", "Thorns")), "g1 g2 g3 g4 |  | CENTER CENTER 0 | 0 false false",
+        "off at first: packed as before, nothing read, your buffs not heard")
+    Equal(tostring(B:SetOnlyWhenMissing("debuff", "Thorns", true)) .. " " .. tostring(B:SetOnlyWhenMissing("buff", "Wrath", true)),
+        "false false", "not on the Debuffs bar, nor for a spell not on the Buffs bar")
+
+    -- Thorns ticked, on you: it has no spot and its packed icon goes; the
+    -- rest packed as before. Only Thorns is read; your buffs are heard.
+    local asked, get = {}, C_UnitAuras.GetPlayerAuraBySpellID
+    C_UnitAuras.GetPlayerAuraBySpellID = function(id)
+        asked[id] = true
+        return get(id)
+    end
+    Equal(tostring(B:SetOnlyWhenMissing("buff", "Thorns", true)) .. " " .. tostring(B:OnlyWhenMissing("buff", "Thorns")) .. " "
+        .. tostring(ns.OnlyWhenMissing("buff").Thorns), "true true true", "ticked for Thorns, kept in the profile")
+    C_UnitAuras.GetPlayerAuraBySpellID = get
+    local others = asked[16870] or asked[16886] or asked[1308663]
+    Equal(On() .. " | " .. Showing() .. " | " .. Packed() .. " | " .. Heard() .. " " .. tostring(asked[9910] == true) .. " "
+        .. tostring(others == true), "g2 g3 g4 |  | CENTER CENTER 0 | true true false",
+        "Thorns on you: no spot, its packed icon off, the rest packed as before; only Thorns read, your buffs heard")
+    Equal(box.groups.g2.layout.layoutIndex .. " " .. tostring(box.groups.g2.filters.includeSpellIDs[16870]) .. " "
+        .. box.groups.g4.layout.layoutIndex, "2 true 4", "the others' packed icons as they were, in your order")
+
+    -- Thorns gone: greyed in its spot, centred as if alone, its slot on to
+    -- light if cast in a fight; the packed icons just past it.
+    PlayerAuras[9910] = nil
+    Changed()
+    local held = bar.holders[1]
+    Equal(On() .. " | " .. Showing() .. " | " .. Packed() .. " | " .. tostring(S[held.icon].desaturated) .. " " .. S[held.icon].alpha
+        .. " " .. tostring(box.slots.b1.filters.includeSpellIDs[467]) .. " " .. tostring(Last(box.slots.b1.button, "SetAllPoints") == held),
+        "b1 g2 g3 g4 | Thorns@60 | LEFT LEFT 100 | true 0.45 true true",
+        "Thorns gone: greyed in its spot in the middle, its slot on over it, the packed icons from just past it")
+    B:SetOption("buff", "grow", "right")
+    local right = Showing() .. " " .. Packed()
+    B:SetOption("buff", "grow", "left")
+    Equal(right .. " | " .. Showing() .. " " .. Packed(), "Thorns@0 LEFT LEFT 40 | Thorns@120 RIGHT RIGHT -40",
+        "growing right: from the left edge, the packed icons after it; growing left: from the right edge, the packed icons before it")
+    B:SetOption("buff", "grow", "centre")
+
+    -- Two ticked and missing: side by side in your order, the packed icons
+    -- past both.
+    B:SetOnlyWhenMissing("buff", "Walk on Air", true)
+    local two = On() .. " | " .. Showing() .. " | " .. Packed()
+    B:SetOption("buff", "grow", "left")
+    Equal(two .. " || " .. Showing() .. " " .. Packed(), "b1 b4 g2 g3 | Thorns@40, Walk on Air@80 | LEFT LEFT 120 || Thorns@120,"
+        .. " Walk on Air@80 RIGHT RIGHT -80", "two missing: side by side, the packed icons past them; growing left, the first on the right")
+    B:SetOption("buff", "grow", "centre")
+
+    -- Bigger icons: the packed icons' container is scaled to their size, so
+    -- its offset is in its own size, and a spot's numbers (its icon is in
+    -- that container) are sized as the packed icons' are.
+    local size = ns.BarData("buff").size
+    B:SetOption("buff", "size", 45)
+    Equal(Showing() .. " | " .. Packed() .. " | " .. box.scale .. " " .. held.size .. " "
+        .. tostring(Last(held.slot.cooldown, "SetCountdownFont") == ns.Style:Countdown(36)) .. " " .. S[held].width,
+        "Thorns@49, Walk on Air@98 | LEFT LEFT 117.6 | 1.25 36 true 45",
+        "icons at 45: the spots at 45, the packed icons from past them in the container's size, the spot's numbers as theirs")
+    B:SetOption("buff", "showMissing", true)
+    Equal(box.scale .. " " .. held.size .. " " .. tostring(Last(held.slot.cooldown, "SetCountdownFont") == ns.Style:Countdown(45)),
+        "1 45 true", "with missing ones greyed (no packed icons): the container at its own size, the numbers at 45")
+    B:SetOption("buff", "showMissing", false)
+    B:SetOption("buff", "size", size)
+    Equal(tostring(B:MissingSpot("buff", "Thorns")) .. " " .. tostring(B:MissingSpot("buff", "Clearcasting")), "true false",
+        "Glow when missing can go on Thorns's spot; Clearcasting, packed, has none")
+
+    -- With missing ones greyed: every other buff in its spot as before, a
+    -- ticked one only while it's missing, the spots showing closed up.
+    B:SetOption("buff", "showMissing", true)
+    local greyed = On() .. " | " .. Showing()
+    PlayerAuras[467] = true
+    Changed()
+    Equal(greyed .. " || " .. On() .. " | " .. Showing(), "b1 b2 b3 b4 | Thorns@0, Clearcasting@40, Nature's Grace@80, Walk on Air@120"
+        .. " || b2 b3 b4 | Clearcasting@20, Nature's Grace@60, Walk on Air@100",
+        "missing ones greyed: every buff in its spot, Thorns too while missing; cast, it goes and the rest close up")
+    -- A border round whole bars: none while a buff is ticked, as its spot
+    -- comes and goes.
+    local border = ns.Get("iconBorder")
+    ns.Set("iconBorder", "bar")
+    local ring = tostring((B:BarDecorFor("buff")))
+    B:SetOnlyWhenMissing("buff", "Thorns", false)
+    B:SetOnlyWhenMissing("buff", "Walk on Air", false)
+    ring = ring .. " " .. tostring((B:BarDecorFor("buff"))) .. " " .. Heard()
+    B:SetOnlyWhenMissing("buff", "Thorns", true)
+    B:SetOnlyWhenMissing("buff", "Walk on Air", true)
+    Equal(ring, "false true false", "no border round the whole bar while a buff is ticked; none ticked: as before, nothing heard")
+    -- Another character's buff ticked in a shared profile (a paladin's Seal
+    -- of Light, joined to Walk on Air) has no icon here, so nothing comes and
+    -- goes: the border stays round the whole bar, and packed, Walk on Air's
+    -- Glow when missing still has no spot to go on.
+    B:SetOnlyWhenMissing("buff", "Thorns", false)
+    B:SetOnlyWhenMissing("buff", "Walk on Air", false)
+    local spells = ns.BarData("buff").spells
+    spells[#spells + 1] = "Seal of Light"
+    ns.Joins("buff")["Seal of Light"] = true
+    ns.OnlyWhenMissing("buff")["Seal of Light"] = true
+    B:Changed()
+    local seal = tostring(ns.Spells:ForMe("Seal of Light", "buff")) .. " " .. bar.count .. " " .. tostring(next(bar.only)) .. " "
+        .. tostring((B:BarDecorFor("buff"))) .. " " .. tostring(bar.decorState)
+    B:SetOption("buff", "showMissing", false)
+    seal = seal .. " " .. tostring(B:MissingSpot("buff", "Walk on Air"))
+    B:SetOption("buff", "showMissing", true)
+    B:SetAura("buff", "Seal of Light", false)
+    Equal(seal .. " | " .. table.concat(spells, ",") .. " " .. tostring(ns.OnlyWhenMissing("buff")["Seal of Light"]),
+        "false 4 nil true b false | Thorns,Clearcasting,Nature's Grace,Walk on Air nil",
+        "another character's buff ticked: no icon here, the border kept, no glow spot for the buff joined to it; taken off, its tick goes")
+    B:SetOnlyWhenMissing("buff", "Thorns", true)
+    B:SetOnlyWhenMissing("buff", "Walk on Air", true)
+    ns.Set("iconBorder", border)
+    B:SetOption("buff", "showMissing", false)
+
+    -- A fight: nothing read, shown, hidden, moved or told to the container.
+    -- Walk on Air, missing as it starts, lights in its slot if cast; Thorns,
+    -- on you, stays hidden though it drops. Both caught up as it ends.
+    Equal(On() .. " | " .. Showing() .. " | " .. Packed(), "b4 g2 g3 | Walk on Air@60 | LEFT LEFT 100", "before the fight: Walk on Air missing")
+    watched[bar] = true
+    for _, holder in ipairs(bar.holders) do watched[holder] = true end
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local calls = containerCallsInCombat
+    reads = AuraReads
+    PlayerAuras[467], PlayerAuras[1308663] = nil, true
+    Fire("UNIT_AURA", "player")
+    for _ = 1, 5 do NextFrame() end
+    B:SetUnlocked(true)
+    B:SetUnlocked(false)
+    local toggled = S[bar].combatToggle == true
+    for _, holder in ipairs(bar.holders) do toggled = toggled or S[holder].combatToggle == true end
+    Equal(Heard() .. " | " .. On() .. " | " .. Showing() .. " | " .. Packed() .. " | " .. (containerCallsInCombat - calls) .. " "
+        .. (AuraReads - reads) .. " " .. tostring(toggled), "false | b4 g2 g3 | Walk on Air@60 | LEFT LEFT 100 | 0 0 false",
+        "in a fight: not heard, nothing read, shown, hidden, moved or switched; Walk on Air's slot stays on over its spot")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(On() .. " | " .. Showing() .. " | " .. Packed() .. " | " .. Heard(), "b1 g2 g3 | Thorns@60 | LEFT LEFT 100 | true",
+        "as it ends: Thorns, gone in the fight, shows; Walk on Air, cast in it, goes; heard again")
+    watched[bar] = nil
+    for _, holder in ipairs(bar.holders) do watched[holder] = nil end
+
+    -- Arranging the bars: every ticked one, to place the bar by.
+    B:SetUnlocked(true)
+    local unlocked = On() .. " | " .. Showing() .. " | " .. Packed()
+    B:SetUnlocked(false)
+    Equal(unlocked .. " || " .. On() .. " | " .. Showing(), "b1 b4 g2 g3 | Thorns@40, Walk on Air@80 | LEFT LEFT 120 || b1 g2 g3 | Thorns@60",
+        "unlocked: both ticked ones, the packed icons past them; locked: only the missing one")
+
+    -- /ccm debug says which are ticked and what each was last read as.
+    SlashCmdList.FECM("debug")
+    local report = S[FECMDebugFrame.edit].text
+    FECMDebugFrame:Hide()
+    Equal(tostring(report:find("1. Thorns | spells [%d,]+ | only when missing | on you false\n  2. Clearcasting | spells 16870\n") ~= nil),
+        "true", "the debug report says which are ticked, and what each was last read as")
+
+    -- With Only show missing (every buff), the ticks have nothing to add.
+    B:SetOption("buff", "onlyMissing", true)
+    Equal(tostring(ns.BuffBar:Flagged("buff", ns.BarData("buff"))) .. " " .. tostring(next(bar.only)) .. " | " .. On() .. " | " .. Showing(),
+        "false nil | b1 b2 | Thorns@40, Clearcasting@80", "with Only show missing: every buff only while missing, the ticks aside")
+    B:SetOption("buff", "onlyMissing", false)
+
+    -- Kept in a copy of the profile, on its own there; a buff taken off the
+    -- bar loses its tick; a reload repairs what's kept.
+    local own = ns.ProfileName()
+    ns.CopyProfile("Raid")
+    local copied = tostring(B:OnlyWhenMissing("buff", "Walk on Air"))
+    B:SetOnlyWhenMissing("buff", "Walk on Air", false)
+    local db = ForeverEnhancedCooldownManagerDB
+    Equal(copied .. " " .. tostring(db.profiles[own].onlyWhenMissing.buff["Walk on Air"]) .. " "
+        .. tostring(db.profiles.Raid.onlyWhenMissing.buff["Walk on Air"]), "true true nil",
+        "a copy keeps the ticks, each profile its own after")
+    ns.UseProfile(own)
+    B:SetAura("buff", "Thorns", false)
+    B:SetAura("buff", "Thorns", true)
+    Equal(tostring(B:OnlyWhenMissing("buff", "Thorns")) .. " " .. tostring(B:OnlyWhenMissing("buff", "Walk on Air")), "false true",
+        "Thorns taken off and put back: no longer ticked; Walk on Air still is")
+    local store = db.profiles[own].onlyWhenMissing
+    store.buff.Wrath, store.buff.Clearcasting, store.debuff, store.cd = true, "yes", { Moonfire = true }, { Thorns = true }
+    Fresh()
+    ns = Load(db)
+    B = ns.Bars
+    store = db.profiles[own].onlyWhenMissing
+    Equal(tostring(B:OnlyWhenMissing("buff", "Walk on Air")) .. " " .. tostring(store.buff.Wrath) .. " " .. tostring(store.buff.Clearcasting)
+        .. " " .. tostring(store.debuff) .. " " .. tostring(store.cd) .. " " .. tostring(S[B.driver].events.UNIT_AURA == true),
+        "true nil nil nil nil true",
+        "after a reload: Walk on Air still ticked; a name not on the bar, anything but true and other bars dropped; heard")
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- One icon per Curse, Bane or Sting (1.8.1, a player's idea): only one of
 -- each family can be yours on a target, so on the Debuffs bar ones side by
 -- side are one icon, and one added goes beside its family, on by default;
@@ -3211,7 +3460,17 @@ end)()
     B:SetOption("debuff", "tickAt", "CENTER")
     top = S[ticks.text].points[1] or {}
     Equal(tostring(top[1]) .. " " .. tostring(top[2]) .. " " .. tostring(top[3]), "CENTER 0 0", "the centre: as before")
-    for field, value in pairs({ tickAt = "TOPLEFT", tickColour = "white", tickSize = 100, tickEdge = false }) do
+    -- Custom (the colour pop-up): its own colour, kept beside it; a new one
+    -- drawn at once, as a named one is.
+    ns.BarData("debuff").tickCustom = "336699"
+    B:SetOption("debuff", "tickColour", ns.CUSTOM)
+    local custom = ("%.1f,%.1f,%.1f"):format(S[ticks.text].colour[1], S[ticks.text].colour[2], S[ticks.text].colour[3])
+    ns.BarData("debuff").tickCustom = "ff0000"
+    B:SetOption("debuff", "tickColour", ns.CUSTOM)
+    Equal(custom .. " " .. ("%.1f,%.1f,%.1f"):format(S[ticks.text].colour[1], S[ticks.text].colour[2], S[ticks.text].colour[3])
+        .. " " .. ("%.1f"):format(S[bar.groupTicks[2][1].text].colour[1]), "0.2,0.4,0.6 1.0,0.0,0.0 1.0",
+        "a custom colour on the count, a new one at once, on packed icons too")
+    for field, value in pairs({ tickAt = "TOPLEFT", tickColour = "white", tickSize = 100, tickEdge = false, tickCustom = "" }) do
         B:SetOption("debuff", field, value)
     end
     -- Kept over a reload; a name taken off the bar goes from the list too.
@@ -3333,6 +3592,64 @@ end)()
     Equal(tostring(corpse) .. " " .. tostring(S[B.driver].events.UNIT_FLAGS), "0 true", "your target dead: no glow (heard as it dies)")
     _G.C_StringUtil, _G.C_CurveUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty =
         before[1], before[2], before[3], before[4]
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Icon details on the aura containers' icons -------------------------------------------------------
+-- The swipe, the edge line and the countdown's size, colour and spot reach
+-- the Buffs and Debuffs bars' icons (packed and fixed) and the buff and
+-- debuff times over the cooldown icons: as each is made, and after a change,
+-- out of a fight only, as their borders are (a change made in one waits for
+-- it to end). At the defaults their numbers stay where the game puts them.
+
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    B:Assign("Wrath", "cd")
+    B:SetOption("cd", "showAuras", true)
+    B:SetOption("debuff", "showMissing", true)
+    B:Changed()
+    local packed = B:Get("buff").groupParts[1]
+    local fixed = B:Get("debuff").holders[1].slot
+    local over = B:Get("cd").auraAnchors[1].parts[1]
+    local own = B:Get("cd").icons[1].cooldown
+    local function Looks(cooldown)
+        local swipe, numbers = S[cooldown].last.SetSwipeColor, S[cooldown].numbers
+        local at = numbers and S[numbers].points[1]
+        return ("%g,%g,%g,%g"):format(swipe[1], swipe[2], swipe[3], swipe[4]) .. " " .. tostring(Last(cooldown, "SetDrawEdge")) .. " "
+            .. tostring(Last(cooldown, "SetCountdownFont")) .. " " .. (at and (at[1] .. " " .. at[4] .. " " .. at[5]) or "game's")
+    end
+    local function All() return Looks(packed.cooldown) .. " | " .. Looks(fixed.cooldown) .. " | " .. Looks(over.cooldown) end
+    Equal(All() .. " | " .. tostring(Last(packed.cooldown, "SetReverse")), "0,0,0,0.7 false FECMFont18 game's | 0,0,0,0.7 false FECMFont18"
+        .. " game's | 0,0,0,0.7 false FECMFont18 game's | true", "at the defaults: each as it always was, its numbers where the game puts them")
+    -- Changed in a fight: your own icons at once, the containers' as it ends.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    for key, value in pairs({ swipeColour = "blue", swipeSeeThrough = 20, countdownSize = 50, countdownColour = "green",
+        countdownSpot = "BOTTOMLEFT", swipeEdge = true, edgeColour = "orange" }) do ns.Set(key, value) end
+    ns.Style:ApplyDetails()
+    local fight = All() .. " || " .. Looks(own)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight, "0,0,0,0.7 false FECMFont18 game's | 0,0,0,0.7 false FECMFont18 game's | 0,0,0,0.7 false FECMFont18 game's || 0.24,0.55,0.88,0.8"
+        .. " true FECMCountdown9 BOTTOMLEFT 1 1", "in a fight: your own icons at once, the containers' icons left alone")
+    Equal(All() .. " | " .. ("%g,%g,%g"):format(S[packed.cooldown].last.SetEdgeColor[1], S[packed.cooldown].last.SetEdgeColor[2],
+        S[packed.cooldown].last.SetEdgeColor[3]), "0.24,0.55,0.88,0.8 true FECMCountdown9 BOTTOMLEFT 1 1 | 0.24,0.55,0.88,0.8 true"
+        .. " FECMCountdown9 BOTTOMLEFT 1 1 | 0.24,0.55,0.88,0.8 true FECMCountdown9 BOTTOMLEFT 1 1 | 1,0.5,0.25",
+        "as it ends: a blue swipe at 80%, the orange edge line, small green numbers in the bottom left, on each")
+    -- New icons come in them too, as they're made.
+    B:SetAura("debuff", "Wrath", true)
+    B:Changed()
+    local second = B:Get("debuff").holders[2].slot
+    Equal(Looks(second.cooldown), "0.24,0.55,0.88,0.8 true FECMCountdown9 BOTTOMLEFT 1 1", "a new icon made in the details picked")
+    -- Back to the defaults: each as it always was, its numbers back in the middle.
+    for _, key in ipairs(ns.ICON_DETAILS) do ns.Set(key, ns.DEFAULTS[key]) end
+    ns.Style:ApplyDetails()
+    Equal(All(), "0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0",
+        "the defaults again: as they always were, the numbers in the middle")
     Equal(#printed, 0, "no errors")
 end)()
 

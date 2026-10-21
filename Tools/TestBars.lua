@@ -3061,10 +3061,11 @@ local rows = w.eachRows
 Equal(S[rows[1].name].text .. "," .. S[rows[2].name].text, "Clearcasting,Power Word: Fortitude", "your Tracked Bars, in Blizzard's order")
 Equal(Last(rows[1].swatches[6].icon, "SetAtlas", 1), "classicon-druid", "each bar's Class swatch shows the icon too")
 Equal(S[rows[1].chosen].text, "Default", "each uses the colour for all at first")
--- Round its swatches, a row says what it's for.
+-- Round its swatch, a row says what it's for.
 local function Hover(region, script) if S[region].scripts[script] then S[region].scripts[script](region) end end
 Hover(rows[1], "OnEnter")
-Equal(S[w.note].text .. " | " .. tostring(Last(rows[1], "EnableMouse")), "Clearcasting: click a colour on the right for this bar alone. | true",
+Equal(S[w.note].text .. " | " .. tostring(Last(rows[1], "EnableMouse")),
+    "Clearcasting: click the swatch on the right for a colour for this bar alone. | true",
     "hovering a bar's row, its note")
 Hover(rows[1], "OnLeave")
 Equal(S[w.eachEmpty].shown, false, "no note while there are bars")
@@ -6191,7 +6192,7 @@ Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
     -- Everything fits the page, top to bottom, none overlapping.
     local tray = S[cp.options].points[1][2]
     local top = -S[tray].points[1][3] + S[tray].height - S[cp.options].points[1][5]
-    local rows = { cp.shown, cp.swing, cp.swatches[1], cp.swingSwatches[1], cp.height, cp.icon, cp.name, cp.timer }
+    local rows = { cp.shown, cp.swing, cp.colour, cp.swingColour, cp.height, cp.icon, cp.name, cp.timer }
     local bottom, clear = 0, true
     for _, row in ipairs(rows) do
         local y = -S[row].points[1][3]
@@ -7281,27 +7282,32 @@ end)()
         and nextSteps[1].version == "1.2.0", true,
         "1.2.0's steps, Healthstones and potions and Dim when ready among them")
     Equal(Titles(Tour:News("1.0.0")), NEW .. ", " .. NEXT, "from 1.0.0 to this copy: the three new steps, then the next update's")
-    -- The newest steps there are: 1.8.1's three. 1.6.0's before them: here only Dim on cooldown,
-    -- on the Cooldowns page: this druid knows no form, so Swap your icons stays out (Tools/TestForms.lua
-    -- and Tools/TestPulse.lua tour it). 1.5.0's before those: here only Ready glow, as the Cooldown
-    -- pulse's page isn't loaded (Tools/TestPulse.lua tours its steps).
-    local latest, six, pulse = {}, {}, {}
+    -- The newest steps there are: 1.9.0's five. 1.8.1's three before them, and 1.6.0's before
+    -- those: here only Dim on cooldown, on the Cooldowns page: this druid knows no form, so Swap
+    -- your icons stays out (Tools/TestForms.lua and Tools/TestPulse.lua tour it). 1.5.0's before
+    -- those: here only Ready glow, as the Cooldown pulse's page isn't loaded (Tools/TestPulse.lua
+    -- tours its steps).
+    local latest, eight, six, pulse = {}, {}, {}, {}
     for _, step in ipairs(nextSteps) do
-        if step.version == "1.8.1" then latest[#latest + 1] = step end
+        if step.version == "1.9.0" then latest[#latest + 1] = step end
+        if step.version == "1.8.1" then eight[#eight + 1] = step end
         if step.version == "1.6.0" then six[#six + 1] = step end
         if step.version == "1.5.0" then pulse[#pulse + 1] = step end
     end
-    local LATEST = Titles(latest)
-    local BEFORE = "Ready glow, Dim on cooldown, "
-    Equal(tostring(#ns.KnownForms()) .. " " .. LATEST .. " | " .. Titles(six) .. " | " .. Titles(pulse) .. " | "
+    local LATEST, EIGHT = Titles(latest), Titles(eight)
+    local BEFORE = "Ready glow, Dim on cooldown, " .. EIGHT .. ", "
+    Equal(tostring(#ns.KnownForms()) .. " " .. LATEST .. " | " .. EIGHT .. " | " .. Titles(six) .. " | " .. Titles(pulse) .. " | "
         .. tostring(NEXT:sub(-#LATEST - #BEFORE) == BEFORE .. LATEST),
-        "0 One icon each, Glow when missing, Count ticks | Dim on cooldown | Ready glow | true",
-        "1.8.1's three, the last of them, straight after 1.6.0's Dim on cooldown and 1.5.0's Ready glow (no form known here)")
-    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.6.0")) .. "|"
-        .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News("1.4.4")),
-        LATEST .. "|" .. LATEST .. "|" .. LATEST .. "|Dim on cooldown, " .. LATEST .. "|" .. BEFORE .. LATEST,
-        "no version seen, or one that isn't: the latest update's, the newest steps there are, as after 1.6.0; after 1.5.9"
-        .. " 1.6.0's too, after 1.4.4 1.5.0's too")
+        "0 Only when missing, Colour swatch, Icon details, Block design, Colour fade | One icon each, Glow when missing, Count ticks"
+        .. " | Dim on cooldown | Ready glow | true",
+        "1.9.0's five, the last of them, straight after 1.8.1's three, 1.6.0's Dim on cooldown and 1.5.0's Ready glow"
+        .. " (no form known here)")
+    Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.8.2")) .. "|"
+        .. Titles(Tour:News("1.6.0")) .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News("1.4.4")),
+        LATEST .. "|" .. LATEST .. "|" .. LATEST .. "|" .. EIGHT .. ", " .. LATEST .. "|Dim on cooldown, " .. EIGHT .. ", " .. LATEST
+        .. "|" .. BEFORE .. LATEST,
+        "no version seen, or one that isn't: the latest update's, the newest steps there are, as after 1.8.2; after 1.6.0"
+        .. " 1.8.1's too, after 1.5.9 1.6.0's too, after 1.4.4 1.5.0's too")
     Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW .. ", " .. NEXT,
         "versions skipped come together: the basics from 1.0.0, then the new ones")
     Equal(Titles(Tour:News("dev")) .. "|" .. Titles(Tour:News(U)), "|", "nothing when nothing is newer than what was seen")
@@ -7347,7 +7353,7 @@ end)()
     local before = Titles(Tour:News("1.5.8")) .. "|" .. Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("1.4.4"))
     Running("1.6.0")
     Equal(fromSource .. "|" .. before .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News(nil)),
-        SIXTH .. ", " .. LATEST .. "||Ready glow|Ready glow|" .. SIXTH .. "|" .. SIXTH,
+        SIXTH .. ", " .. EIGHT .. ", " .. LATEST .. "||Ready glow|Ready glow|" .. SIXTH .. "|" .. SIXTH,
         "after 1.5.9: 1.6.0's steps and the later ones from the source; 1.5.9 never shows them (by hand its last, 1.5.0's);"
         .. " 1.6.0 shows its own, by hand too")
     Equal(Titles(Tour:News("1.4.4")) .. "|" .. Titles(Tour:News("0.9.0")):sub(-#SIXTH - 12), "Ready glow, " .. SIXTH .. "|Ready glow, " .. SIXTH,
@@ -7358,8 +7364,15 @@ end)()
     Running("1.8.0")
     local older = Titles(Tour:News("1.6.0")) .. "|" .. Titles(Tour:News(nil))
     Running("1.8.1")
-    Equal(older .. "|" .. Titles(Tour:News("1.8.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. SIXTH .. "|" .. LATEST .. "|" .. LATEST,
+    Equal(older .. "|" .. Titles(Tour:News("1.8.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. SIXTH .. "|" .. EIGHT .. "|" .. EIGHT,
         "1.8.0 never shows 1.8.1's (by hand 1.6.0's); 1.8.1 after 1.8.0 shows its three, by hand too")
+    -- 1.9.0's, numbered before their release: 1.8.2 (which added none) never
+    -- shows them, by hand 1.8.1's; 1.9.0 does.
+    Running("1.8.2")
+    local before190 = Titles(Tour:News("1.8.1")) .. "|" .. Titles(Tour:News(nil))
+    Running("1.9.0")
+    Equal(before190 .. "|" .. Titles(Tour:News("1.8.2")) .. "|" .. Titles(Tour:News(nil)), "|" .. EIGHT .. "|" .. LATEST .. "|" .. LATEST,
+        "1.8.2 never shows 1.9.0's (by hand 1.8.1's); 1.9.0 after 1.8.2 shows its five, by hand too")
     Running(nil)
 
     -- After an update that added steps: What's new by itself, and Got it goes

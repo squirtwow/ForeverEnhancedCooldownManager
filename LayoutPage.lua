@@ -922,7 +922,7 @@ function ns.BuildLayoutPage(window, page, width, height)
             Stacked(Draws(Row(key)), y, Tile(key))
             y = y + Tile(key) + gap
         end
-        local health, power = ns.Get("prdHealth"), ns.Get("prdPower")
+        local health, power = ns.ColourKey("prdHealth"), ns.ColourKey("prdPower")
         T:Fill(display.health, health ~= "default" and ns.Style:BarColour(health) or HEALTH)
         T:Fill(display.power, power ~= "default" and ns.Style:BarColour(power) or POWER)
         display.up:SetUsable(L:CanMoveDisplay(-1))

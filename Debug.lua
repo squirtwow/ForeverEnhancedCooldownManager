@@ -57,6 +57,9 @@ function ns.DebugReport()
         Say(class), Say(UnitLevel and UnitLevel("player")), tostring(InCombatLockdown())))
     Add(("Look: icon border %s, shadow %s, ready glow %s"):format(tostring(ns.Get("iconBorder")), tostring(ns.Get("iconShadow")),
         tostring(ns.Get("readyGlow"))))
+    -- The design, and whether bars fade (or why not: the game refused a gradient).
+    Add(("Bars: design %s, colour fade %s%s"):format(tostring(ns.Get("barStyle")), tostring(ns.Get("colourFade")),
+        ns.Style and ns.Style.fadeError and (", refused: " .. ns.Style.fadeError) or ""))
     if ns.Style then Fonts(Add) end
     if ns.Bars and ns.Bars.Report then ns.Bars:Report(Add, Say) end
     return table.concat(lines, "\n")

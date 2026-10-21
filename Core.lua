@@ -60,8 +60,9 @@ ns.DEFAULTS = {
     listItems = false, -- show trinkets and bag items in the /ccm spell list
     listRanks = false, -- show every rank you know as its own row
     accent = "purple", -- the /ccm window's accent colour (orange until 1.4.4; purple keeps it apart from other addons)
-    barStyle = "glass", -- Blizzard's Tracked Bars: glass, split or outline
+    barStyle = "glass", -- Blizzard's Tracked Bars: glass, split, outline or block
     barColour = "orange", -- and their colour
+    colourFade = false, -- every bar's fill fades from a deeper shade of its colour into a lighter one (Look page)
     barTexture = "flat", -- the fill of the addon's bars and the restyled ones: flat, or one of the game's (Look page)
     font = FONT, -- the numbers and text on icons and bars: Friz Quadrata, or another of the game's fonts
     prdSkin = true, -- Blizzard's Personal Resource Display in the same design
@@ -157,6 +158,18 @@ ns.DEFAULTS = {
     barDarkness = 0, -- the empty part of your bars and the restyled ones: 0 as before, 100 solid black (Look page)
     thickEdges = false, -- their edges 2px instead of 1px
     readyGlow = "proc", -- a ready reactive ability on your bars: Blizzard's proc glow, or a plain gold edge ("edge")
+    -- Icon details (the Look page's Icon details panel): the cooldown
+    -- swipe's colour and how much of the icon shows through it, the
+    -- countdown numbers' size, colour and spot, and a line along the
+    -- swipe's edge. Each draws the icons as they always looked until it's
+    -- changed: your bars', and Blizzard's while the look is on them.
+    swipeColour = "black",
+    swipeSeeThrough = 30, -- percent of the icon showing through the swipe (70% dark, as Blizzard's own)
+    countdownSize = 100, -- percent of the automatic size (about half the icon)
+    countdownColour = "white", -- a count colour (ns.COUNT_COLOURS), or Custom
+    countdownSpot = "CENTER", -- where on the icon (ns.COUNTDOWN_SPOTS)
+    swipeEdge = false, -- the edge line on every icon; off, none on yours and Blizzard's own on theirs
+    edgeColour = "game", -- its colour: the game's own line, or tinted in a bar colour
     keybinds = false, -- each Cooldowns/Utility icon's key, from your action bars (Look page)
     keybindPosition = "BOTTOM", -- where on the icon: BOTTOM, TOPLEFT, TOP or TOPRIGHT
     keybindSize = 100, -- its size, as a share of the automatic size that follows the icon
@@ -171,6 +184,24 @@ ns.DEFAULTS = {
     talentSwitch = false, -- another talent tree taking the lead in points switches to its role's profile (profile menu)
     updateNotice = true, -- a line in chat when a newer version is out (General page; SquirtVersions.lua)
 }
+-- Custom colours (a colour row's pop-up, Custom): each colour setting can
+-- hold "custom", its own colour kept beside it as six hex digits in the
+-- setting's name with Custom after it ("" until one is picked). The named
+-- colours, your class colour and "click again for default" work as before,
+-- and picking a named one keeps the custom colour for next time. The
+-- Debuffs bar's tick count keeps its own the same way (tickCustom).
+ns.CUSTOM = "custom"
+ns.CUSTOM_NAME = "Custom"
+ns.COLOUR_SETTINGS = { "barColour", "prdHealth", "prdPower", "prdComboColour", "castColour", "castTickColour",
+    "castLatencyColour", "swingColour", "pullColour", "warningColour", "emoteColour", "bossColour",
+    "swipeColour", "countdownColour", "edgeColour" }
+for _, key in ipairs(ns.COLOUR_SETTINGS) do ns.DEFAULTS[key .. "Custom"] = "" end
+
+-- Six hex digits as kept (lower case), or nil for anything else.
+function ns.Hex(value)
+    if type(value) ~= "string" or not value:find("^%x%x%x%x%x%x$") then return nil end
+    return value:lower()
+end
 ns.DECOR_KEYS = { "off", "icon", "bar" }
 ns.DECOR_NAMES = { off = "Off", icon = "Each icon", bar = "Whole bar" }
 ns.READY_GLOW_KEYS = { "proc", "edge" }
@@ -189,6 +220,10 @@ ns.RAID_SIZE = { 50, 200, 100 } -- each Raid Timers size (percent)
 ns.RAID_SIZE_ALL = { 50, 150, 100 } -- all of them together, so the biggest is three times Blizzard's
 ns.TEXT_SIZE = { 8, 16, 10 } -- the display's health and power text
 ns.TEXT_BAR_SIZE = { 0, ns.TEXT_SIZE[2], 0 } -- a bar's own size for it; 0 goes by prdTextSize
+-- Icon details: how much of an icon shows through the swipe (all of it at
+-- 100: no swipe), and the countdown's size, in percent.
+ns.SWIPE_SEE_THROUGH = { 0, 100, 30 }
+ns.COUNTDOWN_SIZE = { 50, 150, 100 }
 -- Cooldown pulse.
 ns.PULSE_SIZE = { 64, 512, 272 }
 ns.PULSE_TIME = { 3, 20, 10 } -- tenths of a second: 0.3 to 2 seconds
@@ -204,11 +239,12 @@ local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTickWidth = ns.CAST_TICK_WIDT
     pulseSeeThrough = ns.PULSE_SEE_THROUGH, pulseGrow = ns.PULSE_GROW,
     pulseX = ns.PULSE_PLACE, pulseY = ns.PULSE_PLACE, minimapX = ns.MINIMAP_PLACE, minimapY = ns.MINIMAP_PLACE,
     prdTextSize = ns.TEXT_SIZE, prdHealthSize = ns.TEXT_BAR_SIZE, prdPowerSize = ns.TEXT_BAR_SIZE,
-    prdExtraSize = ns.TEXT_BAR_SIZE, prdEnergySize = ns.TEXT_BAR_SIZE }
+    prdExtraSize = ns.TEXT_BAR_SIZE, prdEnergySize = ns.TEXT_BAR_SIZE,
+    swipeSeeThrough = ns.SWIPE_SEE_THROUGH, countdownSize = ns.COUNTDOWN_SIZE }
 -- Choices a text setting may hold.
 ns.ACCENT_KEYS = { "orange", "blue", "teal", "purple", "green" }
-ns.BAR_STYLE_KEYS = { "glass", "split", "outline" }
-ns.BAR_STYLE_NAMES = { glass = "Glass", split = "Split", outline = "Outline" }
+ns.BAR_STYLE_KEYS = { "glass", "split", "outline", "block" }
+ns.BAR_STYLE_NAMES = { glass = "Glass", split = "Split", outline = "Outline", block = "Block" }
 ns.BAR_COLOUR_KEYS = { "orange", "charcoal", "blue", "green", "purple", "class" } -- your class colour last
 ns.BAR_COLOUR_NAMES = { orange = "Orange", class = "Class", charcoal = "Charcoal", blue = "Blue", green = "Green", purple = "Purple" }
 -- A channel's tick marks: white, black or a bar colour; notches or lines.
@@ -256,6 +292,29 @@ ns.TEXT_FORMAT_NAMES = { none = "None", value = "Value", both = "Value / max", p
 ns.TEXT_NUMBER_KEYS = { "full", "short" }
 ns.TEXT_NUMBER_NAMES = { full = "4,321", short = "4.3K" }
 ns.TEXT_FONT_KEYS = { "look", "friz", "arial", "morpheus", "skurri", "game" }
+-- The colours of text on an icon: the Debuffs bar's tick count (below), and
+-- the countdown's (Icon details).
+ns.COUNT_COLOUR_KEYS = { "white", "gold", "green", "red", "purple" }
+ns.COUNT_COLOUR_NAMES = { white = "White", gold = "Gold", green = "Green", red = "Red", purple = "Purple" }
+ns.COUNT_COLOURS = { white = { 1, 1, 1 }, gold = { 1, .82, 0 }, green = { .35, .9, .35 }, red = { 1, .25, .2 },
+    purple = { .72, .52, 1 } }
+-- Icon details: the swipe's colours (black, white, then the bar colours),
+-- the countdown's spots on the icon, and the edge line's colours (the
+-- game's own line, untinted, then a bar colour to tint it).
+ns.SWIPE_COLOUR_KEYS = { "black", "white" }
+ns.EDGE_COLOUR_KEYS = { "game" }
+for _, key in ipairs(ns.BAR_COLOUR_KEYS) do
+    ns.SWIPE_COLOUR_KEYS[#ns.SWIPE_COLOUR_KEYS + 1] = key
+    ns.EDGE_COLOUR_KEYS[#ns.EDGE_COLOUR_KEYS + 1] = key
+end
+ns.SWIPE_COLOUR_NAMES = { black = "Black", white = "White" }
+ns.EDGE_COLOUR_NAMES = { game = "Game's own" }
+for key, name in pairs(ns.BAR_COLOUR_NAMES) do ns.SWIPE_COLOUR_NAMES[key], ns.EDGE_COLOUR_NAMES[key] = name, name end
+ns.COUNTDOWN_SPOTS = { "TOPLEFT", "TOP", "TOPRIGHT", "CENTER", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }
+ns.COUNTDOWN_SPOT_NAMES = { TOPLEFT = "Top left", TOP = "Top", TOPRIGHT = "Top right", CENTER = "Centre",
+    BOTTOMLEFT = "Bottom left", BOTTOM = "Bottom", BOTTOMRIGHT = "Bottom right" }
+-- Every Icon details setting (the panel's Defaults puts them all back).
+ns.ICON_DETAILS = { "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "swipeEdge", "edgeColour" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
@@ -298,11 +357,25 @@ for _, bar in ipairs({ "prdHealth", "prdPower", "prdExtra", "prdEnergy" }) do
 end
 for _, key in ipairs(ns.TEXT_NUMBER_KEYS) do CHOICES.prdTextNumbers[key] = true end
 for _, key in ipairs(ns.TEXT_FONT_KEYS) do CHOICES.prdTextFont[key] = true end
+-- Icon details.
+CHOICES.swipeColour, CHOICES.countdownColour, CHOICES.countdownSpot, CHOICES.edgeColour = {}, {}, {}, {}
+for _, key in ipairs(ns.SWIPE_COLOUR_KEYS) do CHOICES.swipeColour[key] = true end
+for _, key in ipairs(ns.COUNT_COLOUR_KEYS) do CHOICES.countdownColour[key] = true end
+for _, key in ipairs(ns.COUNTDOWN_SPOTS) do CHOICES.countdownSpot[key] = true end
+for _, key in ipairs(ns.EDGE_COLOUR_KEYS) do CHOICES.edgeColour[key] = true end
+-- Every colour setting takes Custom too, and its colour beside it: six hex
+-- digits, or "" for none picked yet.
+local CUSTOM_KEPT = {}
+for _, key in ipairs(ns.COLOUR_SETTINGS) do
+    CHOICES[key][ns.CUSTOM] = true
+    CUSTOM_KEPT[key .. "Custom"] = true
+end
 
 function ns.Valid(key, value)
     local default = ns.DEFAULTS[key]
     if type(default) == "boolean" then return type(value) == "boolean" end
     if CHOICES[key] then return CHOICES[key][value] == true end
+    if CUSTOM_KEPT[key] then return value == "" or ns.Hex(value) == value end
     local limits = NUMBERS[key]
     if limits then return type(value) == "number" and value >= limits[1] and value <= limits[2] end
     return type(value) == type(default)
@@ -320,7 +393,7 @@ ns.RELOAD = {
 -- combo points, the druid energy bar, the display's text, keybinds, the pulse, each Raid Timers
 -- part), nor the window's own (its accent, lists, preview, grow arrows and
 -- the minimap button), nor the update notice.
-ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
+ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
     "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
     "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
     "prdPowerRight", "prdExtraAt", "prdExtraCentre", "prdExtraLeft", "prdExtraRight", "prdEnergyAt", "prdEnergyCentre",
@@ -328,10 +401,13 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "barTexture", "font", "iconBorder", "
     "prdTextNumbers", "prdTextSize", "prdTextFont",
     "castColour", "castHeight", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
     "castLatencyColour", "castLatencyText", "swingColour",
+    "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "swipeEdge", "edgeColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
     "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",
     "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseX", "pulseY" }
+-- And each colour's custom one, kept beside it.
+for _, key in ipairs(ns.COLOUR_SETTINGS) do ns.SHARE_LOOK[#ns.SHARE_LOOK + 1] = key .. "Custom" end
 
 -- Bars: each bar lists spells by name, so the highest known rank is
 -- always the one shown.
@@ -364,7 +440,7 @@ ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- and so is Swap with my form, beside the lists it swaps between).
 ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x",
-    "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge" }
+    "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -382,10 +458,7 @@ ns.TICK_AT_KEYS = { "TOPLEFT", "TOP", "TOPRIGHT", "CENTER", "BOTTOMLEFT", "BOTTO
 ns.TICK_AT_NAMES = { TOPLEFT = "Top left", TOP = "Top centre", TOPRIGHT = "Top right", BOTTOMLEFT = "Bottom left",
     BOTTOM = "Bottom centre", BOTTOMRIGHT = "Bottom right", CENTER = "Centre" }
 ns.TICK_SIZE = { 50, 200, 100 } -- min, max, default (percent)
-ns.COUNT_COLOUR_KEYS = { "white", "gold", "green", "red", "purple" }
-ns.COUNT_COLOUR_NAMES = { white = "White", gold = "Gold", green = "Green", red = "Red", purple = "Purple" }
-ns.COUNT_COLOURS = { white = { 1, 1, 1 }, gold = { 1, .82, 0 }, green = { .35, .9, .35 }, red = { 1, .25, .2 },
-    purple = { .72, .52, 1 } }
+-- (Its colours, ns.COUNT_COLOURS, are with Icon details' above.)
 
 local db
 ns.loaded = {}
@@ -407,6 +480,49 @@ function ns.Get(key)
         if value ~= nil then return value end
     end
     return ns.GetSaved(key)
+end
+
+-- The colour a colour setting stands for now: its named choice ("default"
+-- too), or for Custom its own colour as "#rrggbb", which every colour lookup
+-- reads (ns.HexColour); with none kept, the setting's default. get reads it
+-- (ns.Get unless given: ns.GetSaved for what's saved under a preview).
+function ns.ColourKey(setting, get)
+    get = get or ns.Get
+    local key = get(setting)
+    if key ~= ns.CUSTOM then return key end
+    local hex = ns.Hex(get(setting .. "Custom"))
+    return hex and ("#" .. hex) or ns.DEFAULTS[setting]
+end
+
+-- A "#rrggbb" colour key's red, green and blue (0 to 1), or nil for any
+-- other key. The same table for the same key while it's in use, as a named
+-- colour's is (a drag through the game's picker makes a few hundred).
+local hexColours, hexCount = {}, 0
+function ns.HexColour(key)
+    if type(key) ~= "string" or key:sub(1, 1) ~= "#" then return nil end
+    local colour = hexColours[key]
+    if colour then return colour end
+    local hex = ns.Hex(key:sub(2))
+    if not hex then return nil end
+    if hexCount >= 64 then hexColours, hexCount = {}, 0 end
+    colour = { tonumber(hex:sub(1, 2), 16) / 255, tonumber(hex:sub(3, 4), 16) / 255, tonumber(hex:sub(5, 6), 16) / 255 }
+    hexColours[key], hexCount = colour, hexCount + 1
+    return colour
+end
+
+-- The Debuffs bar's tick count colour as a key (its bar settings: data): a
+-- named one, or Custom's "#rrggbb"; and the colour itself.
+function ns.CountColourKey(data)
+    local key = data.tickColour
+    if key == ns.CUSTOM then
+        local hex = ns.Hex(data.tickCustom)
+        return hex and ("#" .. hex) or "white"
+    end
+    return ns.COUNT_COLOURS[key] and key or "white"
+end
+
+function ns.CountColour(key)
+    return ns.COUNT_COLOURS[key] or ns.HexColour(key) or ns.COUNT_COLOURS.white
 end
 
 -- Shows values (checked by the caller) in place of yours until it's nil again.
@@ -564,12 +680,13 @@ local function Lists(profile)
         Repair(profile[key])
     end
     -- The picked icon for a joined group while none is up, the buffs that
-    -- glow while they're missing and the debuffs that count their ticks:
+    -- glow while they're missing, the debuffs that count their ticks and
+    -- the buffs shown only while they're missing (the Buffs bar's own):
     -- only names on that aura bar's list.
-    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks" }) do
+    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing" }) do
         if type(profile[field]) ~= "table" then profile[field] = {} end
         for key, set in pairs(profile[field]) do
-            if not ns.AURA_BARS[key] or type(set) ~= "table" then
+            if not ns.AURA_BARS[key] or type(set) ~= "table" or (field == "onlyWhenMissing" and key ~= "buff") then
                 profile[field][key] = nil
             else
                 local listed = {}
@@ -1016,6 +1133,16 @@ function ns.CountTicks(key)
     return store.countTicks[key]
 end
 
+-- This character's buffs on the Buffs bar shown only while they're missing
+-- from you (Only when missing, ticked buff by buff), by name, true each.
+function ns.OnlyWhenMissing(key)
+    local profile = active and db and Profiles()[active]
+    local store = profile or scratch
+    if type(store.onlyWhenMissing) ~= "table" then store.onlyWhenMissing = {} end
+    if type(store.onlyWhenMissing[key]) ~= "table" then store.onlyWhenMissing[key] = {} end
+    return store.onlyWhenMissing[key]
+end
+
 local function PlayerGUID()
     local guid = UnitGUID and UnitGUID("player")
     return type(guid) == "string" and guid ~= "" and guid or nil
@@ -1228,8 +1355,9 @@ local function Duplicate(from)
         for name in pairs(joins) do profile.joins[key][name] = true end
     end
     -- And which entry each joined icon shows, faded, while none is up, which
-    -- buffs glow while they're missing and which debuffs count their ticks.
-    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks" }) do
+    -- buffs glow while they're missing, which debuffs count their ticks and
+    -- which buffs show only while they're missing.
+    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing" }) do
         profile[field] = {}
         for key, set in pairs(type(from[field]) == "table" and from[field] or {}) do
             profile[field][key] = {}
@@ -1519,6 +1647,7 @@ local function UseSetup(setup)
     db.layout = layout
     ns.LayoutData()
     db.barColours = CopySet(setup.colours)
+    db.barCustom = CopySet(setup.custom)
     ns.BarColours()
 end
 
@@ -1571,6 +1700,10 @@ function ns.ImportProfile(text, shared, withLook)
         local joins = type(shared.joins) == "table" and shared.joins[key]
         if type(joins) == "table" then profile.joins[key] = CopySet(joins) end
     end
+    -- The buffs shown only while they're missing (Lists keeps those on the
+    -- Buffs bar's list).
+    local only = type(shared.only) == "table" and shared.only.buff
+    if type(only) == "table" then profile.onlyWhenMissing = { buff = CopySet(only) } end
     local custom, yours = ns.CustomSpells(), NamesInUse()
     Profiles()[name] = Lists(profile)
     -- One shared from before a spell's new name goes by the new one, as its
@@ -1969,11 +2102,14 @@ function ns.BarData(key)
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
     bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
     -- The Debuffs bar's tick count: top left, its automatic size, white,
-    -- from 1, unless you choose.
+    -- from 1, unless you choose. Custom keeps its colour beside it, and
+    -- without one is white again.
     local debuff = key == "debuff"
     bar.tickAt = debuff and ns.TICK_AT_NAMES[bar.tickAt] and bar.tickAt or "TOPLEFT"
     bar.tickSize = debuff and Limit(bar.tickSize, ns.TICK_SIZE) or ns.TICK_SIZE[3]
-    bar.tickColour = debuff and ns.COUNT_COLOURS[bar.tickColour] and bar.tickColour or "white"
+    bar.tickCustom = debuff and ns.Hex(bar.tickCustom) or ""
+    bar.tickColour = debuff and (ns.COUNT_COLOURS[bar.tickColour] or (bar.tickColour == ns.CUSTOM and bar.tickCustom ~= ""))
+        and bar.tickColour or "white"
     bar.tickFrom = debuff and bar.tickFrom == 0 and 0 or 1
     bar.tickEdge = debuff and bar.tickEdge == true -- On the edge: centred on the icon's border, off unless ticked
     bar.perRow = Limit(bar.perRow, ns.BAR_LIMITS.perRow)
@@ -2045,14 +2181,24 @@ function ns.SavedLayout()
 end
 
 -- Blizzard's Tracked Bars coloured one by one: the bar's spell ID -> a bar
--- colour. Bars not listed use the colour for all bars.
+-- colour, or Custom with its own colour kept beside it (db.barCustom: the
+-- same ID -> six hex digits, kept while the bar has a colour of its own).
+-- Bars not listed use the colour for all bars. Both tables, repaired.
 function ns.BarColours()
-    if not db then return {} end
+    if not db then return {}, {} end
     if type(db.barColours) ~= "table" then db.barColours = {} end
-    for id, key in pairs(db.barColours) do
-        if not (Finite(id) and id > 0 and ns.Valid("barColour", key)) then db.barColours[id] = nil end
+    if type(db.barCustom) ~= "table" then db.barCustom = {} end
+    local colours, custom = db.barColours, db.barCustom
+    for id, key in pairs(colours) do
+        if not (Finite(id) and id > 0 and ns.Valid("barColour", key) and (key ~= ns.CUSTOM or ns.Hex(custom[id]))) then
+            colours[id] = nil
+        end
     end
-    return db.barColours
+    for id, hex in pairs(custom) do
+        local kept = colours[id] ~= nil and ns.Hex(hex) or nil
+        if kept ~= hex then custom[id] = kept end
+    end
+    return colours, custom
 end
 
 -- Spell ID -> its spell's name in ns.RANKS (Ranks.lua), made the first time
@@ -2081,14 +2227,23 @@ end
 -- under one of its ranks (usually the first), so a colour saved at any rank
 -- counts: the highest rank with one, even over the bar's own ID. Before,
 -- learning a rank dropped the colour, so the highest rank's is the latest
--- pick. A spell with no ranks listed has only its own ID.
+-- pick. A spell with no ranks listed has only its own ID. Custom gives its
+-- own colour as "#rrggbb" (ns.HexColour).
 function ns.BarColourFor(spellID)
+    local key, hex = ns.BarChoiceFor(spellID)
+    if key == ns.CUSTOM then return "#" .. hex end
+    return key
+end
+
+-- The same as picked, for the Look page: its key (Custom's too, or nil),
+-- and the custom colour kept beside it, if any.
+function ns.BarChoiceFor(spellID)
     if not (Finite(spellID) and spellID > 0) then return nil end
-    local colours = ns.BarColours()
+    local colours, custom = ns.BarColours()
     for _, id in ipairs(SameSpell(spellID)) do
-        if colours[id] then return colours[id] end
+        if colours[id] then return colours[id], custom[id] end
     end
-    return colours[spellID]
+    return colours[spellID], custom[spellID]
 end
 
 -- One of the Cooldown pulse's lists in this character's profile (repaired
@@ -2227,12 +2382,17 @@ end
 
 -- A Tracked Bar's own colour, or nil to go back to the colour for all bars.
 -- Kept under the bar's spell ID; any other rank's colour goes, so it can't
--- come back in its place.
-function ns.SetBarColour(spellID, key)
+-- come back in its place. Custom takes its colour (hex, six hex digits);
+-- a named colour keeps the custom one beside it for next time.
+function ns.SetBarColour(spellID, key, hex)
     if not db or not (Finite(spellID) and spellID > 0) then return end
-    local colours = ns.BarColours()
-    for _, id in ipairs(SameSpell(spellID)) do colours[id] = nil end
+    local colours, custom = ns.BarColours()
+    local _, kept = ns.BarChoiceFor(spellID)
+    hex = ns.Hex(hex) or kept
+    for _, id in ipairs(SameSpell(spellID)) do colours[id], custom[id] = nil, nil end
+    if key == ns.CUSTOM and not hex then key = nil end
     colours[spellID] = key ~= nil and ns.Valid("barColour", key) and key or nil
+    custom[spellID] = colours[spellID] ~= nil and hex or nil
     if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 
@@ -2382,6 +2542,13 @@ local function Load()
     ns.LayoutData()
     RenameCustom()
     ns.BarColours()
+    -- Each custom colour kept as six hex digits, or not at all; a colour in
+    -- Custom with none kept beside it goes back to its default.
+    for _, key in ipairs(ns.COLOUR_SETTINGS) do
+        local hex = ns.Hex(db[key .. "Custom"])
+        db[key .. "Custom"] = hex
+        if db[key] == ns.CUSTOM and not hex then db[key] = nil end
+    end
     ns.ResolveProfile()
     ListenTalents()
     for key in pairs(ns.RELOAD) do ns.loaded[key] = ns.Get(key) end

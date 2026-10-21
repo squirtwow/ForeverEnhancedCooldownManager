@@ -27,11 +27,26 @@ function A:On(bar)
     return bar and bar.kind == "cooldown" and bar.data and bar.data.showAuras == true and self:Available()
 end
 
--- Sizes an overlay's numbers for its icon, and shows or hides the countdown.
+-- Sizes an overlay's numbers for its icon, and shows or hides the
+-- countdown, in the spot picked in Icon details.
 local function Fit(parts, size, showTimer)
     parts.cooldown:SetCountdownFont(Style:Countdown(size))
     parts.cooldown:SetHideCountdownNumbers(not showTimer)
     parts.count:SetFontObject(Style:Count(size))
+    Style:AuraNumbers(parts)
+end
+
+-- Icon details (the Look page) on every overlay made: the swipe, the edge
+-- line and the countdown, sized for its icon. Only out of a fight
+-- (Bars.lua AuraDetails).
+function A:Details(bar)
+    for _, anchor in ipairs(bar and bar.auraAnchors or {}) do
+        for _, parts in ipairs(anchor.parts) do
+            Style:CooldownLook(parts.cooldown)
+            parts.cooldown:SetCountdownFont(Style:Countdown(anchor.size or 36))
+            Style:AuraNumbers(parts)
+        end
+    end
 end
 
 -- Runs once per slot, as the slot is added (and never later: Buffs.lua's
@@ -52,9 +67,8 @@ local function Look(anchor)
         local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
         cooldown:SetAllPoints(icon)
         cooldown:SetSwipeTexture(Style.FLAT)
-        cooldown:SetSwipeColor(0, 0, 0, .7)
         cooldown:SetReverse(true)
-        cooldown:SetDrawEdge(false)
+        Style:CooldownLook(cooldown) -- the swipe and edge line picked in Icon details
         cooldown:SetDrawBling(false)
         button:SetDurationCooldown(cooldown)
         local top = CreateFrame("Frame", nil, button)

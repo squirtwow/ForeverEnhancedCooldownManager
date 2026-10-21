@@ -107,7 +107,8 @@ local function Face(region, file, size, flags)
 end
 
 -- The pieces every design uses, made once on a bar: a 1px edge and the dark
--- track under its fill, Glass's shine, and Split's box at the end.
+-- track under its fill, Glass's shine, Split's box at the end, and Block's
+-- warm line inside the edge (its strips made the first time it shows).
 local function Pieces(bar, box)
     local parts = {}
     parts.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
@@ -115,6 +116,8 @@ local function Pieces(bar, box)
     parts.track = bar:CreateTexture(nil, "BACKGROUND", nil, -7)
     Around(parts.track, bar, 0)
     Solid(parts.track, Style.TRACK, Style.TRACK[4])
+    parts.block = false -- the track's in Block's warmer colour
+    parts.line = Style:BlockLine(bar, bar, true)
     parts.sheen = bar:CreateTexture(nil, "OVERLAY", nil, -8)
     parts.sheen:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
     parts.sheen:SetPoint("BOTTOMRIGHT", bar, "RIGHT", 0, 0)
@@ -142,6 +145,14 @@ local function ShowPieces(parts, shown, design)
         parts.box:SetShown(shown and design == "split")
         parts.divider:SetShown(shown and design == "split")
     end
+    -- Block: the warmer track (set only when that changes) and the warm line.
+    local block = shown and design == "block" or false
+    if shown and parts.block ~= block then
+        parts.block = block
+        local track = block and Style.BLOCK_TRACK or Style.TRACK
+        Solid(parts.track, track, track[4])
+    end
+    Style:ShowBlockLine(parts.line, block)
 end
 
 -- The fill's texture, set only when it changes.
@@ -151,13 +162,14 @@ local function Fill(bar, parts, texture)
     bar:SetStatusBarTexture(texture)
 end
 
--- Your bar design on a bar: the texture and colour, see-through inside an
--- edge in its colour for Outline, a black edge otherwise.
+-- Your bar design on a bar: the texture and colour (flat, or faded with
+-- Colour fade), see-through inside an edge in its colour for Outline, a
+-- black edge otherwise.
 local function Design(bar, parts, colour)
     local design = ns.Get("barStyle")
     local outline = design == "outline"
     Fill(bar, parts, Style:BarTexture())
-    bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
+    Style:FillColour(bar, colour, outline and .45 or 1)
     Solid(parts.edge, outline and colour or { 0, 0, 0 })
     ShowPieces(parts, true, design)
     return design
@@ -191,15 +203,16 @@ end
 
 -- The countdown bar's colour: yours, or Blizzard's red.
 function R:PullColour()
-    local key = ns.Get("pullColour")
+    local key = ns.ColourKey("pullColour")
     if key ~= "default" then return Style:BarColour(key) end
     return R.RED
 end
 
--- A text colour by its key; "class" is your class colour.
+-- A text colour by its key; "class" is your class colour, and a Custom
+-- colour's "#rrggbb" itself.
 function R:TextColour(key)
     if key == "class" then return Style:BarColour("class") end
-    return R.TEXT_COLOURS[key] or WHITE
+    return R.TEXT_COLOURS[key] or ns.HexColour(key) or WHITE
 end
 
 -- A boss cast's colour by what kind it is, when the game lets that be seen:
@@ -209,7 +222,7 @@ end
 function R:BossColour(kind)
     if kind == "broken" then return R.BROKEN end
     if kind == "locked" then return R.LOCKED end
-    local key = ns.Get("bossColour")
+    local key = ns.ColourKey("bossColour")
     if key ~= "default" then return Style:BarColour(key) end
     return kind == "channel" and R.GREEN or R.GOLD
 end
@@ -376,6 +389,13 @@ local function GivenColour(line, emote)
     return type(info) == "table" and RGB(info[emote and "RAID_BOSS_EMOTE" or "RAID_WARNING"]) or nil
 end
 
+-- Blizzard's usual colour for raid warnings or boss emotes, for the Raid
+-- Timers page's swatch while it's the one chosen.
+local PLAIN_WARNING, PLAIN_EMOTE = { 1, .28, 0 }, { 1, .87, 0 }
+function R:PlainTextColour(emote)
+    return GivenColour(nil, emote) or (emote and PLAIN_EMOTE or PLAIN_WARNING)
+end
+
 -- Your font, outline and shadow on a line, in its kind's size, and your
 -- colour for its kind. With Blizzard's colour chosen, plain goes back on it
 -- (when given). Says whether the line is now in a colour of yours, and its size.
@@ -389,7 +409,7 @@ local function DressWarning(line, emote, plain)
     else
         line:SetShadowOffset(0, 0)
     end
-    local key = ns.Get(emote and "emoteColour" or "warningColour")
+    local key = ns.ColourKey(emote and "emoteColour" or "warningColour")
     local colour = key ~= "default" and R:TextColour(key) or plain
     if colour then line:SetTextColor(colour[1], colour[2], colour[3], 1) end
     return key ~= "default", scale

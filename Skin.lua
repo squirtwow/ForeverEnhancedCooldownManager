@@ -1,10 +1,12 @@
 -- A restyle of Blizzard's Cooldown Manager: square frameless icons with big
--- bold countdown numbers, and Tracked Bars in one of three designs (Glass,
--- Split, Outline) and a colour of your choice, for all of them or bar by bar.
+-- bold countdown numbers, and Tracked Bars in one of four designs (Glass,
+-- Split, Outline, Block) and a colour of your choice, for all of them or bar
+-- by bar, flat or faded (Colour fade).
 -- Visual only. Blizzard still decides what shows, when, and where (Edit Mode).
 -- Cooldowns and auras are secret in combat, so nothing here reads them: each
 -- item frame gets its textures, fonts and anchors set once, after Blizzard's
--- own setup, and no key is ever written on Blizzard's frames.
+-- own setup (and the swipe's colour after each refresh, once Icon details
+-- changes it), and no key is ever written on Blizzard's frames.
 local _, ns = ...
 
 local M = {}
@@ -14,8 +16,9 @@ local Style = ns.Style
 local OVERLAY_ATLAS = "UI-HUD-CoolDownManager-IconOverlay"
 local PIP_ATLAS = "UI-HUD-CoolDownManager-Bar-Pip" -- a Tracked Bar's spark
 -- Tracked Bars are 30 tall with a 30 icon; the bar grows from 19 to sit level
--- with the icon's art.
+-- with the icon's art, or for Block slims to 18, centred on it.
 local BAR_HEIGHT = 26
+local BLOCK_HEIGHT = 18
 -- Blizzard places icons 4 units closer than the padding setting because its
 -- mask trims their edges; trimming 2 from each side of the square art makes
 -- the gap between icons match Edit Mode's Padding exactly.
@@ -26,7 +29,16 @@ local bars = setmetatable({}, { __mode = "k" }) -- restyled bar items and the pi
 local decors = setmetatable({}, { __mode = "k" }) -- each icon's border and shadow
 local rows = {} -- each icon viewer's border and shadow, round the whole row
 local keys = setmetatable({}, { __mode = "k" }) -- Essential/Utility item -> { frame, text, spec, lift, keyed }: the addon's own
-local room = setmetatable({}, { __mode = "k" }) -- item -> { top, lift } last applied to its count and countdown
+local room = setmetatable({}, { __mode = "k" }) -- item -> { top, lift, spot } last applied to its count and countdown
+-- Icon details: every Essential, Utility and buff icon -> its spec; those
+-- whose refreshes are hooked, and those whose swipe or edge line the addon
+-- has set (put back as Blizzard draws them once the details are back to
+-- the defaults); and those with the addon's edge line on now (put back as
+-- soon as Edge line goes off, even while the swipe stays changed).
+local sweeps = setmetatable({}, { __mode = "k" })
+local sweepHooks = setmetatable({}, { __mode = "k" })
+local painted = setmetatable({}, { __mode = "k" })
+local edged = setmetatable({}, { __mode = "k" })
 M.decors, M.rows, M.keys = decors, rows, keys
 local hooked = {}
 local SPLIT_BOX = 46 -- the Split design's time box
@@ -110,27 +122,31 @@ local function KeyFor(item)
 end
 
 -- Blizzard's charge count goes top-right while the icon's own key shows along
--- the bottom, and the countdown moves clear of the key. Both are only touched
--- when something must move, or be put back after: Blizzard's own anchors are
--- the count at BOTTOMRIGHT -2,2 of ChargeCount and the countdown at the
--- sweep's centre.
+-- the bottom, and the countdown moves clear of the key, or to the spot
+-- picked in Icon details (a buff icon's too, which has no key). Both are
+-- only touched when something must move, or be put back after: Blizzard's
+-- own anchors are the count at BOTTOMRIGHT -2,2 of ChargeCount and the
+-- countdown at the sweep's centre.
 local function Room(item)
     local parts = keys[item]
-    local top, lift = Style:CountUp(parts.keyed), parts.lift or 0
+    local keyed = parts and parts.keyed
+    local top, lift, spot = Style:CountUp(keyed), parts and parts.lift or 0, ns.Get("countdownSpot")
     local was = room[item]
     if was then
-        if was.top == top and was.lift == lift then return end
-    elseif not top and lift == 0 then
+        if was.top == top and was.lift == lift and was.spot == spot then return end
+    elseif not top and lift == 0 and spot == "CENTER" then
         return
     end
-    room[item] = { top = top, lift = lift }
+    room[item] = { top = top, lift = lift, spot = spot }
     local cooldown, numbers = item.Cooldown, nil
     local get = cooldown and cooldown.GetCountdownFontString
     if type(get) == "function" then
         local ok, found = pcall(get, cooldown)
         if ok then numbers = found end
     end
-    Style:KeyRoom(item.ChargeCount and item.ChargeCount.Current, item.ChargeCount, 2, numbers, cooldown, lift, parts.keyed)
+    -- (A charge count only on an icon with a key: the Essential and Utility ones.)
+    local box = parts and item.ChargeCount
+    Style:KeyRoom(box and box.Current, box, 2, numbers, cooldown, lift, keyed)
 end
 
 -- A key showing up or going (a new spell, a binding changed) moves the count
@@ -184,6 +200,97 @@ local function Keybind(item, spec)
     ShowKey(item)
 end
 
+-- Icon details -------------------------------------------------------------------
+-- The swipe's colour and see-through and the edge line picked on the Look
+-- page, on Blizzard's Essential, Utility and buff icons, through the
+-- cooldown's own setters only. Blizzard sets its swipe and edge again each
+-- time it refreshes an icon, so once either differs from the defaults each
+-- icon's refresh is post-hooked to set them after it; until then nothing is
+-- hooked, set or read, and the icons stay exactly as Blizzard draws them.
+-- Blizzard's gold swipe over a buff of the icon's spell that's up keeps its
+-- own colour, so it still tells an aura from a cooldown. Nothing is read
+-- that a fight keeps secret: only which of Blizzard's two swipe colours it
+-- picked, and whether it draws its own edge line (for charges).
+
+-- Whether the icon shows Blizzard's gold aura swipe now.
+local function AuraSwipe(item)
+    local constants = _G.CooldownViewerConstants
+    local gold = type(constants) == "table" and constants.ITEM_AURA_COLOR or nil
+    if gold == nil then return false end
+    local shows = item.cooldownSwipeColor
+    if issecretvalue and issecretvalue(shows) then return true end
+    return rawequal(shows, gold)
+end
+
+-- The swipe and edge line as picked. back: put Blizzard's own back (the
+-- defaults' swipe is Blizzard's own dark one; its edge line only for a
+-- spell's charges coming back, in its own colour). Blizzard's own edge line
+-- comes back too as soon as Edge line goes off, with the swipe still
+-- changed: Blizzard never sets its colour, so a tint would stay on it.
+local function Swipe(item, back)
+    local cooldown = item.Cooldown
+    if not cooldown then return end
+    if not AuraSwipe(item) then
+        local colour, alpha = Style:Swipe()
+        cooldown:SetSwipeColor(colour[1], colour[2], colour[3], alpha)
+    end
+    if ns.Get("swipeEdge") == true then
+        local tint = Style:EdgeColour(ns.ColourKey("edgeColour"))
+        cooldown:SetDrawEdge(true)
+        cooldown:SetEdgeColor(tint[1], tint[2], tint[3], 1)
+        edged[item] = true
+    elseif back or edged[item] then
+        cooldown:SetDrawEdge(item.cooldownShowDrawEdge == true)
+        cooldown:SetEdgeColor(1, 1, 1, 1)
+        edged[item] = nil
+    end
+end
+
+-- After each of Blizzard's refreshes of the icon, while the details differ
+-- from the defaults. A failure is reported once, never thrown into
+-- Blizzard's code.
+local function AfterRefresh(item)
+    if not Style:SwipeChanged() then return end
+    local ok, err = pcall(Swipe, item)
+    if not ok and not M.lastError then
+        M.lastError = tostring(err)
+        print("|cffffd100" .. ns.TITLE .. ":|r couldn't colour a cooldown icon's swipe. Please report this: " .. M.lastError)
+    end
+end
+
+-- A cooldown icon's refresh and a buff icon's (CooldownViewer.lua's
+-- RefreshSpellCooldownInfo and RefreshCooldownInfo), hooked once.
+local function HookSwipe(item)
+    if sweepHooks[item] then return end
+    sweepHooks[item] = true
+    for _, method in ipairs({ "RefreshSpellCooldownInfo", "RefreshCooldownInfo" }) do
+        if type(item[method]) == "function" then
+            hooksecurefunc(item, method, function() AfterRefresh(item) end)
+        end
+    end
+end
+
+-- The swipe on one icon as picked now: hooked and set while it differs
+-- from the defaults; put back once, as they come back.
+local function Sweep(item)
+    if Style:SwipeChanged() then
+        HookSwipe(item)
+        Swipe(item)
+        painted[item] = true
+    elseif painted[item] then
+        Swipe(item, true)
+        painted[item] = nil
+    end
+end
+
+-- All of it on one icon: the countdown's size and colour, its spot (clear
+-- of a key in the middle), and the swipe.
+local function Detail(item, spec)
+    if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
+    if keys[item] then KeyLook(item) else Room(item) end
+    Sweep(item)
+end
+
 -- Item frames -------------------------------------------------------------------
 
 -- Essential and Utility cooldowns, including trinkets and potions.
@@ -198,6 +305,8 @@ local function Cooldown(item, spec)
     if item.OutOfRange then item.OutOfRange:SetAlpha(0) end
     if item.CooldownFlash then item.CooldownFlash:SetAlpha(0) end
     Keybind(item, spec)
+    sweeps[item] = spec
+    Sweep(item)
 end
 
 -- Tracked buffs shown as icons.
@@ -207,6 +316,9 @@ local function Buff(item, spec)
     Decorate(item, item.Icon)
     if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
     Font(item.Applications and item.Applications.Applications, Style:Count(spec.size))
+    Room(item)
+    sweeps[item] = spec
+    Sweep(item)
 end
 
 -- Tracked buffs shown as bars. Every piece any design uses is made once per
@@ -230,33 +342,49 @@ local function Fill(bar, parts)
     return true
 end
 
+-- Block's slimmer bar and its text a size smaller, or back as they were; set
+-- only when the design goes to or from Block.
+local function Slim(bar, parts, block)
+    if parts.slim == block then return end
+    parts.slim = block
+    bar:SetHeight(block and BLOCK_HEIGHT or BAR_HEIGHT)
+    Font(bar.Name, Style:Font(block and 12 or 13))
+    Font(bar.Duration, Style:Font(block and 13 or 15))
+end
+
 -- The bar in the design and colour chosen: its own colour when one is chosen
--- for its spell (at any rank), or the colour for all. As Blizzard gives a
--- pooled bar a spell (after every relayout), a bar with the same spell,
--- design, colour for all, darkness and edges as last time is left as it is;
--- force (a Look page choice, which may be its own colour) draws it again.
+-- for its spell (at any rank), or the colour for all, flat or faded. As
+-- Blizzard gives a pooled bar a spell (after every relayout), a bar with the
+-- same spell, design, colour for all, darkness, edges and fade as last time
+-- is left as it is; force (a Look page choice, which may be its own colour)
+-- draws it again.
 local function Look(item, parts, force)
-    local bar, design, all, id = item.Bar, ns.Get("barStyle"), ns.Get("barColour"), SpellOf(item)
-    local dark, thick = ns.Get("barDarkness"), ns.Get("thickEdges")
+    local bar, design, all, id = item.Bar, ns.Get("barStyle"), ns.ColourKey("barColour"), SpellOf(item)
+    local dark, thick, fade = ns.Get("barDarkness"), ns.Get("thickEdges"), Style:Fades()
     local filled = Fill(bar, parts)
     if not (force or filled) and parts.drawn and parts.spell == id and parts.design == design and parts.all == all
-        and parts.dark == dark and parts.thick == thick then
+        and parts.dark == dark and parts.thick == thick and parts.fade == fade then
         return
     end
     parts.drawn, parts.spell, parts.design, parts.all, parts.dark, parts.thick = true, id, design, all, dark, thick
+    parts.fade = fade
     local colour = Style:BarColour(id and ns.BarColourFor(id) or all)
     local glass, split, outline = design == "glass", design == "split", design == "outline"
-    bar:SetStatusBarColor(colour[1], colour[2], colour[3], outline and .45 or 1)
+    Style:FillColour(bar, colour, outline and .45 or 1)
     if parts.track then parts.track:SetColorTexture(Style:TrackColour()) end
     -- A 1px edge round the bar and the icon: black, or the colour for Outline;
-    -- with Thick edges, a second pixel inside each.
+    -- with Thick edges, a second pixel inside each, and Block's warm line
+    -- inside those.
     local edge = outline and colour or BLACK
     Solid(parts.edge, edge)
     Style:ShowInnerEdge(parts.inner, edge)
+    Style:ShowBlockLine(parts.line)
     if parts.iconEdge then
         Solid(parts.iconEdge, edge)
         Style:ShowInnerEdge(parts.iconInner, edge)
+        Style:ShowBlockLine(parts.iconLine)
     end
+    Slim(bar, parts, design == "block")
     Style:ShowSheen(parts.sheen, glass)
     parts.box:SetShown(split)
     parts.divider:SetShown(split)
@@ -297,6 +425,7 @@ local function Bar(item, spec)
         parts.iconEdge = iconFrame:CreateTexture(nil, "BACKGROUND", nil, -8)
         Inset(parts.iconEdge, iconFrame.Icon, -1)
         parts.iconInner = Style:InnerEdge(iconFrame, iconFrame.Icon)
+        parts.iconLine = Style:BlockLine(iconFrame, iconFrame.Icon)
     end
     local bar = item.Bar
     if not bar then return end
@@ -310,6 +439,7 @@ local function Bar(item, spec)
     parts.edge = bar:CreateTexture(nil, "BACKGROUND", nil, -8)
     Inset(parts.edge, bar, -1)
     parts.inner = Style:InnerEdge(bar, bar)
+    parts.line = Style:BlockLine(bar, bar)
     -- Glass: a soft shine across the top.
     local shine, height = bar:CreateTexture(nil, "OVERLAY", nil, -8), math.floor(BAR_HEIGHT * .45)
     shine:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
@@ -330,6 +460,7 @@ local function Bar(item, spec)
     parts.divider:SetColorTexture(0, 0, 0, 1)
     Font(bar.Name, Style:Font(13))
     Font(bar.Duration, Style:Font(15))
+    parts.slim = false -- the height and fonts above; Look slims it for Block
     bars[item] = parts
     Look(item, parts, true)
 end
@@ -482,6 +613,18 @@ end
 -- The keys again after a binding or page change; text only, so in combat too.
 function M:ShowKeys()
     for item in pairs(keys) do SafeShowKey(item) end
+end
+
+-- Icon details picked on the Look page, on every Essential, Utility and
+-- buff icon: cosmetic setters only, so in combat too.
+function M:ApplyIconDetails()
+    for item, spec in pairs(sweeps) do
+        local ok, err = pcall(Detail, item, spec)
+        if not ok and not M.lastError then
+            M.lastError = tostring(err)
+            print("|cffffd100" .. ns.TITLE .. ":|r couldn't restyle a cooldown icon's details. Please report this: " .. M.lastError)
+        end
+    end
 end
 
 -- Setup -------------------------------------------------------------------------

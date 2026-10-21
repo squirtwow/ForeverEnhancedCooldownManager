@@ -5,8 +5,8 @@
 local _, ns = ...
 local T = ns.Theme
 
-local SWATCH, SWATCH_GAP = 20, 6
-local SAMPLE = { name = "Hearthstone", icon = "Interface\\Icons\\INV_Misc_Rune_01", total = 3 }
+local SWATCH = 20 -- a colour's swatch, which opens its colours
+local SAMPLE ={ name = "Hearthstone", icon = "Interface\\Icons\\INV_Misc_Rune_01", total = 3 }
 -- The batch preview: a few crafts of a long batch, counting down.
 local BATCH_SAMPLE = { name = "Roasted Boar Meat", icon = "Interface\\Icons\\INV_Misc_Food_14", total = 3, count = 133, from = 4 }
 local SWING_SAMPLE = 2.8 -- seconds between the preview's swings
@@ -125,38 +125,41 @@ function ns.BuildCastBarPage(window, page, width)
     ticks:SetWidth(math.max(shown:GetWidth(), swings:GetWidth()))
     page.ticks = ticks
 
-    -- A row of colours for one of them: click the chosen one again for its own.
-    local function Colours(caption, key, y, note)
+    -- A colour for one of them: its swatch opens the colours, and the
+    -- chosen one clicked again goes back to its own (shown: the colour in use).
+    local function Colours(caption, key, y, note, about, shown)
         local label = T:Text(options, "GameFontHighlight")
         label:SetPoint("TOPLEFT", 0, y - 4)
         label:SetText(caption)
-        local swatches = {}
-        for i, colour in ipairs(ns.BAR_COLOUR_KEYS) do
-            local swatch = ns.Swatch(options, SWATCH, function()
+        local choice = ns.ColourChoice(window, options, SWATCH, ns.SettingChoice(key, {
+            keys = ns.BAR_COLOUR_KEYS,
+            colourOf = function(colour) return ns.Style:BarColour(colour) end,
+            shown = shown,
+            pick = function(colour)
                 ns.Set(key, ns.Get(key) ~= colour and colour or "default")
                 Changed()
-            end)
-            swatch:SetPoint("TOPLEFT", 100 + (i - 1) * (SWATCH + SWATCH_GAP), y)
-            swatch.key = colour
-            if colour == "class" then ns.ClassIcon(swatch) end
-            window:Hint(swatch, note)
-            swatches[i] = swatch
-        end
+            end,
+            note = note,
+            about = about,
+        }, Changed))
+        choice:SetPoint("TOPLEFT", 100, y)
         local chosen = T:Text(options, "GameFontHighlightSmall", T.MUTED)
-        chosen:SetPoint("TOPLEFT", 100 + #ns.BAR_COLOUR_KEYS * (SWATCH + SWATCH_GAP) + 2, y - 4)
-        return swatches, chosen
+        chosen:SetPoint("TOPLEFT", 100 + choice:GetWidth() + 8, y - 4)
+        return choice, chosen
     end
-    local swatches, chosen = Colours("Cast colour", "castColour", -54,
-        "A colour for your cast bar. Click it again for Blizzard's gold, green while channelling.")
-    local swingSwatches, swingChosen = Colours("Swing colour", "swingColour", -82,
-        "A colour for your swing timer. Click it again for silver.")
-    page.swatches, page.chosen = swatches, chosen
-    page.swingSwatches, page.swingChosen = swingSwatches, swingChosen
+    local colour, chosen = Colours("Cast colour", "castColour", -54,
+        "A colour for your cast bar. Click it again for Blizzard's gold, green while channelling.",
+        "Your cast bar's colour. Click for the colours.", function() return C:CastColour() end)
+    local swingColour, swingChosen = Colours("Swing colour", "swingColour", -82,
+        "A colour for your swing timer. Click it again for silver.",
+        "Your swing timer's colour. Click for the colours.", function() return C:SwingColour() end)
+    page.colour, page.swatches, page.chosen = colour, colour.swatches, chosen
+    page.swingColour, page.swingSwatches, page.swingChosen = swingColour, swingColour.swatches, swingChosen
     -- Both rows of colours, their labels and swatches, as one part for the
     -- page's walkthrough (the ? in the title bar) to outline.
     local colours = CreateFrame("Frame", nil, options)
     colours:SetPoint("TOPLEFT", 0, -54)
-    colours:SetSize(100 + #ns.BAR_COLOUR_KEYS * (SWATCH + SWATCH_GAP) - SWATCH_GAP, 48)
+    colours:SetSize(100 + colour:GetWidth(), 48)
     page.colours = colours
 
     local height = T:Slider(options, "Height", ns.CAST_HEIGHT, 1, 280, function(value)
@@ -188,20 +191,21 @@ function ns.BuildCastBarPage(window, page, width)
     tickColourLabel:SetPoint("TOPLEFT", RIGHT, -172)
     tickColourLabel:SetText("Colour")
     tickParts[#tickParts + 1] = tickColourLabel
-    local tickSwatches = {}
-    for i, key in ipairs(ns.TICK_COLOUR_KEYS) do
-        local swatch = ns.Swatch(options, SWATCH, function()
+    local tickColour = ns.ColourChoice(window, options, SWATCH, ns.SettingChoice("castTickColour", {
+        keys = ns.TICK_COLOUR_KEYS,
+        colourOf = function(key) return C:MarkColour(key) end,
+        shown = function() return C:MarkColour() end,
+        pick = function(key)
             ns.Set("castTickColour", key)
             Changed()
-        end)
-        swatch:SetPoint("TOPLEFT", RIGHT + 52 + (i - 1) * (SWATCH + SWATCH_GAP), -168)
-        swatch.key = key
-        if key == "class" then ns.ClassIcon(swatch) end
-        window:Hint(swatch, (key == "white" and "White" or key == "black" and "Black" or ns.BAR_COLOUR_NAMES[key])
-            .. " tick marks.")
-        tickSwatches[i] = swatch
-        tickParts[#tickParts + 1] = swatch
-    end
+        end,
+        note = function(key)
+            return (key == "white" and "White" or key == "black" and "Black" or ns.BAR_COLOUR_NAMES[key]) .. " tick marks."
+        end,
+        about = "The tick marks' colour. Click for the colours.",
+    }, Changed))
+    tickColour:SetPoint("TOPLEFT", RIGHT + 52, -168)
+    tickParts[#tickParts + 1] = tickColour
     local styleLabel = T:Text(options, "GameFontHighlight")
     styleLabel:SetPoint("TOPLEFT", RIGHT, -194)
     styleLabel:SetText("Style")
@@ -224,7 +228,7 @@ function ns.BuildCastBarPage(window, page, width)
     tickWidth:SetPoint("TOPLEFT", RIGHT + 184, -190)
     window:Hint(tickWidth, "How wide each tick mark is, in screen pixels.")
     tickParts[#tickParts + 1] = tickWidth
-    page.tickSwatches, page.tickStyle, page.tickWidth = tickSwatches, tickStyle, tickWidth
+    page.tickColour, page.tickSwatches, page.tickStyle, page.tickWidth = tickColour, tickColour.swatches, tickStyle, tickWidth
     -- Latency, under the tick marks (and their choices while they show):
     -- the tick and Show ms beside it, then, while it's on, its colour.
     local latency = Tick("Latency on the bar", "castLatency", -178,
@@ -233,20 +237,22 @@ function ns.BuildCastBarPage(window, page, width)
     local latencyMs = Tick("Show ms", "castLatencyText", -178, "How long the zone is, in ms, at the right end of the bar.")
     local latencyLabel = T:Text(options, "GameFontHighlight")
     latencyLabel:SetText("Colour")
-    local latencySwatches = {}
-    for i, key in ipairs(ns.LATENCY_COLOUR_KEYS) do
-        local swatch = ns.Swatch(options, SWATCH, function()
+    local latencyColour = ns.ColourChoice(window, options, SWATCH, ns.SettingChoice("castLatencyColour", {
+        keys = ns.LATENCY_COLOUR_KEYS,
+        colourOf = function(key) return C:LagColour(key) end,
+        shown = function() return C:LagColour() end,
+        pick = function(key)
             ns.Set("castLatencyColour", key)
             Changed()
-        end)
-        swatch.key = key
-        if key == "class" then ns.ClassIcon(swatch) end
-        window:Hint(swatch, key == "paler" and "A paler shade of your cast bar's own colour for the latency zone."
-            or ((key == "red" and "Red" or key == "white" and "White" or key == "black" and "Black"
-            or ns.BAR_COLOUR_NAMES[key]) .. " latency zone, in your bar's texture."))
-        latencySwatches[i] = swatch
-    end
-    page.latency, page.latencyMs, page.latencySwatches = latency, latencyMs, latencySwatches
+        end,
+        note = function(key)
+            return key == "paler" and "A paler shade of your cast bar's own colour for the latency zone."
+                or ((key == "red" and "Red" or key == "white" and "White" or key == "black" and "Black"
+                or ns.BAR_COLOUR_NAMES[key]) .. " latency zone, in your bar's texture.")
+        end,
+        about = "The latency zone's colour. Click for the colours.",
+    }, Changed))
+    page.latency, page.latencyMs, page.latencyColour, page.latencySwatches = latency, latencyMs, latencyColour, latencyColour.swatches
     -- Where they go: under the tick marks, or under their choices.
     local function PlaceLatency(ticking)
         local y = ticking and -222 or -178
@@ -256,11 +262,10 @@ function ns.BuildCastBarPage(window, page, width)
         latencyMs:SetPoint("TOPLEFT", RIGHT + 170, y)
         latencyLabel:ClearAllPoints()
         latencyLabel:SetPoint("TOPLEFT", RIGHT, y - 26)
-        for i, swatch in ipairs(latencySwatches) do
-            swatch:ClearAllPoints()
-            swatch:SetPoint("TOPLEFT", RIGHT + 52 + (i - 1) * (SWATCH + SWATCH_GAP), y - 22)
-        end
+        latencyColour:ClearAllPoints()
+        latencyColour:SetPoint("TOPLEFT", RIGHT + 52, y - 22)
     end
+    PlaceLatency(false) -- a place from the start, so its pop-up has one to go under
     -- The time: seconds left, or left / the whole cast, beside Time left.
     local timeFormat = T:Segmented(options, { { key = "left", label = "1.5" }, { key = "total", label = "1.5 / 3.0" } }, 180,
         function(key)
@@ -286,12 +291,10 @@ function ns.BuildCastBarPage(window, page, width)
         .. "It keeps its room between casts, since the Buffs and Debuffs bars can't move in a fight.")
     page.about = about
 
-    local function Paint(list, label, key, default)
-        local colour = ns.Get(key)
-        for _, swatch in ipairs(list) do
-            ns.PaintSwatch(swatch, ns.Style:BarColour(swatch.key), swatch.key == colour)
-        end
-        label:SetText(colour == "default" and default or ns.BAR_COLOUR_NAMES[colour])
+    local function Paint(choice, label, key, default)
+        local picked = ns.Get(key)
+        choice:Paint()
+        label:SetText(picked == "default" and default or picked == ns.CUSTOM and ns.CUSTOM_NAME or ns.BAR_COLOUR_NAMES[picked])
     end
 
     function page:Refresh()
@@ -313,8 +316,8 @@ function ns.BuildCastBarPage(window, page, width)
         batch:SetChecked(ns.Get("castBatch"))
         marks:SetChecked(ns.Get("castTicks"))
         height:Set(ns.Get("castHeight"))
-        Paint(swatches, chosen, "castColour", "Blizzard's gold")
-        Paint(swingSwatches, swingChosen, "swingColour", "Silver")
+        Paint(colour, chosen, "castColour", "Blizzard's gold")
+        Paint(swingColour, swingChosen, "swingColour", "Silver")
         C:Look(sample, false)
         C:Look(batchSample, false)
         C:SwingLook(swingSample)
@@ -328,10 +331,7 @@ function ns.BuildCastBarPage(window, page, width)
         -- The tick marks' choices and preview only while they're on.
         local ticking = ns.Get("castTicks") and true or false
         for _, piece in ipairs(tickParts) do piece:SetShown(ticking) end
-        local tickColour = ns.Get("castTickColour")
-        for _, swatch in ipairs(tickSwatches) do
-            ns.PaintSwatch(swatch, C:MarkColour(swatch.key), swatch.key == tickColour)
-        end
+        tickColour:Paint()
         tickStyle:SetSelected(ns.Get("castTickStyle"))
         tickWidth:Set(ns.Get("castTickWidth"))
         -- Latency: Show ms and the colours only while it's on.
@@ -340,11 +340,8 @@ function ns.BuildCastBarPage(window, page, width)
         latencyMs:SetChecked(ns.Get("castLatencyText"))
         latencyMs:SetShown(lagging)
         latencyLabel:SetShown(lagging)
-        local lagColour = ns.Get("castLatencyColour")
-        for _, swatch in ipairs(latencySwatches) do
-            swatch:SetShown(lagging)
-            ns.PaintSwatch(swatch, C:LagColour(swatch.key), swatch.key == lagColour)
-        end
+        latencyColour:SetShown(lagging)
+        latencyColour:Paint()
         PlaceLatency(ticking)
         timeFormat:SetSelected(ns.Get("castTimeFormat"))
         SampleLag()

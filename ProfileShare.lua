@@ -277,16 +277,18 @@ local BAR_CHECKS = {
     x = Place, y = Place,
     tickAt = function(v) return ns.TICK_AT_NAMES[v] ~= nil end,
     tickSize = function(v) return Within(v, ns.TICK_SIZE) end,
-    tickColour = function(v) return ns.COUNT_COLOURS[v] ~= nil end,
+    tickColour = function(v) return ns.COUNT_COLOURS[v] ~= nil or v == ns.CUSTOM end,
     tickFrom = function(v) return v == 0 or v == 1 end,
     tickEdge = Bool,
+    -- Custom's own colour beside it: six hex digits as kept, or none.
+    tickCustom = function(v) return v == "" or ns.Hex(v) == v end,
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], spacing = ns.BAR_LIMITS.spacing[3], perRow = ns.BAR_LIMITS.perRow[3],
     whenReady = "show", onCooldown = "show", dimUnusable = false, dimOpacity = ns.BAR_LIMITS.dimOpacity[3],
     outOfCombat = "show", showMissing = false, onlyMissing = false, greyedNoTarget = false, showNames = false, showTimer = true,
     showAuras = false, selfDebuffs = false, grow = "centre", wrap = "down",
-    tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false }
+    tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false, tickCustom = "" }
 -- The layout's own settings; its rows and the bars taken out are lists.
 local LAYOUT_CHECKS = {
     on = Bool, preset = Preset, base = Preset, left = BarKey, right = BarKey,
@@ -299,9 +301,10 @@ for _, key in ipairs(ns.SHARE_LOOK) do LOOK[key] = true end
 -- What a string's top table holds: its name (n), the addon's version (a),
 -- the bars' lists (l), each form's lists (f: Swap with my form, form ->
 -- bar -> list) and the bars swapping with your form (w: bar -> true),
--- joins (j), Cooldown pulse ticks (p) and Long ones (q), spells added by
--- name or ID (c), and the look and layout (g).
-local KNOWN = { n = true, a = true, l = true, f = true, w = true, j = true, p = true, q = true, c = true, g = true }
+-- joins (j), the buffs shown only while they're missing (m: "buff" -> name
+-- -> true, Only when missing), Cooldown pulse ticks (p) and Long ones (q),
+-- spells added by name or ID (c), and the look and layout (g).
+local KNOWN = { n = true, a = true, l = true, f = true, w = true, j = true, m = true, p = true, q = true, c = true, g = true }
 
 -- Reading ----------------------------------------------------------------------------------------
 
@@ -324,9 +327,16 @@ end
 -- bar's settings: true or false read (true on the Cooldowns or Utility bar
 -- goes into swap, for the profile), anything else left out.
 local function Setup(g, Skip, swap)
-    local setup = { look = {}, bars = {}, layout = {}, colours = {} }
+    local setup = { look = {}, bars = {}, layout = {}, colours = {}, custom = {} }
     for key, value in pairs(Table(g.s)) do
         if LOOK[key] and ns.Valid(key, value) then setup.look[key] = value else Skip() end
+    end
+    -- Custom only with its own colour beside it.
+    for _, key in ipairs(ns.COLOUR_SETTINGS) do
+        if setup.look[key] == ns.CUSTOM and not ns.Hex(setup.look[key .. "Custom"]) then
+            setup.look[key] = nil
+            Skip()
+        end
     end
     local bars = Table(g.b)
     for key in pairs(bars) do
@@ -343,6 +353,10 @@ local function Setup(g, Skip, swap)
             else
                 Skip()
             end
+        end
+        if own.tickColour == ns.CUSTOM and not ns.Hex(own.tickCustom) then
+            own.tickColour = nil
+            Skip()
         end
         setup.bars[key] = own
     end
@@ -366,13 +380,19 @@ local function Setup(g, Skip, swap)
     for key, out in pairs(Table(saved.hidden)) do
         if BarKey(key) and out == true then layout.hidden[key] = true else Skip() end
     end
-    local count = 0
+    -- Tracked Bar colours (k), and for each in Custom its own colour (h).
+    local count, hexes = 0, Table(g.h)
     for id, colour in pairs(Table(g.k)) do
-        if ID(id) and ns.Valid("barColour", colour) and count < MAX_COLOURS then
+        local hex = colour == ns.CUSTOM and ns.Hex(hexes[id])
+        if ID(id) and ns.Valid("barColour", colour) and (colour ~= ns.CUSTOM or hex) and count < MAX_COLOURS then
             setup.colours[id], count = colour, count + 1
+            if hex then setup.custom[id] = hex end
         else
             Skip()
         end
+    end
+    for id in pairs(hexes) do
+        if not setup.custom[id] then Skip() end
     end
     return setup
 end
@@ -385,7 +405,7 @@ local function Clean(data)
     for key in pairs(data) do
         if not KNOWN[key] then Skip() end
     end
-    local shared = { lists = {}, forms = {}, swap = {}, joins = {}, pick = {}, style = {}, added = {}, count = 0, picks = 0 }
+    local shared = { lists = {}, forms = {}, swap = {}, joins = {}, only = {}, pick = {}, style = {}, added = {}, count = 0, picks = 0 }
     -- Each bar's entries, each once and at most the bars' limit; a spell
     -- sits on the Cooldowns or the Utility bar, not both.
     local lists, cooldown, listed = Table(data.l), {}, {}
@@ -459,6 +479,21 @@ local function Clean(data)
             Skip()
         end
     end
+    -- On the Buffs bar, the buffs shown only while they're missing (Only
+    -- when missing): names on its list, true each.
+    if data.m ~= nil and type(data.m) ~= "table" then Skip() end
+    for key, set in pairs(Table(data.m)) do
+        if key == "buff" and type(set) == "table" then
+            local listed, kept = {}, {}
+            for _, entry in ipairs(shared.lists.buff) do listed[entry] = true end
+            for name, on in pairs(set) do
+                if on == true and listed[name] then kept[name] = true else Skip() end
+            end
+            shared.only.buff = kept
+        else
+            Skip()
+        end
+    end
     -- The Cooldown pulse's ticks (true), and its cooldowns switched to Long.
     for _, list in ipairs({ { data.p, shared.pick, true }, { data.q, shared.style, "long" } }) do
         local count = 0
@@ -493,8 +528,8 @@ local function Clean(data)
     return shared
 end
 
--- A pasted string's profile: { name, lists, forms, swap, joins, pick, style,
--- added, setup (or nil), count (entries on its bars), picks, skipped }; or nil
+-- A pasted string's profile: { name, lists, forms, swap, joins, only, pick,
+-- style, added, setup (or nil), count (entries on its bars), picks, skipped }; or nil
 -- and why not (nil only, for an empty box). The string is read from its
 -- "FECM1:" wherever that is, so a whole chat message pasted (words or a
 -- code block's mark before it) still reads, up to the last letter Base64
@@ -594,10 +629,16 @@ local function SetupNow()
     for _, field in ipairs(LAYOUT_FIELDS) do layout[field] = saved[field] end
     layout.above, layout.below = Entries(saved.above), Entries(saved.below)
     for key in pairs(saved.hidden) do layout.hidden[key] = true end
-    for id, colour in pairs(ns.BarColours()) do
+    local picked, custom, hexes = ns.BarColours()
+    for id, colour in pairs(picked) do
         if ID(id) then colours[id] = colour end
+        -- Custom's own colour, only for a bar in Custom.
+        if ID(id) and colour == ns.CUSTOM and custom[id] then
+            hexes = hexes or {}
+            hexes[id] = custom[id]
+        end
     end
-    return { s = look, b = bars, l = layout, k = colours }
+    return { s = look, b = bars, l = layout, k = colours, h = hexes }
 end
 
 -- The profile you're on, with the look and layout, as a share string; or
@@ -641,6 +682,13 @@ function P.Export()
         local set = Picks(ns.Joins(key), true)
         if next(set) then joins[key] = set end
     end
+    -- The buffs shown only while they're missing, those on the Buffs bar's list.
+    local only, listed = {}, {}
+    for _, entry in ipairs(data.l.buff or {}) do listed[entry] = true end
+    for name in pairs(Picks(ns.OnlyWhenMissing("buff"), true)) do
+        if listed[name] then only[name] = true end
+    end
+    if next(only) then data.m = { buff = only } end
     local picks, styles = Picks(ns.PulsePicks(), true), Picks(ns.PulseStyles(), "long")
     if next(joins) then data.j = joins end
     if next(picks) then data.p = picks end
@@ -683,6 +731,8 @@ function P.RedrawLook()
         skin:ApplyDecor()
         skin:ApplyKeybinds()
     end
+    -- Icon details: the swipe, countdown and edge line on every icon.
+    ns.Style:ApplyDetails()
     if ns.Resource and ns.Resource.started then ns.Resource:Apply() end
     if ns.CastBar and ns.CastBar.started then ns.CastBar:Apply() end
     if ns.RaidTimers and ns.RaidTimers.started then ns.RaidTimers:Apply() end
@@ -747,8 +797,9 @@ P.EXTRAS = {
     { key = "energy", label = "Energy bar in other forms", settings = { "prdEnergy" }, classes = { DRUID = true } },
     { key = "tidy", label = "Tidy extra mana bar", settings = { "prdHideRepeat" }, classes = { DRUID = true } },
 }
--- A look made yours in the panel: its font and colour, in place of its own.
-local OWN = { font = "font", colour = "barColour" }
+-- A look made yours in the panel: its font and colour, in place of its own
+-- (and Custom's own colour, with the colour Custom).
+local OWN = { font = "font", colour = "barColour", colourCustom = "barColourCustom" }
 
 -- The choices to offer you: every extra, or those for your class.
 function P.ExtrasFor(class)

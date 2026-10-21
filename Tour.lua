@@ -537,6 +537,67 @@ local NEWS = {
         target = function(w) return w.pages.bar.listPanel end,
         side = "above",
     },
+    {
+        version = "1.9.0",
+        page = "buff",
+        bars = { buff = true },
+        title = "Only when missing",
+        text = "Tick Only when missing beside a buff in this list and its icon shows only while that buff is missing,"
+            .. " so you see what to cast again.",
+        -- The list, the tick beside Glow when missing on each buff's row; the
+        -- box above it.
+        target = function(w) return w.pages.bar.listPanel end,
+        side = "above",
+    },
+    {
+        version = "1.9.0",
+        page = "look",
+        title = "Colour swatch",
+        text = "Each colour is one swatch now. Click it for the colours, or the rainbow, Custom, for any colour you like.",
+        -- The swatch; the box above it, so the colours it opens under it
+        -- stay in sight.
+        target = function(w) return w.barColour end,
+        side = "above",
+    },
+    {
+        version = "1.9.0",
+        page = "look",
+        title = "Icon details",
+        text = "Change the cooldown swipe's colour and see-through, the countdown's size, colour and spot, and add an edge line."
+            .. " A preview shows each change.",
+        -- The button in the preview; the box under it at its right end,
+        -- inside the page.
+        target = function(w) return w.iconDetails end,
+        side = "below",
+        align = "end",
+    },
+    {
+        version = "1.9.0",
+        page = "look",
+        title = "Block design",
+        text = "A new design for your bars: slimmer, each in a black edge with a thin warm line inside.",
+        -- No watch: the step stays so the bars can be seen.
+        try = "Try it: pick Block.",
+        already = function() return ns.Get("barStyle") == "block" end,
+        alreadyText = "Block is already picked.",
+        -- The four designs; the box beside them, clear of the preview above
+        -- and Colour fade below.
+        target = function(w) return w.barDesign end,
+        side = "right",
+    },
+    {
+        version = "1.9.0",
+        page = "look",
+        title = "Colour fade",
+        text = "Tick it and your bars fill with a soft gradient of their colour, in any design.",
+        -- No watch: the step stays so the fade can be seen.
+        try = "Try it: tick it.",
+        already = function() return ns.Get("colourFade") end,
+        alreadyText = "It's already on.",
+        -- The tick; the box beside it, clear of the colour's swatch.
+        target = function(w) return w.colourFade end,
+        side = "right",
+    },
 }
 
 -- Steps only a page's own walkthrough shows (the ? in the title bar), for
@@ -594,7 +655,8 @@ local HELP = {
         page = "cast",
         when = function() return ns.BuildCastBarPage ~= nil end,
         title = "Colours",
-        text = "A colour for your cast bar and one for your swing timer. Click the chosen one again for Blizzard's gold, or silver.",
+        text = "A colour for your cast bar and one for your swing timer: click a swatch for its colours, or Custom for any."
+            .. " The chosen one clicked again is Blizzard's gold, or silver.",
         -- Below: to the right, the box would cover the chosen colour's name.
         target = function(w) return w.pages.cast.colours end,
         side = "below",

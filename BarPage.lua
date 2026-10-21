@@ -29,6 +29,31 @@ end
 local SELF_TICK = { buff = "Show your debuffs on you", debuff = "Show your debuffs on you" }
 local SELF_LABEL = { buff = SELF_TICK.buff, debuff = SELF_TICK.debuff }
 
+-- The Debuffs bar's tick count colour, in parent: a swatch that opens the
+-- colours, Custom's kept beside them (tickCustom). For the bar showing
+-- (state.bar).
+local function TickColour(window, parent, state)
+    local B = ns.Bars
+    local function Data() return ns.BarData(state.bar) end
+    local function Set(key, hex)
+        Data().tickCustom = hex
+        B:SetOption(state.bar, "tickColour", key)
+        window:Refresh()
+    end
+    return ns.ColourChoice(window, parent, 20, {
+        keys = ns.COUNT_COLOUR_KEYS,
+        colourOf = function(key) return ns.COUNT_COLOURS[key] end,
+        chosen = function() return Data().tickColour end,
+        shown = function() return ns.CountColour(ns.CountColourKey(Data())) end,
+        pick = function(key) Set(key, Data().tickCustom) end,
+        note = function(key) return ns.COUNT_COLOUR_NAMES[key] .. " tick count." end,
+        about = "The tick count's colour. Click for the colours.",
+        custom = function() return Data().tickCustom end,
+        setCustom = function(hex) Set(ns.CUSTOM, hex) end,
+        restore = Set,
+    })
+end
+
 function ns.BuildBarPage(window, page, width)
     local B = ns.Bars
     local state = { bar = "cd", search = "" }
@@ -617,7 +642,9 @@ function ns.BuildBarPage(window, page, width)
     tickEdge:SetPoint("TOPLEFT", 492, -153)
     window:Hint(tickEdge, "Centres the count on the icon's edge at its spot, half outside, so it covers less of the icon."
         .. " Not for the centre.")
-    local tickSize = T:Slider(options, "Size", ns.TICK_SIZE, 10, 200, function(value)
+    -- Its size, then its colour: one swatch that opens the colours, so the
+    -- slider has the room the row of swatches had.
+    local tickSize = T:Slider(options, "Size", ns.TICK_SIZE, 10, 260, function(value)
         B:SetOption(state.bar, "tickSize", value)
     end, 44)
     tickSize:SetPoint("TOPLEFT", 0, -151)
@@ -630,19 +657,10 @@ function ns.BuildBarPage(window, page, width)
     end
     window:Hint(tickSize, "How big the tick count is: 100% follows the icon's size.")
     local tickColour = T:Text(options, "GameFontHighlight")
-    tickColour:SetPoint("TOPLEFT", 216, -155)
+    tickColour:SetPoint("TOPLEFT", 276, -155)
     tickColour:SetText("Colour")
-    local tickSwatches = {}
-    for i, key in ipairs(ns.COUNT_COLOUR_KEYS) do
-        local swatch = ns.Swatch(options, 20, function()
-            B:SetOption(state.bar, "tickColour", key)
-            window:Refresh()
-        end)
-        swatch:SetPoint("TOPLEFT", 266 + (i - 1) * 24, -151)
-        swatch.key = key
-        window:Hint(swatch, ns.COUNT_COLOUR_NAMES[key] .. " tick count.")
-        tickSwatches[i] = swatch
-    end
+    local tickChoice = TickColour(window, options, state)
+    tickChoice:SetPoint("TOPLEFT", 326, -151)
     -- Whether any of the Debuffs bar's debuffs counts its ticks now: one of
     -- yours (not another class's in a shared profile, whose tick you can't see).
     local function Counting()
@@ -658,7 +676,7 @@ function ns.BuildBarPage(window, page, width)
         editing = editing,
         showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap,
         tickAt = tickAt, tickFrom = tickFrom, tickEdge = tickEdge, tickSize = tickSize, tickColour = tickColour,
-        tickSwatches = tickSwatches }
+        tickChoice = tickChoice, tickSwatches = tickChoice.swatches }
 
     -- The spell list -------------------------------------------------------------------
     local listPanel = CreateFrame("Frame", nil, page, "BackdropTemplate")
@@ -795,9 +813,10 @@ function ns.BuildBarPage(window, page, width)
         row.glow:SetFrameLevel(row.check:GetFrameLevel() + 2)
         window:Hint(row.glow, function()
             local debuffs = state.bar == "debuff"
-            if ns.BuffBar:Packed(ns.BarData(state.bar)) then
+            -- (A buff ticked Only when missing has a spot of its own.)
+            if row.spell and not B:MissingSpot(state.bar, row.spell) then
                 return debuffs and "Tick Show missing debuffs greyed first: the glow shows on a missing debuff's greyed spot."
-                    or "Tick Show missing buffs greyed first: the glow shows on a missing buff's greyed spot."
+                    or "Tick Show missing buffs greyed or Only when missing first: the glow shows on a missing buff's greyed spot."
             end
             if debuffs then
                 return "Its icon glows while it's missing from an enemy you target, like a Judgement that fell off."
@@ -805,6 +824,26 @@ function ns.BuildBarPage(window, page, width)
             return "Its icon glows while it's missing, so you see to recast it, like a Seal that fell off."
         end)
         row.glow:Hide()
+        -- On the Buffs page, a ticked buff's own Only when missing (a
+        -- player's ask), just left of Glow when missing: its icon shows only
+        -- while it's missing from you, in a spot of its own, as Only show
+        -- missing does for every buff. Greyed, saying why, while Only show
+        -- missing is on; its own choice is kept.
+        row.only = T:Check(row, "Only when missing", function(self)
+            if row.spell then B:SetOnlyWhenMissing(state.bar, row.spell, self:GetChecked()) end
+            window:Refresh()
+        end)
+        row.only:SetWidth(18 + (row.only.text:GetStringWidth() or 0))
+        row.only:SetPoint("RIGHT", -8, 0)
+        row.only:SetFrameLevel(row.check:GetFrameLevel() + 2)
+        window:Hint(row.only, function()
+            if ns.BarData("buff").onlyMissing then
+                return "Not needed with Only show missing, which already shows every buff only while it's missing."
+            end
+            return "Shows this buff only while it's missing from you, so you see to recast it. The game hides your buffs"
+                .. " from addons in a fight, so changes then show once it ends."
+        end)
+        row.only:Hide()
         -- On the Debuffs page, a ticked debuff that ticks gets one there too
         -- (a player's idea: Bane of Agony's ticks): its icon counts them.
         row.ticks = T:Check(row, "Count ticks", function(self)
@@ -841,7 +880,7 @@ function ns.BuildBarPage(window, page, width)
         row.header:SetText(text:upper())
         row.header:Show()
         row.spell, row.other, row.pinned = nil, nil, nil
-        for _, part in ipairs({ row.check, row.icon, row.name, row.rank, row.where, row.glow, row.ticks }) do part:Hide() end
+        for _, part in ipairs({ row.check, row.icon, row.name, row.rank, row.where, row.glow, row.ticks, row.only }) do part:Hide() end
         row:Show()
         y = y + HEADER_ROW
     end
@@ -863,6 +902,7 @@ function ns.BuildBarPage(window, page, width)
         for _, part in ipairs({ row.check, row.icon, row.name, row.rank, row.where }) do part:Show() end
         row.glow:Hide() -- a ticked buff's only (Spell)
         row.ticks:Hide() -- and a ticked debuff's
+        row.only:Hide() -- and a ticked buff's
         row:Show()
         y = y + ROW
         return row
@@ -877,7 +917,18 @@ function ns.BuildBarPage(window, page, width)
             -- Glow when missing, for a buff or debuff on the bar.
             row.glow:SetShown(on)
             row.glow:SetChecked(B:GlowsMissing(state.bar, entry.key))
-            if on then row.glow:SetUsable(not ns.BuffBar:Packed(ns.BarData(state.bar))) end
+            if on then row.glow:SetUsable(B:MissingSpot(state.bar, entry.key)) end
+            -- Only when missing, on the Buffs page for a buff on the bar,
+            -- just left of Glow when missing; greyed while Only show missing
+            -- does it for every buff.
+            local only = state.bar == "buff" and on
+            row.only:SetShown(only)
+            row.only:SetChecked(B:OnlyWhenMissing(state.bar, entry.key))
+            if only then
+                row.only:SetUsable(not ns.BarData("buff").onlyMissing)
+                row.only:ClearAllPoints()
+                row.only:SetPoint("RIGHT", row.glow, "LEFT", -14, 0)
+            end
             -- Count ticks, on the Debuffs page for a debuff on the bar that
             -- ticks, just left of Glow when missing; greyed while its icon
             -- can't count (its hint says why), unless it's ticked, so it can
@@ -1086,11 +1137,8 @@ function ns.BuildBarPage(window, page, width)
         end
         -- The tick count's two rows, while the Debuffs bar counts any.
         local counting = key == "debuff" and Counting()
-        for _, part in ipairs({ tickAt, tickAt.label, tickFrom, tickEdge, tickSize, tickColour }) do part:SetShown(counting) end
-        for _, swatch in ipairs(tickSwatches) do
-            swatch:SetShown(counting)
-            ns.PaintSwatch(swatch, ns.COUNT_COLOURS[swatch.key], swatch.key == data.tickColour)
-        end
+        for _, part in ipairs({ tickAt, tickAt.label, tickFrom, tickEdge, tickSize, tickColour, tickChoice }) do part:SetShown(counting) end
+        tickChoice:Paint()
         tickAt:SetSelected(data.tickAt)
         tickFrom:SetChecked(data.tickFrom == 1)
         tickEdge:SetChecked(data.tickEdge == true)

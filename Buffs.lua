@@ -20,6 +20,10 @@
 --   is read out of combat only (the game keeps your buffs secret in a fight),
 --   so in a fight the bar stays as it was: a buff cast then draws over its
 --   greyed spot in its slot as usual, and one that drops shows once it's over.
+-- * Only when missing (the Buffs bar, ticked buff by buff): those buffs alone
+--   go that way, each in a fixed slot and holder of its own while it's
+--   missing; the rest stay as they are, packed or greyed. On a packed bar
+--   their spots lead the row and the game's packed icons follow (F:Spots).
 local _, ns = ...
 
 local F = {}
@@ -52,6 +56,35 @@ function F:Packed(data)
     return not (data.showMissing or self:OnlyMissing(data))
 end
 
+-- Only when missing: whether any buff on the Buffs bar is ticked to show
+-- only while it's missing (not with the bar's own Only show missing, which
+-- already does it for all). From the saved picks, so it's known before the
+-- bar is laid out.
+function F:Flagged(key, data)
+    if key ~= "buff" or data == nil or self:OnlyMissing(data) then return false end
+    return next(ns.OnlyWhenMissing(key)) ~= nil
+end
+
+-- Whether the bar reads which of your buffs are on you: with Only show
+-- missing, or any buff ticked Only when missing.
+function F:Watches(key, data)
+    return self:OnlyMissing(data) or self:Flagged(key, data)
+end
+
+-- Whether entry i shows only while it's missing: every entry with Only show
+-- missing, else one ticked Only when missing (bar.only, F:Layout).
+function F:Hides(bar, i)
+    return self:OnlyMissing(bar.data) or bar.only ~= nil and bar.only[i] == true
+end
+
+-- Whether a buff on the bar as laid out is ticked Only when missing: a tick
+-- on another character's buff in a shared profile isn't (it has no icon
+-- here). Before the bar is first laid out, from the saved picks (F:Flagged).
+function F:Ticked(bar, key, data)
+    if bar and bar.only then return next(bar.only) ~= nil end
+    return self:Flagged(key, data)
+end
+
 -- Every entry keeping a spot of its own, greyed while missing: with missing
 -- ones greyed, and not with Only show missing, whose spots come and go.
 function F:Fixed(data)
@@ -65,11 +98,28 @@ function F:KeepGreyed(data)
     return data ~= nil and data.greyedNoTarget == true and self:Fixed(data)
 end
 
--- Sizes an icon's numbers for its size, and shows or hides the countdown.
+-- Sizes an icon's numbers for its size, and shows or hides the countdown,
+-- in the spot picked in Icon details.
 local function Fit(parts, size, showTimer)
     parts.cooldown:SetCountdownFont(Style:Countdown(size))
     parts.cooldown:SetHideCountdownNumbers(not showTimer)
     parts.count:SetFontObject(Style:Count(size))
+    Style:AuraNumbers(parts)
+end
+
+-- Icon details (the Look page) on the bar's icons as made: each packed
+-- icon's and each fixed spot's, its numbers sized as laid out. Only out of
+-- a fight (Bars.lua AuraDetails).
+function F:Details(bar)
+    local function Detail(parts, size)
+        Style:CooldownLook(parts.cooldown)
+        parts.cooldown:SetCountdownFont(Style:Countdown(size))
+        Style:AuraNumbers(parts)
+    end
+    for _, parts in ipairs(bar.groupParts or {}) do Detail(parts, BASE) end
+    for _, holder in ipairs(bar.holders or {}) do
+        if holder.slot then Detail(holder.slot, holder.size or BASE) end
+    end
 end
 
 -- Count ticks (a player's idea: how many times Bane of Agony has ticked),
@@ -347,9 +397,8 @@ local function Look(button, size, showTimer, decorate, counts)
     local cooldown = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
     cooldown:SetAllPoints(icon)
     cooldown:SetSwipeTexture(Style.FLAT)
-    cooldown:SetSwipeColor(0, 0, 0, .7)
     cooldown:SetReverse(true)
-    cooldown:SetDrawEdge(false)
+    Style:CooldownLook(cooldown) -- the swipe and edge line picked in Icon details
     cooldown:SetDrawBling(false)
     button:SetDurationCooldown(cooldown)
     -- Stack counts sit above the sweep.
@@ -430,7 +479,7 @@ end
 
 function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
-    bar.groupParts, bar.names, bar.up, bar.spots = {}, {}, {}, {}
+    bar.groupParts, bar.names, bar.up, bar.spots, bar.only = {}, {}, {}, {}, {}
     bar.tickPaces, bar.tickShows, bar.groupTicks = {}, {}, {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
@@ -573,12 +622,14 @@ end
 -- Reads which entries are on you (bar.up, by place). One the game won't say
 -- about keeps what it was last (by its names: bar.upBy), and one never read
 -- counts as missing, so it shows. True when any changed. Nothing is read
--- with Only show missing off, or your bars. bar.unread says the game didn't
--- answer for one or more (your buffs still secret as a fight ends, say), so
--- the bars read again a moment later (Bars.lua, Again).
+-- with Only show missing off and no buff ticked Only when missing, or your
+-- bars off, and only the entries that show while missing are read.
+-- bar.unread says the game didn't answer for one or more (your buffs still
+-- secret as a fight ends, say), so the bars read again a moment later
+-- (Bars.lua, Again).
 function F:Check(bar)
     bar.unread = nil
-    if not (self:OnlyMissing(bar.data) and ns.Bars:Enabled()) then
+    if not (self:Watches(bar.key, bar.data) and ns.Bars:Enabled()) then
         bar.upBy = nil
         return false
     end
@@ -586,9 +637,11 @@ function F:Check(bar)
     local last, now, up, changed = bar.upBy or {}, {}, bar.up, false
     for i = 1, bar.count do
         local name, on = bar.names[i], nil
-        if readable then on = OnYou(bar.slotIDs[i]) end
-        if on == nil then on, bar.unread = last[name], true end
-        now[name] = on
+        if self:Hides(bar, i) then
+            if readable then on = OnYou(bar.slotIDs[i]) end
+            if on == nil then on, bar.unread = last[name], true end
+            now[name] = on
+        end
         on = on == true
         if (up[i] == true) ~= on then changed = true end
         up[i] = on
@@ -599,26 +652,74 @@ function F:Check(bar)
 end
 
 -- Whether entry i has a spot on the bar now: always with missing ones
--- greyed; with Only show missing, while it's missing, and every one while
--- the bars are arranged (unlocked, or in Edit Mode), so the bar can be
--- placed and sized with them all. A missing one's slot stays on, so a buff
--- cast in a fight draws over its greyed spot.
+-- greyed; with Only show missing, or ticked Only when missing, while it's
+-- missing, and every one while the bars are arranged (unlocked, or in Edit
+-- Mode), so the bar can be placed and sized with them all. A missing one's
+-- slot stays on, so a buff cast in a fight draws over its greyed spot.
 local function Spot(bar, i)
-    return not (F:OnlyMissing(bar.data) and bar.up[i]) or ns.Bars:Arranging()
+    return not (F:Hides(bar, i) and bar.up[i]) or ns.Bars:Arranging()
 end
 
--- Shows the fixed spots that show and hides the rest (all of them while
--- packed), and lists those shown in your order (bar.spots) for the bar to
--- place side by side. Out of combat only, as they carry the slots.
+-- Whether entry i is shown in a fixed slot and spot: every entry unless
+-- packed; on a packed bar, the ones ticked Only when missing (the rest are
+-- the game's packed icons).
+local function Own(bar, i, packed)
+    return not packed or bar.only[i] == true
+end
+
+-- A packed bar's spots (Only when missing) in one row, side by side: from
+-- the edge it grows from, or centred as if alone, and the game's packed
+-- icons just past them (bar.leadPoint, bar.leadX: the container's point and
+-- how far along from the bar's, F:Apply). With none, the icons sit as
+-- before: centred, or from that edge.
+local function Lead(bar, spots)
+    local data = bar.data
+    local side = data.grow == "left" and "RIGHT" or data.grow == "right" and "LEFT" or "CENTER"
+    local n = #spots
+    bar.leadPoint, bar.leadX = side, 0
+    if n == 0 then return end
+    local size, spacing = ns.IconSize(data), data.spacing
+    local step = size + spacing
+    local slots = bar.count > 0 and bar.count or 3
+    local width = slots * size + (slots - 1) * spacing
+    local corner = data.wrap == "up" and "BOTTOMLEFT" or "TOPLEFT"
+    local from
+    if data.grow == "left" then
+        from = width - n * step + spacing
+        bar.leadPoint, bar.leadX = "RIGHT", -n * step
+    elseif data.grow == "right" then
+        from = 0
+        bar.leadPoint, bar.leadX = "LEFT", n * step
+    else
+        from = (width - (n * step - spacing)) / 2
+        bar.leadPoint, bar.leadX = "LEFT", from + n * step
+    end
+    -- Growing left, the first one on the right, as fixed spots go.
+    for k, holder in ipairs(spots) do
+        local at = data.grow == "left" and (n - k) or (k - 1)
+        holder:ClearAllPoints()
+        holder:SetPoint(corner, bar, corner, from + at * step, 0)
+    end
+end
+
+-- Shows the fixed spots that show and hides the rest (on a packed bar, all
+-- but those ticked Only when missing), and lists those shown in your order
+-- (bar.spots) for the bar to place side by side. Out of combat only, as
+-- they carry the slots.
 function F:Spots(bar)
-    local fixed, spots = not self:Packed(bar.data), {}
+    local packed, spots = self:Packed(bar.data), {}
     for i = 1, bar.count do
         local holder = bar.holders[i]
-        local shown = fixed and Spot(bar, i)
+        local shown = Own(bar, i, packed) and Spot(bar, i)
         holder:SetShown(shown)
         if shown then spots[#spots + 1] = holder end
     end
     bar.spots = spots
+    if packed then
+        Lead(bar, spots)
+    else
+        bar.leadPoint, bar.leadX = nil, 0
+    end
     return spots
 end
 
@@ -649,17 +750,23 @@ end
 -- IDs; joined entries count as one, with every linked spell's IDs.
 function F:Layout(bar, data)
     local size, spacing = ns.IconSize(data), data.spacing
-    local count = 0
+    local count, packed = 0, self:Packed(data)
     local picks, glows = ns.MissingPicks(bar.key), ns.GlowMissing(bar.key)
     local counts = bar.key == "debuff" and ns.CountTicks(bar.key) or {}
+    -- Only when missing: the Buffs bar's, and not with Only show missing.
+    local flags = self:Flagged(bar.key, data) and ns.OnlyWhenMissing(bar.key) or {}
+    -- A packed bar's slots sit in its container, scaled with the packed
+    -- icons, so their numbers are sized as those icons' are.
+    local fit = packed and BASE or size
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
-        local ids, entry, picked, glow, yours = {}, nil, nil, false, {}
+        local ids, entry, picked, glow, yours, only = {}, nil, nil, false, {}, false
         for _, name in ipairs(group) do
             local found = ns.Spells:Find(name)
             if found and found.ids and ns.Spells:ForMe(name, bar.key) then
                 entry = entry or found
                 if picks[name] and not picked then picked = found end -- the first picked, as B:Picked
                 glow = glow or glows[name] == true
+                only = only or flags[name] == true
                 yours[#yours + 1] = name
                 for _, id in ipairs(found.ids) do ids[id] = true end
             end
@@ -674,36 +781,32 @@ function F:Layout(bar, data)
             count = count + 1
             local holder = bar.holders[count]
             holder:SetSize(size, size)
-            holder.size, holder.showTimer = size, data.showTimer
-            if holder.slot then Fit(holder.slot, size, data.showTimer) end
+            holder.size, holder.showTimer = fit, data.showTimer
+            if holder.slot then Fit(holder.slot, fit, data.showTimer) end
             holder.icon:SetTexture(entry.icon)
             holder.label:SetWidth(size + spacing)
             holder.label:SetText(#group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name)
-            holder.label:SetShown(data.showNames)
+            -- (A packed bar offers no names: its icons have no spot for one.)
+            holder.label:SetShown(data.showNames and not packed)
             MissingGlow(holder, glow, size)
             bar.slotIDs[count] = ids
             bar.names[count] = table.concat(group, "+")
             bar.tickPaces[count], bar.tickShows[count] = pace, shows
+            bar.only[count] = only or nil
         end
     end
     for i = count + 1, ns.BUFF_SLOTS do
         bar.holders[i]:Hide()
         MissingGlow(bar.holders[i], false)
-        bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i] = nil, nil, nil, nil
+        bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i], bar.only[i] = nil, nil, nil, nil, nil
     end
     for _, parts in ipairs(bar.groupParts) do parts.cooldown:SetHideCountdownNumbers(not data.showTimer) end
     bar.count = count
-    -- Which are on you, then the spots that show.
+    -- Which are on you, then the spots that show. (Packed icons line up
+    -- from the bar's centre, or from the edge the bar grows away from, past
+    -- any spots: F:Apply. Fixed spots are placed in rows by the bar.)
     self:Check(bar)
     self:Spots(bar)
-    -- Packed icons line up from the bar's centre, or from the edge the bar
-    -- grows away from. (Fixed spots are placed in rows by the bar.)
-    local side = data.grow == "left" and "RIGHT" or data.grow == "right" and "LEFT" or "CENTER"
-    if bar.container and bar.containerSide ~= side then
-        bar.containerSide = side
-        bar.container:ClearAllPoints()
-        bar.container:SetPoint(side, bar, side)
-    end
     self:Apply(bar)
     self:UpdateTarget(bar)
 end
@@ -830,9 +933,24 @@ function F:Apply(bar)
     local data = bar.data
     local on = ns.Bars:Enabled()
     local packed = self:Packed(data)
+    local scale = packed and ns.IconSize(data) / BASE or 1
+    -- Packed icons line up from the bar's centre, or from the edge the bar
+    -- grows away from; past the spots of any buffs ticked Only when missing
+    -- (F:Spots), the offset in the container's own size, as it's scaled.
+    local side = data.grow == "left" and "RIGHT" or data.grow == "right" and "LEFT" or "CENTER"
+    local point, x = bar.leadPoint or side, bar.leadX or 0
+    local where = x == 0 and point or (point .. "|" .. x .. "|" .. scale)
+    if bar.containerSide ~= where then
+        bar.containerSide = where
+        container:ClearAllPoints()
+        if x == 0 then container:SetPoint(point, bar, point) else container:SetPoint(point, bar, point, x / scale, 0) end
+    end
     for i = 1, ns.BUFF_SLOTS do
-        local ids = on and not packed and bar.slotIDs[i] or nil
-        -- Only show missing: a buff on you has no spot, and its slot is off.
+        -- Fixed slots: every entry's, or on a packed bar those ticked Only
+        -- when missing.
+        local ids = on and Own(bar, i, packed) and bar.slotIDs[i] or nil
+        -- Only show missing or Only when missing: a buff on you has no spot,
+        -- and its slot is off.
         if ids and not Spot(bar, i) then ids = nil end
         local signature = Signature(ids)
         if bar.applied[i] ~= signature then
@@ -847,7 +965,6 @@ function F:Apply(bar)
         end
     end
     -- Groups are made as they're first needed; the game keeps them after that.
-    local scale = packed and ns.IconSize(data) / BASE or 1
     local spacing = data.spacing / scale
     -- Growing left, the first entry sits at the right, as fixed spots do.
     local function Index(i)
@@ -862,7 +979,8 @@ function F:Apply(bar)
         end
     end
     for i = 1, bar.groups do
-        local ids = on and packed and bar.slotIDs[i] or nil
+        -- (Not one ticked Only when missing: its own slot shows it.)
+        local ids = on and packed and bar.only[i] ~= true and bar.slotIDs[i] or nil
         local signature = ids and (Signature(ids) .. "|" .. spacing .. "|" .. Index(i)) or ""
         if bar.appliedGroups[i] ~= signature then
             bar.appliedGroups[i] = signature
@@ -941,11 +1059,12 @@ local function SetCount(ticks, seconds, shows, data, size)
     ticks.frame:SetShown(seconds ~= nil)
     if not seconds then return end
     local font = Style:Ticks(size, data.tickSize)
-    local look = data.tickAt .. "|" .. tostring(data.tickEdge) .. "|" .. font .. "|" .. data.tickColour .. "|" .. Shows(shows)
+    local colourKey = ns.CountColourKey(data) -- a named colour, or Custom's own
+    local look = data.tickAt .. "|" .. tostring(data.tickEdge) .. "|" .. font .. "|" .. colourKey .. "|" .. Shows(shows)
     if ticks.look == look then return end
     local at = INSET[data.tickAt] or INSET.TOPLEFT
     local point = INSET[data.tickAt] and data.tickAt or "TOPLEFT"
-    local colour = ns.COUNT_COLOURS[data.tickColour] or ns.COUNT_COLOURS.white
+    local colour = ns.CountColour(colourKey)
     if ticks.curve and not pcall(Paint, ticks.curve, colour, shows) then
         -- Turned down: a joined icon can't tell its debuffs apart, so no count.
         ticks.look = nil

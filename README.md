@@ -25,8 +25,14 @@ EraUI.
   looks in one click, and can switch on what goes with it (keybinds, text, your
   cast bar). Undo puts your look back
 - Square icons with big, bold countdown numbers
-- Tracked Bars in three designs (Glass, Split and Outline) and six colours, or a
-  colour of their own for any bar
+- Tracked Bars in four designs (Glass, Split, Outline and the slimmer Block
+  design, with a thin warm line inside a black edge) and six colours, or a
+  colour of their own for any bar. Each colour is one swatch: click it for the
+  colours, or Custom for any colour. Colour fade fills your bars with a soft
+  gradient of their colour (off by default)
+- Icon details on the Look page: the cooldown swipe's colour and see-through,
+  the countdown's size, colour and spot, and an edge line, on your icons and
+  Blizzard's
 - Optional borders and soft shadows, round each icon or round whole rows, with
   Thick edges for a bolder 2px edge, and a Darkness slider for the empty part
   of your bars, right down to solid black (Look page)
@@ -83,6 +89,8 @@ EraUI.
 - Glow when missing: tick it beside a buff and its icon glows while the buff is
   missing, like a Seal that fell off; beside a debuff of yours, it glows while
   the debuff is missing from the enemy you target (off by default)
+- Only when missing: tick it beside a buff and its icon shows only while that
+  buff is missing from you (off by default)
 - Count ticks: tick it beside a debuff and its icon counts its ticks like
   stacks, like Bane of Agony, in the spot, size and colour you pick, inside the
   icon or on its edge (off by default)

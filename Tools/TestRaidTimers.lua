@@ -1037,6 +1037,56 @@ page.bossColours.swatches[4]:Click()
 Equal(ns.Get("bossColour") .. " " .. Colour(boss.bar), "green 0.38,0.74,0.3,1", "a colour for boss casts")
 Equal(S[page.bossNote].text:find("secret", 1, true) ~= nil, true, "the note says what the game keeps secret")
 
+-- The Look page's Block and Colour fade reach these bars too, the previews
+-- and Blizzard's alike (the same code): a thin warm line inside the edge
+-- (always one pixel in: these bars never take Thick edges), a warmer track,
+-- and each fill faded from a deeper shade of its colour into a lighter one.
+;(function()
+    local fill = pull.bar:CreateTexture()
+    rawset(pull.bar, "GetStatusBarTexture", function() return fill end)
+    local function Warm(bar)
+        local strips, shown, track = {}, 0, "none"
+        for _, obj in ipairs(objects) do
+            if S[obj].parent == bar and S[obj].kind == "Texture" then
+                local a = Last(obj, "SetColorTexture", 4)
+                if a == .35 then
+                    strips[#strips + 1] = obj
+                    if S[obj].shown then shown = shown + 1 end
+                elseif a == .85 or a == .92 then
+                    track = string.format("%g %g %g %g", Last(obj, "SetColorTexture", 1), Last(obj, "SetColorTexture", 2),
+                        Last(obj, "SetColorTexture", 3), a)
+                end
+            end
+        end
+        local top = strips[1] and S[strips[1]].points[1]
+        return #strips .. " " .. shown .. " " .. track .. (top and (" " .. top[4] .. " " .. top[5]) or "")
+    end
+    local function Fade()
+        local how, from, to = Last(fill, "SetGradient", 1), Last(fill, "SetGradient", 2), Last(fill, "SetGradient", 3)
+        if not how then return "flat" end
+        return string.format("%s %.2f %.2f %.2f %g > %.2f %.2f %.2f %g", how, from.r, from.g, from.b, from.a, to.r, to.g, to.b, to.a)
+    end
+    Equal(Warm(pull.bar) .. " | " .. Warm(boss.bar) .. " | " .. Fade(), "0 0 0.08 0.08 0.09 0.85 | 0 0 0.08 0.08 0.09 0.85 | flat",
+        "Glass, unfaded: no warm line made, today's track, nothing faded")
+    ns.Set("barStyle", "block")
+    ns.Set("colourFade", true)
+    ns.Set("thickEdges", true)
+    ns.RaidTimers:SampleLook(pull)
+    ns.RaidTimers:SampleLook(boss)
+    Equal(Warm(pull.bar) .. " | " .. Warm(boss.bar) .. " | " .. Fade() .. " | " .. Colour(pull.bar),
+        "4 4 0.11 0.085 0.075 0.92 0 -1 | 4 4 0.11 0.085 0.075 0.92 0 -1 | HORIZONTAL 0.80 0.00 0.00 1 > 1.00 0.40 0.40 1 | 1,0,0,1",
+        "Block and Colour fade: the warm line one pixel in and the warmer track on both, Blizzard's red faded over its flat colour")
+    ns.Set("barStyle", "glass")
+    ns.Set("colourFade", false)
+    ns.Set("thickEdges", false)
+    ns.RaidTimers:SampleLook(pull)
+    ns.RaidTimers:SampleLook(boss)
+    Equal(Warm(pull.bar) .. " | " .. Warm(boss.bar) .. " | " .. Colour(pull.bar),
+        "4 0 0.08 0.08 0.09 0.85 0 -1 | 4 0 0.08 0.08 0.09 0.85 0 -1 | 1,0,0,1", "back to Glass: the line hidden, today's track, flat")
+    rawset(pull.bar, "GetStatusBarTexture", nil)
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- Sizes, the parts on: usable, saved, and on the preview at once.
 do
     local function G(value) return value and string.format("%g", value) or "nil" end
@@ -1141,7 +1191,8 @@ do
         if S[obj].parent == page.options and S[obj].shown then inside[#inside + 1] = obj end
     end
     local count, outside, overlaps = Laid(page.options, inside)
-    Equal(count .. " | " .. outside .. " | " .. overlaps, "49 |  | ",
+    -- (Each colour is one swatch: its colours are in a pop-up on the window.)
+    Equal(count .. " | " .. outside .. " | " .. overlaps, "29 |  | ",
         "every tick, label, colour, choice, size, the Edit Mode button and the boss note inside the options, none on another")
     count, outside, overlaps = Laid(page.tray, { page.boxes.pull, page.boxes.warnings, page.boxes.boss })
     Equal(count .. " | " .. outside .. " | " .. overlaps, "3 |  | ", "the three preview boxes inside the preview, side by side")
@@ -1860,7 +1911,7 @@ do
                 list[#list + 1] = { Rect(obj) }
             end
         end
-        Equal(#list .. " " .. Covers(second, list), "51 0", "the sizes box on none of the 49 pieces of the options, the title or its status")
+        Equal(#list .. " " .. Covers(second, list), "31 0", "the sizes box on none of the 29 pieces of the options, the title or its status")
     end
     Equal(tostring(sizes[1].usable) .. " " .. tostring(sizes[3].usable), "true false",
         "the countdown's sizes work now it's ticked; the raid warnings' still wait for theirs")
