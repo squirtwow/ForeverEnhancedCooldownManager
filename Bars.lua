@@ -330,11 +330,9 @@ local function RefreshItem(icon, data, follows)
     end
 end
 
--- Your ammunition: how many you carry, greyed when you're out.
-local function RefreshAmmo(icon)
-    local texture = GetInventoryItemTexture("player", icon.slot)
-    if texture then icon.texture:SetTexture(texture) end
-    local count = GetInventoryItemID("player", icon.slot) and GetInventoryItemCount("player", icon.slot) or 0
+-- An icon that only counts what you carry (your ammo, your Soul Shards):
+-- the count, greyed at 0, never cooling down.
+local function Counted(icon, count)
     if Open(count) and type(count) == "number" then
         icon.count:SetText(count)
         icon.texture:SetDesaturated(count == 0)
@@ -342,14 +340,27 @@ local function RefreshAmmo(icon)
     icon.cooldown:Clear()
     Alpha(icon, 1)
     Tint(icon, TINT.ready)
-    -- Ammo is never "can't cast". Icons are reused by place, so this clears
-    -- what a spell or item there before left for the debug report.
+    -- Never "can't cast". Icons are reused by place, so this clears what a
+    -- spell or item there before left for the debug report.
     icon.cantCast = false
     SetGlow(icon, false)
 end
 
--- Whether an icon shows an item (or your ammunition) rather than a spell.
-local ITEM_KINDS = { item = true, slot = true, family = true, ammo = true }
+-- Your ammunition: how many you carry, greyed when you're out.
+local function RefreshAmmo(icon)
+    local texture = GetInventoryItemTexture("player", icon.slot)
+    if texture then icon.texture:SetTexture(texture) end
+    Counted(icon, GetInventoryItemID("player", icon.slot) and GetInventoryItemCount("player", icon.slot) or 0)
+end
+
+-- Your Soul Shards in your bags (not the bank).
+local function RefreshShards(icon)
+    Counted(icon, C_Item.GetItemCount(icon.itemID, false, false))
+end
+
+-- Whether an icon shows an item (your ammunition, your Soul Shards) rather
+-- than a spell.
+local ITEM_KINDS = { item = true, slot = true, family = true, ammo = true, shards = true }
 
 -- A spell's cooldown: on the sweep, grey while it cools down, and in full,
 -- dimmed or hidden while it cools down and while it's ready, as chosen.
@@ -413,6 +424,7 @@ end
 -- sets the icon's opacity again, with its cooldown.
 local function RefreshIcon(icon, data, hasTarget, follows, part)
     if icon.kind == "ammo" then return RefreshAmmo(icon) end
+    if icon.kind == "shards" then return RefreshShards(icon) end
     if ITEM_KINDS[icon.kind] then return RefreshItem(icon, data, follows) end
     local changed = part ~= "cooldown" and SpellState(icon, hasTarget)
     if part ~= "state" or (changed and data.dimUnusable) then SpellCooldown(icon, data) end
@@ -1754,6 +1766,9 @@ local function VetItem(key, itemID)
     if ns.Spells:IsAmmo(itemID) then
         if not ns.Spells:UsesAmmo() then return false, "Your class doesn't use ammo." end
         plan = { name = "ammo", shown = "your ammo", extra = " It counts whatever ammo you have equipped." }
+    elseif itemID == ns.Spells.SOUL_SHARD then
+        if not ns.Spells:UsesShards() then return false, "Only warlocks use Soul Shards." end
+        plan = { name = "shards", shown = "your Soul Shards", extra = " It counts how many you carry." }
     else
         local family = ns.Spells:Family(itemID)
         if family then

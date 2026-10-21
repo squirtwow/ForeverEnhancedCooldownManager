@@ -796,6 +796,80 @@ function C:SwingStopped(ranged)
     end
 end
 
+-- Tick sound ---------------------------------------------------------------------------
+-- A sound as each tick of a channelled spell lands (Cast bar page, None by
+-- default), so you can hear Drain Life or Mind Flay tick without watching the
+-- bar. The same moments as the tick marks, from the same data, whether your
+-- own cast bar is on or not: it listens on a frame of its own. A pushback
+-- drops the ticks past the channel's new end; cut short, no more sound.
+local LATE = .25 -- seconds: a tick heard any later than this (a loading screen, a stutter) is skipped
+local heard -- the channel being listened to: its start, end, ticks, period and the next tick due
+local ear
+
+-- With Sound Effects, at the game's own volume: one of the pulse's sounds.
+function C:PlayTick(key)
+    local kit = ns.Pulse and ns.Pulse.SOUNDS[key or ns.Get("castTickSound")]
+    if kit and PlaySound then pcall(PlaySound, kit, "SFX") end
+end
+
+local function StopListening()
+    heard = nil
+    if ear then ear:SetScript("OnUpdate", nil) end
+end
+
+-- Each tick whose moment has come, once; the listening stops after the last.
+local function Listen()
+    local now = GetTime()
+    while heard and heard.next <= heard.ticks do
+        local at = heard.start + heard.next * heard.period
+        if at > now then return end
+        if at > heard.finish + .05 then break end
+        if now - at <= LATE then C:PlayTick() end
+        heard.next = heard.next + 1
+    end
+    StopListening()
+end
+
+-- The channel as the game gives it: a new one starts listening, an update
+-- (a pushback) moves its end and keeps its ticks' moments. An update for a
+-- channel not heard from its start (a sound picked partway through) stays
+-- silent: its start is all that's left to time the ticks by, and a pushback
+-- has already shortened it.
+local function Hear(fresh)
+    if ns.Get("castTickSound") == "none" then return StopListening() end
+    local name, _, _, startMS, endMS, _, _, spell = UnitChannelInfo("player")
+    if not (Open(name) and Open(startMS) and Open(endMS) and Open(spell)) then return StopListening() end
+    if not (name and CHANNEL_TICKS[spell]) then return StopListening() end
+    if not fresh and not (heard and heard.spell == spell) then return StopListening() end
+    local start, finish = startMS / 1000, endMS / 1000
+    if fresh then
+        local ticks = CHANNEL_TICKS[spell]
+        heard = { spell = spell, start = start, ticks = ticks, period = math.max(.001, finish - start) / ticks, next = 1 }
+    end
+    heard.finish = finish
+    ear:SetScript("OnUpdate", Listen)
+    Listen()
+end
+
+-- The channel over. Run to its end, its last tick (due about now, at its
+-- end) is heard. Cut short (moving, another spell, the target gone: the game
+-- names no one for those either) or broken off, nothing more.
+local function Unheard(interruptedBy)
+    if not heard then return end
+    if Open(interruptedBy) and interruptedBy == nil and heard.next <= heard.ticks then
+        local at = heard.start + heard.next * heard.period
+        local now = GetTime()
+        if at <= heard.finish + .05 and heard.finish - at <= LATE and math.abs(at - now) <= LATE then C:PlayTick() end
+    end
+    StopListening()
+end
+
+function C:Hear(event, interruptedBy)
+    if not ear then return end
+    if event == "UNIT_SPELLCAST_CHANNEL_STOP" then return Unheard(interruptedBy) end
+    Hear(event == "UNIT_SPELLCAST_CHANNEL_START")
+end
+
 -- Its place ----------------------------------------------------------------------------
 
 -- How much room it takes under the display while the cast bar or the swing
@@ -882,8 +956,10 @@ function C:Start()
         else
             local _, id, _, interruptedBy = ...
             C:Event(event, id, interruptedBy)
+            if event:find("^UNIT_SPELLCAST_CHANNEL_") then C:Hear(event, interruptedBy) end
         end
     end)
-    self.row = row
+    ear = CreateFrame("Frame")
+    self.row, self.ear = row, ear
     self:Apply()
 end

@@ -779,6 +779,7 @@ function ns.BuildBarPage(window, page, width)
             local entry = row.spell and ns.Spells:Find(row.spell)
             local family = (entry and entry.kind == "family"
                 and " One icon for the best one you carry, switching as your bags change." or "")
+                .. (entry and entry.kind == "shards" and " It counts how many you carry." or "")
                 .. (row.spell and B:CarryNote(row.spell) or "")
             local on = not ns.AURA_BARS[state.bar] and row.spell and B:Find(row.spell)
             if on and on ~= state.bar then return "Move " .. name .. " here from " .. ns.BAR_NAMES[on] .. "." .. family end

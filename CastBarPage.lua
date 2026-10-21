@@ -16,6 +16,7 @@ local TICK_SAMPLE = { name = "Drain Life", icon = "Interface\\Icons\\Spell_Shado
 local TICK_AT = { .8, .6, .4, .2 }
 local SAMPLE_LAG = .18 -- seconds: the preview's latency
 local DIM = .35 -- a preview bar whose tick is off
+local SOUND_WIDTH = 150 -- the tick sound's picker
 
 function ns.BuildCastBarPage(window, page, width)
     local C = ns.CastBar
@@ -186,9 +187,54 @@ function ns.BuildCastBarPage(window, page, width)
     marks:SetPoint("TOPLEFT", RIGHT, -146)
     page.shown, page.swing, page.icon, page.name, page.timer, page.batch = shown, swings, icon, name, timer, batch
     page.marks = marks
+    -- A sound as each tick lands, cast bar on or off, under the tick marks'
+    -- tick (beside their colour while that shows): its name between two
+    -- arrows, which step through the pulse's sounds and play each one; its
+    -- name plays it again. None (the default) is off.
+    local soundNote = "A sound on each tick of a channelled spell, like Drain Life or Mind Flay, cast bar on or off. The arrows"
+        .. " step through the sounds and play each one."
+    local soundLabel = T:Text(options, "GameFontHighlight")
+    soundLabel:SetText("Sound")
+    local sound = CreateFrame("Frame", nil, options, "BackdropTemplate")
+    sound:SetSize(SOUND_WIDTH, 20)
+    T:Flat(sound, T.FIELD, T.CONTROL_BORDER)
+    local function PlaceSound(ticking)
+        local x = ticking and RIGHT + 96 or RIGHT
+        soundLabel:ClearAllPoints()
+        soundLabel:SetPoint("TOPLEFT", x, -176)
+        sound:ClearAllPoints()
+        sound:SetPoint("TOPLEFT", x + 44, -172)
+    end
+    PlaceSound(false)
+    local function Step(by)
+        local keys, at = ns.PULSE_SOUND_KEYS, 1
+        for i, key in ipairs(keys) do
+            if key == ns.Get("castTickSound") then at = i end
+        end
+        local key = keys[(at - 1 + by) % #keys + 1]
+        ns.Set("castTickSound", key)
+        C:PlayTick(key)
+        Changed()
+    end
+    sound.back = T:Square(sound, "<")
+    sound.back:SetPoint("LEFT", 1, 0)
+    sound.back:SetScript("OnClick", function() Step(-1) end)
+    sound.next = T:Square(sound, ">")
+    sound.next:SetPoint("RIGHT", -1, 0)
+    sound.next:SetScript("OnClick", function() Step(1) end)
+    sound.play = CreateFrame("Button", nil, sound)
+    sound.play:SetSize(SOUND_WIDTH - 2 * 18 - 8, 18)
+    sound.play:SetPoint("CENTER")
+    sound.play:SetScript("OnClick", function() C:PlayTick() end)
+    sound.name = T:Text(sound.play, "GameFontHighlightSmall")
+    sound.name:SetPoint("CENTER")
+    sound.name:SetJustifyH("CENTER")
+    sound.label = soundLabel
+    for _, button in ipairs({ sound.back, sound.play, sound.next }) do window:Hint(button, soundNote) end
+    page.tickSound = sound
     local tickParts = {}
     local tickColourLabel = T:Text(options, "GameFontHighlight")
-    tickColourLabel:SetPoint("TOPLEFT", RIGHT, -172)
+    tickColourLabel:SetPoint("TOPLEFT", RIGHT, -176)
     tickColourLabel:SetText("Colour")
     tickParts[#tickParts + 1] = tickColourLabel
     local tickColour = ns.ColourChoice(window, options, SWATCH, ns.SettingChoice("castTickColour", {
@@ -204,10 +250,10 @@ function ns.BuildCastBarPage(window, page, width)
         end,
         about = "The tick marks' colour. Click for the colours.",
     }, Changed))
-    tickColour:SetPoint("TOPLEFT", RIGHT + 52, -168)
+    tickColour:SetPoint("TOPLEFT", RIGHT + 52, -172)
     tickParts[#tickParts + 1] = tickColour
     local styleLabel = T:Text(options, "GameFontHighlight")
-    styleLabel:SetPoint("TOPLEFT", RIGHT, -194)
+    styleLabel:SetPoint("TOPLEFT", RIGHT, -198)
     styleLabel:SetText("Style")
     tickParts[#tickParts + 1] = styleLabel
     local styles = {}
@@ -216,7 +262,7 @@ function ns.BuildCastBarPage(window, page, width)
         ns.Set("castTickStyle", key)
         Changed()
     end)
-    tickStyle:SetPoint("TOPLEFT", RIGHT + 52, -190)
+    tickStyle:SetPoint("TOPLEFT", RIGHT + 52, -194)
     for _, button in ipairs(tickStyle.buttons) do
         window:Hint(button, "Notches: short marks at the bar's top and bottom edges. Lines: right across the bar.")
     end
@@ -225,16 +271,16 @@ function ns.BuildCastBarPage(window, page, width)
         ns.Set("castTickWidth", value)
         Changed()
     end, 44)
-    tickWidth:SetPoint("TOPLEFT", RIGHT + 184, -190)
+    tickWidth:SetPoint("TOPLEFT", RIGHT + 184, -194)
     window:Hint(tickWidth, "How wide each tick mark is, in screen pixels.")
     tickParts[#tickParts + 1] = tickWidth
     page.tickColour, page.tickSwatches, page.tickStyle, page.tickWidth = tickColour, tickColour.swatches, tickStyle, tickWidth
     -- Latency, under the tick marks (and their choices while they show):
     -- the tick and Show ms beside it, then, while it's on, its colour.
-    local latency = Tick("Latency on the bar", "castLatency", -178,
+    local latency = Tick("Latency on the bar", "castLatency", -204,
         "Your latency as a zone at the end of each cast, the start of a channel: once the bar reaches it, the cast is"
         .. " done on the server, so you can start the next.")
-    local latencyMs = Tick("Show ms", "castLatencyText", -178, "How long the zone is, in ms, at the right end of the bar.")
+    local latencyMs = Tick("Show ms", "castLatencyText", -204, "How long the zone is, in ms, at the right end of the bar.")
     local latencyLabel = T:Text(options, "GameFontHighlight")
     latencyLabel:SetText("Colour")
     local latencyColour = ns.ColourChoice(window, options, SWATCH, ns.SettingChoice("castLatencyColour", {
@@ -253,9 +299,9 @@ function ns.BuildCastBarPage(window, page, width)
         about = "The latency zone's colour. Click for the colours.",
     }, Changed))
     page.latency, page.latencyMs, page.latencyColour, page.latencySwatches = latency, latencyMs, latencyColour, latencyColour.swatches
-    -- Where they go: under the tick marks, or under their choices.
+    -- Where they go: under the tick sound, or under the tick marks' choices.
     local function PlaceLatency(ticking)
-        local y = ticking and -222 or -178
+        local y = ticking and -222 or -204
         latency:ClearAllPoints()
         latency:SetPoint("TOPLEFT", RIGHT, y)
         latencyMs:ClearAllPoints()
@@ -315,6 +361,7 @@ function ns.BuildCastBarPage(window, page, width)
         timer:SetChecked(ns.Get("castTime"))
         batch:SetChecked(ns.Get("castBatch"))
         marks:SetChecked(ns.Get("castTicks"))
+        sound.name:SetText(ns.PULSE_SOUND_NAMES[ns.Get("castTickSound")] or ns.PULSE_SOUND_NAMES.none)
         height:Set(ns.Get("castHeight"))
         Paint(colour, chosen, "castColour", "Blizzard's gold")
         Paint(swingColour, swingChosen, "swingColour", "Silver")
@@ -343,6 +390,7 @@ function ns.BuildCastBarPage(window, page, width)
         latencyColour:SetShown(lagging)
         latencyColour:Paint()
         PlaceLatency(ticking)
+        PlaceSound(ticking)
         timeFormat:SetSelected(ns.Get("castTimeFormat"))
         SampleLag()
         C:Look(tickSample, true)

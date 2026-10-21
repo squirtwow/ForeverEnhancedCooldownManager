@@ -112,6 +112,7 @@ ns.DEFAULTS = {
     castTickColour = "white", -- their colour: white, black or a bar colour
     castTickStyle = "notches", -- notches at the bar's top and bottom edges, or lines right across
     castTickWidth = 2, -- screen pixels
+    castTickSound = "none", -- a sound as each tick of a channelled spell lands (the pulse's sounds), cast bar on or off
     castTimeFormat = "left", -- the time on the bar: seconds left, or left / the whole cast
     castLatency = false, -- your latency as a zone at the end of a cast (the start of a channel)
     castLatencyColour = "red", -- its colour: red, white, black or a bar colour
@@ -319,7 +320,7 @@ local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { defa
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
     keybindPosition = {}, font = {}, barTexture = {}, readyGlow = {}, castTickColour = {}, castTickStyle = {},
-    castLatencyColour = {}, castTimeFormat = {} }
+    castLatencyColour = {}, castTimeFormat = {}, castTickSound = {} }
 for _, key in ipairs(ns.READY_GLOW_KEYS) do CHOICES.readyGlow[key] = true end
 for _, key in ipairs(ns.TICK_COLOUR_KEYS) do CHOICES.castTickColour[key] = true end
 for _, key in ipairs(ns.TICK_STYLE_KEYS) do CHOICES.castTickStyle[key] = true end
@@ -344,7 +345,9 @@ for _, key in ipairs(ns.FONT_KEYS) do CHOICES.warningFont[key] = true end
 for _, key in ipairs(ns.OUTLINE_KEYS) do CHOICES.warningOutline[key] = true end
 CHOICES.pulseBorder, CHOICES.pulseSound, CHOICES.pulseLongSound = {}, {}, {}
 for _, key in ipairs(ns.PULSE_BORDER_KEYS) do CHOICES.pulseBorder[key] = true end
-for _, key in ipairs(ns.PULSE_SOUND_KEYS) do CHOICES.pulseSound[key], CHOICES.pulseLongSound[key] = true, true end
+for _, key in ipairs(ns.PULSE_SOUND_KEYS) do
+    CHOICES.pulseSound[key], CHOICES.pulseLongSound[key], CHOICES.castTickSound[key] = true, true, true
+end
 -- The display's health and power text.
 CHOICES.prdTextNumbers, CHOICES.prdTextFont = {}, {}
 for _, bar in ipairs({ "prdHealth", "prdPower", "prdExtra", "prdEnergy" }) do

@@ -2443,7 +2443,7 @@ end
         look = "THE LOOK, KEYBINDS ON ICONS, FONT AND BAR TEXTURE, READY GLOW, COLOUR SWATCH, ICON DETAILS, BLOCK DESIGN,"
             .. " COLOUR FADE | 8 | look true",
         layout = "LAYOUTS, LIVE PREVIEW, ALL BARS, GROW ARROWS | 4 | layout true",
-        cast = "CAST BAR, COLOURS, HEIGHT AND PARTS | 3 | cast true",
+        cast = "CAST BAR, TICK SOUND, COLOURS, HEIGHT AND PARTS | 4 | cast true",
         general = "SWITCH YOUR BARS ON, ONE ICON EACH, MINIMAP BUTTON, HELP | 4 | general true",
         raid = "RAID TIMERS, SIZES, EDIT MODE | 3 | raid true",
         pulse = "TURN IT ON, PICK YOUR COOLDOWNS, QUICK AND LONG, WHERE IT SHOWS | 4 | pulse true",
@@ -2629,7 +2629,8 @@ end)()
     -- colours' names (Blizzard's gold, Silver) that the step talks about.
     w:Select("cast")
     help:Click()
-    box.next:Click()
+    -- Past Tick sound (1.9.1), second on the page.
+    for _ = 1, 2 do box.next:Click() end
     local cp = w.pages.cast
     local function Clear(a, b)
         local al, at, ar, ab = Placed(a)

@@ -56,6 +56,8 @@ EraUI.
   (off by default)
 - Tick marks on channelled spells, like Drain Life or Arcane Missiles, where
   each tick lands, in the colour, style and width you like (off by default)
+- A sound on each tick of a channelled spell, like Drain Soul or Drain Life,
+  with or without your cast bar (off by default)
 - Your latency as a zone at the end of each cast, with its ms, and the time as
   seconds left or left / the whole cast (off by default)
 - A swing timer in the same spot: your main hand and ranged swings (Auto Shot
@@ -96,7 +98,8 @@ EraUI.
   icon or on its edge (off by default)
 - Trinkets, potions, your Hearthstone and ammo, and any spell by name or ID; drag
   items in from your bags, and any ammo becomes one icon for whatever you have
-  equipped
+  equipped. A warlock's Soul Shards become one icon counting how many you carry,
+  greyed at 0
 - Healthstones, Healing Potions and Mana Potions: one icon each for the best
   one you carry, switching as your bags change
 - Keybinds on the icons: the key that casts each spell, at the bottom or a top

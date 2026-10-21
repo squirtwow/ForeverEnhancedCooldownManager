@@ -1986,6 +1986,42 @@ do
         "a hunter out of ammo: still on the bar, greyed at 0")
     Equal(#printed, 0, "no errors")
 end
+-- Soul Shards: a warlock's own icon, counting how many you carry and greyed
+-- at 0, in the Items list whether you carry any or not, and taken when a
+-- Soul Shard is dragged in. Any other class passes over it on a shared bar.
+do
+    _G.UnitClass = function() return "Warlock", "WARLOCK" end
+    itemCount[6265] = 3
+    B:Rebuild()
+    local shards = ns.Spells:Find("shards")
+    Equal(shards and (shards.name .. " " .. shards.line .. " " .. tostring(ns.Spells:IsItem(shards))), "Soul Shards Items true",
+        "a warlock's Soul Shards: listed with the items, never offered for the Buffs or Debuffs bar")
+    local ok, said = B:AddItem("util", 6265)
+    Equal(tostring(ok) .. " " .. said, "true Added your Soul Shards to Utility. It counts how many you carry.",
+        "a Soul Shard dragged in (seen in game 2026-10-21: no longer experimental)")
+    Equal(select(2, B:AddItem("buff", 6265)), "Items can't go on the Buffs bar.", "but not onto the Buffs bar")
+    local util = B:Get("util")
+    local function Shards()
+        for i = 1, util.count do
+            if util.icons[i].kind == "shards" then return util.icons[i] end
+        end
+    end
+    local icon = Shards()
+    Equal(icon and (S[icon.count].text .. " " .. tostring(S[icon.texture].desaturated) .. " " .. tostring(icon.cantCast)),
+        "3 false false", "its count, in colour")
+    itemCount[6265] = 0
+    B:RefreshAll()
+    Equal(tostring(Shards() ~= nil) .. " " .. S[icon.count].text .. " " .. tostring(S[icon.texture].desaturated), "true 0 true",
+        "out of shards: still on the bar, greyed at 0")
+    _G.UnitClass = function() return "Mage", "MAGE" end
+    B:Rebuild()
+    Equal(tostring(ns.Spells:Find("shards")) .. " " .. tostring((Shards())) .. " " .. select(2, B:AddItem("util", 6265)) .. " "
+        .. tostring(table.concat(ns.BarData("util").spells, ","):find("shards") ~= nil), "nil nil Only warlocks use Soul Shards. true",
+        "a mage: not listed, not shown, not taken when dragged in, and kept in the profile for the warlock")
+    _G.UnitClass = function() return "Hunter", "HUNTER" end
+    B:Rebuild()
+    Equal(#printed, 0, "no errors")
+end
 
 -- Healthstones and potions: one icon for whichever rank you carry ------------------------------
 
@@ -5807,6 +5843,94 @@ do
     Equal(Marks(), 0, "and the marks go with the channel")
     ns.Set("castTicks", false)
 end
+-- Tick sound (None by default): one of the pulse's sounds as each tick of a
+-- channel lands, at the tick marks' moments, with your own cast bar off too.
+-- A tick heard too late is skipped, a pushback drops the ticks past the new
+-- end, and a channel cut short makes no more sound.
+do
+    local played, savedPlay, savedPulse = {}, _G.PlaySound, ns.Pulse
+    _G.PlaySound = function(kit, channel) played[#played + 1] = kit .. " " .. tostring(channel) end
+    ns.Pulse = savedPulse or { SOUNDS = { chime = 316447 } }
+    local ear = C.ear
+    local channel = { "Drain Soul", "Channeling", 136163, 300000, 315000, false, false, 1120 }
+    _G.UnitChannelInfo = function() return table.unpack(channel) end
+    local function Step(at)
+        clock = at
+        if S[ear].scripts.OnUpdate then S[ear].scripts.OnUpdate(ear, 0) end
+    end
+    ns.Set("castBar", false)
+    clock = 300
+    Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 1120)
+    Equal(#played .. " " .. tostring(S[ear].scripts.OnUpdate), "0 nil", "None by default: nothing heard, nothing listening")
+    ns.Set("castTickSound", "chime")
+    Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 1120)
+    Step(302.9)
+    Equal(#played, 0, "Drain Soul's 5 ticks over 15 seconds: none before the first")
+    Step(303)
+    Equal(table.concat(played, ","), "316447 SFX", "the first tick, with Sound Effects, with the cast bar off")
+    Step(306.1)
+    Equal(#played, 2, "then the next")
+    Step(309.5)
+    Equal(#played, 2, "one heard too late is skipped, not played late")
+    channel[5] = 310000 -- pushed back: its end now before the fourth tick
+    Fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", nil, 1120)
+    Step(312.1)
+    Equal(#played .. " " .. tostring(S[ear].scripts.OnUpdate), "2 nil", "pushed back: the ticks past the new end never sound")
+    -- Mind Flay, run to its end: the last tick as the channel stops.
+    played = {}
+    channel = { "Mind Flay", "Channeling", 136208, 500000, 503000, false, false, 15407 }
+    clock = 500
+    Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 15407)
+    Step(501)
+    Step(502)
+    clock = 502.95
+    Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 15407)
+    Equal(#played .. " " .. tostring(S[ear].scripts.OnUpdate), "3 nil", "run to its end: all three, the last as it stops")
+    -- Drain Life broken off: no more.
+    played = {}
+    channel = { "Drain Life", "Channeling", 136169, 600000, 605000, false, false, 689 }
+    clock = 600
+    Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 689)
+    Step(601)
+    clock = 601.9
+    Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 689, "Creature-0-1")
+    Step(602)
+    Equal(#played .. " " .. tostring(S[ear].scripts.OnUpdate), "1 nil", "broken off: no more ticks")
+    -- Cut short by you (moving, another spell): the game names no one, as at
+    -- a channel's end, but a tick still to come isn't heard.
+    played = {}
+    channel = { "Drain Life", "Channeling", 136169, 650000, 655000, false, false, 689 }
+    clock = 650
+    Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 689)
+    Step(651)
+    clock = 651.9
+    Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 689)
+    Equal(#played .. " " .. tostring(S[ear].scripts.OnUpdate), "1 nil", "cut short just before a tick: that tick isn't heard")
+    -- A sound picked partway through a channel, which is then pushed back:
+    -- silent until the next one, never ticking at guessed moments.
+    played = {}
+    ns.Set("castTickSound", "none")
+    channel = { "Drain Life", "Channeling", 136169, 900000, 905000, false, false, 689 }
+    clock = 900
+    Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 689)
+    ns.Set("castTickSound", "chime")
+    clock = 901.5
+    channel[5] = 903750
+    Fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", nil, 689)
+    for _, at in ipairs({ 902, 903, 903.75 }) do Step(at) end
+    clock = 903.75
+    Fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 689)
+    Equal(#played .. " " .. tostring(S[ear].scripts.OnUpdate), "0 nil", "picked partway through, then pushed back: silent")
+    -- A channel with no tick data: not listened to.
+    channel = { "Fishing", "Channeling", 136245, 700000, 721000, false, false, 7620 }
+    Fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 7620)
+    Equal(tostring(S[ear].scripts.OnUpdate), "nil", "a channel without ticks isn't listened to")
+    ns.Set("castTickSound", "none")
+    ns.Set("castBar", true)
+    _G.UnitChannelInfo = function() return nil end
+    _G.PlaySound, ns.Pulse = savedPlay, savedPulse
+    Equal(#printed, 0, "no errors")
+end
 -- Latency (off by default): a zone at the end of a cast, timed from your
 -- press to the cast starting, with its ms; and the time as left / the whole cast.
 do
@@ -5888,6 +6012,29 @@ cp.swatches[3]:Click()
 Equal(S[cp.chosen].text, "Blizzard's gold", "clicking your colour again goes back to Blizzard's")
 cp.icon:Click()
 Equal(tostring(ns.Get("castIcon")) .. " " .. tostring(S[cp.sample.icon].shown), "true true", "the icon comes back, in the preview too")
+-- The tick sound's picker: None to start; an arrow steps to the next sound
+-- and plays it; its note fits the footer's two lines (about 6.5 units a
+-- letter in the small font).
+do
+    local played, savedPlay, savedPulse = {}, _G.PlaySound, ns.Pulse
+    _G.PlaySound = function(kit) played[#played + 1] = kit end
+    ns.Pulse = savedPulse or { SOUNDS = { chime = 316447, anvil = 316528 } }
+    local sound = cp.tickSound
+    Equal(S[sound.name].text, "None", "the tick sound starts at None")
+    sound.next:Click()
+    Equal(ns.Get("castTickSound") .. " " .. S[sound.name].text .. " " .. table.concat(played, ","), "chime Chime 316447",
+        "an arrow steps to the next sound and plays it")
+    Hover(sound.next, "OnEnter")
+    Equal(tostring(#S[w.note].text * 6.5 <= 2 * S[w.note].width) .. " " .. tostring(S[w.note].text:find("(experimental)", 1, true) ~= nil),
+        "true false", "its note fits the footer's two lines (seen in game 2026-10-21: no longer experimental)")
+    Hover(sound.next, "OnLeave")
+    sound.back:Click()
+    sound.back:Click()
+    Equal(ns.Get("castTickSound"), "anvil", "back from None goes round to the last")
+    sound.next:Click()
+    Equal(ns.Get("castTickSound"), "none", "and on again to None, off")
+    _G.PlaySound, ns.Pulse = savedPlay, savedPulse
+end
 w:Select("layout")
 Equal(S[w.pages.layout.castStrip].shown, true, "the Layout page draws it under the display")
 Equal(w.pages.layout.drawError, nil, "the Layout page drew without errors")
@@ -7287,27 +7434,29 @@ end)()
     -- your icons stays out (Tools/TestForms.lua and Tools/TestPulse.lua tour it). 1.5.0's before
     -- those: here only Ready glow, as the Cooldown pulse's page isn't loaded (Tools/TestPulse.lua
     -- tours its steps).
-    local latest, eight, six, pulse = {}, {}, {}, {}
+    local latest, eight, six, pulse, newest = {}, {}, {}, {}, {}
     for _, step in ipairs(nextSteps) do
         if step.version == "1.9.0" then latest[#latest + 1] = step end
+        if step.version == "1.9.1" then newest[#newest + 1] = step end
         if step.version == "1.8.1" then eight[#eight + 1] = step end
         if step.version == "1.6.0" then six[#six + 1] = step end
         if step.version == "1.5.0" then pulse[#pulse + 1] = step end
     end
-    local LATEST, EIGHT = Titles(latest), Titles(eight)
+    local LATEST, EIGHT, NEWEST = Titles(latest), Titles(eight), Titles(newest)
     local BEFORE = "Ready glow, Dim on cooldown, " .. EIGHT .. ", "
+    local TAIL = BEFORE .. LATEST .. ", " .. NEWEST
     Equal(tostring(#ns.KnownForms()) .. " " .. LATEST .. " | " .. EIGHT .. " | " .. Titles(six) .. " | " .. Titles(pulse) .. " | "
-        .. tostring(NEXT:sub(-#LATEST - #BEFORE) == BEFORE .. LATEST),
+        .. NEWEST .. " | " .. tostring(NEXT:sub(-#TAIL) == TAIL),
         "0 Only when missing, Colour swatch, Icon details, Block design, Colour fade | One icon each, Glow when missing, Count ticks"
-        .. " | Dim on cooldown | Ready glow | true",
-        "1.9.0's five, the last of them, straight after 1.8.1's three, 1.6.0's Dim on cooldown and 1.5.0's Ready glow"
-        .. " (no form known here)")
+        .. " | Dim on cooldown | Ready glow | Tick sound | true",
+        "1.9.1's Tick sound last (its Soul Shards are a warlock's), after 1.9.0's five, straight after 1.8.1's three,"
+        .. " 1.6.0's Dim on cooldown and 1.5.0's Ready glow (no form known here)")
     Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.8.2")) .. "|"
         .. Titles(Tour:News("1.6.0")) .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News("1.4.4")),
-        LATEST .. "|" .. LATEST .. "|" .. LATEST .. "|" .. EIGHT .. ", " .. LATEST .. "|Dim on cooldown, " .. EIGHT .. ", " .. LATEST
-        .. "|" .. BEFORE .. LATEST,
-        "no version seen, or one that isn't: the latest update's, the newest steps there are, as after 1.8.2; after 1.6.0"
-        .. " 1.8.1's too, after 1.5.9 1.6.0's too, after 1.4.4 1.5.0's too")
+        NEWEST .. "|" .. NEWEST .. "|" .. LATEST .. ", " .. NEWEST .. "|" .. EIGHT .. ", " .. LATEST .. ", " .. NEWEST
+        .. "|Dim on cooldown, " .. EIGHT .. ", " .. LATEST .. ", " .. NEWEST .. "|" .. TAIL,
+        "no version seen, or one that isn't: the latest update's, the newest steps there are; after 1.8.2 1.9.0's too;"
+        .. " after 1.6.0 1.8.1's too, after 1.5.9 1.6.0's too, after 1.4.4 1.5.0's too")
     Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW .. ", " .. NEXT,
         "versions skipped come together: the basics from 1.0.0, then the new ones")
     Equal(Titles(Tour:News("dev")) .. "|" .. Titles(Tour:News(U)), "|", "nothing when nothing is newer than what was seen")
@@ -7353,7 +7502,7 @@ end)()
     local before = Titles(Tour:News("1.5.8")) .. "|" .. Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("1.4.4"))
     Running("1.6.0")
     Equal(fromSource .. "|" .. before .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News(nil)),
-        SIXTH .. ", " .. EIGHT .. ", " .. LATEST .. "||Ready glow|Ready glow|" .. SIXTH .. "|" .. SIXTH,
+        SIXTH .. ", " .. EIGHT .. ", " .. LATEST .. ", " .. NEWEST .. "||Ready glow|Ready glow|" .. SIXTH .. "|" .. SIXTH,
         "after 1.5.9: 1.6.0's steps and the later ones from the source; 1.5.9 never shows them (by hand its last, 1.5.0's);"
         .. " 1.6.0 shows its own, by hand too")
     Equal(Titles(Tour:News("1.4.4")) .. "|" .. Titles(Tour:News("0.9.0")):sub(-#SIXTH - 12), "Ready glow, " .. SIXTH .. "|Ready glow, " .. SIXTH,
@@ -7373,6 +7522,12 @@ end)()
     Running("1.9.0")
     Equal(before190 .. "|" .. Titles(Tour:News("1.8.2")) .. "|" .. Titles(Tour:News(nil)), "|" .. EIGHT .. "|" .. LATEST .. "|" .. LATEST,
         "1.8.2 never shows 1.9.0's (by hand 1.8.1's); 1.9.0 after 1.8.2 shows its five, by hand too")
+    -- 1.9.1's, numbered before their release: 1.9.0 never shows them (by
+    -- hand its own five); 1.9.1 does, after 1.9.0 and by hand.
+    local before191 = Titles(Tour:News("1.9.0")) .. "|" .. Titles(Tour:News(nil))
+    Running("1.9.1")
+    Equal(before191 .. "|" .. Titles(Tour:News("1.9.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. LATEST .. "|" .. NEWEST .. "|" .. NEWEST,
+        "1.9.0 never shows 1.9.1's (by hand its five); 1.9.1 after 1.9.0 shows its Tick sound, by hand too")
     Running(nil)
 
     -- After an update that added steps: What's new by itself, and Got it goes
@@ -7607,8 +7762,8 @@ end)()
     Equal(tostring(S[notes].shown) .. " " .. tostring(notes.seen) .. " " .. tostring(S[notes.tour].shown), "true nil true",
         "/ccm new offers it too")
     notes.tour:Click()
-    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of " .. #latest .. " " .. latest[1].title:upper(),
-        "the next update's steps, the newest there are")
+    Equal(S[box.count].text .. " " .. S[box.title].text, "1 of " .. #newest .. " " .. newest[1].title:upper(),
+        "the next update's steps, the newest there are (1.9.1's)")
     tw.news:Click()
     Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown), "true true", "What's new opened over the tour")
     CloseSpecialWindows()
@@ -7617,7 +7772,7 @@ end)()
     -- Skip tour ends it too, and says where it is.
     tw.news:Click()
     notes.tour:Click()
-    if #latest > 1 then box.next:Click() end -- a step past the first, where there is one
+    if #newest > 1 then box.next:Click() end -- a step past the first, where there is one
     box.skip:Click()
     Equal(tostring(S[box].shown) .. " " .. S[tw.note].text, "false See it again any time from What's new, or with /ccm new.",
         "Skip tour ends it, saying where to see it again")

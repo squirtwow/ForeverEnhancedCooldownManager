@@ -1496,7 +1496,7 @@ end)()
     w:Select("cast")
     Check("cast", "cast with latency, tick marks off")
     Equal(tostring(cast.tickSample:IsVisible()) .. " " .. tostring(cast.tickStyle:IsVisible()) .. " "
-        .. tostring(S[cast.latency].points[1][3]), "false false -178",
+        .. tostring(S[cast.latency].points[1][3]), "false false -204",
         "with tick marks off, their preview and choices hide, and latency moves up under them")
     ns.Set("castLatency", false)
     w:Select("cast")

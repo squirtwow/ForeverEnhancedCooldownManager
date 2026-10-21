@@ -598,6 +598,32 @@ local NEWS = {
         target = function(w) return w.colourFade end,
         side = "right",
     },
+    {
+        version = "1.9.1",
+        page = "util",
+        bars = { util = true },
+        -- Warlocks only (a class the game won't say counts as one).
+        when = function() return ns.Spells ~= nil and ns.Spells:UsesShards() end,
+        title = "Soul Shards",
+        text = "Drag a Soul Shard from your bags onto this bar, or tick Show items and find Soul Shards in the list."
+            .. " Its icon counts how many you carry, greyed at 0.",
+        -- The list, where Show items is; the box above it.
+        target = function(w) return w.pages.bar.listPanel end,
+        side = "above",
+    },
+    {
+        version = "1.9.1",
+        page = "cast",
+        when = function() return ns.BuildCastBarPage ~= nil end,
+        title = "Tick sound",
+        text = "Pick a Sound and it plays on each tick of a channelled spell, like Drain Life or Mind Flay, with or without"
+            .. " this cast bar. The arrows play each one as you step through.",
+        -- The picker under the tick marks' tick; the box under it at its
+        -- right end, inside the page.
+        target = function(w) return w.pages.cast.tickSound end,
+        side = "below",
+        align = "end",
+    },
 }
 
 -- Steps only a page's own walkthrough shows (the ? in the title bar), for

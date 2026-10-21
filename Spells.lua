@@ -462,6 +462,26 @@ function S:UsesAmmo()
     return AMMO_CLASSES[class] == true
 end
 
+-- A warlock's Soul Shards: one icon counting how many you carry, greyed at
+-- 0, like the ammo. Offered in the Items list whether you carry any or not.
+S.SOUL_SHARD = 6265
+local SHARD_ICON = "Interface\\Icons\\INV_Misc_Gem_Amethyst_02"
+
+local function AddShards()
+    local icon = C_Item.GetItemIconByID and C_Item.GetItemIconByID(S.SOUL_SHARD)
+    Add({ key = "shards", name = "Soul Shards", kind = "shards", line = S.LINES.items, itemID = S.SOUL_SHARD,
+        icon = Open(icon) and icon or SHARD_ICON, rankText = "" })
+end
+
+-- Whether your class uses Soul Shards: only warlocks. Any other class on a
+-- shared profile passes over them on a bar, where they stay for the
+-- warlock. Unknown: it does.
+function S:UsesShards()
+    local _, class = UnitClass("player")
+    if not (Open(class) and type(class) == "string") then return true end
+    return class == "WARLOCK"
+end
+
 local function ScanItems()
     for index, slot in ipairs(TRINKETS) do
         local itemID = GetInventoryItemID("player", slot)
@@ -474,6 +494,7 @@ local function ScanItems()
     end
     local ammo = GetInventoryItemID("player", AMMO)
     if ammo and S:UsesAmmo() then AddAmmo(ammo) end
+    if S:UsesShards() then AddShards() end
     -- Healthstones and potions, one entry each whatever rank you carry.
     local _, class = UnitClass("player")
     for _, family in ipairs(FAMILIES) do
@@ -903,6 +924,7 @@ end
 function S:ForMe(key, bar, remember)
     if type(key) ~= "string" then return false end
     if key == "ammo" then return self:UsesAmmo() end
+    if key == "shards" then return self:UsesShards() end
     Ready()
     local entry = byKey[key]
     if entry and not entry.added then return true end
@@ -984,10 +1006,11 @@ function S:Icon(key)
     return icon or 134400
 end
 
--- Trinkets, bag items, healthstones and potions, and ammunition: nothing
--- that puts an aura on anyone.
+-- Trinkets, bag items, healthstones and potions, ammunition and Soul
+-- Shards: nothing that puts an aura on anyone.
 function S:IsItem(entry)
     return entry.kind == "item" or entry.kind == "slot" or entry.kind == "ammo" or entry.kind == "family"
+        or entry.kind == "shards"
 end
 
 -- The healthstone or potion family an item is a rank of, if any: dragging

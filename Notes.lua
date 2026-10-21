@@ -10,6 +10,15 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.9.1",
+        sections = {
+            { "Added", {
+                "Soul Shards for warlocks: drag one onto a bar to see how many you carry, greyed at 0.",
+                "Tick sound (Cast bar page): a sound on each tick of a channelled spell, like Drain Soul or Drain Life.",
+            } },
+        },
+    },
+    {
         version = "1.9.0",
         sections = {
             { "Added", {

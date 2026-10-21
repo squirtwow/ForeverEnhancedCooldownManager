@@ -216,8 +216,8 @@ end
 local families
 -- A bar entry's key as the bars keep them (Spells.lua): a spell's name,
 -- "Name@N" for one of its ranks, "Name#ID" for a spell pinned to one ID,
--- "item:<id>", "slot:13" or "slot:14" (the trinkets), "ammo", or a
--- healthstone or potion family. Nil for anything else.
+-- "item:<id>", "slot:13" or "slot:14" (the trinkets), "ammo", "shards" (Soul
+-- Shards), or a healthstone or potion family. Nil for anything else.
 local function Entry(value)
     local key = Word(value)
     if not key then return nil end
