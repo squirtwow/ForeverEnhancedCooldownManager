@@ -1740,7 +1740,8 @@ end
     Equal(Lit("buff", { ENERGIZED }) .. " | " .. Lit("buff", { LONG }) .. " | " .. Lit("buff", { ENERGIZED, LONG }) .. " | "
         .. Lit("buff", { { id = 1259705 } }), "g1 | g2 | g1 g2 | ", "each lights for its own buff only, both for both, neither for the racial")
     Equal(page.icons[1].name .. " | " .. page.icons[2].name .. " | " .. Note(page.icons[2]), "Energized (ID 1259691) | Energized (ID 1270842) | Energized"
-        .. " (ID 1270842). Drag it onto another icon to swap them, or off the bar to take it off.", "the page's tray names them apart, alike")
+        .. " (ID 1270842). Click: its own settings. Drag it onto another icon to swap them, or off the bar to take it off.",
+        "the page's tray names them apart, alike")
     -- Typed or dropped again, each is there already, as before.
     local said = {}
     for _, text in ipairs({ "1270842", "1259691" }) do
@@ -2227,10 +2228,12 @@ end)()
             profiles = {
                 Old = { cd = { "Read Ley Line" }, util = {}, buff = { "Blessing of Salvation" }, debuff = {}, joins = {},
                     forms = { [5] = { cd = { "Read Ley Line" } } },
-                    pulsePick = { ["Read Ley Line"] = true, Barkskin = true }, pulseStyle = { ["Read Ley Line"] = "long" } },
+                    pulsePick = { ["Read Ley Line"] = true, Barkskin = true }, pulseStyle = { ["Read Ley Line"] = "long" },
+                    spellLook = { ["Read Ley Line"] = { font = "barlow", size = 120 } } },
                 Other = { cd = {}, util = { "Read Ley Line#1259705" }, debuff = {},
                     buff = { "Arcane Intellect", "Blessing of Salvation", "Salvation", "Greater Blessing of Salvation" },
-                    joins = { buff = { ["Blessing of Salvation"] = true, ["Greater Blessing of Salvation"] = true } } } } }
+                    joins = { buff = { ["Blessing of Salvation"] = true, ["Greater Blessing of Salvation"] = true } },
+                    spellLook = { ["Read Ley Line#1259705"] = { size = 90 } } } } }
     end
     local function Keys(set)
         local keys = {}
@@ -2248,6 +2251,11 @@ end)()
         "Arcane Intellect,Salvation,Mass Salvation | Mass Salvation=true Salvation=true | Read Leyline#1259705",
         "another profile too: the second Salvation gone, the joins kept, a pinned one under its new name")
     Equal(Keys(db.custom), "Read Leyline=1259705 Salvation=1038,25895", "spells added by those names, merged with the new name's")
+    -- Each entry's own countdown look (settings per spell) moves with it.
+    local function Look(look) return look and (tostring(look.font) .. "/" .. tostring(look.size)) or "none" end
+    Equal(Look(mine.spellLook["Read Leyline"]) .. " " .. Look(mine.spellLook["Read Ley Line"]) .. " | "
+        .. Look(other.spellLook["Read Leyline#1259705"]) .. " " .. Look(other.spellLook["Read Ley Line#1259705"]),
+        "barlow/120 none | nil/90 none", "each entry's own countdown look goes with it to the new name, a pinned one's too")
     Equal(Lit("buff", 1038) .. " | " .. Lit("buff", 25895), "g1 | g1", "a paladin's Salvation lights for Salvation and Mass Salvation")
     Start("PALADIN", db)
     Equal(table.concat(db.profiles.Old.cd, ",") .. " | " .. Keys(db.custom), "Read Leyline | Read Leyline=1259705 Salvation=1038,25895",
@@ -3600,7 +3608,8 @@ end)()
 -- the Buffs and Debuffs bars' icons (packed and fixed) and the buff and
 -- debuff times over the cooldown icons: as each is made, and after a change,
 -- out of a fight only, as their borders are (a change made in one waits for
--- it to end). At the defaults their numbers stay where the game puts them.
+-- it to end). Their numbers are put in the middle of the art as each is
+-- made (as on your bars' icons: never left wherever the game puts them).
 
 ;(function()
     Fresh()
@@ -3623,8 +3632,12 @@ end)()
             .. tostring(Last(cooldown, "SetCountdownFont")) .. " " .. (at and (at[1] .. " " .. at[4] .. " " .. at[5]) or "game's")
     end
     local function All() return Looks(packed.cooldown) .. " | " .. Looks(fixed.cooldown) .. " | " .. Looks(over.cooldown) end
-    Equal(All() .. " | " .. tostring(Last(packed.cooldown, "SetReverse")), "0,0,0,0.7 false FECMFont18 game's | 0,0,0,0.7 false FECMFont18"
-        .. " game's | 0,0,0,0.7 false FECMFont18 game's | true", "at the defaults: each as it always was, its numbers where the game puts them")
+    Equal(All() .. " | " .. tostring(Last(packed.cooldown, "SetReverse")), "0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false"
+        .. " FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0 | true",
+        "at the defaults: each as it always was, its numbers set in the middle of its art as it's made")
+    local numbers = S[packed.cooldown].numbers
+    Equal(tostring(S[numbers].points[1][2] == packed.cooldown) .. " " .. S[numbers].points[1][3] .. " " .. #S[numbers].points,
+        "true CENTER 1", "on the middle of its own cooldown, one point only: nothing of the addon's moves it off-centre")
     -- Changed in a fight: your own icons at once, the containers' as it ends.
     Fire("PLAYER_REGEN_DISABLED")
     lockdown = true
@@ -3634,8 +3647,8 @@ end)()
     local fight = All() .. " || " .. Looks(own)
     lockdown = false
     Fire("PLAYER_REGEN_ENABLED")
-    Equal(fight, "0,0,0,0.7 false FECMFont18 game's | 0,0,0,0.7 false FECMFont18 game's | 0,0,0,0.7 false FECMFont18 game's || 0.24,0.55,0.88,0.8"
-        .. " true FECMCountdown9 BOTTOMLEFT 1 1", "in a fight: your own icons at once, the containers' icons left alone")
+    Equal(fight, "0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0"
+        .. " || 0.24,0.55,0.88,0.8 true FECMCountdown9 BOTTOMLEFT 1 1", "in a fight: your own icons at once, the containers' icons left alone")
     Equal(All() .. " | " .. ("%g,%g,%g"):format(S[packed.cooldown].last.SetEdgeColor[1], S[packed.cooldown].last.SetEdgeColor[2],
         S[packed.cooldown].last.SetEdgeColor[3]), "0.24,0.55,0.88,0.8 true FECMCountdown9 BOTTOMLEFT 1 1 | 0.24,0.55,0.88,0.8 true"
         .. " FECMCountdown9 BOTTOMLEFT 1 1 | 0.24,0.55,0.88,0.8 true FECMCountdown9 BOTTOMLEFT 1 1 | 1,0.5,0.25",
@@ -3645,11 +3658,442 @@ end)()
     B:Changed()
     local second = B:Get("debuff").holders[2].slot
     Equal(Looks(second.cooldown), "0.24,0.55,0.88,0.8 true FECMCountdown9 BOTTOMLEFT 1 1", "a new icon made in the details picked")
+    -- Timer text (minutes then seconds) on the containers' icons too: out of
+    -- a fight only, as the rest; and back to the game's own after.
+    do
+        local made = setmetatable({}, { __index = function() return function() end end })
+        local util, enum, read = _G.C_StringUtil, _G.Enum, Proto.GetCountdownAbbrevThreshold
+        _G.C_StringUtil = { CreateSecondsFormatter = function() return made end }
+        _G.Enum = setmetatable({ SecondsFormatterAbbreviation = { OneLetter = 2 }, SecondsFormatterInterval = { Seconds = 0 },
+            SecondsFormatterRounding = { RoundUp = 0 } }, { __index = enum })
+        function Proto:GetCountdownAbbrevThreshold() return 90 end
+        local function Text(cooldown)
+            local formatter, switch = S[cooldown].last.SetCountdownFormatter, S[cooldown].last.SetCountdownAbbrevThreshold
+            return (formatter == nil and "-" or formatter[1] == made and "m" or tostring(formatter[1])) .. "/"
+                .. (switch == nil and "-" or tostring(switch[1]))
+        end
+        local function Texts()
+            return Text(packed.cooldown) .. " " .. Text(fixed.cooldown) .. " " .. Text(over.cooldown) .. " " .. Text(second.cooldown)
+                .. " | " .. Text(own)
+        end
+        Fire("PLAYER_REGEN_DISABLED")
+        lockdown = true
+        ns.Set("countdownFormat", "minutes")
+        ns.Style:ApplyDetails()
+        local fight = Texts()
+        lockdown = false
+        Fire("PLAYER_REGEN_ENABLED")
+        Equal(fight .. " || " .. Texts(), "-/- -/- -/- -/- | m/60 || m/60 m/60 m/60 m/60 | m/60",
+            "Timer text picked in a fight: your own icons at once, the containers' as it ends")
+        ns.Set("countdownFormat", "game")
+        ns.Style:ApplyDetails()
+        Equal(Texts(), "nil/90 nil/90 nil/90 nil/90 | nil/90", "back to the game's own: the formatter cleared, the game's switch back")
+        _G.C_StringUtil, _G.Enum, Proto.GetCountdownAbbrevThreshold = util, enum, read
+    end
     -- Back to the defaults: each as it always was, its numbers back in the middle.
     for _, key in ipairs(ns.ICON_DETAILS) do ns.Set(key, ns.DEFAULTS[key]) end
     ns.Style:ApplyDetails()
     Equal(All(), "0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0",
         "the defaults again: as they always were, the numbers in the middle")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Settings per spell on the aura containers' icons -------------------------------------------------
+-- An entry's own countdown font and size (set in its panel on a bar's page)
+-- reach its icon on the Buffs and Debuffs bars (a packed one's and a fixed
+-- spot's) and the buff and debuff time over its cooldown icon: out of a
+-- fight only, as Icon details do (one set in a fight waits for it to end),
+-- while your own icons change at once. A joined icon takes the first of its
+-- entries with a look. New icons are made in it; Icon details keep it.
+
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("buff", "Moonfire", true)
+    B:SetAura("debuff", "Moonfire", true)
+    B:Assign("Wrath", "cd")
+    B:SetOption("cd", "showAuras", true)
+    B:SetOption("debuff", "showMissing", true)
+    B:Changed()
+    local buff, debuff, cd = B:Get("buff"), B:Get("debuff"), B:Get("cd")
+    local function Font(cooldown) return tostring(Last(cooldown, "SetCountdownFont")) end
+    -- A packed entry's icons (its group's, all alike), by its place.
+    local function Group(index)
+        local font
+        for _, parts in ipairs(buff.groupParts) do
+            if parts.index == index then
+                local own = Font(parts.cooldown)
+                if font and font ~= own then return "mixed" end
+                font = own
+            end
+        end
+        return font or "none"
+    end
+    local function All()
+        local over = cd.auraAnchors[1].parts
+        return Group(1) .. " " .. Group(2) .. " | " .. Font(debuff.holders[1].slot.cooldown)
+            .. " | " .. Font(over[1].cooldown) .. " " .. Font(over[2].cooldown) .. " || " .. Font(cd.icons[1].cooldown)
+    end
+    Equal(All(), "FECMFont18 FECMFont18 | FECMFont18 | FECMFont18 FECMFont18 || FECMFont18", "none with a look: each as before")
+    -- Set in a fight: your own icon at once, the containers' as it ends.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local set = tostring(B:SetSpellLook("Thorns", "font", "barlow")) .. " " .. tostring(B:SetSpellLook("Moonfire", "size", 150)) .. " "
+        .. tostring(B:SetSpellLook("Wrath", "font", "fira"))
+    local fight = All()
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(set .. " | " .. fight, "true true true | FECMFont18 FECMFont18 | FECMFont18 | FECMFont18 FECMFont18 || FECMFontfira18",
+        "set in a fight: your own Wrath icon in Fira at once, the containers' icons left alone")
+    Equal(All(), "FECMFontbarlow18 FECMFont27 | FECMFont27 | FECMFontfira18 FECMFontfira18 || FECMFontfira18",
+        "as it ends: Thorns' packed icon in Barlow, Moonfire's at 150% on both bars, Wrath's time over its icon in Fira")
+    -- A joined icon: the first of its entries with a look.
+    B:SetSpellLook("Moonfire", "font", "saira")
+    B:SetJoined("buff", 2, true)
+    B:Changed()
+    local joined = Group(1)
+    B:SetSpellLook("Thorns", "font", nil)
+    Equal(joined .. " " .. Group(1), "FECMFontbarlow18 FECMFontsaira27", "joined: Thorns' look, the first; without it, Moonfire's")
+    -- Icon details keep each icon's own: Moonfire's own size, Wrath's own font at the new size.
+    ns.Set("countdownSize", 50)
+    ns.Style:ApplyDetails()
+    Equal(Font(debuff.holders[1].slot.cooldown) .. " " .. Font(cd.auraAnchors[1].parts[1].cooldown) .. " " .. Font(cd.icons[1].cooldown)
+        .. " " .. Group(1), "FECMFontsaira27 FECMFontfira9 FECMFontfira9 FECMFontsaira27",
+        "a smaller countdown on the Look page: each keeps its own font, and an own size stays")
+    ns.Set("countdownSize", 100)
+    ns.Style:ApplyDetails()
+    -- A new spot is made in its entry's look.
+    B:SetAura("debuff", "Wrath", true)
+    B:Changed()
+    Equal(Font(debuff.holders[2].slot.cooldown), "FECMFontfira18", "a new spot for Wrath, made in its look")
+    -- Taken off a bar: kept while another list has it; off its last, it goes.
+    B:SetAura("buff", "Moonfire", false)
+    local kept = ns.Style:LookKey(ns.SpellLook("Moonfire"))
+    B:SetAura("debuff", "Moonfire", false)
+    Equal(kept .. " " .. tostring(ns.SpellLook("Moonfire")) .. " " .. ns.Style:LookKey(ns.SpellLook("Wrath")), "saira/150 nil fira/",
+        "off the Buffs bar: kept for the Debuffs bar; off that too: gone; Wrath, still on two, keeps its own")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Warn at N seconds left (a player's idea: Siphon Life warning with 3
+-- seconds left on the target, Demon Armor at 10 minutes, together with Glow
+-- when missing). The addon can't read an aura's time in a fight, so the
+-- game draws it all, from rules set out of combat: the warned entry's
+-- countdown turns red from N (its cooldown's formatter, written as the
+-- Timer text picked), packed or fixed; round a fixed spot a red edge from N
+-- (a second slot on the same spells, made with the rest, drawing only its
+-- time left through a rule: the edge under N, nothing from N); and out of a
+-- fight your own buff's spot glows from N, read from your buffs then, with
+-- one timer for the next to cross. Off by default: nothing set or read.
+;(function()
+    local before = { _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty, _G.C_Timer, clock }
+    local function Game()
+        _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+            return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end,
+                ClearBreakpoints = function(self) self.rules, self.cleared = {}, (self.cleared or 0) + 1 end }
+        end }
+        _G.Enum.NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 }
+        _G.Enum.DurationTextBindingProperty = { RemainingDuration = 0, ElapsedDuration = 2, TotalDuration = 4 }
+    end
+    -- A rule set as text: each rule from its first second, red(...) in red, "edge N" the edge N across.
+    local function Rules(formatter)
+        if formatter == nil then return "none" end
+        local out = {}
+        for _, rule in ipairs(formatter.rules) do
+            local text = rule.format:gsub("|cffff4040(.-)|r", "red(%1)"):gsub("|T[^:]*LowEdge:(%d+):%d+:[^|]*|t", "edge %1")
+            out[#out + 1] = rule.threshold .. "=" .. text
+        end
+        return table.concat(out, " ")
+    end
+    -- A cooldown's numbers: "unset" with nothing ever set, else its rules ("none" once cleared).
+    local function Numbers(cooldown)
+        local call = S[cooldown].last.SetCountdownFormatter
+        if not call then return "unset" end
+        return Rules(call[1])
+    end
+    local function Slots(container)
+        local made, on = 0, 0
+        for key, slot in pairs(S[container].slots) do
+            if key:find("^w") then
+                made = made + 1
+                if slot.enabled then on = on + 1 end
+            end
+        end
+        return made .. " edge slots, " .. on .. " on"
+    end
+
+    -- An older game without number rules: no edge slots, and a warning
+    -- leaves the countdown as it was.
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetWarnAt("debuff", "Moonfire", 3)
+    local bar = B:Get("debuff")
+    Equal(Slots(bar.container) .. " | " .. tostring(bar.marks) .. " | " .. Numbers(bar.groupParts[1].cooldown) .. " | " .. #printed,
+        "0 edge slots, 0 on | nil | unset | 0", "no number rules in the game: no edge slots, the countdown as it was, no errors")
+
+    -- With them: each aura bar makes its 16 edge slots with its 16 spots, all off.
+    Fresh()
+    Game()
+    ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    B = ns.Bars
+    bar = B:Get("debuff")
+    local box = S[bar.container]
+    local w1 = box.slots.w1
+    local options = w1.supplied.durationTextOptions
+    local text = w1.supplied.SetDurationText
+    Equal(table.concat({ Slots(bar.container), Slots(B:Get("buff").container), box.made .. " made, " .. box.late .. " late",
+        tostring(options.textFormat.formatString), tostring(options.textFormat.components[1].property),
+        Rules(options.textFormat.components[1].formatter), tostring(S[w1.button].last.EnableMouse[1]),
+        tostring(S[w1.button].last.SetAllPoints[1] == bar.holders[1]), tostring((S[text].points[1] or {})[1]),
+        tostring(S[S[text].parent].last.SetFrameLevel[1]) }, " | "),
+        "16 edge slots, 0 on | 16 edge slots, 0 on | 32 made, 0 late | {} | 0 | 0= | false | true | CENTER | 6",
+        "each aura bar: 16 edge slots made with its spots, all off; each asks for its icon's time left, writes nothing yet, never"
+        .. " takes the mouse, sits on its entry's spot, its text centred on a layer above the spot's icon")
+    -- Nothing warned: nothing set on any icon, nothing of yours read.
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetAura("buff", "Thorns", true)
+    B:SetOption("buff", "showMissing", true)
+    local reads = AuraReads
+    Equal(Numbers(bar.groupParts[1].cooldown) .. " " .. Numbers(B:Get("buff").holders[1].slot.cooldown) .. " | " .. (AuraReads - reads) .. " "
+        .. tostring(S[B.driver].events.UNIT_AURA == true) .. " | " .. tostring(B:WarnAt("debuff", "Moonfire")) .. " | "
+        .. Slots(bar.container), "unset unset | 0 false | nil | 16 edge slots, 0 on",
+        "off by default: no icon's numbers touched, none of your buffs read or heard")
+
+    -- Moonfire warns at 3 seconds on the packed Debuffs bar: its countdown red under 3, as the game writes it; no edge.
+    local packed = bar.groupParts[1]
+    Equal(tostring(B:SetWarnAt("debuff", "Moonfire", 3)) .. " | " .. Numbers(packed.cooldown) .. " | " .. Slots(bar.container) .. " | "
+        .. tostring(packed.index), "true | 0=red(%d) 3=%d 60=%dm 3600=%dh | 16 edge slots, 0 on | 1",
+        "packed: Moonfire's countdown red under 3 seconds, then as before; no edge, as a packed icon has no spot to ring")
+    -- Fixed spots (Show missing debuffs greyed): the edge slot on Moonfire's own spells, on its spot, the edge under 3.
+    B:SetOption("debuff", "showMissing", true)
+    local holder = bar.holders[1]
+    local mark = holder.mark
+    local w, b = box.slots.w1, box.slots.b1
+    Equal(table.concat({ Numbers(holder.slot.cooldown), tostring(w.enabled), tostring(w.filters.includeSpellIDs == b.filters.includeSpellIDs),
+        tostring(w.filters.isFromPlayerOrPlayerPet), Rules(mark.formatter), Slots(bar.container) }, " | "),
+        "0=red(%d) 3=%d 60=%dm 3600=%dh | true | true | true | 0=edge 45 3= | 16 edge slots, 1 on",
+        "fixed: its countdown red under 3, and its edge slot on, on the same spells as its spot (yours only), the edge 45 across"
+        .. " (1.25 times its 36) under 3 and nothing from 3")
+    local edge = mark.formatter.rules[1].format
+    Equal(edge, "|T" .. ns.MEDIA .. "LowEdge:45:45:0:0:64:64:0:64:0:64:255:64:64|t", "the edge: the addon's own ring, tinted red")
+    -- Changed to 5: each rule sent once; a bigger bar sizes the edge to it.
+    local cleared = mark.formatter.cleared or 0
+    B:SetWarnAt("debuff", "Moonfire", 5)
+    Equal(Rules(mark.formatter) .. " | " .. (mark.formatter.cleared - cleared) .. " | " .. Numbers(holder.slot.cooldown),
+        "0=edge 45 5= | 1 | 0=red(%d) 5=%d 60=%dm 3600=%dh", "5 seconds: the edge's rule replaced once, the numbers red under 5")
+    -- Sent again with nothing changed: neither the numbers' formatter (fixed or packed) nor the edge's rule goes again.
+    local sentFixed, sentPacked = S[holder.slot.cooldown].last.SetCountdownFormatter, S[packed.cooldown].last.SetCountdownFormatter
+    cleared = mark.formatter.cleared
+    ns.BuffBar:Apply(bar)
+    Equal(tostring(rawequal(S[holder.slot.cooldown].last.SetCountdownFormatter, sentFixed)) .. " "
+        .. tostring(rawequal(S[packed.cooldown].last.SetCountdownFormatter, sentPacked)) .. " " .. (mark.formatter.cleared - cleared),
+        "true true 0", "applied again with nothing changed: no formatter or edge rule sent again")
+    B:SetOption("debuff", "size", 48)
+    Equal(Rules(mark.formatter), "0=edge 60 5=", "a bigger bar: the edge 60 across")
+    B:SetOption("debuff", "size", 36)
+    -- In a fight the icons are the game's: a change waits for it to end.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetWarnAt("debuff", "Moonfire", 10)
+    local fight = Rules(mark.formatter) .. " " .. Numbers(holder.slot.cooldown)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight .. " | " .. Rules(mark.formatter) .. " " .. Numbers(holder.slot.cooldown),
+        "0=edge 45 5= 0=red(%d) 5=%d 60=%dm 3600=%dh | 0=edge 45 10= 0=red(%d) 10=%d 60=%dm 3600=%dh",
+        "set in a fight: as it was until the fight ends, then 10")
+    -- Joined with Wrath (Moonfire first): Wrath's alone, then Moonfire's, the first in the icon's order.
+    B:SetAura("debuff", "Wrath", true)
+    B:SetJoined("debuff", 2, true)
+    B:SetWarnAt("debuff", "Moonfire", 0)
+    B:SetWarnAt("debuff", "Wrath", 30)
+    local wrath = Rules(mark.formatter)
+    B:SetWarnAt("debuff", "Moonfire", 3)
+    Equal(wrath .. " | " .. Rules(mark.formatter) .. " | " .. tostring(w.filters.includeSpellIDs[5176]) .. " " .. Slots(bar.container),
+        "0=edge 45 30= | 0=edge 45 3= | true 16 edge slots, 1 on", "joined: Wrath's 30 while only it warns, then Moonfire's 3 (the first"
+        .. " in the icon's order); one edge slot, on both spells")
+    B:SetJoined("debuff", 2, false)
+    B:SetWarnAt("debuff", "Wrath", nil)
+    -- Off: the numbers back to the game's own, the edge slot off.
+    B:SetWarnAt("debuff", "Moonfire", 0)
+    Equal(Numbers(holder.slot.cooldown) .. " | " .. tostring(w.enabled) .. " | " .. Rules(mark.formatter) .. " | "
+        .. tostring(S[holder.slot.cooldown].last.SetCountdownAbbrevThreshold), "none | false | 0= | nil",
+        "Off: the formatter cleared, the edge slot off and writing nothing (the game's own switch never touched: it has none here)")
+    -- The game's 1:31 form (its switch at 90): kept in the red numbers too.
+    function Proto:GetCountdownAbbrevThreshold() return 90 end
+    Fresh()
+    Game()
+    ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    B = ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetWarnAt("debuff", "Moonfire", 120)
+    bar = B:Get("debuff")
+    packed = bar.groupParts[1]
+    Equal(Numbers(packed.cooldown) .. " | " .. tostring(S[packed.cooldown].last.SetCountdownAbbrevThreshold[1]),
+        "0=red(%d) 60=red(%d:%02d) 90=red(%dm) 120=%dm 3600=%dh | 60",
+        "the game's 1:31 up to its switch at 90, then minutes; red under 2 minutes; the game's switch moved to a minute (the rules write 1:31)")
+    local rule = S[packed.cooldown].last.SetCountdownFormatter[1].rules[2]
+    Equal(rule.step .. " " .. rule.rounding .. " " .. rule.components[1].div .. "/" .. rule.components[1].rounding .. " "
+        .. rule.components[2].mod .. "/" .. rule.components[2].rounding, "1 1 60/2 60/2",
+        "1:31 as the game counts: whole seconds rounded up, then minutes and seconds")
+    -- Timer text's minutes: the red rules in 3m, 2m, 1m, then 59s.
+    ns.Set("countdownFormat", "minutes")
+    ns.Style:ApplyDetails()
+    Equal(Numbers(packed.cooldown), "0=red(%ds) 59=red(%dm) 120=%dm 3540=%dh", "with Timer text's minutes: 59s, then 1m, red under 2m")
+    ns.Set("countdownFormat", "game")
+    ns.Style:ApplyDetails()
+    Equal(Numbers(packed.cooldown), "0=red(%d) 60=red(%d:%02d) 90=red(%dm) 120=%dm 3600=%dh", "and back")
+    Proto.GetCountdownAbbrevThreshold = nil
+
+    -- The Buffs bar: Thorns warns at 10 minutes, its spot greyed while missing.
+    local ends, delays = {}, {}
+    local get = C_UnitAuras.GetPlayerAuraBySpellID
+    C_UnitAuras.GetPlayerAuraBySpellID = function(id)
+        AuraReads = AuraReads + 1
+        local ending = ends[id]
+        if lockdown or ending == nil then return nil end
+        if rawequal(ending, SECRET) then return { spellId = id, expirationTime = SECRETS.number } end
+        if ending == "whole" then return SECRET end
+        return { spellId = id, expirationTime = ending }
+    end
+    _G.C_Timer = { After = function(delay, fn)
+        timers[#timers + 1] = fn
+        delays[#delays + 1] = delay
+    end }
+    local function Run()
+        local now = timers
+        timers = {}
+        for _, fn in ipairs(now) do fn() end
+    end
+    local function NextFrame() S[B.driver].scripts.OnUpdate(B.driver, 0) end
+    local buff = B:Get("buff")
+    B:SetAura("buff", "Thorns", true)
+    B:SetOption("buff", "showMissing", true)
+    B:SetGlowMissing("buff", "Thorns", true)
+    holder = buff.holders[1]
+    local function Lit()
+        local host = holder.lowHost
+        return tostring(host ~= nil and host.glow ~= nil and host.glow:IsShown())
+    end
+    reads = AuraReads
+    ends[467] = clock + 700
+    B:SetWarnAt("buff", "Thorns", 600)
+    Equal(table.concat({ Lit(), tostring(delays[#delays]), tostring(AuraReads > reads), tostring(S[B.driver].events.UNIT_AURA == true),
+        Numbers(holder.slot.cooldown), tostring(S[buff.container].slots.w1.enabled) }, " | "),
+        "false | 100.05 | true | true | 0=red(%d) 60=red(%d:%02d) 90=red(%dm) 600=%dm 3600=%dh | true",
+        "11 minutes 40 left: not lit, a timer for when it's 10 minutes; your buffs read and heard; red numbers and the edge slot too")
+    -- Your buffs changing often (the same moment to wait for): still the one timer, none piling up.
+    local queued, waiting = #delays, #timers
+    for _ = 1, 3 do
+        Fire("UNIT_AURA", "player")
+        NextFrame()
+    end
+    Equal((#delays - queued) .. " " .. (#timers - waiting), "0 0", "your buffs changing again, the same moment to wait for: no more timers")
+    -- Time passes: the timer reads it, now under 10 minutes: lit, on top of the bar's icons.
+    clock = clock + 101
+    Run()
+    Equal(Lit() .. " " .. tostring(S[holder.lowHost].last.SetFrameLevel[1]) .. " " .. S[holder.lowHost].width,
+        "true 16 36", "at 10 minutes: the ready glow lit, over the aura container's icons, the spot's size")
+    -- Glow when missing too: it shows under the game's icon only while Thorns is gone; the low-time glow only while it's up.
+    local both = Lit() .. " " .. tostring(holder.glowHost ~= nil)
+    ends[467] = nil
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    Equal(both .. " | " .. Lit(), "true true | false", "with Glow when missing: its glow under the game's icon (seen only while"
+        .. " Thorns is gone), the low-time glow out as Thorns goes, so the two never show at once")
+    -- Recast: 30 minutes again, out until it's under 10 again.
+    ends[467] = clock + 1800
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    Equal(Lit() .. " " .. tostring(delays[#delays]), "false 1200.05", "recast: out, and a timer for 20 minutes on")
+    -- A stale timer does nothing: recast again, then the first one's time comes.
+    ends[467] = clock + 3000
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    clock = clock + 1201
+    reads = AuraReads
+    timers[1]()
+    Equal(Lit() .. " " .. (AuraReads - reads), "false 0", "a timer set before a later read stands down: nothing read")
+    -- A fight starts while it's lit: out; the game's red numbers and edge take over. Read again as it ends.
+    ends[467] = clock + 30
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    local lit = Lit()
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local inFight = Lit() .. " " .. tostring(S[B.driver].events.UNIT_AURA == true)
+    reads = AuraReads
+    Run()
+    inFight = inFight .. " " .. tostring(AuraReads == reads)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(lit .. " | " .. inFight .. " | " .. Lit(), "true | false false true | true",
+        "lit, then a fight: out, nothing heard or read; lit again as it ends")
+    -- Its time kept secret: out, read again a few times at most, nothing misused.
+    ends[467] = SECRET
+    timers = {}
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    local tries = 0
+    for _ = 1, 8 do
+        if #timers == 0 then break end
+        tries = tries + 1
+        Run()
+        NextFrame()
+    end
+    Equal(Lit() .. " " .. tostring(buff.lowUnread) .. " " .. tries .. " " .. tostring(SecretMisuse[1]), "false true 4 nil",
+        "its time secret: out, read again four times at most, no secret misused")
+    -- The whole answer secret, or auras kept secret out of a fight: no glow, nothing read past asking.
+    ends[467] = "whole"
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    local whole = Lit()
+    ends[467] = clock + 30
+    AurasSecret = true
+    reads = AuraReads
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    Equal(whole .. " " .. Lit() .. " " .. (AuraReads - reads), "false false 0", "a secret answer: out; auras kept secret: none read")
+    AurasSecret = false
+    Fire("ENCOUNTER_END")
+    NextFrame()
+    Equal(Lit(), "true", "the game lets them be read again (an encounter over): lit")
+    -- Only when missing: Thorns has no icon while it's on you, so no warning: no glow, edge or red numbers.
+    B:SetOnlyWhenMissing("buff", "Thorns", true)
+    Equal(table.concat({ tostring(B:WarnUsable("buff", "Thorns")), tostring(buff.warns[1]), Lit(),
+        tostring(S[buff.container].slots.w1.enabled), Numbers(holder.slot.cooldown), tostring(B:WarnAt("buff", "Thorns")) }, " "),
+        "false nil false false none 600", "ticked Only when missing: no warning shows (kept for when it's unticked)")
+    B:SetOnlyWhenMissing("buff", "Thorns", false)
+    -- Packed (missing ones not greyed): only the red numbers; nothing read.
+    B:SetOption("buff", "showMissing", false)
+    reads = AuraReads
+    Fire("UNIT_AURA", "player")
+    NextFrame()
+    local group
+    for _, parts in ipairs(buff.groupParts) do
+        if parts.index == 1 then group = group or parts end
+    end
+    Equal(Lit() .. " " .. tostring(S[buff.container].slots.w1.enabled) .. " " .. Numbers(group.cooldown) .. " "
+        .. tostring(S[B.driver].events.UNIT_AURA == true) .. " " .. (AuraReads - reads),
+        "false false 0=red(%d) 60=red(%d:%02d) 90=red(%dm) 600=%dm 3600=%dh false 0",
+        "packed: the red numbers only; no edge or glow, and your buffs no longer read or heard")
+    B:SetOption("buff", "showMissing", true)
+    -- /ccm debug says it all.
+    local report = ns.DebugReport()
+    Equal(report:match("Warn at: [^\n]*") .. " || " .. report:match("1%. Thorns[^\n]*"), "Warn at: buff: Thorns 600s; debuff: Moonfire 120s"
+        .. " | numbers: rules made 3, refused 0 | edge slots: buff made, debuff made || 1. Thorns | spells 467,782,1075,8914,9756,9910 | warn"
+        .. " at 600s: red numbers true, edge on, rule 600:45, low glow true", "/ccm debug: what warns, the rules made (game 120 s, minutes"
+        .. " 120 s, game 600 s), the edge slots, and each entry's state")
+    -- Taken off its bar: forgotten; the glow out, the numbers cleared.
+    B:SetAura("buff", "Thorns", false)
+    Equal(tostring(B:WarnAt("buff", "Thorns")) .. " " .. Lit() .. " " .. Numbers(holder.slot.cooldown) .. " "
+        .. tostring(S[B.driver].events.UNIT_AURA == true), "nil false none false", "off its bar: forgotten, out, cleared, not heard")
+    C_UnitAuras.GetPlayerAuraBySpellID = get
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty, _G.C_Timer, clock =
+        before[1], before[2], before[3], before[4], before[5]
     Equal(#printed, 0, "no errors")
 end)()
 

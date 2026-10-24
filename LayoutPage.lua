@@ -39,6 +39,112 @@ local function Arrow(parent, up)
     return button
 end
 
+-- Moving a bar by numbers (a player's idea) -------------------------------------------
+-- While your bars are unlocked, in place of the box's drag hint: which bar
+-- (the one you last dragged on screen; click for the next), where it is as
+-- x and y from the middle of your screen (type a number, then Enter), and
+-- an arrow each way to move it a pixel (ten with Shift). Your own bars
+-- only, out of a fight (Bars.lua B:MoveBar); Blizzard's Cooldown Manager is
+-- moved in Edit Mode.
+local NUDGES = { { "left", -1, 0 }, { "right", 1, 0 }, { "up", 0, 1 }, { "down", 0, -1 } }
+-- The rows' arrow art (pointing up) turned to face each way: its corners'
+-- places on the art, top left, bottom left, top right, bottom right.
+local TURNED = { up = { .25, .25, .25, .75, .75, .25, .75, .75 }, down = { .25, .75, .25, .25, .75, .75, .75, .25 },
+    left = { .75, .25, .25, .25, .75, .75, .25, .75 }, right = { .25, .75, .75, .75, .25, .25, .75, .25 } }
+
+local function NudgeArrow(parent, way)
+    local button = T:Square(parent, "")
+    local art = button:CreateTexture(nil, "ARTWORK")
+    art:SetSize(12, 12)
+    art:SetPoint("CENTER")
+    art:SetTexture(ns.MEDIA .. "UI-ScrollBar-ScrollUpButton-Up")
+    local at = TURNED[way]
+    art:SetTexCoord(at[1], at[2], at[3], at[4], at[5], at[6], at[7], at[8])
+    art:SetDesaturated(true)
+    T:Paint(function(accent) art:SetVertexColor(accent[1], accent[2], accent[3]) end)
+    button.art, button.way = art, way
+    return button
+end
+
+local function MoveStrip(window, box)
+    local B = ns.Bars
+    local move = CreateFrame("Frame", nil, box)
+    move:SetPoint("TOPLEFT", 12, -6)
+    move:SetSize(300, 20)
+    move:Hide()
+    local function Said(ok, why)
+        if not ok and why then window:Say(why) end
+        window:Refresh()
+    end
+    local which = T:Button(move, "", 80, 20)
+    which:SetPoint("LEFT", 0, 0)
+    which:SetScript("OnClick", function()
+        local at = 1
+        for i, key in ipairs(ns.BAR_KEYS) do
+            if key == B.moving then at = i end
+        end
+        B.moving = ns.BAR_KEYS[at % #ns.BAR_KEYS + 1]
+        window:Refresh()
+    end)
+    window:Hint(which, "The bar the numbers and arrows move: the one you last dragged. Click for the next. (experimental)")
+    move.which = which
+    -- x, then y: what it says, and its box.
+    local inputs, x = {}, 88
+    for _, axis in ipairs({ "x", "y" }) do
+        local label = T:Text(move, "GameFontHighlightSmall", T.MUTED)
+        label:SetPoint("LEFT", x, 0)
+        label:SetText(axis:upper())
+        local input = T:Input(move, "", 46)
+        input:SetPoint("LEFT", x + 12, 0)
+        input:SetScript("OnEnterPressed", function(self)
+            local value = tonumber(self:GetText())
+            self:ClearFocus()
+            local nowX, nowY = B:BarPlace(B.moving)
+            if not value then return Said(false, "Type a number of pixels, like 120 or -40.") end
+            if not nowX then return Said(B:NudgeBar(B.moving, 0, 0)) end
+            Said(B:MoveBar(B.moving, axis == "x" and value or nowX, axis == "y" and value or nowY))
+        end)
+        input:SetScript("OnEscapePressed", function(self)
+            self:ClearFocus()
+            window:Refresh()
+        end)
+        window:Hint(input, axis == "x" and "How far the bar is right of the middle of your screen, in pixels (left of it is minus)."
+            .. " Type a number, then Enter." or "How far the bar is above the middle of your screen, in pixels (below it is minus)."
+            .. " Type a number, then Enter.")
+        inputs[axis] = input
+        x = x + 64
+    end
+    move.x, move.y = inputs.x, inputs.y
+    -- A pixel each way, ten with Shift.
+    move.arrows = {}
+    for i, nudge in ipairs(NUDGES) do
+        local arrow = NudgeArrow(move, nudge[1])
+        arrow:SetPoint("LEFT", x + (i - 1) * 20, 0)
+        arrow:SetScript("OnClick", function()
+            local step = IsShiftKeyDown and IsShiftKeyDown() and 10 or 1
+            Said(B:NudgeBar(B.moving, nudge[2] * step, nudge[3] * step))
+        end)
+        window:Hint(arrow, "Moves the bar 1 pixel " .. nudge[1] .. ", or 10 with Shift held. Out of combat only.")
+        move.arrows[i] = arrow
+    end
+    -- Shown while unlocked, with the bar picked and where it is now. A box
+    -- being typed in keeps what's in it.
+    function move:Refresh(shown)
+        self:SetShown(shown)
+        if not shown then return end
+        -- A bar you have: an extra one goes with the profile it's in (another
+        -- profile switched to), so then its kind's.
+        if not ns.HasBar(B.moving) then B.moving = ns.BAR_KIND[B.moving] or "cd" end
+        which:SetLabel(ns.BAR_NAMES[B.moving] or "")
+        local now = { B:BarPlace(B.moving) }
+        for i, axis in ipairs({ "x", "y" }) do
+            local input = inputs[axis]
+            if not input:HasFocus() then input:SetText(now[i] and tostring(math.floor(now[i] + .5)) or "") end
+        end
+    end
+    return move
+end
+
 -- A preset in miniature: its rows as tiny tiles around the display.
 local function Thumbnail(card, preset)
     local tile, gap = 3, 1
@@ -176,7 +282,8 @@ function ns.BuildLayoutPage(window, page, width, height)
     outLabel:SetPoint("BOTTOMLEFT", OUT_LABEL, 12)
     outLabel:SetText("Put back:")
     local outButtons = {}
-    for _, key in ipairs(ns.BAR_KEYS) do
+    -- (Each bar there can be: an extra bar's shows while you have it.)
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
         local button = T:Button(box, "+ " .. ns.BAR_NAMES[key], 84, 18)
         button:SetPoint("BOTTOMLEFT", OUT_LEFT, 9)
         button:SetScript("OnClick", function() Done(L:PutBack(key)) end)
@@ -210,6 +317,8 @@ function ns.BuildLayoutPage(window, page, width, height)
     page.unlock, page.home = unlock, home
     -- Where the Taken out buttons wrap, clear of these two.
     local OUT_RIGHT = inner - 12 - 100 - 6 - 90 - 6
+    local move = MoveStrip(window, box)
+    page.move = move
 
     -- Find a debuff: only your class's, then click the spot it goes in the
     -- Debuffs row.
@@ -431,7 +540,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         local first, last, step = 1, #list, 1
         if delta < 0 then first, last, step = #list, 1, -1 end
         for i = first, last, step do
-            if not layout.hidden[list[i]] then
+            if L.In(layout, list[i]) then
                 return "Move your resource display " .. (delta < 0 and "up" or "down") .. " the stack, past "
                     .. ns.BAR_NAMES[list[i]] .. "."
             end
@@ -838,7 +947,8 @@ function ns.BuildLayoutPage(window, page, width, height)
     local function Draw()
         local layout = ns.LayoutData()
         -- Only the bars in the layout are drawn; taken-out ones get a button.
-        local function In(key) return key and not layout.hidden[key] end
+        -- (An extra bar you don't have now isn't drawn at all.)
+        local function In(key) return L.In(layout, key) end
         local above, below, sides = {}, {}, {}
         for _, key in ipairs(layout.above) do if In(key) then above[#above + 1] = key end end
         for _, key in ipairs(layout.below) do if In(key) then below[#below + 1] = key end end
@@ -931,8 +1041,8 @@ function ns.BuildLayoutPage(window, page, width, height)
         ShowButtons(display)
         -- Put back: a button for each bar taken out.
         local x, line, any = OUT_LEFT, 9, false
-        for _, key in ipairs(ns.BAR_KEYS) do
-            local button, out = outButtons[key], layout.hidden[key] == true
+        for _, key in ipairs(ns.ALL_BAR_KEYS) do
+            local button, out = outButtons[key], layout.hidden[key] == true and ns.HasBar(key)
             button:SetShown(out)
             if out then
                 if x + 84 > OUT_RIGHT then x, line = OUT_LEFT, line + 22 end
@@ -1063,6 +1173,10 @@ function ns.BuildLayoutPage(window, page, width, height)
         spacing:Set(layout.gap)
         iconSpacing:Set(layout.spacing)
         allBars:Set(ns.Get("barScale"))
+        -- Unlocked: the numbers to move a bar by, in place of the drag hint
+        -- (not while a found debuff waits for its spot: that says so there).
+        move:Refresh(on and B:IsUnlocked() and placing == nil)
+        drag:SetShown(not move:IsShown())
         Draw()
     end
 

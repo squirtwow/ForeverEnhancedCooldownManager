@@ -59,6 +59,7 @@ ns.DEFAULTS = {
     groupFamilies = true,
     listItems = false, -- show trinkets and bag items in the /ccm spell list
     listRanks = false, -- show every rank you know as its own row
+    listTicked = false, -- show only the spells on the bar whose page it is (a player's idea)
     accent = "purple", -- the /ccm window's accent colour (orange until 1.4.4; purple keeps it apart from other addons)
     barStyle = "glass", -- Blizzard's Tracked Bars: glass, split, outline or block
     barColour = "orange", -- and their colour
@@ -78,6 +79,7 @@ ns.DEFAULTS = {
     prdText = false,
     prdHealthAt = "centre", -- where on the health bar: centre, sides (a left and right pair) or off
     prdHealthCentre = "value", -- what each spot shows: value, both (value / max) or percent; left and right also none
+    -- (and on the health bar heals or absorbs)
     prdHealthLeft = "value",
     prdHealthRight = "percent",
     prdPowerAt = "centre", -- the same for the power bar
@@ -169,6 +171,7 @@ ns.DEFAULTS = {
     countdownSize = 100, -- percent of the automatic size (about half the icon)
     countdownColour = "white", -- a count colour (ns.COUNT_COLOURS), or Custom
     countdownSpot = "CENTER", -- where on the icon (ns.COUNTDOWN_SPOTS)
+    countdownFormat = "game", -- its text: the game's own (2:52), or "minutes" (3m, 2m, 1m, then 59s; a player's idea)
     swipeEdge = false, -- the edge line on every icon; off, none on yours and Blizzard's own on theirs
     edgeColour = "game", -- its colour: the game's own line, or tinted in a bar colour
     keybinds = false, -- each Cooldowns/Utility icon's key, from your action bars (Look page)
@@ -261,8 +264,14 @@ ns.TIME_FORMAT_KEYS = { "left", "total" }
 -- The game's own fonts and bar textures, so every player has them (their
 -- files are in Style.lua).
 -- Game font: the one the rest of your game uses, in your game's language.
-ns.FONT_KEYS = { "friz", "arial", "morpheus", "skurri", "game" }
-ns.FONT_NAMES = { friz = "Friz Quadrata", arial = "Arial Narrow", morpheus = "Morpheus", skurri = "Skurri", game = "Game font" }
+-- Then three free fonts shipped in Media\Fonts (a player's idea: narrow
+-- road-sign numbers), each under its own licence beside it (OFL 1.1). They
+-- write Latin letters (Fira Sans Condensed Cyrillic too), so Game font
+-- stays the default where the game is in Chinese, Korean or Russian.
+ns.FONT_KEYS = { "friz", "arial", "morpheus", "skurri", "game", "barlow", "saira", "fira" }
+ns.FONT_NAMES = { friz = "Friz Quadrata", arial = "Arial Narrow", morpheus = "Morpheus", skurri = "Skurri", game = "Game font",
+    barlow = "Barlow Semi Condensed", saira = "Saira Semi Condensed", fira = "Fira Sans Condensed" }
+ns.SHIPPED_FONTS = { barlow = true, saira = true, fira = true }
 ns.BAR_TEXTURE_KEYS = { "flat", "classic", "raid", "skills" }
 ns.BAR_TEXTURE_NAMES = { flat = "Flat", classic = "Classic", raid = "Raid", skills = "Skills" }
 -- Raid Timers: the countdown's big numbers, the raid warnings' outline and their
@@ -288,11 +297,22 @@ ns.PULSE_STYLE_NAMES = { quick = "Quick", long = "Long" }
 -- its font: the Look page's, or one of the game's own just for it.
 ns.TEXT_AT_KEYS = { "centre", "sides", "off" }
 ns.TEXT_AT_NAMES = { centre = "Centre", sides = "Left and right", off = "Off" }
-ns.TEXT_FORMAT_KEYS = { "none", "value", "both", "percent" }
-ns.TEXT_FORMAT_NAMES = { none = "None", value = "Value", both = "Value / max", percent = "Percent" }
+-- (bare: a percent with no % sign, a player's idea; full mana shows 100.)
+ns.TEXT_FORMAT_KEYS = { "none", "value", "both", "percent", "bare" }
+ns.TEXT_FORMAT_NAMES = { none = "None", value = "Value", both = "Value / max", percent = "Percent", bare = "Percent (no sign)",
+    heals = "Incoming heals", absorbs = "Absorbs" }
+-- The health bar's ends can also show heals on their way to you and the
+-- shields on you (a player's idea): the game's numbers, handed straight to
+-- the text, never added to your health (Resource.lua). Not the middle,
+-- which always shows something: these are blank while there are none.
+ns.TEXT_HEALTH_EXTRAS = { "heals", "absorbs" }
+ns.TEXT_HEALTH_KEYS = {}
+for _, key in ipairs(ns.TEXT_FORMAT_KEYS) do ns.TEXT_HEALTH_KEYS[#ns.TEXT_HEALTH_KEYS + 1] = key end
+for _, key in ipairs(ns.TEXT_HEALTH_EXTRAS) do ns.TEXT_HEALTH_KEYS[#ns.TEXT_HEALTH_KEYS + 1] = key end
 ns.TEXT_NUMBER_KEYS = { "full", "short" }
 ns.TEXT_NUMBER_NAMES = { full = "4,321", short = "4.3K" }
-ns.TEXT_FONT_KEYS = { "look", "friz", "arial", "morpheus", "skurri", "game" }
+ns.TEXT_FONT_KEYS = { "look" }
+for _, key in ipairs(ns.FONT_KEYS) do ns.TEXT_FONT_KEYS[#ns.TEXT_FONT_KEYS + 1] = key end
 -- The colours of text on an icon: the Debuffs bar's tick count (below), and
 -- the countdown's (Icon details).
 ns.COUNT_COLOUR_KEYS = { "white", "gold", "green", "red", "purple" }
@@ -314,8 +334,12 @@ for key, name in pairs(ns.BAR_COLOUR_NAMES) do ns.SWIPE_COLOUR_NAMES[key], ns.ED
 ns.COUNTDOWN_SPOTS = { "TOPLEFT", "TOP", "TOPRIGHT", "CENTER", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }
 ns.COUNTDOWN_SPOT_NAMES = { TOPLEFT = "Top left", TOP = "Top", TOPRIGHT = "Top right", CENTER = "Centre",
     BOTTOMLEFT = "Bottom left", BOTTOM = "Bottom", BOTTOMRIGHT = "Bottom right" }
+-- The countdown's text: the game's own, or whole minutes then seconds (Style.lua's Timer text).
+ns.COUNTDOWN_FORMATS = { "game", "minutes" }
+ns.COUNTDOWN_FORMAT_NAMES = { game = "Game (2:52)", minutes = "Minutes, then seconds (3m, 59s)" }
 -- Every Icon details setting (the panel's Defaults puts them all back).
-ns.ICON_DETAILS = { "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "swipeEdge", "edgeColour" }
+ns.ICON_DETAILS = { "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge",
+    "edgeColour" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
@@ -358,13 +382,16 @@ for _, bar in ipairs({ "prdHealth", "prdPower", "prdExtra", "prdEnergy" }) do
         CHOICES[bar .. "Left"][key], CHOICES[bar .. "Right"][key] = true, true
     end
 end
+for _, key in ipairs(ns.TEXT_HEALTH_EXTRAS) do CHOICES.prdHealthLeft[key], CHOICES.prdHealthRight[key] = true, true end
 for _, key in ipairs(ns.TEXT_NUMBER_KEYS) do CHOICES.prdTextNumbers[key] = true end
 for _, key in ipairs(ns.TEXT_FONT_KEYS) do CHOICES.prdTextFont[key] = true end
 -- Icon details.
 CHOICES.swipeColour, CHOICES.countdownColour, CHOICES.countdownSpot, CHOICES.edgeColour = {}, {}, {}, {}
+CHOICES.countdownFormat = {}
 for _, key in ipairs(ns.SWIPE_COLOUR_KEYS) do CHOICES.swipeColour[key] = true end
 for _, key in ipairs(ns.COUNT_COLOUR_KEYS) do CHOICES.countdownColour[key] = true end
 for _, key in ipairs(ns.COUNTDOWN_SPOTS) do CHOICES.countdownSpot[key] = true end
+for _, key in ipairs(ns.COUNTDOWN_FORMATS) do CHOICES.countdownFormat[key] = true end
 for _, key in ipairs(ns.EDGE_COLOUR_KEYS) do CHOICES.edgeColour[key] = true end
 -- Every colour setting takes Custom too, and its colour beside it: six hex
 -- digits, or "" for none picked yet.
@@ -404,7 +431,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "prdTextNumbers", "prdTextSize", "prdTextFont",
     "castColour", "castHeight", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
     "castLatencyColour", "castLatencyText", "swingColour",
-    "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "swipeEdge", "edgeColour",
+    "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge", "edgeColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
     "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",
@@ -414,13 +441,40 @@ for _, key in ipairs(ns.COLOUR_SETTINGS) do ns.SHARE_LOOK[#ns.SHARE_LOOK + 1] = 
 
 -- Bars: each bar lists spells by name, so the highest known rank is
 -- always the one shown.
+-- The four bars everyone has.
+ns.BASE_BAR_KEYS = { "cd", "util", "buff", "debuff" }
+-- Extra bars (a player's idea: Curse of the Elements on a bar apart from
+-- three damage over time spells): a second bar of a kind, added on its
+-- page and kept in your profile (Extra bars, below). One of each kind, two
+-- in all: each aura one is another of the game's secure containers.
+ns.EXTRA_BAR_KEYS = { "cd2", "util2", "buff2", "debuff2" }
+ns.EXTRA_OF = { cd = "cd2", util = "util2", buff = "buff2", debuff = "debuff2" } -- a kind's extra bar
+ns.EXTRA_MAX = 2
+-- Every bar there can be, each extra after its kind: what's saved, shared
+-- and repaired goes by these.
+ns.ALL_BAR_KEYS = { "cd", "cd2", "util", "util2", "buff", "buff2", "debuff", "debuff2" }
+-- The bars you have now: the four, and the extras in your profile (in the
+-- order above), kept up to date in place (ns.SyncBarKeys).
 ns.BAR_KEYS = { "cd", "util", "buff", "debuff" }
-ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs", debuff = "Debuffs" }
+ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs", debuff = "Debuffs",
+    cd2 = "Cooldowns 2", util2 = "Utility 2", buff2 = "Buffs 2", debuff2 = "Debuffs 2" }
+-- Each bar's kind: the bar it's a copy of (each of the four is its own).
+ns.BAR_KIND = { cd = "cd", util = "util", buff = "buff", debuff = "debuff", cd2 = "cd", util2 = "util", buff2 = "buff",
+    debuff2 = "debuff" }
 -- The bars fed by Blizzard's secure aura container, and what each watches.
 ns.AURA_BARS = {
     buff = { unit = "player", filter = "HELPFUL", word = "buff" },
     debuff = { unit = "target", filter = "HARMFUL", mine = true, word = "debuff" },
 }
+ns.AURA_BARS.buff2, ns.AURA_BARS.debuff2 = ns.AURA_BARS.buff, ns.AURA_BARS.debuff
+-- Swap with my form: the Cooldowns and Utility bars only.
+local SWAP_BARS = { cd = true, util = true }
+function ns.CanSwap(key)
+    return SWAP_BARS[key] == true
+end
+-- An icon's own size (settings per spell), as a share of its bar's icon
+-- size: min, max, default.
+ns.ICON_SIZE = { 50, 150, 100 }
 -- min, max, default. dimOpacity: how much of a dimmed icon shows, in percent
 -- (When ready's and On cooldown's Dim, and Dim when you can't cast it); 40
 -- is how dim they always were.
@@ -587,6 +641,36 @@ end
 -- to Long (-> "long"; the rest are Quick).
 local PULSE_LISTS = { pulsePick = true, pulseStyle = "long" }
 
+-- Extra bars (below): whether a profile (or the stand-in lists) has a bar,
+-- one of the four always, an extra once added there; and the bars it has,
+-- in order.
+local function Present(store, key)
+    if not ns.BAR_NAMES[key] then return false end
+    if ns.EXTRA_OF[key] then return true end -- one of the four
+    local extras = store and store.extraBars
+    return type(extras) == "table" and extras[key] == true
+end
+
+local function ProfileBars(store)
+    local keys = {}
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        if Present(store, key) then keys[#keys + 1] = key end
+    end
+    return keys
+end
+
+-- A profile's extra bars, repaired: the keys this version knows, true each,
+-- two at most (in order); none kept leaves no table.
+local function RepairExtras(profile)
+    local saved, kept, count = profile.extraBars, {}, 0
+    if type(saved) == "table" then
+        for _, key in ipairs(ns.EXTRA_BAR_KEYS) do
+            if saved[key] == true and count < ns.EXTRA_MAX then kept[key], count = true, count + 1 end
+        end
+    end
+    profile.extraBars = count > 0 and kept or nil
+end
+
 -- Swap with my form (below): whether a form has a list of its own, the one
 -- the forms sharing it go by (ns.FORM_LISTS: Bear Form's, for Dire Bear
 -- Form too). Its lists are kept under it in a profile.
@@ -610,7 +694,7 @@ local function RepairForms(profile)
             profile.forms[form] = nil
         else
             for key, list in pairs(lists) do
-                if not ns.BAR_NAMES[key] or ns.AURA_BARS[key] or type(list) ~= "table" then lists[key] = nil else Repair(list) end
+                if not SWAP_BARS[key] or type(list) ~= "table" then lists[key] = nil else Repair(list) end
             end
         end
     end
@@ -666,30 +750,147 @@ local function RenameSet(set)
 end
 
 local function RenameSpells(profile)
-    for _, key in ipairs(ns.BAR_KEYS) do RenameList(profile[key], profile.joins[key]) end
+    for _, key in ipairs(ProfileBars(profile)) do RenameList(profile[key], profile.joins[key]) end
     for _, lists in pairs(type(profile.forms) == "table" and profile.forms or {}) do
         for _, list in pairs(type(lists) == "table" and lists or {}) do
             if type(list) == "table" then RenameList(list) end
         end
     end
     for field in pairs(PULSE_LISTS) do RenameSet(profile[field]) end
+    if type(profile.spellLook) == "table" then RenameSet(profile.spellLook) end
+    for _, field in ipairs({ "warnAt", "iconSize" }) do
+        for _, set in pairs(type(profile[field]) == "table" and profile[field] or {}) do
+            if type(set) == "table" then RenameSet(set) end
+        end
+    end
+end
+
+-- Whether a profile (or the stand-in lists) has an entry on any of its
+-- lists: a bar's, or a form's.
+local function InLists(store, name)
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        for _, spell in ipairs(type(store[key]) == "table" and store[key] or {}) do
+            if spell == name then return true end
+        end
+    end
+    for _, lists in pairs(type(store.forms) == "table" and store.forms or {}) do
+        for _, list in pairs(type(lists) == "table" and lists or {}) do
+            for _, spell in ipairs(type(list) == "table" and list or {}) do
+                if spell == name then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- Settings per spell (a player's idea: a font and size per icon), set in
+-- the panel a bar page's tray icon opens: an entry's own countdown font (a
+-- key of ns.FONT_KEYS) and size (percent of the automatic size, as Icon
+-- details' Size), each in place of the Look page's, on every bar it's on
+-- and Blizzard's icon for its spell. Kept in the profile by entry
+-- (profile.spellLook[entry] = { font, size }); one with neither isn't kept.
+-- A look as kept, each field checked: nil when neither is left.
+function ns.CleanSpellLook(look)
+    if type(look) ~= "table" then return nil end
+    local font = type(look.font) == "string" and CHOICES.font[look.font] and look.font or nil
+    local size, limits = look.size, ns.COUNTDOWN_SIZE
+    if not (type(size) == "number" and size == math.floor(size) and size >= limits[1] and size <= limits[2]) then size = nil end
+    if not (font or size) then return nil end
+    return { font = font, size = size }
+end
+
+-- A profile's own looks: only entries on one of its lists (a form's too),
+-- each look checked. A profile with none keeps no table for them.
+local function RepairLooks(profile)
+    if profile.spellLook == nil then return end
+    local looks, kept = type(profile.spellLook) == "table" and profile.spellLook or {}, {}
+    for name, look in pairs(looks) do
+        if type(name) == "string" and InLists(profile, name) then kept[name] = ns.CleanSpellLook(look) end
+    end
+    profile.spellLook = next(kept) ~= nil and kept or nil
+end
+
+-- A profile's warnings (Warn at N seconds left): only an aura bar's, only
+-- names on that bar's list, each a whole number of seconds up to an hour.
+-- A profile with none keeps no table for them.
+local function RepairWarns(profile)
+    if profile.warnAt == nil then return end
+    local warns, kept = type(profile.warnAt) == "table" and profile.warnAt or {}, {}
+    for key, set in pairs(warns) do
+        if ns.AURA_BARS[key] and Present(profile, key) and type(set) == "table" then
+            local listed, own = {}, {}
+            for _, name in ipairs(profile[key]) do listed[name] = true end
+            for name, seconds in pairs(set) do
+                if listed[name] and ns.WarnValue(seconds) then own[name] = seconds end
+            end
+            if next(own) ~= nil then kept[key] = own end
+        end
+    end
+    profile.warnAt = next(kept) ~= nil and kept or nil
+end
+
+-- An icon's own size (settings per spell): a whole percent of its bar's
+-- icon size that can be kept.
+function ns.SizeValue(value)
+    local limits = ns.ICON_SIZE
+    return type(value) == "number" and value == math.floor(value) and value >= limits[1] and value <= limits[2]
+end
+
+-- Whether a name is on any of a bar's lists in a profile: its own, or for
+-- the Cooldowns or Utility bar a form's.
+local function OnBarLists(store, key, name)
+    for _, spell in ipairs(type(store[key]) == "table" and store[key] or {}) do
+        if spell == name then return true end
+    end
+    for _, lists in pairs(SWAP_BARS[key] and type(store.forms) == "table" and store.forms or {}) do
+        local list = type(lists) == "table" and lists[key]
+        for _, spell in ipairs(type(list) == "table" and list or {}) do
+            if spell == name then return true end
+        end
+    end
+    return false
+end
+
+-- A profile's icon sizes: only a bar it has, only names on that bar's
+-- lists, each a percent that can be kept. None kept leaves no table.
+local function RepairSizes(profile)
+    if profile.iconSize == nil then return end
+    local sizes, kept = type(profile.iconSize) == "table" and profile.iconSize or {}, {}
+    for key, set in pairs(sizes) do
+        if Present(profile, key) and type(set) == "table" then
+            local own = {}
+            for name, percent in pairs(set) do
+                if type(name) == "string" and OnBarLists(profile, key, name) and ns.SizeValue(percent) then own[name] = percent end
+            end
+            if next(own) ~= nil then kept[key] = own end
+        end
+    end
+    profile.iconSize = next(kept) ~= nil and kept or nil
 end
 
 -- A profile's lists, repaired in place, with their joins: on the Buffs and
 -- Debuffs bars, the names joined to the entry just before them.
 local function Lists(profile)
-    for _, key in ipairs(ns.BAR_KEYS) do
-        if type(profile[key]) ~= "table" then profile[key] = {} end
-        Repair(profile[key])
+    -- Its extra bars, then a list for each bar it has; an extra it doesn't
+    -- have keeps none.
+    RepairExtras(profile)
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        if Present(profile, key) then
+            if type(profile[key]) ~= "table" then profile[key] = {} end
+            Repair(profile[key])
+        else
+            profile[key] = nil
+        end
     end
     -- The picked icon for a joined group while none is up, the buffs that
     -- glow while they're missing, the debuffs that count their ticks and
-    -- the buffs shown only while they're missing (the Buffs bar's own):
+    -- the buffs shown only while they're missing (a Buffs bar's own):
     -- only names on that aura bar's list.
     for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing" }) do
         if type(profile[field]) ~= "table" then profile[field] = {} end
         for key, set in pairs(profile[field]) do
-            if not ns.AURA_BARS[key] or type(set) ~= "table" or (field == "onlyWhenMissing" and key ~= "buff") then
+            if not (ns.AURA_BARS[key] and Present(profile, key)) or type(set) ~= "table"
+                or (field == "onlyWhenMissing" and ns.BAR_KIND[key] ~= "buff") then
                 profile[field][key] = nil
             else
                 local listed = {}
@@ -702,7 +903,7 @@ local function Lists(profile)
     end
     if type(profile.joins) ~= "table" then profile.joins = {} end
     for key, joins in pairs(profile.joins) do
-        if not ns.AURA_BARS[key] or type(joins) ~= "table" then
+        if not (ns.AURA_BARS[key] and Present(profile, key)) or type(joins) ~= "table" then
             profile.joins[key] = nil
         else
             local listed = {}
@@ -726,10 +927,13 @@ local function Lists(profile)
     local ticks = profile.swapForm
     if type(ticks) == "table" then
         for key, on in pairs(ticks) do
-            if not ns.BAR_NAMES[key] or ns.AURA_BARS[key] or on ~= true then ticks[key] = nil end
+            if not SWAP_BARS[key] or on ~= true then ticks[key] = nil end
         end
     end
     profile.swapForm = type(ticks) == "table" and next(ticks) ~= nil and ticks or nil
+    RepairLooks(profile)
+    RepairWarns(profile)
+    RepairSizes(profile)
     RenameSpells(profile)
     -- Positions per profile: its spots and sizes, repaired as they're used.
     if profile.place ~= nil and type(profile.place) ~= "table" then profile.place = nil end
@@ -824,7 +1028,7 @@ local STEALTH = 30 -- the game's form for a rogue's Stealth (ROGUE_STEALTH)
 -- Whether a bar swaps with your form: ticked in the profile you're on (or
 -- the stand-in lists, until the character is known), on a bar that can.
 local function Swaps(key)
-    if not ns.BAR_NAMES[key] or ns.AURA_BARS[key] then return false end
+    if not SWAP_BARS[key] then return false end
     local ticks = (active and db and Profiles()[active] or scratch).swapForm
     return type(ticks) == "table" and ticks[key] == true
 end
@@ -837,7 +1041,7 @@ end
 -- from it (lists kept apart, your form read and heard) is Bars.lua's
 -- B:SetOption, which the bar's page goes through.
 function ns.SetSwaps(key, on)
-    if not ns.BAR_NAMES[key] or ns.AURA_BARS[key] then return end
+    if not SWAP_BARS[key] then return end
     local store = ns.ProfileLists()
     local ticks = type(store.swapForm) == "table" and store.swapForm or {}
     ticks[key] = on == true or nil
@@ -851,9 +1055,9 @@ end
 -- gone from the bars. Profiles that never swapped stay unticked.
 local function MoveSwapTicks()
     local bars = type(db.bars) == "table" and db.bars or {}
-    for _, key in ipairs(ns.BAR_KEYS) do
+    for _, key in ipairs(ns.BASE_BAR_KEYS) do
         local bar = bars[key]
-        local ticked = type(bar) == "table" and rawget(bar, "swapForm") == true and not ns.AURA_BARS[key]
+        local ticked = type(bar) == "table" and rawget(bar, "swapForm") == true and SWAP_BARS[key]
         if type(bar) == "table" then rawset(bar, "swapForm", nil) end
         for _, profile in pairs(ticked and Profiles() or {}) do
             local made = false
@@ -1030,6 +1234,9 @@ end
 -- character is known; with Swap with my form, the form's (ns.ShownForm).
 function ns.ActiveList(key)
     local store = ns.ProfileLists()
+    -- An extra bar you don't have (removed, or another profile's): an empty
+    -- list of its own, never kept, so its frame is laid out with nothing.
+    if not Present(store, key) then return {} end
     local form = ns.ShownForm(key)
     if form ~= 0 then return FormList(store, form, key) end
     if type(store[key]) ~= "table" then store[key] = {} end
@@ -1094,56 +1301,306 @@ function ns.KeepApart(keep)
             end
         end
     end
+    -- An extra cooldown bar (Extra bars, below) never swaps, and a spell on
+    -- it is on no other cooldown bar's list, in any form (B:Assign keeps it
+    -- so). Where one is (a profile made from a string), the Cooldowns and
+    -- Utility bars' lists keep it, then the extras in order.
+    local taken = {}
+    for _, key in ipairs({ "cd", "util" }) do
+        for _, list in ipairs(ns.BarLists(key)) do
+            for _, name in ipairs(list) do taken[name] = true end
+        end
+    end
+    for _, key in ipairs({ "cd2", "util2" }) do
+        local list = Present(store, key) and store[key]
+        if type(list) == "table" then
+            for i = #list, 1, -1 do
+                if taken[list[i]] then
+                    table.remove(list, i)
+                    changed = true
+                end
+            end
+            for _, name in ipairs(list) do taken[name] = true end
+        end
+    end
     return changed
+end
+
+-- This character's choices for an aura bar's entries, kept under field by
+-- bar: made the first time they're wanted, for a bar you have. One you don't
+-- have (an extra bar removed) gets an empty table of its own, never kept.
+local function Choices(field, key)
+    local store = ns.ProfileLists()
+    if not Present(store, key) then return {} end
+    if type(store[field]) ~= "table" then store[field] = {} end
+    if type(store[field][key]) ~= "table" then store[field][key] = {} end
+    return store[field][key]
 end
 
 -- This character's joins for an aura bar.
 function ns.Joins(key)
-    local profile = active and db and Profiles()[active]
-    local store = profile or scratch
-    if type(store.joins) ~= "table" then store.joins = {} end
-    if type(store.joins[key]) ~= "table" then store.joins[key] = {} end
-    return store.joins[key]
+    return Choices("joins", key)
 end
 
 -- This character's picks for an aura bar: the entry of a joined icon shown,
 -- faded, while none of them is up (by name, true each).
 function ns.MissingPicks(key)
-    local profile = active and db and Profiles()[active]
-    local store = profile or scratch
-    if type(store.missingPicks) ~= "table" then store.missingPicks = {} end
-    if type(store.missingPicks[key]) ~= "table" then store.missingPicks[key] = {} end
-    return store.missingPicks[key]
+    return Choices("missingPicks", key)
 end
 
 -- This character's buffs on an aura bar that glow while they're missing
 -- (a player's idea: a Seal that fell off), by name, true each.
 function ns.GlowMissing(key)
-    local profile = active and db and Profiles()[active]
-    local store = profile or scratch
-    if type(store.glowMissing) ~= "table" then store.glowMissing = {} end
-    if type(store.glowMissing[key]) ~= "table" then store.glowMissing[key] = {} end
-    return store.glowMissing[key]
+    return Choices("glowMissing", key)
 end
 
 -- This character's debuffs on an aura bar whose icons count their ticks (a
 -- player's idea: Bane of Agony's), by name, true each.
 function ns.CountTicks(key)
-    local profile = active and db and Profiles()[active]
-    local store = profile or scratch
-    if type(store.countTicks) ~= "table" then store.countTicks = {} end
-    if type(store.countTicks[key]) ~= "table" then store.countTicks[key] = {} end
-    return store.countTicks[key]
+    return Choices("countTicks", key)
 end
 
--- This character's buffs on the Buffs bar shown only while they're missing
+-- This character's buffs on a Buffs bar shown only while they're missing
 -- from you (Only when missing, ticked buff by buff), by name, true each.
 function ns.OnlyWhenMissing(key)
-    local profile = active and db and Profiles()[active]
-    local store = profile or scratch
-    if type(store.onlyWhenMissing) ~= "table" then store.onlyWhenMissing = {} end
-    if type(store.onlyWhenMissing[key]) ~= "table" then store.onlyWhenMissing[key] = {} end
-    return store.onlyWhenMissing[key]
+    return Choices("onlyWhenMissing", key)
+end
+
+-- This character's own looks by entry (settings per spell), made only when
+-- one is set (make).
+local function SpellLooks(make)
+    local store = active and db and Profiles()[active] or scratch
+    if type(store.spellLook) ~= "table" then
+        if not make then return nil end
+        store.spellLook = {}
+    end
+    return store.spellLook
+end
+
+-- Whether any entry has a look of its own: until one does, nothing more is
+-- read for Blizzard's icons (Skin.lua).
+function ns.HasSpellLooks()
+    local looks = SpellLooks(false)
+    return looks ~= nil and next(looks) ~= nil
+end
+
+-- An entry's own look ({ font, size }, either nil for the Look page's), or nil.
+function ns.SpellLook(name)
+    local looks = SpellLooks(false)
+    local look = looks and type(name) == "string" and looks[name]
+    return type(look) == "table" and look or nil
+end
+
+-- A joined icon's look: the first of its entries (in order) with one.
+function ns.SpellLookFor(names)
+    for _, name in ipairs(names or {}) do
+        local look = ns.SpellLook(name)
+        if look then return look end
+    end
+    return nil
+end
+
+-- Sets one field of an entry's look ("font" or "size"; nil for the Look
+-- page's again), only for an entry on one of your lists. A look left with
+-- neither goes. True when it changed.
+function ns.SetSpellLook(name, field, value)
+    if type(name) ~= "string" or (field ~= "font" and field ~= "size") then return false end
+    if not InLists(ns.ProfileLists(), name) then return false end
+    local was = ns.SpellLook(name) or {}
+    local look = { font = was.font, size = was.size }
+    look[field] = value
+    look = ns.CleanSpellLook(look)
+    if value ~= nil and not (look and look[field] == value) then return false end -- not a font or size kept
+    if (look and look.font) == was.font and (look and look.size) == was.size then return false end
+    local looks = SpellLooks(look ~= nil)
+    if looks then
+        looks[name] = look
+        if next(looks) == nil then ns.ProfileLists().spellLook = nil end
+    end
+    return true
+end
+
+-- Warn at N seconds left (a player's idea: Siphon Life warning with 3
+-- seconds left on the target, Demon Armor with 10 minutes left on you): an
+-- aura bar's entry whose icon warns as its time runs low, set in the panel
+-- its tray icon opens. Kept by bar and entry, in seconds, only once one is
+-- set (profile.warnAt[key][name] = seconds), so a profile from before loads
+-- unchanged.
+ns.WARN_SECONDS = { 3, 5, 10, 30, 60, 300, 600 } -- the choices offered
+ns.WARN_MAX = 3600
+
+-- Whether a number of seconds can be kept: a whole number, 1 to an hour.
+function ns.WarnValue(value)
+    return type(value) == "number" and value == math.floor(value) and value >= 1 and value <= ns.WARN_MAX
+end
+
+local function Warns(make)
+    local store = ns.ProfileLists()
+    if type(store.warnAt) ~= "table" then
+        if not make then return nil end
+        store.warnAt = {}
+    end
+    return store.warnAt
+end
+
+-- An aura bar's warned entries (name -> seconds), to read: none kept gives
+-- an empty table of its own.
+function ns.WarnAt(key)
+    local warns = Warns(false)
+    local set = warns and warns[key]
+    return type(set) == "table" and set or {}
+end
+
+-- Sets (or with nil, clears) an entry's warning on an aura bar. True when it
+-- changed. Whether it's on that bar is the caller's (Bars.lua B:SetWarnAt).
+function ns.SetWarnAt(key, name, seconds)
+    if not (ns.AURA_BARS[key] and Present(ns.ProfileLists(), key)) or type(name) ~= "string"
+        or (seconds ~= nil and not ns.WarnValue(seconds)) then
+        return false
+    end
+    if ns.WarnAt(key)[name] == seconds then return false end
+    local warns = Warns(seconds ~= nil)
+    if not warns then return false end
+    if type(warns[key]) ~= "table" then warns[key] = {} end
+    warns[key][name] = seconds
+    if next(warns[key]) == nil then warns[key] = nil end
+    if next(warns) == nil then ns.ProfileLists().warnAt = nil end
+    return true
+end
+
+-- An entry gone from a list: its look goes too once no list of yours has it
+-- (a form's included), so putting it back starts afresh, as after a reload.
+function ns.ForgetSpellLook(name)
+    local looks = SpellLooks(false)
+    if not (looks and type(name) == "string" and looks[name] ~= nil) or InLists(ns.ProfileLists(), name) then return end
+    looks[name] = nil
+    if next(looks) == nil then ns.ProfileLists().spellLook = nil end
+end
+
+-- An icon's own size (settings per spell; a player's idea: more control
+-- over each icon's size), set in the panel its tray icon opens: a percent of
+-- its bar's icon size, kept by bar and entry in the profile
+-- (profile.iconSize[bar][name]), only once one is set.
+function ns.OwnSize(key, name)
+    local sizes = ns.ProfileLists().iconSize
+    local set = type(sizes) == "table" and sizes[key]
+    local percent = type(set) == "table" and type(name) == "string" and set[name]
+    return ns.SizeValue(percent) and percent or nil
+end
+
+-- Sets it, or with nil the bar's size again: only for an entry on one of
+-- that bar's lists, on a bar you have. True when it changed.
+function ns.SetOwnSize(key, name, percent)
+    local store = ns.ProfileLists()
+    if type(name) ~= "string" or not Present(store, key) or (percent ~= nil and not ns.SizeValue(percent)) then return false end
+    if percent ~= nil and not OnBarLists(store, key, name) then return false end
+    if ns.OwnSize(key, name) == percent then return false end
+    local sizes = type(store.iconSize) == "table" and store.iconSize or {}
+    local set = type(sizes[key]) == "table" and sizes[key] or {}
+    set[name] = percent
+    sizes[key] = next(set) ~= nil and set or nil
+    store.iconSize = next(sizes) ~= nil and sizes or nil
+    return true
+end
+
+-- An entry gone from a bar: its size there goes too, once none of that
+-- bar's lists has it (a form's included).
+function ns.ForgetOwnSize(key, name)
+    if ns.OwnSize(key, name) and not OnBarLists(ns.ProfileLists(), key, name) then ns.SetOwnSize(key, name, nil) end
+end
+
+-- The size an entry's icon shows at on a bar whose icons are size across:
+-- its own share of that, never under the smallest a bar can have.
+function ns.IconSizeFor(key, name, size)
+    local percent = ns.OwnSize(key, name)
+    if not percent then return size end
+    return math.max(ns.BAR_LIMITS.size[1], math.floor(size * percent / 100 + .5))
+end
+
+-- Extra bars ---------------------------------------------------------------------
+-- A second bar of a kind (Cooldowns 2, Utility 2, Buffs 2 or Debuffs 2), a
+-- copy of it in everything but Swap with my form: added on its kind's page,
+-- one of each kind and two in all, kept in the profile beside its list
+-- (profile.extraBars[bar] = true), so switching profiles brings it or takes
+-- it away. Its settings and place are every character's, as the four bars'
+-- are. Never changed in a fight.
+local present = { cd = true, util = true, buff = true, debuff = true } -- the bars you have now
+
+-- ns.BAR_KEYS (and ns.HasBar) as the profile you're on has them, kept in
+-- place: after it loads or switches, and as a bar is added or removed.
+function ns.SyncBarKeys()
+    local keys = ProfileBars(ns.ProfileLists())
+    for i = #ns.BAR_KEYS, 1, -1 do ns.BAR_KEYS[i] = nil end
+    present = {}
+    for i, key in ipairs(keys) do
+        ns.BAR_KEYS[i], present[key] = key, true
+    end
+end
+
+function ns.HasBar(key)
+    return present[key] == true
+end
+
+-- Whether a kind's extra bar can be added now: true and its key, or false
+-- and why not.
+function ns.CanAddBar(kind)
+    local key = ns.EXTRA_OF[kind]
+    if not key then return false, "There's no such bar." end
+    if present[key] then return false, ns.BAR_NAMES[key] .. " is there already." end
+    if #ns.BAR_KEYS - #ns.BASE_BAR_KEYS >= ns.EXTRA_MAX then
+        return false, "You have " .. ns.EXTRA_MAX .. " extra bars already: remove one on its page first."
+    end
+    if InCombatLockdown() then return false, "Finish combat first." end
+    if not active then return false, "Your profile hasn't loaded yet." end
+    return true, key
+end
+
+-- Adds it to the profile you're on, empty: true and its key, or false and
+-- why not. Bars.lua B:AddBar makes it.
+function ns.AddBar(kind)
+    local ok, key = ns.CanAddBar(kind)
+    if not ok then return false, key end
+    local store = ns.ProfileLists()
+    store.extraBars = type(store.extraBars) == "table" and store.extraBars or {}
+    store.extraBars[key] = true
+    store[key] = {}
+    -- The first time, it starts with its kind's icon size, spacing and icons
+    -- across, so it lines up with that bar (not 20 across, stretching a
+    -- display matched to your rows). Its own settings after that are kept.
+    local first = not (type(db.bars) == "table" and type(db.bars[key]) == "table" and rawget(db.bars[key], "perRow") ~= nil)
+    ns.SyncBarKeys()
+    if first then
+        local from, to = ns.BarData(kind), ns.BarData(key)
+        if from and to then to.size, to.spacing, to.perRow = from.size, from.spacing, from.perRow end
+    end
+    return true, key
+end
+
+-- Removes an extra bar from the profile you're on, with its list and its
+-- entries' choices there (joins, picks, glow, ticks, only when missing,
+-- Warn at, icon sizes); a look goes once no list of yours has its entry.
+-- Its settings and place stay, for when one is added again. True, or false
+-- and why not. Bars.lua B:RemoveBar empties its frame.
+function ns.RemoveBar(key)
+    if not ns.BAR_NAMES[key] or ns.EXTRA_OF[key] then return false, "Only an extra bar can be removed." end
+    if not present[key] then return false, ns.BAR_NAMES[key] .. " isn't there." end
+    if InCombatLockdown() then return false, "Finish combat first." end
+    if not active then return false, "Your profile hasn't loaded yet." end
+    local store = ns.ProfileLists()
+    local names = type(store[key]) == "table" and store[key] or {}
+    local extras = type(store.extraBars) == "table" and store.extraBars or {}
+    extras[key] = nil
+    store.extraBars = next(extras) ~= nil and extras or nil
+    store[key] = nil
+    for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "warnAt", "iconSize" }) do
+        local sets = store[field]
+        if type(sets) == "table" then sets[key] = nil end
+    end
+    if type(store.warnAt) == "table" and next(store.warnAt) == nil then store.warnAt = nil end
+    if type(store.iconSize) == "table" and next(store.iconSize) == nil then store.iconSize = nil end
+    for _, name in ipairs(names) do ns.ForgetSpellLook(name) end
+    ns.SyncBarKeys()
+    return true
 end
 
 local function PlayerGUID()
@@ -1217,7 +1674,7 @@ function ns.ResolveProfile(final)
         local legacy = next(profiles) == nil
         name = FreeName(own)
         local profile = {}
-        for _, key in ipairs(ns.BAR_KEYS) do
+        for _, key in ipairs(ns.BASE_BAR_KEYS) do
             local bar = type(db.bars) == "table" and db.bars[key]
             local old = legacy and type(bar) == "table" and rawget(bar, "spells")
             profile[key] = type(old) == "table" and old or {}
@@ -1242,6 +1699,8 @@ function ns.ResolveProfile(final)
         db[field] = nil
     end
     active = name
+    -- Its extra bars, if it has any.
+    ns.SyncBarKeys()
     PlaceAtLogin()
     return true
 end
@@ -1296,8 +1755,12 @@ local function Switch(name)
     Chars()[PlayerGUID()] = name
     active = name
     ns.talentNote = nil
+    -- Its extra bars come, and another profile's go.
+    ns.SyncBarKeys()
     if ns.Bars and ns.Bars.started then ns.Bars:Changed() end
     if ns.Pulse and ns.Pulse.started then ns.Pulse:Apply() end
+    -- The new profile's own looks for its spells on Blizzard's icons.
+    if ns.Skin and ns.Skin.started then ns.Skin:ApplySpellLooks() end
 end
 
 -- Role links follow a profile renamed (to its new name) and let go of one
@@ -1348,7 +1811,12 @@ local function Duplicate(from)
         profile.swapForm = {}
         for key, on in pairs(from.swapForm) do profile.swapForm[key] = on end
     end
-    for _, key in ipairs(ns.BAR_KEYS) do
+    -- Its extra bars too, each with its list.
+    if type(from.extraBars) == "table" then
+        profile.extraBars = {}
+        for key, on in pairs(from.extraBars) do profile.extraBars[key] = on end
+    end
+    for _, key in ipairs(ProfileBars(from)) do
         local list = {}
         for i, spell in ipairs(type(from[key]) == "table" and from[key] or {}) do list[i] = spell end
         profile[key] = list
@@ -1370,6 +1838,24 @@ local function Duplicate(from)
     for field in pairs(PULSE_LISTS) do
         profile[field] = {}
         for key, value in pairs(type(from[field]) == "table" and from[field] or {}) do profile[field][key] = value end
+    end
+    -- And each entry's own look (settings per spell).
+    if type(from.spellLook) == "table" then
+        profile.spellLook = {}
+        for name, look in pairs(from.spellLook) do profile.spellLook[name] = ns.CleanSpellLook(look) end
+    end
+    -- And each warned entry's seconds (Warn at N seconds left), and each
+    -- icon's own size (Lists checks them).
+    for _, field in ipairs({ "warnAt", "iconSize" }) do
+        if type(from[field]) == "table" then
+            profile[field] = {}
+            for key, set in pairs(from[field]) do
+                if type(set) == "table" then
+                    profile[field][key] = {}
+                    for name, value in pairs(set) do profile[field][key][name] = value end
+                end
+            end
+        end
     end
     profile.place = PlaceForCopy(from)
     return profile
@@ -1539,16 +2025,23 @@ end
 -- look (colours, border, font, All bars) stays every character's.
 local PLACE_FIELDS = { "size", "spacing", "perRow", "grow", "wrap", "point", "x", "y" }
 
+-- Whether a bar's settings are worth keeping or setting from saved (from):
+-- one of the four always, an extra bar once it has some (one never added
+-- keeps none).
+local function Settled(key, from)
+    return ns.EXTRA_OF[key] ~= nil or type(from) == "table" or type(db.bars) == "table" and type(db.bars[key]) == "table"
+end
+
 -- The spots and sizes on screen now, sharing nothing with them.
 local function Snapshot()
     local place = { bars = {}, layout = CopyTable(db.layout) }
     place.layout.hidden = CopySet(type(db.layout) == "table" and db.layout.hidden)
-    for _, key in ipairs(ns.BAR_KEYS) do
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
         local bar, saved = type(db.bars) == "table" and db.bars[key], {}
         if type(bar) == "table" then
             for _, field in ipairs(PLACE_FIELDS) do saved[field] = rawget(bar, field) end
         end
-        place.bars[key] = saved
+        if Settled(key) then place.bars[key] = saved end
     end
     return place
 end
@@ -1578,10 +2071,12 @@ LoadPlace = function(name)
     local place = type(profile) == "table" and profile.place
     if type(place) ~= "table" then return false end
     local bars = type(place.bars) == "table" and place.bars or {}
-    for _, key in ipairs(ns.BAR_KEYS) do
-        local data, from = ns.BarData(key), type(bars[key]) == "table" and bars[key] or {}
-        for _, field in ipairs(PLACE_FIELDS) do data[field] = from[field] end
-        ns.BarData(key)
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        if Settled(key, bars[key]) then
+            local data, from = ns.BarData(key), type(bars[key]) == "table" and bars[key] or {}
+            for _, field in ipairs(PLACE_FIELDS) do data[field] = from[field] end
+            ns.BarData(key)
+        end
     end
     local layout = CopyTable(place.layout)
     layout.hidden = CopySet(type(place.layout) == "table" and place.layout.hidden)
@@ -1640,10 +2135,12 @@ local function UseSetup(setup)
         if value ~= nil and ns.Valid(key, value) then db[key] = value else db[key] = nil end
     end
     local bars = type(setup.bars) == "table" and setup.bars or {}
-    for _, key in ipairs(ns.BAR_KEYS) do
-        local data, from = ns.BarData(key), type(bars[key]) == "table" and bars[key] or {}
-        for _, field in ipairs(ns.SHARE_BAR_FIELDS) do data[field] = from[field] end
-        ns.BarData(key)
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        if Settled(key, bars[key]) then
+            local data, from = ns.BarData(key), type(bars[key]) == "table" and bars[key] or {}
+            for _, field in ipairs(ns.SHARE_BAR_FIELDS) do data[field] = from[field] end
+            ns.BarData(key)
+        end
     end
     local layout = CopyTable(setup.layout)
     layout.hidden = CopySet(type(setup.layout) == "table" and setup.layout.hidden)
@@ -1660,7 +2157,7 @@ end
 local function NamesInUse()
     local used = {}
     local function Mark(lists)
-        for _, key in ipairs(ns.BAR_KEYS) do
+        for _, key in ipairs(ns.ALL_BAR_KEYS) do
             for _, spell in ipairs(type(lists[key]) == "table" and lists[key] or {}) do used[spell] = true end
         end
         for _, own in pairs(type(lists.forms) == "table" and lists.forms or {}) do
@@ -1671,7 +2168,7 @@ local function NamesInUse()
         if type(profile) == "table" then Mark(profile) end
     end
     Mark(scratch)
-    for _, key in ipairs(ns.BAR_KEYS) do
+    for _, key in ipairs(ns.BASE_BAR_KEYS) do
         local bar = type(db.bars) == "table" and db.bars[key]
         local old = type(bar) == "table" and rawget(bar, "spells")
         if type(old) == "table" then Mark({ [key] = old }) end
@@ -1696,17 +2193,43 @@ function ns.ImportProfile(text, shared, withLook)
     name = FreeName(name)
     -- Each form's lists too (Swap with my form), checked as the bars' are,
     -- and which bars swap with your form.
+    -- Its extra bars too, each with its list (Lists keeps those it has).
     local profile = { joins = {}, pulsePick = CopySet(shared.pick), pulseStyle = CopySet(shared.style),
-        forms = CopyForms(shared.forms), swapForm = CopySet(shared.swap) }
-    for _, key in ipairs(ns.BAR_KEYS) do profile[key] = CopyList(shared.lists[key]) end
+        forms = CopyForms(shared.forms), swapForm = CopySet(shared.swap), extraBars = CopySet(shared.extras) }
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        if ns.EXTRA_OF[key] or type(shared.lists[key]) == "table" then profile[key] = CopyList(shared.lists[key]) end
+    end
     for key in pairs(ns.AURA_BARS) do
         local joins = type(shared.joins) == "table" and shared.joins[key]
         if type(joins) == "table" then profile.joins[key] = CopySet(joins) end
     end
-    -- The buffs shown only while they're missing (Lists keeps those on the
+    -- The buffs shown only while they're missing (Lists keeps those on a
     -- Buffs bar's list).
-    local only = type(shared.only) == "table" and shared.only.buff
-    if type(only) == "table" then profile.onlyWhenMissing = { buff = CopySet(only) } end
+    profile.onlyWhenMissing = {}
+    for key, set in pairs(type(shared.only) == "table" and shared.only or {}) do
+        if type(set) == "table" then profile.onlyWhenMissing[key] = CopySet(set) end
+    end
+    -- Each icon's own size (Lists keeps those on its bar's lists).
+    if type(shared.sizes) == "table" then
+        profile.iconSize = {}
+        for key, set in pairs(shared.sizes) do
+            if ns.BAR_NAMES[key] and type(set) == "table" then profile.iconSize[key] = CopySet(set) end
+        end
+    end
+    -- Each entry's own look (Lists keeps those on its lists).
+    if type(shared.looks) == "table" then
+        profile.spellLook = {}
+        for spell, look in pairs(shared.looks) do
+            if type(spell) == "string" then profile.spellLook[spell] = ns.CleanSpellLook(look) end
+        end
+    end
+    -- Each warned entry's seconds (Lists keeps those on its bar's list).
+    if type(shared.warns) == "table" then
+        profile.warnAt = {}
+        for key, set in pairs(shared.warns) do
+            if ns.AURA_BARS[key] and type(set) == "table" then profile.warnAt[key] = CopySet(set) end
+        end
+    end
     local custom, yours = ns.CustomSpells(), NamesInUse()
     Profiles()[name] = Lists(profile)
     -- One shared from before a spell's new name goes by the new one, as its
@@ -2045,7 +2568,7 @@ end
 
 -- A bar's spells aren't stored with it: reading them gives this character's list.
 local SPELLS = {}
-for _, key in ipairs(ns.BAR_KEYS) do
+for _, key in ipairs(ns.ALL_BAR_KEYS) do
     SPELLS[key] = { __index = function(_, field)
         if field == "spells" then return ns.ActiveList(key) end
     end }
@@ -2093,13 +2616,14 @@ function ns.BarData(key)
     end
     bar.combatOnly = nil
     bar.showMissing = bar.showMissing == true
-    -- The Buffs bar only: a buff shows only while it's not on you, off
-    -- unless ticked. (A target's debuffs change in a fight, when the addon
-    -- can't read them.)
-    bar.onlyMissing = key == "buff" and bar.onlyMissing == true
-    -- The Debuffs bar only (a player's idea): its missing debuffs greyed
+    -- A Buffs bar only (an extra one too): a buff shows only while it's not
+    -- on you, off unless ticked. (A target's debuffs change in a fight, when
+    -- the addon can't read them.)
+    local kind = ns.BAR_KIND[key]
+    bar.onlyMissing = kind == "buff" and bar.onlyMissing == true
+    -- A Debuffs bar only (a player's idea): its missing debuffs greyed
     -- stay with no enemy targeted, off unless ticked.
-    bar.greyedNoTarget = key == "debuff" and bar.greyedNoTarget == true
+    bar.greyedNoTarget = kind == "debuff" and bar.greyedNoTarget == true
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
@@ -2107,7 +2631,7 @@ function ns.BarData(key)
     -- The Debuffs bar's tick count: top left, its automatic size, white,
     -- from 1, unless you choose. Custom keeps its colour beside it, and
     -- without one is white again.
-    local debuff = key == "debuff"
+    local debuff = kind == "debuff"
     bar.tickAt = debuff and ns.TICK_AT_NAMES[bar.tickAt] and bar.tickAt or "TOPLEFT"
     bar.tickSize = debuff and Limit(bar.tickSize, ns.TICK_SIZE) or ns.TICK_SIZE[3]
     bar.tickCustom = debuff and ns.Hex(bar.tickCustom) or ""
@@ -2541,7 +3065,9 @@ local function Load()
     -- Everything saved is checked and repaired now, before anything uses it.
     RepairProfiles()
     MoveSwapTicks()
-    for _, key in ipairs(ns.BAR_KEYS) do ns.BarData(key) end
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        if Settled(key) then ns.BarData(key) end
+    end
     ns.LayoutData()
     RenameCustom()
     ns.BarColours()
@@ -2598,7 +3124,11 @@ loader:SetScript("OnEvent", function(self, event, name)
         self:UnregisterEvent("PLAYER_LOGIN")
         -- In case the character, or its name, wasn't known yet when the
         -- settings loaded.
-        if not active and ns.ResolveProfile(true) and ns.Bars then ns.Bars:Rebuild() end
+        if not active and ns.ResolveProfile(true) then
+            if ns.Bars then ns.Bars:Rebuild() end
+            -- Its spells' own looks on Blizzard's icons (settings per spell).
+            if ns.Skin and ns.Skin.started then ns.Skin:ApplySpellLooks() end
+        end
         if ns.NameUnknownProfile() and ns.window and ns.window:IsShown() then ns.window:Refresh() end
     end
 end)

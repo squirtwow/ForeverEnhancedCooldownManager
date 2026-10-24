@@ -8,6 +8,12 @@ without the prior written permission of the author.
 You are permitted to download and use Forever Enhanced Cooldown Manager for
 personal use with World of Warcraft: Forever.
 
+The font files in Media\Fonts (Barlow Semi Condensed, Saira Semi Condensed
+and Fira Sans Condensed) are not the author's: each is included unchanged
+under the SIL Open Font License, Version 1.1, found beside it in that folder
+(BarlowSemiCondensed-OFL.txt, SairaSemiCondensed-OFL.txt and
+FiraSansCondensed-OFL.txt). That licence, not the one above, covers them.
+
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE

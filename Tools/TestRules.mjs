@@ -422,7 +422,7 @@ test("Blizzard's aura containers never run the addon's code while they update", 
   assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua'], 'the only containers');
   assert.deepEqual(where(/:AddAura(Slot|Group)\(/), [], 'no slot or group added but through F.Add');
   const looks = files.flatMap(name => (code[name].match(/initializeFrame\s*=\s*[^,}]+/g) || []).map(look => `${name}: ${look.trim()}`));
-  assert.equal(looks.length, 4, 'four looks: Buffs bar spots, packed entries, your debuffs, buff and debuff times');
+  assert.equal(looks.length, 5, 'five looks: Buffs bar spots, their edges (Warn at), packed entries, your debuffs, buff and debuff times');
   assert.deepEqual(looks.filter(look => !/: initializeFrame = (F|ns\.BuffBar)\.Guard\(/.test(look)), [], 'every look guarded');
   const buffs = code['Buffs.lua'];
   assert.match(buffs, /function F\.Add\(container, method, \.\.\.\)\r?\n\s+adding = true\r?\n\s+local ok, result = pcall\(container\[method\], container, \.\.\.\)\r?\n\s+adding = false\r?\n/);
@@ -434,16 +434,23 @@ test("Blizzard's aura containers never run the addon's code while they update", 
   assert.equal(count(buffs, /AddGroup\(container, "/g), 2, 'both kinds of group added through AddGroup');
 });
 
-// The addon reads your buffs in one place only: Buffs.lua's OnYou, for the
-// Buffs bar's Only show missing. Never in a fight (the game keeps them
-// secret then, and finds none even with them up), nor while it says auras
-// are secret; each answer through pcall, and Open() before it's tested, so
-// a secret or unreadable one counts as no answer. Tools/TestAuraContainers.lua
-// checks what it does with them.
-test('your buffs are read only by Only show missing, out of combat, each answer through pcall and Open()', () => {
+// The addon reads your buffs in two places only, both in Buffs.lua: OnYou,
+// for the Buffs bar's Only show missing, and TimeLeft, for Warn at's glow
+// out of a fight. Never in a fight (the game keeps them secret then, and
+// finds none even with them up), nor while it says auras are secret; each
+// answer through pcall, and Open() before it's tested (and an answer's end
+// time Open() too), so a secret or unreadable one counts as no answer.
+// Tools/TestAuraContainers.lua checks what it does with them.
+test('your buffs are read only by Only show missing and Warn at, out of combat, each answer through pcall and Open()', () => {
   assert.deepEqual(where(/C_UnitAuras|UnitAura\(|UnitBuff\(|UnitDebuff\(|GetAuraDataBy|AuraBySpellID/), ['Buffs.lua'], 'one file reads auras');
   const buffs = code['Buffs.lua'];
-  assert.equal(count(buffs, /GetPlayerAuraBySpellID/g), 1, 'one ask');
+  assert.equal(count(buffs, /GetPlayerAuraBySpellID/g), 2, 'two asks: OnYou and TimeLeft');
+  assert.equal(count(buffs, /local ok, aura = pcall\(get, id\)\r?\n\s+if not ok or not Open\(aura\) then\r?\n\s+unknown = true/g), 2,
+    'both through pcall and Open()');
+  assert.match(buffs, /local ends = aura\.expirationTime\r?\n\s+if not Open\(ends\) then\r?\n\s+unknown = true/, 'an end time Open() before use');
+  assert.match(buffs, /local readable = watch and Readable\(\)[\s\S]*?if readable then\r?\n\s+local left, unknown = TimeLeft\(bar\.slotIDs\[i\]\)/,
+    'Warn at reads only when readable');
+  assert.equal(count(buffs, /TimeLeft\(/g), 2, 'TimeLeft defined once, asked from F:LowTime only');
   assert.match(buffs, /local function Readable\(\)\r?\n\s+if InCombatLockdown\(\) then return false end\r?\n\s+local fighting = UnitAffectingCombat/,
     'never in a fight');
   assert.match(buffs, /local ok, secret = pcall\(ask\)\r?\n\s+if not \(ok and Open\(secret\) and secret == false\) then return false end/,

@@ -46,6 +46,85 @@ local function Fonts(Add)
         for _, sample in ipairs(SAMPLES) do widths[#widths + 1] = sample[1] .. " " .. Width(file, sample[2]) end
         Add(("  %s (%s): %s"):format(key, tostring(file), table.concat(widths, ", ")))
     end
+    -- Countdown numbers in the font in use: the same widths mean every digit
+    -- is as wide as the rest, so a thin 1 leaves room beside it (17 and 13
+    -- sit a little right of 29 in Friz Quadrata).
+    local file = Style:FontFile()
+    Add(("  digits in the font in use: 29 %s, 17 %s, 13 %s, 11 %s"):format(Width(file, "29"), Width(file, "17"), Width(file, "13"),
+        Width(file, "11")))
+    -- Settings per spell: each entry's own countdown font and size.
+    local looks, own = {}, ns.ProfileLists and ns.ProfileLists().spellLook
+    for name, look in pairs(type(own) == "table" and own or {}) do
+        if type(look) == "table" then
+            looks[#looks + 1] = ("%s (%s, %s)"):format(tostring(name), tostring(look.font or "look"),
+                look.size and (look.size .. "%") or "look")
+        end
+    end
+    table.sort(looks)
+    Add("Own countdowns: " .. (#looks > 0 and table.concat(looks, ", ") or "none"))
+end
+
+-- Heals on their way to you and the shields on you (the health bar's
+-- Incoming heals and Absorbs text): whether the game has the calls, what
+-- each says now (a number, none, or secret) and, for a secret, whether the
+-- game's own text for it comes out blank (nothing there) or not (the server
+-- sent one), measured on a hidden line of the report's own. Then what each
+-- end of the health bar shows.
+local probe
+
+local function Shows(value)
+    local util = C_StringUtil
+    if not (util and util.TruncateWhenZero) then return "" end
+    local ok, width = pcall(function()
+        if not probe then
+            probe = UIParent:CreateFontString(nil, "BACKGROUND")
+            probe:Hide()
+            probe:SetFont(ns.Style:FontFile(), 12, "")
+        end
+        probe:SetText(util.TruncateWhenZero(value))
+        return probe:GetStringWidth()
+    end)
+    if not ok then return " (refused)" end
+    if type(width) ~= "number" or (issecretvalue and issecretvalue(width)) then return " (can't tell)" end
+    return width > 0 and " (sent)" or " (blank)"
+end
+
+local function Now(call, ...)
+    if type(call) ~= "function" then return "no call" end
+    local ok, value = pcall(call, ...)
+    if not ok then return "refused" end
+    if type(value) == "nil" then return "none" end
+    if issecretvalue and issecretvalue(value) then return "secret" .. Shows(value) end
+    return tostring(value)
+end
+
+local function Heals(Add)
+    local util = C_StringUtil
+    local blank = util ~= nil and util.TruncateWhenZero ~= nil and util.WrapString ~= nil
+    Add(("Heals and absorbs: incoming %s, from you %s, absorbs %s, blank at 0 %s | health text %s at %s, left %s, right %s"):format(
+        Now(UnitGetIncomingHeals, "player"), Now(UnitGetIncomingHeals, "player", "player"), Now(UnitGetTotalAbsorbs, "player"),
+        tostring(blank), tostring(ns.Get("prdText")), tostring(ns.Get("prdHealthAt")), tostring(ns.Get("prdHealthLeft")),
+        tostring(ns.Get("prdHealthRight"))))
+end
+
+-- Warn at N seconds left: each aura bar's warned entries, whether the game
+-- made the red numbers' rules, and whether each bar has its edge slots.
+local function Warns(Add)
+    local list, edges, keys = {}, {}, {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if ns.AURA_BARS[key] then keys[#keys + 1] = key end -- (Buffs 2 and Debuffs 2 too, once added)
+    end
+    for _, key in ipairs(keys) do
+        local names = {}
+        for name, seconds in pairs(ns.WarnAt(key)) do names[#names + 1] = ("%s %ss"):format(tostring(name), tostring(seconds)) end
+        table.sort(names)
+        if #names > 0 then list[#list + 1] = key .. ": " .. table.concat(names, ", ") end
+        local bar = ns.Bars and ns.Bars.started and ns.Bars:Get(key)
+        edges[#edges + 1] = key .. " " .. (not bar and "not made" or bar.marks and "made" or "none")
+    end
+    local refused = ns.BuffBar and ns.BuffBar.markError
+    Add(("Warn at: %s | numbers: %s | edge slots: %s%s"):format(#list > 0 and table.concat(list, "; ") or "none",
+        ns.Style:WarnReport(), table.concat(edges, ", "), refused and ("; refused: " .. refused) or ""))
 end
 
 function ns.DebugReport()
@@ -60,6 +139,11 @@ function ns.DebugReport()
     -- The design, and whether bars fade (or why not: the game refused a gradient).
     Add(("Bars: design %s, colour fade %s%s"):format(tostring(ns.Get("barStyle")), tostring(ns.Get("colourFade")),
         ns.Style and ns.Style.fadeError and (", refused: " .. ns.Style.fadeError) or ""))
+    -- Icon details' countdown, and how its Timer text went.
+    Add(("Countdown: size %s%%, spot %s, text %s%s"):format(tostring(ns.Get("countdownSize")), tostring(ns.Get("countdownSpot")),
+        tostring(ns.Get("countdownFormat")), ns.Style and ns.Style:TimerReport() or ""))
+    if ns.Style then Warns(Add) end
+    Heals(Add)
     if ns.Style then Fonts(Add) end
     if ns.Bars and ns.Bars.Report then ns.Bars:Report(Add, Say) end
     return table.concat(lines, "\n")

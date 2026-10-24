@@ -309,13 +309,19 @@ function ns.BuildRaidTimersPage(window, page, width)
     -- Raid warnings and boss emotes.
     local warningTick = Tick("Raid warnings and boss emotes" .. UNTESTED, "raidWarnings", COLUMN, -4,
         "The big text at the top of your screen: raid warnings and what bosses say and whisper. Blizzard still places and fades it.")
-    -- Each font by its first name, in its own face.
+    -- Each font's name in its own face, in a list from one box (Window.lua's FontChoice).
     Label("Font", COLUMN, -28)
-    local fontNames = {}
-    for _, key in ipairs(ns.FONT_KEYS) do fontNames[key] = ns.FONT_NAMES[key]:match("^%S+") end
-    local font = Pills(ns.FONT_KEYS, fontNames, "warningFont", inner - COLUMN - LABEL, COLUMN + LABEL, -28,
-        "The font for raid warnings and boss emotes.")
-    for _, button in ipairs(font.buttons) do button.label:SetFontObject(ns.Style:SampleFont(button.key)) end
+    local font = ns.FontChoice(window, options, inner - COLUMN - LABEL, {
+        keys = ns.FONT_KEYS,
+        name = function(key) return ns.FONT_NAMES[key] end,
+        note = "The font for raid warnings and boss emotes.",
+        pick = function(key)
+            ns.Set("warningFont", key)
+            Changed()
+        end,
+        about = "The font for raid warnings and boss emotes. Click for the fonts.",
+    })
+    font:SetPoint("TOPLEFT", COLUMN + LABEL, -28)
     Label("Outline", COLUMN, -56)
     local outline = Pills(ns.OUTLINE_KEYS, ns.OUTLINE_NAMES, "warningOutline", 150, COLUMN + LABEL, -56,
         "A dark outline round each letter, thin or thick, so the text reads over anything.")

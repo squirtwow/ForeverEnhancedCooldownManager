@@ -4683,6 +4683,12 @@ Equal(At(B:Get("cd")), "BOTTOM 0 -80", "Cooldowns right on top of the display")
 Equal(At(B:Get("util")), "TOP 0 -100", "Utility right under it")
 Equal(At(B:Get("buff")) .. " " .. At(B:Get("debuff")), "TOP 0 -136 TOP 0 -136", "empty bars take no room")
 Equal(string.format("%g %g", S[prd].width, S[prd.PowerBar].width), "216 216", "the display as wide as the widest row")
+B:AddBar("buff")
+L:Stack()
+Equal(string.format("%g %g %g", S[prd].width, S[prd.PowerBar].width, ns.BarData("buff2").perRow), "216 216 " .. ns.BarData("buff").perRow,
+    "a new, empty Buffs 2 doesn't stretch the display, and starts with Buffs' icons across")
+B:RemoveBar("buff2")
+L:Stack()
 -- The rows touch unless you give them room.
 L:SetGap(6)
 Equal(At(B:Get("cd")) .. " " .. At(B:Get("util")) .. " " .. ns.LayoutData().gap, "BOTTOM 0 -74 TOP 0 -106 6",
@@ -5396,17 +5402,30 @@ Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
     local cdBar, buffBar, castBar = B:Get("cd"), B:Get("buff"), ns.CastBar.row.bar
 
     -- Four of the game's own fonts and Game font (1.8.0: the rest of the
-    -- game's, in its language), each name in its own face, each pill as wide
-    -- as its name needs (about 6.5 units a letter in the small font); Friz
-    -- Quadrata and flat, as before, until you pick another.
+    -- game's, in its language), then the three free fonts shipped with the
+    -- addon, in one box's list (its rows: font.buttons), each name in its own
+    -- face, each row wide enough for its name (about 6.5 units a letter in
+    -- the small font); Friz Quadrata and flat, as before, until you pick
+    -- another. The list open, so its rows can be hovered.
+    font:Click()
     local labels, cramped = {}, {}
     for i, button in ipairs(font.buttons) do
         labels[i] = S[button.label].text .. ":" .. Last(button.label, "SetFontObject")
-        if #S[button.label].text * 6.5 + 4 > S[button].width then cramped[#cramped + 1] = S[button.label].text end
+        if #S[button.label].text * 6.5 + 16 > S[button].width then cramped[#cramped + 1] = S[button.label].text end
     end
-    Equal(table.concat(labels, " ") .. " | " .. table.concat(cramped, ", "), "Friz:FECMSamplefriz Arial:FECMSamplearial"
-        .. " Morpheus:FECMSamplemorpheus Skurri:FECMSampleskurri Game:FECMSamplegame | ",
-        "four of the game's fonts and Game font, each name in its own face and inside its pill")
+    Equal(table.concat(labels, " ") .. " | " .. table.concat(cramped, ", "), "Friz Quadrata:FECMSamplefriz Arial Narrow:FECMSamplearial"
+        .. " Morpheus:FECMSamplemorpheus Skurri:FECMSampleskurri Game font:FECMSamplegame Barlow Semi Condensed:FECMSamplebarlow"
+        .. " Saira Semi Condensed:FECMSamplesaira Fira Sans Condensed:FECMSamplefira | ",
+        "four of the game's fonts, Game font and the three shipped with the addon, each name in its own face and inside its row")
+    Equal(tostring(font.popup:IsShown()) .. " " .. S[font.label].text .. " " .. Last(font.label, "SetFontObject") .. " "
+        .. Last(FECMSamplebarlow, "SetFont", 1) .. " " .. Last(FECMSamplefira, "SetFont", 1),
+        "true Friz Quadrata FECMSamplefriz Interface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Fonts\\BarlowSemiCondensed-SemiBold.ttf"
+        .. " Interface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Fonts\\FiraSansCondensed-SemiBold.ttf",
+        "the list open under its box, which shows the font in use in its face; the shipped ones from the addon's own folder")
+    Hover(font.buttons[6], "OnEnter")
+    Equal(S[w.note].text, "Barlow Semi Condensed, narrow like road signs, for countdowns, counts, keys and names on icons, and the text"
+        .. " on your cast bar and Tracked Bars. (experimental)", "a shipped font says what it is, quietly experimental")
+    Hover(font.buttons[6], "OnLeave")
     Hover(font.buttons[5], "OnEnter")
     Equal(S[w.note].text, "Game font, your game's own, for names in any language, for countdowns, counts, keys and names on icons, and the"
         .. " text on your cast bar and Tracked Bars. (experimental)", "Game font says what it's for, quietly experimental")
@@ -8220,6 +8239,26 @@ end
     ns.Set("keybindSize", 100)
     B:SetOption("cd", "size", 20)
     Equal(At(numbers), "CENTER CENTER 0 4", "a small icon: the countdown moves up clear of a key along the bottom")
+    -- Only on an icon that shows a key: with keybinds on, one with no key
+    -- keeps its countdown in its middle (a player saw them all lifted).
+    local bound = keyOf.ACTIONBUTTON1
+    keyOf.ACTIONBUTTON1 = nil
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    local unbound = tostring(S[key].shown) .. " " .. At(numbers)
+    keyOf.ACTIONBUTTON1 = bound
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    Equal(unbound .. " | " .. tostring(S[key].shown) .. " " .. At(numbers), "false CENTER CENTER 0 0 | true CENTER CENTER 0 4",
+        "no key on it: its countdown in the middle, keybinds still on; bound again, up clear of it")
+    -- Its own countdown size (settings per spell): bigger numbers, moved
+    -- further up, clear of the key; back to Icon details' size, back down.
+    B:SetSpellLook("Moonfire", "size", 150)
+    local _, lift = ns.Style:KeyFit(20, ns.Style:CountdownSize(20, 150), "BOTTOM", 100)
+    local own = At(numbers) .. " " .. Last(moon.cooldown, "SetCountdownFont")
+    B:SetSpellLook("Moonfire", "size", nil)
+    Equal(tostring(lift > 4) .. " " .. own .. " | " .. At(numbers), "true CENTER CENTER 0 " .. lift .. " FECMFont17 | CENTER CENTER 0 4",
+        "its own size at 150%: the countdown bigger and further up, clear of the key; back to the Look page's: as it was")
     ns.Set("keybinds", false)
     B:ApplyKeybinds()
     Equal(At(moon.count) .. " | " .. At(numbers) .. " " .. tostring(S[key].shown), "BOTTOMRIGHT BOTTOMRIGHT -1 1 | CENTER CENTER 0 0 false",
@@ -9408,8 +9447,9 @@ end)()
     Over(nil, icon)
     local trayBack = Move(icon, bp.tray)
     Equal(table.concat({ onTray, onIcon, onRemove, iconBack, trayBack }, " | "), table.concat({ TRAY,
-        "Moonfire. Drag it onto another icon to swap them, or off the bar to take it off.", "Take Moonfire off Cooldowns.",
-        "Moonfire. Drag it onto another icon to swap them, or off the bar to take it off.", TRAY }, " | "),
+        "Moonfire. Click: its own settings. Drag it onto another icon to swap them, or off the bar to take it off.",
+        "Take Moonfire off Cooldowns.",
+        "Moonfire. Click: its own settings. Drag it onto another icon to swap them, or off the bar to take it off.", TRAY }, " | "),
         "tray, icon, its x, the icon, the tray: each its own note")
     -- Off the x past the icon's edge, straight onto the tray: the tray's note.
     Over(true, icon, icon.remove)

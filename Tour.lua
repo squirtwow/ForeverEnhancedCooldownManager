@@ -635,7 +635,7 @@ local HELP = {
         bars = AURA_BARS,
         title = "Missing ones greyed",
         text = function()
-            if ShownBar() == "debuff" then
+            if ns.BAR_KIND[ShownBar()] == "debuff" then
                 return "Ticked, each debuff keeps its spot, greyed while it's missing from your target."
                     .. " Unticked, only the ones up show, in one row."
             end
@@ -667,7 +667,7 @@ local HELP = {
         bars = AURA_BARS,
         title = "Your debuffs on you",
         text = function()
-            if ShownBar() == "debuff" then
+            if ns.BAR_KIND[ShownBar()] == "debuff" then
                 return "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, at the end of this bar."
                     .. " Not with missing debuffs greyed."
             end
@@ -986,7 +986,8 @@ function Tour:Page(key)
     local list, bar = {}, ns.BAR_NAMES[key] ~= nil
     for _, group in ipairs({ STEPS, NEWS, HELP }) do
         for _, step in ipairs(group) do
-            if step.page and Same(step.page, key) and not (bar and step.bars and not step.bars[key])
+            -- (An extra bar's page as its kind's: Debuffs 2 as Debuffs.)
+            if step.page and Same(step.page, key) and not (bar and step.bars and not step.bars[ns.BAR_KIND[key]])
                 and (not step.when or step.when(window)) then
                 local part = window and Value(step.target, window)
                 if part and part:IsShown() then list[#list + 1] = step end

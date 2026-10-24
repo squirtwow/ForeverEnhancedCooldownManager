@@ -580,6 +580,9 @@ end
 -- full when ours goes.
 -- A druid's extra mana bar in forms and energy bar out of cat form can have
 -- text too (off until picked): each always its own power, mana or energy.
+-- The health bar's ends can show heals on their way to you and the shields
+-- on you too, as numbers only: Blizzard's own heal and shield pieces on the
+-- bar stay as they are.
 local SPOTS = { "centre", "left", "right" }
 local TEXT_KINDS = { "health", "power", "extra", "energy" }
 local TEXT_KEYS = {
@@ -610,7 +613,8 @@ local textOn = false
 
 -- Plain numbers for the Set up panel's preview (Window.lua).
 local SAMPLES = {
-    health = { Current = function() return 4321 end, Max = function() return 5120 end, Percent = function() return 84.4 end },
+    health = { Current = function() return 4321 end, Max = function() return 5120 end, Percent = function() return 84.4 end,
+        Heals = function() return 1200 end, Absorbs = function() return 850 end },
     power = { Current = function() return 1876 end, Max = function() return 2400 end, Percent = function() return 78.2 end },
     extra = { Current = function() return 1240 end, Max = function() return 2400 end, Percent = function() return 51.7 end },
     energy = { Current = function() return 80 end, Max = function() return 100 end, Percent = function() return 80 end },
@@ -629,10 +633,14 @@ end
 local function GameSource(kind)
     local curve = CurveConstants and CurveConstants.ScaleTo100 or nil
     if kind == "health" then
+        -- Heals on their way to you (from anyone, you too) and the shields
+        -- on you, should the game have the calls.
         return {
             Current = function() return UnitHealth("player") end,
             Max = function() return UnitHealthMax("player") end,
             Percent = curve and UnitHealthPercent and function() return UnitHealthPercent("player", false, curve) end or nil,
+            Heals = UnitGetIncomingHeals and function() return UnitGetIncomingHeals("player") end or nil,
+            Absorbs = UnitGetTotalAbsorbs and function() return UnitGetTotalAbsorbs("player") end or nil,
         }
     end
     local own = OWN_POWER[kind]
@@ -659,7 +667,30 @@ local function Number(value)
     return value
 end
 
--- One spot's text: the value now, it and the most it can be, a percent, or nothing.
+-- The health bar's heals on their way to you and the shields on you, each
+-- in its marks: +1200 coming, (850) shielded. The game keeps both secret,
+-- so they're never compared or added up: the game's own calls write the
+-- number and leave it blank at 0 (whole numbers, no commas). On a build
+-- without those calls, the number as the game writes it, 0 too. No number
+-- at all (none coming, or no call): blank.
+local EXTRA_MARKS = { heals = { "+", "" }, absorbs = { "(", ")" } }
+local EXTRA_SOURCES = { heals = "Heals", absorbs = "Absorbs" }
+local EXTRA_EVENTS = { "UNIT_HEAL_PREDICTION", "UNIT_ABSORB_AMOUNT_CHANGED" }
+
+local function Extra(text, format, source)
+    local get, marks = source[EXTRA_SOURCES[format]], EXTRA_MARKS[format]
+    local value = get and get()
+    if type(value) ~= "number" then return text:SetText("") end
+    local util = C_StringUtil
+    if util and util.TruncateWhenZero and util.WrapString then
+        text:SetText(util.WrapString(util.TruncateWhenZero(value), marks[1], marks[2]))
+    else
+        text:SetFormattedText(marks[1] .. "%s" .. marks[2], Number(value))
+    end
+end
+
+-- One spot's text: the value now, it and the most it can be, a percent (with
+-- its % sign, or bare: 100 at full), heals or shields, or nothing.
 local function Put(text, format, source)
     if format == "value" then
         text:SetFormattedText("%s", Number(source.Current()))
@@ -667,6 +698,10 @@ local function Put(text, format, source)
         text:SetFormattedText("%s / %s", Number(source.Current()), Number(source.Max()))
     elseif format == "percent" and source.Percent then
         text:SetFormattedText("%.0f%%", source.Percent())
+    elseif format == "bare" and source.Percent then
+        text:SetFormattedText("%.0f", source.Percent())
+    elseif EXTRA_MARKS[format] then
+        Extra(text, format, source)
     else
         text:SetText("")
     end
@@ -731,6 +766,8 @@ local function Arrange(slots, kind)
     end
     slots.formats = formats
     slots.any = formats.centre ~= "none" or formats.left ~= "none" or formats.right ~= "none"
+    -- Heals or shields at an end: their own events are heard too.
+    slots.extras = EXTRA_MARKS[formats.left] ~= nil or EXTRA_MARKS[formats.right] ~= nil
 end
 
 -- The spots in use, from source.
@@ -872,6 +909,9 @@ local function ApplyText()
             holder:UnregisterAllEvents()
             if show then
                 for _, event in ipairs(TEXT_EVENTS[kind]) do holder:RegisterUnitEvent(event, "player") end
+                if slots.extras then
+                    for _, event in ipairs(EXTRA_EVENTS) do holder:RegisterUnitEvent(event, "player") end
+                end
                 holder:RegisterEvent(TEXT_REFRESH)
             end
             MuteBlizzard(holder, show)

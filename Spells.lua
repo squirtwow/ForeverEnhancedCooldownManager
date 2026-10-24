@@ -806,7 +806,9 @@ local function Untracked(name, ids, bar)
         buff = buff or (ns.PASSIVE_BUFFS ~= nil and ns.PASSIVE_BUFFS[id] ~= nil)
         debuff = debuff or (ns.PASSIVE_DEBUFFS ~= nil and ns.PASSIVE_DEBUFFS[id] ~= nil)
     end
-    if (bar == "buff" and buff) or (bar == "debuff" and debuff) then return nil end
+    -- (An extra bar goes by its kind: Buffs 2 as Buffs.)
+    local kind = ns.BAR_KIND and ns.BAR_KIND[bar] or bar
+    if (kind == "buff" and buff) or (kind == "debuff" and debuff) then return nil end
     if buff then return name .. " is passive. Only its buff can be tracked, on the Buffs bar." end
     if debuff then return name .. " is passive. Only its debuff can be tracked, on the Debuffs bar." end
     return name .. " is passive, so there's nothing to track."
@@ -944,7 +946,7 @@ function S:ForMe(key, bar, remember)
     local procs = ProcClasses()[name]
     local races = ByName(ns.SPELL_RACES, name)
     local racial = races and not classes and not procs
-    if added and bar == "buff" and not racial then return true end
+    if added and (ns.BAR_KIND and ns.BAR_KIND[bar] or bar) == "buff" and not racial then return true end
     if classes or procs then
         -- While the game won't say your class, it's yours, as it always was.
         local _, class = UnitClass("player")

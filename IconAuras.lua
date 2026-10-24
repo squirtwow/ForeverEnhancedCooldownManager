@@ -28,22 +28,23 @@ function A:On(bar)
 end
 
 -- Sizes an overlay's numbers for its icon, and shows or hides the
--- countdown, in the spot picked in Icon details.
-local function Fit(parts, size, showTimer)
-    parts.cooldown:SetCountdownFont(Style:Countdown(size))
+-- countdown, in the spot picked in Icon details; look: its spell's own
+-- countdown font and size (settings per spell), or nil for the Look page's.
+local function Fit(parts, size, showTimer, look)
+    parts.cooldown:SetCountdownFont(Style:Countdown(size, look))
     parts.cooldown:SetHideCountdownNumbers(not showTimer)
     parts.count:SetFontObject(Style:Count(size))
     Style:AuraNumbers(parts)
 end
 
 -- Icon details (the Look page) on every overlay made: the swipe, the edge
--- line and the countdown, sized for its icon. Only out of a fight
--- (Bars.lua AuraDetails).
+-- line and the countdown, sized for its icon (in its spell's own look).
+-- Only out of a fight (Bars.lua AuraDetails).
 function A:Details(bar)
     for _, anchor in ipairs(bar and bar.auraAnchors or {}) do
         for _, parts in ipairs(anchor.parts) do
             Style:CooldownLook(parts.cooldown)
-            parts.cooldown:SetCountdownFont(Style:Countdown(anchor.size or 36))
+            parts.cooldown:SetCountdownFont(Style:Countdown(anchor.size or 36, anchor.look))
             Style:AuraNumbers(parts)
         end
     end
@@ -78,7 +79,7 @@ local function Look(anchor)
         count:SetPoint("BOTTOMRIGHT", -1, 1)
         button:SetApplicationCount(count)
         local parts = { cooldown = cooldown, count = count }
-        Fit(parts, anchor.size or 36, anchor.showTimer ~= false)
+        Fit(parts, anchor.size or 36, anchor.showTimer ~= false, anchor.look)
         anchor.parts[#anchor.parts + 1] = parts
     end
 end
@@ -154,9 +155,11 @@ end
 
 -- Each slot sits over the icon of the spell it was told about, found by name,
 -- so icons moving in a fight (an item running out) never put a time on the
--- wrong spell. The addon's own frames only: fine in combat.
+-- wrong spell. The addon's own frames only: fine in combat. Its numbers
+-- take the spell's own look (settings per spell) out of a fight only: in
+-- one, a look changed then waits for it to end (A:CombatEnded).
 local function Place(bar, data)
-    local size = ns.IconSize(data)
+    local base, fight = ns.IconSize(data), InCombatLockdown()
     for i, anchor in ipairs(bar.auraAnchors) do
         local name, target = bar.auraNames[i], nil
         if name then
@@ -165,6 +168,9 @@ local function Place(bar, data)
                 if icon and icon.name == name and icon:IsShown() then target = icon break end
             end
         end
+        -- Its numbers sized for the icon it sits over: that icon's own size
+        -- (settings per spell), else the bar's.
+        local size = target and target.size or base
         anchor:ClearAllPoints()
         if target then
             anchor:SetAllPoints(target)
@@ -172,9 +178,12 @@ local function Place(bar, data)
             anchor:SetSize(1, 1)
             anchor:SetPoint("CENTER", UIParent, "BOTTOMLEFT", AWAY, AWAY)
         end
-        if anchor.size ~= size or anchor.showTimer ~= data.showTimer then
-            anchor.size, anchor.showTimer = size, data.showTimer
-            for _, parts in ipairs(anchor.parts) do Fit(parts, size, data.showTimer) end
+        local look = anchor.look
+        if not fight then look = ns.SpellLook(name) end
+        if fight and Style:LookKey(ns.SpellLook(name)) ~= Style:LookKey(look) then bar.auraPending = true end
+        if anchor.size ~= size or anchor.showTimer ~= data.showTimer or Style:LookKey(anchor.look) ~= Style:LookKey(look) then
+            anchor.size, anchor.showTimer, anchor.look = size, data.showTimer, look
+            for _, parts in ipairs(anchor.parts) do Fit(parts, size, data.showTimer, look) end
         end
     end
 end

@@ -1302,6 +1302,17 @@ end)()
     Equal(table.concat(shownOn, ", "), "cd, util, buff, debuff, general, general with EraUI, cd bars off, general bars off, util taken out",
         "the note shows on the bar pages and General only")
     Equal(table.concat(problems, "; "), "", "where it shows, nothing on the page is under it; the ? pulses on every page")
+    -- A bar with spells shows + Another bar (extra bars) with Clear at the
+    -- right of its top row: there only the ? pulses, as on other pages with
+    -- buttons there; an empty bar's page still has the note.
+    ns.Bars:SetAura("debuff", "Moonfire", true)
+    w:Select("debuff")
+    Step(w, 0)
+    local withSpells = Nudge(w) .. " " .. tostring(w.pages.bar.another:IsVisible())
+    w:Select("buff")
+    Step(w, 0)
+    Equal(withSpells .. " | " .. Nudge(w) .. " " .. tostring(w.pages.bar.another:IsVisible()), "false true true | true true false",
+        "a bar with spells: + Another bar shows, the note doesn't (the ? still pulses); an empty bar's page keeps the note")
     Equal(#printed, 0, "no errors")
 end)()
 
@@ -1515,6 +1526,22 @@ end)()
     ns.Set("useBars", true)
     ns.Layout:TakeOut("util")
     Check("util", "taken out")
+    -- Extra bars: with spells on it, + Another bar left of Clear (Cooldowns 2
+    -- > once added); Cooldowns 2's page, its title the longest, with Remove
+    -- bar, and taken out of the layout too.
+    ns.Bars:Assign("Moonfire", "cd")
+    Check("cd", "cd with spells: + Another bar")
+    ns.Bars:AddBar("cd")
+    Check("cd", "cd with Cooldowns 2 there")
+    Check("cd2", "Cooldowns 2, empty: Remove bar in Clear's place")
+    ns.Bars:Assign("Wrath", "cd2")
+    Check("cd2", "Cooldowns 2")
+    ns.Layout:TakeOut("cd2")
+    Check("cd2", "Cooldowns 2 taken out")
+    Equal(tostring(w.pages.bar.another:IsVisible()) .. " " .. S[w.pages.bar.another.label].text .. " " .. tostring(w.pages.bar.putBack:IsVisible())
+        .. " " .. tostring(w.pages.bar.clear:IsVisible()), "true Remove bar true true", "(Remove bar, Put back and Clear all checked there)")
+    ns.Bars:RemoveBar("cd2")
+    ns.Bars:Assign("Moonfire", nil)
     -- Buffs with Only show missing: rows, names and missing ones greyed
     -- (greyed out) all there, and its tick under the sliders.
     ns.Bars:SetOption("buff", "onlyMissing", true)
@@ -1891,11 +1918,17 @@ end)()
     Pick("prdTextFont", "arial")
     Equal(ns.Get("prdHealthSize") .. " " .. ns.Get("prdPowerSize") .. " " .. Last(hp.slots.left, "SetFontObject") .. " "
         .. Last(mp.slots.right, "SetFontObject"), "14 12 FECMFontarial14 FECMFontarial12", "each bar its own size, in Arial Narrow, just for this text")
+    -- (One box: its list of fonts open to read them, then shut.)
     local fonts = panel.fonts
+    fonts:Click()
     Equal(S[fonts.buttons[1].label].text .. " " .. Last(fonts.buttons[1].label, "SetFontObject") .. " " .. Last(fonts.buttons[3].label, "SetFontObject")
         .. " | " .. Note(fonts.buttons[1]) .. " | " .. Note(fonts.buttons[3]), "Look page FECMSamplefriz FECMSamplearial | "
         .. "The font picked on the Look page, now Friz Quadrata. | Arial Narrow, plain and narrow, just for this text.",
         "the Look page's font first, then the game's own, each in its own face and saying what it is")
+    Equal(S[fonts.label].text .. " " .. Last(fonts.label, "SetFontObject") .. " " .. #fonts.buttons .. " " .. S[fonts.buttons[7].label].text
+        .. " " .. Last(fonts.buttons[7].label, "SetFontObject"), "Arial Narrow FECMSamplearial 9 Barlow Semi Condensed FECMSamplebarlow",
+        "the box shows the font picked in its face; the list has the fonts shipped with the addon too")
+    fonts:Click()
     Check("size 14 in Arial Narrow")
     local healthNote = Note(Row("prdHealthAt").buttons[2])
     PickBar("power")
@@ -1924,6 +1957,118 @@ end)()
     Equal(#Picker().buttons .. " " .. tostring(preview.energy:IsVisible()) .. " " .. Preview(preview.energy), '4 true "" | 80 | 80%',
         "the energy bar ticked: Energy too, a pair at its ends")
     Check("energy left and right")
+    -- Percent (no sign), a player's idea: the percent with no % after it
+    -- (full shows 100), saying so, quietly experimental, the row's five
+    -- choices each sized by its name, the row inside the panel.
+    Pick("prdEnergyRight", "bare")
+    local bare, widths = nil, {}
+    for _, button in ipairs(Row("prdEnergyRight").buttons) do
+        if button.key == "bare" then bare = button end
+        widths[#widths + 1] = button.key .. " " .. math.floor(S[button].width)
+    end
+    Equal(ns.Get("prdEnergyRight") .. " " .. Preview(preview.energy) .. " | " .. S[bare.label].text .. " | " .. Note(bare) .. " | "
+        .. table.concat(widths, ", "), 'bare "" | 80 | 80 | Percent (no sign) | As a percent with no % sign, like 84. Full shows 100.'
+        .. " (experimental) | none 49, value 56, both 99, percent 70, bare 141",
+        "Percent (no sign): the number with no % sign, its note quietly experimental, each choice as wide as its name needs")
+    Check("percent with no sign")
+    Pick("prdEnergyRight", "percent")
+    -- Incoming heals and Absorbs, a player's idea: at the health bar's ends
+    -- only (the middle always shows something, and the other bars have no
+    -- heals), each saying what it shows, quietly experimental, in a row as
+    -- wide as the others, each choice as wide as its name needs; the
+    -- preview's sample numbers through the game's own calls, which leave
+    -- each blank at 0 (whole numbers, no commas).
+    do
+        local util = _G.C_StringUtil
+        _G.C_StringUtil = {
+            TruncateWhenZero = function(v) local n = math.floor(v) return n == 0 and "" or tostring(n) end,
+            WrapString = function(infix, prefix, suffix) return infix == "" and "" or (prefix or "") .. infix .. (suffix or "") end,
+        }
+        PickBar("health")
+        Pick("prdHealthLeft", "heals")
+        Pick("prdHealthRight", "absorbs")
+        local left, names, widths, heals, absorbs = Row("prdHealthLeft"), {}, {}, nil, nil
+        for _, button in ipairs(left.buttons) do
+            if button.key == "heals" then heals = button elseif button.key == "absorbs" then absorbs = button end
+            names[#names + 1] = S[button.label].text
+            widths[#widths + 1] = math.floor(S[button].width)
+        end
+        local healsNote, absorbsNote = Note(heals), Note(absorbs)
+        Equal(ns.Get("prdHealthLeft") .. " " .. ns.Get("prdHealthRight") .. " " .. left.selected .. " " .. Row("prdHealthRight").selected
+            .. " | " .. Preview(hp) .. " | " .. table.concat(names, ", ") .. " | " .. table.concat(widths, " ") .. " | " .. healsNote
+            .. " | " .. absorbsNote .. " | " .. tostring(Fit.Wide(healsNote, "GameFontHighlightSmall") <= 2 * S[w.note].width
+            and Fit.Wide(absorbsNote, "GameFontHighlightSmall") <= 2 * S[w.note].width) .. " " .. math.floor(S[left].width),
+            'heals absorbs heals absorbs | "" | +1200 | (850) | None, Value, Value / max, Percent, Percent (no sign), Incoming heals,'
+            .. " Absorbs | 34 38 68 48 97 82 48 | Heals on their way to you, like +1200. Blank while none are coming. (experimental) |"
+            .. " Shields on you, like (850) from Power Word: Shield. Blank while you have none. (experimental) | true 420",
+            "Incoming heals and Absorbs at the health bar's ends: +1200 and (850) on the preview, each choice sized by its name,"
+            .. " each saying what it shows in two lines of the footer at most, quietly experimental")
+        Check("heals and absorbs")
+        -- Not in the middle, and not on the other bars.
+        local function Keys(row)
+            local keys = {}
+            for _, button in ipairs(row.buttons) do keys[#keys + 1] = button.key end
+            return table.concat(keys, " ")
+        end
+        Pick("prdHealthAt", "centre")
+        local centre = Keys(Row("prdHealthCentre"))
+        Pick("prdHealthAt", "sides")
+        Equal(centre .. " | " .. Keys(Row("prdPowerLeft")) .. " | " .. Keys(Row("prdPowerRight")) .. " | " .. Keys(Row("prdExtraLeft"))
+            .. " | " .. Keys(Row("prdEnergyRight")), "value both percent bare | none value both percent bare | none value both percent bare"
+            .. " | none value both percent bare | none value both percent bare",
+            "only at the health bar's ends: not in its middle, nor on the power, extra mana or energy bars")
+        -- A build without the game's blank-at-0 calls: the number as the game writes it.
+        _G.C_StringUtil = nil
+        w:Refresh()
+        Equal(Preview(hp), '"" | +1,200 | (850)', "no blank-at-0 calls: the game's own number writer")
+        _G.C_StringUtil = util
+        Pick("prdHealthLeft", "value")
+        Pick("prdHealthRight", "percent")
+    end
+    -- /ccm debug: whether the game has the calls and what each says now: a
+    -- number, none or secret, and for a secret whether the game's own text
+    -- for it comes out blank or not (measured on a hidden line of the
+    -- report's own, the secret only handed on); then what each end of the
+    -- health bar shows. Nothing misused, nothing changed.
+    do
+        Pick("prdHealthLeft", "heals")
+        local util, width, given = _G.C_StringUtil, Proto.GetStringWidth, {}
+        _G.C_StringUtil = {
+            TruncateWhenZero = function(v)
+                given[#given + 1] = IsSecret(v) and "secret" or tostring(v)
+                return SECRETS.string
+            end,
+            WrapString = function() return "" end,
+        }
+        _G.UnitGetIncomingHeals = function(unit, healer)
+            assert(unit == "player")
+            if healer then return nil end
+            return SECRETS.number
+        end
+        _G.UnitGetTotalAbsorbs = function(unit) assert(unit == "player"); return 0 end
+        local function Line() return tostring(ns.DebugReport():match("Heals and absorbs: [^\n]*")) end
+        local sent = Line()
+        -- A line given secret text: measured as nothing there, then kept secret too.
+        local answer
+        function Proto:GetStringWidth()
+            if rawequal(S[self].text, SECRETS.string) then return answer end
+            return width(self)
+        end
+        answer = 0
+        local blank = Line():match("incoming [^,]*")
+        answer = SECRETS.number
+        local hidden = Line():match("incoming [^,]*")
+        Proto.GetStringWidth = width
+        _G.C_StringUtil, _G.UnitGetIncomingHeals, _G.UnitGetTotalAbsorbs = nil, nil, nil
+        local none = Line()
+        _G.C_StringUtil = util
+        Pick("prdHealthLeft", "value")
+        Equal(sent .. " || " .. blank .. " | " .. hidden .. " || " .. none .. " || " .. table.concat(given, " ") .. " " .. ns.Get("prdHealthLeft"),
+            "Heals and absorbs: incoming secret (sent), from you none, absorbs 0, blank at 0 true | health text false at sides, left heals,"
+            .. " right percent || incoming secret (blank) | incoming secret (can't tell) || Heals and absorbs: incoming no call, from you"
+            .. " no call, absorbs no call, blank at 0 false | health text false at sides, left heals, right percent || secret secret secret value",
+            "/ccm debug: the calls, what each says now, a secret's text blank or not on a hidden line of its own, and the health bar's ends")
+    end
     ns.Set("prdEnergy", false)
     w:Refresh()
     Equal(#Picker().buttons .. " " .. tostring(Row("prdHealthAt"):IsVisible()), "3 true", "unticked: Energy goes, back on Health")
@@ -2116,8 +2261,8 @@ end)()
             ns.Set(choice[1], was)
         end
     end
-    Equal(tostring(w.keyPlace:IsVisible()) .. " " .. tostring(w.prdText:GetChecked()) .. " " .. tried, "true true 64",
-        "(keybinds' choices shown, the text ticked, and every choice tried twice: four designs, Colour fade off and on)")
+    Equal(tostring(w.keyPlace:IsVisible()) .. " " .. tostring(w.prdText:GetChecked()) .. " " .. tried, "true true 70",
+        "(keybinds' choices shown, the text ticked, and every choice tried twice: four designs, eight fonts, Colour fade off and on)")
     Equal(table.concat(found, " | "), "", "in every state, each piece on the Look page inside its box (the preview, the choices,"
         .. " the Each bar box), none on another, and each row of the list inside it")
     C_Spell.GetSpellName = spellName
@@ -2813,6 +2958,48 @@ end)()
     Check(dialog, "custom colours")
     Equal(tostring(Last(panel.defaults, "SetEnabled")) .. " " .. S[panel.defaults].alpha, "true 1", "Defaults usable once anything's changed")
 
+    -- Timer text (a player's idea): the game's own countdown, or whole
+    -- minutes then seconds (3m, 2m, 1m, then 59s), at once on the preview
+    -- and your icons, through the cooldown's own setters only: the game's
+    -- seconds formatter, set up once, and its switch to a count of minutes
+    -- at a minute. Nothing is set at the default; picked back, each gets the
+    -- game's own again (the switch as read off a cooldown of the addon's own).
+    do
+        local calls, made, makes = {}, {}, 0
+        setmetatable(made, { __index = function(_, method)
+            return function(_, value) calls[#calls + 1] = method .. " " .. tostring(value) end
+        end })
+        local util, enum, read = _G.C_StringUtil, _G.Enum, Proto.GetCountdownAbbrevThreshold
+        _G.C_StringUtil = { CreateSecondsFormatter = function() makes = makes + 1; return made end }
+        _G.Enum = setmetatable({ SecondsFormatterAbbreviation = { OneLetter = 2 }, SecondsFormatterInterval = { Seconds = 0 },
+            SecondsFormatterRounding = { RoundUp = 0 }, SecondsFormatterIntervalWhitespace = { Strip = 1 } }, { __index = enum })
+        function Proto:GetCountdownAbbrevThreshold() return 3600 end
+        local format = panel.format
+        local function Text(cooldown)
+            local formatter, switch = S[cooldown].last.SetCountdownFormatter, S[cooldown].last.SetCountdownAbbrevThreshold
+            return (formatter == nil and "-" or formatter[1] == made and "minutes" or tostring(formatter[1])) .. " "
+                .. (switch == nil and "-" or tostring(switch[1]))
+        end
+        Equal(format.selected .. " | " .. Note(format.buttons[1]) .. " | " .. Note(format.buttons[2]) .. " | "
+            .. S[format.buttons[1].label].text .. " / " .. S[format.buttons[2].label].text .. " | " .. Text(icon.cooldown) .. " " .. makes,
+            "game | The countdown as the game writes it, like 2:52, as it's always been. | Whole minutes, then seconds under a minute:"
+            .. " 3m, 2m, 1m, then 59s. On your bars and Blizzard's icons. (experimental) | Game (2:52) / Minutes, then seconds (3m, 59s)"
+            .. " | - - 0", "Text: the game's own to start with, nothing set on any cooldown; minutes then seconds quietly experimental")
+        S[format.buttons[2]].scripts.OnClick(format.buttons[2])
+        Equal(ns.Get("countdownFormat") .. " " .. format.selected .. " | " .. Text(icon.cooldown) .. " | " .. Text(first.cooldown) .. " | "
+            .. makes .. " " .. table.concat(calls, ", "), "minutes minutes | minutes 60 | minutes 60 | 1 SetDefaultAbbreviation 2,"
+            .. " SetStripIntervalWhitespace 1, SetDesiredUnitCount 1, SetMinInterval 0, SetRounding 0, SetCanRoundUpLastUnit true,"
+            .. " SetCanRoundUpIntervals true", "minutes then seconds: one formatter made for 3m and 59s, on your icons and the preview,"
+            .. " the switch to minutes at a minute")
+        Check(dialog, "minutes then seconds")
+        Equal(ns.DebugReport():match("Countdown: [^\n]*"), "Countdown: size 150%, spot TOPLEFT, text minutes (formatter made,"
+            .. " game's switch 3600)", "/ccm debug says how it went")
+        S[format.buttons[1]].scripts.OnClick(format.buttons[1])
+        Equal(ns.Get("countdownFormat") .. " | " .. Text(icon.cooldown) .. " | " .. Text(first.cooldown) .. " " .. makes,
+            "game | nil 3600 | nil 3600 1", "back to the game's own: the formatter cleared, the switch where the game keeps it")
+        _G.C_StringUtil, _G.Enum, Proto.GetCountdownAbbrevThreshold = util, enum, read
+    end
+
     -- Another page, the window closing and the window opened again each put it away.
     local said = {}
     for _, step in ipairs({ { "a page", function() w:Select("general") end }, { "the window closing", function() w:Hide() end },
@@ -2844,22 +3031,246 @@ end)()
     local back = {}
     for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
     Equal(table.concat(back, " ") .. " " .. ns.Get("countdownColourCustom") .. " | " .. Looks(icon.cooldown) .. " | "
-        .. Looks(panel.tray.icons[1].cooldown) .. " " .. S[panel.defaults].alpha, "black 30 100 white CENTER false game 00ffff |"
+        .. Looks(panel.tray.icons[1].cooldown) .. " " .. S[panel.defaults].alpha, "black 30 100 white CENTER game false game 00ffff |"
         .. " 0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0 | 0,0,0,0.7 false FECMFont20 CENTER CENTER 0 0 0.45",
         "Defaults: every detail back, on your icons and the preview, the custom colour kept beside")
     -- Anything odd saved goes back to its default.
     kept = ForeverEnhancedCooldownManagerDB
     kept.swipeColour, kept.swipeSeeThrough, kept.countdownSize, kept.countdownColour = "pink", 101, 49.5, ns.CUSTOM
     kept.countdownColourCustom, kept.countdownSpot, kept.swipeEdge, kept.edgeColour = "zzzzzz", "MIDDLE", "yes", "gold"
+    kept.countdownFormat = "hours"
     w:Hide()
     ns = Start(kept)
     back = {}
     for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
     Equal(table.concat(back, " ") .. " " .. tostring(ForeverEnhancedCooldownManagerDB.countdownColourCustom),
-        "black 30 100 white CENTER false game nil", "odd values saved: each back to its default, a Custom with no colour too")
+        "black 30 100 white CENTER game false game nil", "odd values saved: each back to its default, a Custom with no colour too")
     _G.ColorPickerFrame = nil
     Equal(table.concat(found, " | "), "", "in every state: every piece inside the panel and none on another, under the title bar, clear of the footer")
     Equal(#printed, 0, "no errors from Icon details")
+end)()
+
+-- Settings per spell: a tray icon's own panel ---------------------------------------------------------
+-- (A player's idea: a font and size per icon.) An icon in a bar page's tray
+-- clicked with nothing held opens its own panel over the window: its icon
+-- with a countdown going round, at the bar's size, in its look; its
+-- countdown's font (the Look page's, then every font, each in its own face)
+-- and its own size (a tick, then a percent); and on the Buffs and Debuffs
+-- pages its own ticks from the spell list. Nothing changes until picked;
+-- each change shows at once on your icons and the preview, is kept by entry
+-- in the profile (over a reload too), and every hover of the new choices
+-- is quietly experimental. Defaults puts its look back. It fits in every
+-- state, and goes with another page, the window or its entry; with a spell
+-- held, a click drops it on the bar as before.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire", "Wrath" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    local B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("cd")
+    local bp = w.pages.bar
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local function Font(cooldown) return tostring(Last(cooldown, "SetCountdownFont")) end
+    local found = {}
+    local function Check(panel, label)
+        local problems = Fit.Problems(panel.dialog)
+        local _, top, _, bottom = Fit.Rect(panel.dialog)
+        if top < 42 or bottom > 560 - 28 then problems = problems .. ("the panel at %.1f to %.1f, over the title bar or the footer"):format(top, bottom) end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    local cd = B:Get("cd")
+    Equal(Font(cd.icons[1].cooldown) .. " " .. tostring(w.spellPanel), "FECMFont18 nil", "your icons as always, and no panel until one is clicked")
+
+    -- Clicked with nothing held: Moonfire's own panel, nothing changed yet.
+    bp.icons[1]:Click()
+    local panel = w.spellPanel
+    local preview = panel.preview
+    Equal(table.concat({ tostring(panel.dialog:IsVisible()), tostring(S[panel].points[2][3]), S[panel.title].text, S[panel.quiet].text,
+        panel.font.selected, S[panel.font.label].text, tostring(panel.own:GetChecked()), S[panel.size.value].text, tostring(panel.size.usable),
+        tostring(panel.glow:IsVisible()), tostring(panel.only:IsVisible()), tostring(panel.ticks:IsVisible()), tostring(S[panel.defaults].alpha) }, " "),
+        "true 28 MOONFIRE on Cooldowns look Look page false 100% false false false false 0.45",
+        "opened over the window, clear of the footer: the Look page's font and size, no ticks on Cooldowns, Defaults greyed")
+    Equal(Font(preview.cooldown) .. " " .. S[preview].width .. " " .. tostring(Last(preview.cooldown, "SetCooldown", 2)) .. " "
+        .. tostring(S[preview.cooldown].scripts.OnCooldownDone ~= nil) .. " " .. tostring(S[preview.art].texture == ns.Spells:Icon("Moonfire")),
+        "FECMFont18 36 75 true true", "the preview: its icon at the bar's size, its countdown going round and round")
+    Equal(tostring(panel.warn:IsVisible()) .. " " .. tostring(panel.warnLabel:IsVisible()), "false false",
+        "no Warn at on Cooldowns: it's for the Buffs and Debuffs bars' auras")
+    Check(panel, "Cooldowns, at the start")
+    -- Each choice says what it does; the new ones quietly experimental.
+    panel.font:Click()
+    local notes = { Note(panel.font), Note(panel.font.buttons[1]), Note(panel.font.buttons[7]), Note(panel.own), Note(panel.size),
+        Note(panel.defaults), Note(panel.done) }
+    local rows = {}
+    for i, row in ipairs(panel.font.buttons) do rows[i] = S[row.label].text end
+    panel.font:Click()
+    Equal(table.concat(notes, " | "), "This spell's countdown font: the Look page's, or one of its own. Click for the fonts. (experimental) | The"
+        .. " Look page's font, now Friz Quadrata. | Barlow Semi Condensed, narrow like road signs, just for this spell's countdown. | Gives"
+        .. " this spell's countdown a size of its own, in place of Icon details' Size on the Look page. (experimental) | Tick Its own first:"
+        .. " until then it's Icon details' Size. | This spell's countdown back in the Look page's font and size, and its icon at the"
+        .. " bar's size. Its ticks stay as they are. | Close this panel. Every choice is kept as you make it.",
+        "each says what it does; the font and size quietly experimental")
+    -- Its icon's own size, in the row under (an icon's own size: a player's
+    -- idea): off at first, saying what it does, quietly experimental.
+    Equal(table.concat({ tostring(panel.ownIcon:GetChecked()), S[panel.iconSize.value].text, tostring(panel.iconSize.usable),
+        tostring(panel.ownIcon.usable), Note(panel.ownIcon), Note(panel.iconSize) }, " | "), "false | 100% | false | true | Gives this"
+        .. " icon a size of its own on Cooldowns, in place of the bar's Icon size. (experimental) | Tick Its own first: until then"
+        .. " it's the bar's Icon size.", "Icon size: off at first, the bar's size, saying what it does")
+    Equal(table.concat(rows, ", "), "Look page, Friz Quadrata, Arial Narrow, Morpheus, Skurri, Game font, Barlow Semi Condensed,"
+        .. " Saira Semi Condensed, Fira Sans Condensed", "the Look page's font first, then every font")
+
+    -- A font of its own: Moonfire's icon and the preview at once, Wrath's as it was.
+    panel.font.buttons[7]:Click()
+    Equal(ns.Style:LookKey(ns.SpellLook("Moonfire")) .. " " .. Font(cd.icons[1].cooldown) .. " " .. Font(cd.icons[2].cooldown) .. " "
+        .. Font(preview.cooldown) .. " " .. panel.font.selected .. " " .. S[panel.font.label].text .. " " .. S[panel.defaults].alpha,
+        "barlow/ FECMFontbarlow18 FECMFont18 FECMFontbarlow18 barlow Barlow Semi Condensed 1",
+        "Barlow for Moonfire: its icon and the preview at once, Wrath's as it was, Defaults usable")
+    -- Its own size: ticked, the Look page's to start; then bigger.
+    panel.own:Click()
+    local ticked = ns.Style:LookKey(ns.SpellLook("Moonfire")) .. " " .. tostring(panel.size.usable) .. " " .. Font(cd.icons[1].cooldown)
+    panel.size:Choose(150)
+    Equal(ticked .. " | " .. ns.Style:LookKey(ns.SpellLook("Moonfire")) .. " " .. Font(cd.icons[1].cooldown) .. " " .. Font(preview.cooldown)
+        .. " " .. S[panel.size.value].text .. " | " .. Note(panel.size), "barlow/100 true FECMFontbarlow18 | barlow/150 FECMFontbarlow27"
+        .. " FECMFontbarlow27 150% | How big this spell's countdown is: 100% is about half the icon. In the middle it still moves clear of a"
+        .. " keybind. (experimental)", "its own size: the Look page's to start, then 150% on its icon and the preview")
+    Check(panel, "Cooldowns, Barlow at 150%")
+    Equal(ns.DebugReport():match("Own countdowns: [^\n]*"), "Own countdowns: Moonfire (barlow, 150%)", "/ccm debug lists it")
+    -- Unticked: the Look page's size again, its font kept.
+    panel.own:Click()
+    Equal(ns.Style:LookKey(ns.SpellLook("Moonfire")) .. " " .. Font(cd.icons[1].cooldown) .. " " .. tostring(panel.size.usable) .. " "
+        .. S[panel.size.value].text, "barlow/ FECMFontbarlow18 false 100%", "unticked: the Look page's size again, the slider greyed")
+    -- Ticked again with another Size in Icon details: it starts at that one.
+    ns.Set("countdownSize", 80)
+    w:Refresh()
+    panel.own:Click()
+    local again = ns.Style:LookKey(ns.SpellLook("Moonfire")) .. " " .. S[panel.size.value].text
+    ns.Set("countdownSize", 100)
+    w:Refresh()
+    Equal(again, "barlow/80 80%", "ticked again: it starts at Icon details' Size, 80% there")
+    panel.size:Choose(120)
+
+    -- Kept by entry in the profile, over a reload.
+    local kept = ForeverEnhancedCooldownManagerDB
+    w:Hide()
+    ns = Start(kept)
+    B = ns.Bars
+    cd = B:Get("cd")
+    Equal(Font(cd.icons[1].cooldown) .. " " .. Font(cd.icons[2].cooldown), "FECMFontbarlow22 FECMFont18",
+        "kept over a reload: Moonfire's icon made in Barlow at 120%")
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    w:Select("cd")
+    bp = w.pages.bar
+    bp.icons[1]:Click()
+    panel, preview = w.spellPanel, w.spellPanel.preview
+    Equal(panel.font.selected .. " " .. tostring(panel.own:GetChecked()) .. " " .. S[panel.size.value].text, "barlow true 120%",
+        "opened again: as kept")
+    -- Defaults: its look back to the Look page's, none kept.
+    panel.defaults:Click()
+    Equal(Font(cd.icons[1].cooldown) .. " " .. panel.font.selected .. " " .. tostring(panel.own:GetChecked()) .. " " .. S[panel.defaults].alpha
+        .. " " .. tostring(ns.ProfileLists().spellLook), "FECMFont18 look false 0.45 nil", "Defaults: back to the Look page's, none kept")
+
+    -- On the Debuffs page: Glow when missing and Count ticks, as on its row.
+    w:Select("debuff")
+    Equal(tostring(S[panel].shown), "false", "another page: the panel goes")
+    bp.icons[1]:Click()
+    local function RowOf(name)
+        for _, row in ipairs(bp.rows) do
+            if row:IsVisible() and row.spell == name then return row end
+        end
+    end
+    Equal(table.concat({ S[panel.title].text, S[panel.quiet].text, tostring(panel.glow:IsVisible()), tostring(panel.glow.usable),
+        tostring(panel.only:IsVisible()), tostring(panel.ticks:IsVisible()), tostring(panel.ticks.usable) }, " ") .. " | " .. Note(panel.glow)
+        .. " | " .. Note(panel.ticks) .. " | " .. S[panel.note].text, "MOONFIRE on Debuffs true false false true true | Tick Show missing debuffs"
+        .. " greyed first: the glow shows on a missing debuff's greyed spot. | Counts its ticks on its icon, every 3 seconds for Moonfire,"
+        .. " starting again when you reapply it. | On every bar it's on, and on Blizzard's icon for it while the look is on the Cooldown"
+        .. " Manager. The Buffs and Debuffs bars change once you're out of combat.",
+        "its own ticks as on its row: Glow when missing greyed until missing debuffs show greyed, Count ticks with its pace")
+    Check(panel, "Debuffs, two ticks")
+    panel.ticks:Click()
+    Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. tostring(panel.ticks:GetChecked()) .. " " .. tostring(RowOf("Moonfire").ticks:GetChecked()),
+        "true true true", "Count ticks from the panel: on the bar, and on its row in the list")
+    RowOf("Moonfire").ticks:Click()
+    Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. tostring(panel.ticks:GetChecked()), "false false",
+        "and from its row: the panel follows")
+    -- Warn at (a player's idea: Siphon Life with 3 seconds left): Off, then
+    -- each time, in a row under the size; each says what it does, the times
+    -- quietly experimental. Packed, only the numbers; with missing debuffs
+    -- greyed, the edge too.
+    local warnLabels = {}
+    for i, button in ipairs(panel.warn.buttons) do warnLabels[i] = S[button.label].text end
+    Equal(table.concat(warnLabels, " ") .. " | " .. tostring(panel.warn:IsVisible()) .. " " .. tostring(panel.warn.selected) .. " "
+        .. S[panel.warnLabel].text .. " " .. tostring(S[panel.warn].alpha) .. " | " .. Note(panel.warn.buttons[1]) .. " | "
+        .. Note(panel.warn.buttons[2]), "Off 3s 5s 10s 30s 1m 5m 10m | true 0 Warn at 1 | No warning: its countdown stays as it is. | Its"
+        .. " countdown turns red with 3 seconds left. Tick Show missing debuffs greyed for a red edge round its icon too. (experimental)",
+        "Warn at: Off picked, eight choices, each saying what it does; packed: the numbers only, and how to get the edge")
+    panel.warn.buttons[2]:Click()
+    Equal(tostring(B:WarnAt("debuff", "Moonfire")) .. " " .. tostring(panel.warn.selected) .. " " .. tostring(S[panel].shown),
+        "3 3 true", "3s: kept for Moonfire on the Debuffs bar, picked, the panel still open")
+    B:SetOption("debuff", "showMissing", true)
+    w:Refresh()
+    Equal(Note(panel.warn.buttons[7]), "Its countdown turns red with 5 minutes left, with a red edge round its icon. (experimental)",
+        "with missing debuffs greyed: the edge too (no glow on the Debuffs bar)")
+    Check(panel, "Debuffs, Warn at")
+    Equal(ns.DebugReport():match("Warn at: [^|]*"), "Warn at: debuff: Moonfire 3s ", "/ccm debug lists it")
+    panel.warn.buttons[1]:Click()
+    B:SetOption("debuff", "showMissing", false)
+    Equal(tostring(B:WarnAt("debuff", "Moonfire")) .. " " .. tostring(panel.warn.selected) .. " " .. tostring(ns.ProfileLists().warnAt),
+        "nil 0 nil", "Off: none kept")
+    -- With a spell held, a click drops it on the bar, as before: no panel.
+    panel.done:Click()
+    local GetCursor = _G.GetCursorInfo
+    _G.GetCursorInfo = function() return "spell", nil, nil, 5176 end
+    bp.icons[1]:Click()
+    local dropped = tostring(w.refused and w.refused.held) .. " " .. tostring(w.refused and w.refused.text)
+    _G.GetCursorInfo = GetCursor
+    Equal(dropped .. " " .. tostring(S[panel].shown), "spell:5176 " .. tostring(select(2, B:CanAdd("debuff", "5176"))) .. " false",
+        "a spell held: dropped on the bar as before (turned away or not, as on the tray), no panel")
+
+    -- On the Buffs page: Only when missing too, then Glow when missing with it.
+    w:Select("buff")
+    bp.icons[1]:Click()
+    local only = tostring(panel.only:IsVisible()) .. " " .. tostring(panel.glow.usable) .. " " .. tostring(panel.ticks:IsVisible())
+    panel.only:Click()
+    panel.glow:Click()
+    Equal(only .. " | " .. tostring(B:OnlyWhenMissing("buff", "Thorns")) .. " " .. tostring(B:GlowsMissing("buff", "Thorns")) .. " "
+        .. tostring(panel.glow.usable) .. " | " .. S[panel.note].text:match("The Buffs.*$"), "true false false | true true true | The Buffs and Debuffs bars"
+        .. " change once you're out of combat.", "Thorns: Only when missing, then Glow when missing, usable once it's ticked")
+    Check(panel, "Buffs, two ticks")
+    -- Warn at greyed for a buff shown only while it's missing: no icon while it's up.
+    Equal(tostring(S[panel.warn].alpha) .. " " .. tostring(Last(panel.warn.buttons[2], "SetEnabled")) .. " | " .. Note(panel.warn.buttons[2]),
+        "0.35 false | Not for a buff shown Only when missing: it has no icon while it's on you, so nothing to warn on.",
+        "Only when missing: Warn at greyed, and says why")
+    panel.only:Click()
+    B:SetOption("buff", "showMissing", true)
+    w:Refresh()
+    Equal(tostring(S[panel.warn].alpha) .. " | " .. Note(panel.warn.buttons[8]), "1 | Its countdown turns red with 10 minutes left, with"
+        .. " a red edge round its icon. Out of combat its icon glows too. (experimental)", "unticked, with missing buffs greyed: the"
+        .. " edge, and out of combat a glow (your own buffs)")
+    B:SetOption("buff", "showMissing", false)
+    panel.only:Click()
+    -- Taken off its bar from the tray: the panel goes with it.
+    bp.icons[1].remove:Click()
+    Equal(tostring(B:HasAura("buff", "Thorns")) .. " " .. tostring(S[panel].shown), "false false", "its entry taken off: the panel goes")
+    -- The window closing, and opened again, put it away.
+    bp.icons[1]:Click()
+    local said = {}
+    w:Select("debuff")
+    bp.icons[1]:Click()
+    said[1] = tostring(S[panel].shown)
+    w:Hide()
+    said[2] = tostring(S[panel].shown)
+    ns.ShowWindow()
+    w:Select("debuff")
+    bp.icons[1]:Click()
+    ns.ShowWindow()
+    said[3] = tostring(S[panel].shown)
+    Equal(table.concat(said, " "), "true false false", "the window closing or opened again: the panel goes")
+    Equal(table.concat(found, " | "), "", "in every state: every piece inside the panel and none on another, under the title bar, clear of the footer")
+    Equal(#printed, 0, "no errors from a spell's own panel")
 end)()
 
 -- Block and Colour fade on the Look page -------------------------------------------------------------
@@ -2958,6 +3369,168 @@ end)()
     ns = Start(kept)
     Equal(ns.Get("barStyle") .. " " .. tostring(ns.Get("colourFade")), "glass false", "odd values saved: back to Glass and flat")
     Equal(#printed, 0, "no errors from Block and Colour fade")
+end)()
+
+-- Ticked only on a bar page's spell list -----------------------------------------------------------
+-- A player's idea: a tick listing only the spells on this page's bar, so
+-- their own ticks are quick to reach. Off by default, quietly experimental;
+-- after Show items and Show all ranks on the Cooldowns and Utility pages,
+-- beside the search on Buffs and Debuffs (which have neither), clear of
+-- them all. Other spells from a search don't show (none is on the bar); a
+-- bar with nothing says so.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire", "Wrath" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w, B = FECMFrame, ns.Bars
+    w:Select("cd")
+    local bp = w.pages.bar
+    local tick = bp.ticked
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local function Listed()
+        local names = {}
+        for _, row in ipairs(bp.rows) do
+            if row:IsVisible() then names[#names + 1] = row.spell or row.other or ("[" .. tostring(S[row.header].text) .. "]") end
+        end
+        return table.concat(names, ", ")
+    end
+    local everything = Listed()
+    local p = S[tick].points[1]
+    Equal(tostring(tick:IsVisible()) .. " " .. tostring(tick:GetChecked()) .. " " .. S[tick.text].text .. " " .. tostring(p[2] == bp.showRanks)
+        .. " " .. p[1] .. " " .. p[3] .. " " .. p[4] .. " | " .. Note(tick) .. " | " .. Fit.Problems(bp),
+        "true false Ticked only true LEFT RIGHT 14 | Lists only the spells on this bar, with their own ticks. (experimental) | ",
+        "off by default, after Show all ranks, saying what it does, quietly experimental; the page's pieces all clear")
+    tick:Click()
+    Equal(tostring(ns.Get("listTicked")) .. " " .. tostring(tick:GetChecked()) .. " | " .. Listed(), "true true | [BALANCE], Moonfire, Wrath",
+        "ticked: only Moonfire and Wrath, the spells on Cooldowns, under their heading")
+    -- A search keeps to them, with no Other spells.
+    bp.search:SetText("wra")
+    S[bp.search].scripts.OnTextChanged(bp.search)
+    Equal(Listed(), "Wrath", "a search: only the ticked ones that match, no Other spells")
+    bp.search:SetText("")
+    S[bp.search].scripts.OnTextChanged(bp.search)
+    -- Beside the search on the Debuffs page; with nothing on the bar, it says so.
+    w:Select("debuff")
+    p = S[tick].points[1]
+    Equal(tostring(tick:IsVisible()) .. " " .. tostring(p[2] == bp.search) .. " " .. Listed() .. " | " .. Fit.Problems(bp),
+        "true true [NOTHING ON THIS BAR YET] | ", "on the Debuffs page: beside the search, and a bar with nothing says so")
+    B:SetAura("debuff", "Moonfire", true)
+    w:Refresh()
+    Equal(Listed(), "[BALANCE], Moonfire", "a debuff on the bar: just it")
+    w:Select("buff")
+    Equal(Fit.Problems(bp), "", "the Buffs page: all clear")
+    -- Unticked: everything again.
+    w:Select("cd")
+    tick:Click()
+    Equal(tostring(ns.Get("listTicked")) .. " " .. tostring(Listed() == everything), "false true", "unticked: every spell again")
+    B:SetAura("debuff", "Moonfire", false)
+    Equal(#printed, 0, "no errors from Ticked only")
+end)()
+
+-- Moving a bar by numbers on the Layout page -------------------------------------------------------
+-- A player's idea: while your bars are unlocked, in place of the box's drag
+-- hint, the bar picked (the one last dragged, or click for the next), its
+-- place as x and y from the middle of your screen to type in, and an arrow
+-- each way moving it a pixel (ten with Shift). Your own bars only, out of a
+-- fight; a bar moved this way leaves its layout, as a dragged one does.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire", "Wrath" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w, B, L = FECMFrame, ns.Bars, ns.Layout
+    w:Select("layout")
+    local page = w.pages.layout
+    local move = page.move
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local function Where() return ("%g %g"):format(B:BarPlace(B.moving)) end
+    local function Boxes() return tostring(S[move.x].text) .. " " .. tostring(S[move.y].text) end
+    Equal(tostring(move:IsVisible()) .. " " .. tostring(page.dragHint:IsVisible()), "false true", "locked: the drag hint, no numbers")
+    page.cards[1]:Click()
+    B:SetUnlocked(true)
+    w:Refresh()
+    local start = { B:BarPlace("cd") }
+    Equal(tostring(move:IsVisible()) .. " " .. tostring(page.dragHint:IsVisible()) .. " " .. tostring(L:Active()) .. " "
+        .. S[move.which.label].text .. " " .. tostring(Boxes() == math.floor(start[1] + .5) .. " " .. math.floor(start[2] + .5))
+        .. " | " .. Fit.Problems(page), "true false true Cooldowns true | ",
+        "unlocked: the numbers in the drag hint's place, for Cooldowns, where it is in its layout; every piece clear")
+    Equal(Note(move.which) .. " | " .. Note(move.x) .. " | " .. Note(move.arrows[1]), "The bar the numbers and arrows move: the one you"
+        .. " last dragged. Click for the next. (experimental) | How far the bar is right of the middle of your screen, in pixels (left of"
+        .. " it is minus). Type a number, then Enter. | Moves the bar 1 pixel left, or 10 with Shift held. Out of combat only.",
+        "each says what it does, quietly experimental")
+    -- A pixel right: out of its layout, as a drag would.
+    move.arrows[2]:Click()
+    local x, y = B:BarPlace("cd")
+    Equal(Num(x - math.floor(start[1] + .5)) .. " " .. Num(y - math.floor(start[2] + .5)) .. " " .. tostring(L:Active()) .. " "
+        .. tostring(L.moved) .. " " .. Boxes(), "1.00 0.00 false true " .. math.floor(x) .. " " .. math.floor(y),
+        "a pixel right, to whole pixels: the bar leaves its layout, and the boxes follow")
+    -- Ten up with Shift.
+    _G.IsShiftKeyDown = function() return true end
+    move.arrows[3]:Click()
+    _G.IsShiftKeyDown = nil
+    local _, up = B:BarPlace("cd")
+    Equal(Num(up - y), "10.00", "Shift: ten up")
+    -- Typed in: x, then Enter.
+    move.x:SetText("250")
+    S[move.x].scripts.OnEnterPressed(move.x)
+    x = B:BarPlace("cd")
+    Equal(Num(x) .. " " .. Boxes(), "250.00 250 " .. math.floor(up + .5), "250 typed for x: there, y as it was")
+    move.y:SetText("lots")
+    S[move.y].scripts.OnEnterPressed(move.y)
+    Equal(S[w.note].text .. " " .. Where(), "Type a number of pixels, like 120 or -40. 250 " .. ("%g"):format(up),
+        "not a number: it says so, nothing moves")
+    -- Kept on the screen: all of the bar, whichever point it's held by, so
+    -- its numbers say where it really is (the game keeps it on screen).
+    S[UIParent].width, S[UIParent].height = 1600, 900
+    local cd = B:Get("cd")
+    local function Edges()
+        local px, py = B:BarPlace("cd")
+        local point, width, height = cd.data.point, cd:GetWidth(), cd:GetHeight()
+        local cx = px - (point:find("LEFT") and -width / 2 or point:find("RIGHT") and width / 2 or 0)
+        local cy = py - (point:find("TOP") and height / 2 or point:find("BOTTOM") and -height / 2 or 0)
+        return ("%s %.0f %.0f %.0f %.0f"):format(point, cx - width / 2, cx + width / 2, cy - height / 2, cy + height / 2)
+    end
+    local function Type(input, value)
+        input:SetText(value)
+        S[input].scripts.OnEnterPressed(input)
+    end
+    local function Sides(edges, a, b) local t = { edges:match("^(%S+) (%S+) (%S+) (%S+) (%S+)$") } return t[1] .. " " .. t[a] .. " " .. t[b] end
+    local sized = tostring(cd:GetWidth() > 0 and cd:GetHeight() > 0)
+    Type(move.y, "-2000")
+    Type(move.x, "-5000")
+    local low = Sides(Edges(), 2, 4)
+    Type(move.y, "2000")
+    Type(move.x, "5000")
+    local high = Sides(Edges(), 3, 5)
+    -- Held by a corner now (growing left: its bottom right, as it wraps up).
+    B:SetOption("cd", "grow", "left")
+    Type(move.x, "-5000")
+    Type(move.y, "-2000")
+    local corner = Sides(Edges(), 2, 4)
+    B:SetOption("cd", "grow", "centre")
+    Equal(sized .. " | " .. low .. " | " .. high .. " | " .. corner, "true | BOTTOM -800 -450 | BOTTOM 800 450 | BOTTOMRIGHT -800 -450",
+        "far off the screen: all of the bar kept on it, its edge on the screen's, held by an edge's middle or by a corner")
+    S[UIParent].width, S[UIParent].height = nil, nil
+    -- The next bar.
+    move.which:Click()
+    Equal(B.moving .. " " .. S[move.which.label].text, "util Utility", "click: the next bar")
+    -- In a fight: nothing moves, and it says why.
+    local before = Where()
+    lockdown = true
+    move.arrows[1]:Click()
+    lockdown = false
+    Equal(S[w.note].text .. " " .. tostring(Where() == before), "Finish combat first, then move your bars. true", "in a fight: nothing moves")
+    -- A bar dragged on screen is the one the numbers move.
+    local buff = B:Get("buff")
+    S[buff.mover].scripts.OnDragStart(buff.mover)
+    S[buff.mover].scripts.OnDragStop(buff.mover)
+    Equal(B.moving .. " " .. S[move.which.label].text, "buff Buffs", "a bar dragged: the numbers follow it")
+    -- Locked again: the drag hint back.
+    B:SetUnlocked(false)
+    w:Refresh()
+    Equal(tostring(move:IsVisible()) .. " " .. tostring(page.dragHint:IsVisible()), "false true", "locked again: the drag hint back")
+    Equal(#printed, 0, "no errors from moving bars by numbers")
 end)()
 
 Equal(#printed, 0, "no errors")

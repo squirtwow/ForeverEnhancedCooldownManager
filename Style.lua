@@ -47,11 +47,17 @@ end
 -- has them. Friz Quadrata is the /ccm window's too. Game font is the one the
 -- rest of the game is in, for its language: Friz Quadrata in English, a
 -- Chinese, Korean or Cyrillic one where the others can't write the names.
+-- Then the three free fonts shipped with the addon (Media\Fonts, each with
+-- its licence beside it); should the game not find one, Face below writes
+-- in Friz Quadrata instead.
 S.FONTS = {
     friz = "Fonts\\FRIZQT__.TTF",
     arial = "Fonts\\ARIALN.TTF",
     morpheus = "Fonts\\MORPHEUS.ttf",
     skurri = "Fonts\\skurri.ttf",
+    barlow = ns.MEDIA .. "Fonts\\BarlowSemiCondensed-SemiBold.ttf",
+    saira = ns.MEDIA .. "Fonts\\SairaSemiCondensed-SemiBold.ttf",
+    fira = ns.MEDIA .. "Fonts\\FiraSansCondensed-SemiBold.ttf",
 }
 local FONT = S.FONTS.friz
 S.FONTS.game = type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT ~= "" and STANDARD_TEXT_FONT or FONT
@@ -157,27 +163,27 @@ function S:SampleFont(key)
 end
 
 -- Countdown numbers about half the icon's height, times the size picked in
--- Icon details; stacks and counts smaller.
-function S:CountdownSize(iconSize)
-    local size, percent = math.max(11, iconSize * .5), ns.Get("countdownSize")
+-- Icon details (or percent: a spell's own size, settings per spell); stacks
+-- and counts smaller.
+function S:CountdownSize(iconSize, percent)
+    local size = math.max(11, iconSize * .5)
+    percent = percent or ns.Get("countdownSize")
     if percent ~= 100 then size = size * percent / 100 end
     return math.floor(size + .5)
 end
 
--- The countdown's font: the shared one for its size while the numbers are
--- white, as they always were; in another colour (Icon details), that
--- size's own font in that colour.
-function S:Countdown(iconSize)
-    local size, key = self:CountdownSize(iconSize), ns.ColourKey("countdownColour")
-    if key == "white" then return self:Font(size) end
-    size = math.max(8, size)
-    local name = "FECMCountdown" .. size
-    local font = numbers[size]
+-- A countdown font in a colour of its own, made once for its size (and
+-- face, for a spell's own font: settings per spell) and shared. file: the
+-- face, nil to follow the Look page's.
+local spellNumbers = {} -- in a spell's own font: by name
+
+local function Coloured(store, slot, name, file, size, key)
+    local font = store[slot]
     if not font then
         font = CreateFont(name)
-        Face(font, self:FontFile(), size, Outline(size))
+        Face(font, file or S:FontFile(), size, Outline(size))
         font:SetShadowOffset(0, 0)
-        numbers[size] = font
+        store[slot] = font
     end
     if font.colourKey ~= key then
         font.colourKey = key
@@ -185,6 +191,32 @@ function S:Countdown(iconSize)
         font:SetTextColor(colour[1], colour[2], colour[3])
     end
     return name
+end
+
+-- The countdown's font: the shared one for its size while the numbers are
+-- white, as they always were; in another colour (Icon details), that
+-- size's own font in that colour. look: a spell's own font and size
+-- (settings per spell, ns.SpellLook), each in place of the Look page's, or
+-- nil, which is exactly as before.
+function S:Countdown(iconSize, look)
+    local size, key = self:CountdownSize(iconSize, look and look.size), ns.ColourKey("countdownColour")
+    local own = look and S.FONTS[look.font] and look.font or nil
+    if own then
+        if key == "white" then return self:FontIn(own, size) end
+        size = math.max(8, size)
+        local name = "FECMCountdown" .. own .. size
+        return Coloured(spellNumbers, name, name, S.FONTS[own], size, key)
+    end
+    if key == "white" then return self:Font(size) end
+    size = math.max(8, size)
+    -- (Kept by size, so a new Look page font reaches them: S:ApplyFont.)
+    return Coloured(numbers, size, "FECMCountdown" .. size, nil, size, key)
+end
+
+-- A look's fields as one word, to tell whether an icon's changed.
+function S:LookKey(look)
+    if not look then return "" end
+    return tostring(look.font or "") .. "/" .. tostring(look.size or "")
 end
 
 function S:Count(iconSize)
@@ -563,7 +595,8 @@ function S:KeyText(parent)
     return text -- no height: a FontString shorter than its font draws nothing
 end
 
--- Places and sizes it as chosen; returns the countdown's lift (0 with keybinds off).
+-- Places and sizes it as chosen; returns the countdown's lift (0 with keybinds off), which
+-- S:KeyRoom only gives an icon that shows a key.
 function S:KeyLook(text, region, art, countdown)
     local position = ns.Get("keybindPosition")
     local size, lift = self:KeyFit(art, countdown, position, ns.Get("keybindSize"))
@@ -593,7 +626,8 @@ function S:CountUp(keyed)
 end
 
 -- Room for the key: the count goes top-right while the icon's key shows along the bottom (keyed),
--- bottom-right otherwise, as on an icon with no key; the countdown's numbers move by lift.
+-- bottom-right otherwise, as on an icon with no key; the countdown's numbers move by lift, only
+-- on an icon that shows a key (keyed): one with none keeps them in its middle.
 -- box/inset: where the count sits; around: what the numbers sit on (S:NumbersAt).
 function S:KeyRoom(count, box, inset, numbers, around, lift, keyed)
     if count and box then
@@ -604,7 +638,7 @@ function S:KeyRoom(count, box, inset, numbers, around, lift, keyed)
             count:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -inset, inset)
         end
     end
-    if numbers and around then self:NumbersAt(numbers, around, lift) end
+    if numbers and around then self:NumbersAt(numbers, around, keyed == true and lift or 0) end
 end
 
 -- Icon details ---------------------------------------------------------------------
@@ -645,10 +679,206 @@ function S:SwipeChanged()
         or ns.Get("swipeEdge") == true
 end
 
+-- Timer text (a player's idea): the countdown's numbers as the game writes
+-- them (2:52), or in whole minutes rounded up and then seconds under a
+-- minute (3m, 2m, 1m, then 59s). Only through the cooldown's own setters: a
+-- formatter of the game's, made once, and the game's switch from 1:31 to a
+-- count of minutes moved down to a minute. At the default nothing is set on
+-- any cooldown; one changed and set back gets the game's own again (no
+-- formatter, and the switch where the game keeps it, read once off a
+-- cooldown of the addon's own made for that, never off Blizzard's).
+local MINUTE = 60
+local formatter -- minutes then seconds; false once the game can't make it
+local gameSwitch -- the game's own switch; false once it can't be read
+local timed = setmetatable({}, { __mode = "k" }) -- cooldowns showing minutes then seconds
+
+local function Formatter()
+    if formatter ~= nil then return formatter or nil end
+    formatter = false
+    local util, enum = C_StringUtil, Enum
+    if type(util) ~= "table" or type(util.CreateSecondsFormatter) ~= "function" or type(enum) ~= "table"
+        or not (enum.SecondsFormatterAbbreviation and enum.SecondsFormatterInterval and enum.SecondsFormatterRounding) then
+        return nil
+    end
+    -- The rest are finishing touches: one the game turns down leaves the others.
+    local function Try(made, method, value)
+        local done, err = pcall(function() made[method](made, value) end)
+        if not done and not S.timerError then S.timerError = method .. ": " .. tostring(err) end
+    end
+    local ok, made = pcall(function()
+        local made = util.CreateSecondsFormatter()
+        made:SetDefaultAbbreviation(enum.SecondsFormatterAbbreviation.OneLetter) -- 3 m, 59 s
+        if enum.SecondsFormatterIntervalWhitespace then -- 3m, 59s (a few languages keep the space)
+            Try(made, "SetStripIntervalWhitespace", enum.SecondsFormatterIntervalWhitespace.Strip)
+        end
+        made:SetDesiredUnitCount(1) -- 3m, not 2m 52s
+        Try(made, "SetMinInterval", enum.SecondsFormatterInterval.Seconds)
+        Try(made, "SetRounding", enum.SecondsFormatterRounding.RoundUp) -- as the game counts: 0.4 left reads 1s
+        Try(made, "SetCanRoundUpLastUnit", true) -- 2:52 reads 3m until 2:00 reads 2m
+        Try(made, "SetCanRoundUpIntervals", true) -- 59.6 seconds reads 1m, not 60s
+        return made
+    end)
+    if ok and made then formatter = made end
+    if not ok then S.timerError = tostring(made) end
+    return formatter or nil
+end
+
+local function GameSwitch()
+    if gameSwitch ~= nil then return gameSwitch or nil end
+    gameSwitch = false
+    local made, probe = pcall(CreateFrame, "Cooldown")
+    if not (made and probe) then return nil end
+    probe:SetSize(1, 1)
+    probe:Hide()
+    if type(probe.GetCountdownAbbrevThreshold) ~= "function" then return nil end
+    local ok, value = pcall(probe.GetCountdownAbbrevThreshold, probe)
+    if ok and not (issecretvalue and issecretvalue(value)) and type(value) == "number" then gameSwitch = value end
+    return gameSwitch or nil
+end
+
+-- For /ccm debug: how Timer text went, once it has been picked.
+function S:TimerReport()
+    if formatter == nil and gameSwitch == nil then return "" end
+    return (" (formatter %s, game's switch %s%s)"):format(formatter and "made" or formatter == false and "none" or "not made",
+        tostring(gameSwitch), S.timerError and ("; " .. S.timerError) or "")
+end
+
+-- Warn at N seconds left (a player's idea: Siphon Life with 3 seconds left;
+-- Buffs.lua F:Warns): an aura icon's countdown turns red from N seconds
+-- left. Its time is secret in a fight, so the game picks the colour: a
+-- number rule of the game's set as the cooldown's formatter, out of combat,
+-- that writes each stretch of time as the Timer text picked does (the
+-- game's 2:52 or 3m, 2m, 1m, then 59s), in red under N. One rule set is
+-- made for each format and number of seconds, and shared.
+local warned = setmetatable({}, { __mode = "k" }) -- warned cooldowns: their seconds
+local warnFormatters = {} -- by format and seconds; false where the game can't make it
+local RED = "|cffff4040"
+
+-- Each stretch of time and how it's written, from its first second (from).
+-- noClock: the game's 2:52 left out, written in minutes (if the game turns
+-- down a rule with two numbers).
+local function Segments(minutes, switch, noClock)
+    local rounding = Enum.NumericRuleFormatRounding
+    local up, down = rounding.Up, rounding.Down
+    local function In(div) return { { div = div, step = 1, rounding = up } } end
+    if minutes then
+        -- From 59 seconds, as Timer text's own: 59.6 seconds reads 1m, not 60s.
+        return { { from = 0, format = "%ds", step = 1, rounding = up }, { from = 59, format = "%dm", components = In(60) },
+            { from = 59 * 60, format = "%dh", components = In(3600) } }
+    end
+    local segments = { { from = 0, format = "%d", step = 1, rounding = up } }
+    local clock = not noClock and type(switch) == "number" and switch > MINUTE and math.min(switch, 3600) or MINUTE
+    if clock > MINUTE then
+        segments[#segments + 1] = { from = MINUTE, format = "%d:%02d", step = 1, rounding = up,
+            components = { { div = 60, step = 1, rounding = down }, { mod = 60, step = 1, rounding = down } } }
+    end
+    if clock < 3600 then segments[#segments + 1] = { from = clock, format = "%dm", components = In(60) } end
+    segments[#segments + 1] = { from = 3600, format = "%dh", components = In(3600) }
+    return segments
+end
+
+-- The rules for the game: each stretch as it's written, red below seconds
+-- (a stretch reaching past it goes on from there as before).
+local function WarnRules(segments, seconds)
+    local rules = {}
+    local function Add(segment, threshold, red)
+        rules[#rules + 1] = { threshold = threshold, format = red and (RED .. segment.format .. "|r") or segment.format,
+            step = segment.step, rounding = segment.rounding, components = segment.components }
+    end
+    for i, segment in ipairs(segments) do
+        local after = segments[i + 1] and segments[i + 1].from or math.huge
+        if segment.from < seconds then
+            Add(segment, segment.from, true)
+            if seconds < after then Add(segment, seconds, false) end
+        else
+            Add(segment, segment.from, false)
+        end
+    end
+    return rules
+end
+
+local function WarnFormatter(minutes, seconds)
+    local switch = not minutes and GameSwitch() or nil
+    local key = (minutes and "minutes" or "game") .. "/" .. seconds .. "/" .. tostring(switch)
+    local made = warnFormatters[key]
+    if made ~= nil then return made or nil end
+    warnFormatters[key] = false
+    local util, enum = C_StringUtil, Enum
+    if type(util) ~= "table" or type(util.CreateNumericRuleFormatter) ~= "function" or type(enum) ~= "table"
+        or type(enum.NumericRuleFormatRounding) ~= "table" then return nil end
+    local function Make(noClock)
+        return pcall(function()
+            local formatter = util.CreateNumericRuleFormatter()
+            for _, rule in ipairs(WarnRules(Segments(minutes, switch, noClock), seconds)) do formatter:AddBreakpoint(rule) end
+            return formatter
+        end)
+    end
+    local ok, result = Make(false)
+    if not ok and not minutes then
+        if not S.warnError then S.warnError = tostring(result) end
+        ok, result = Make(true)
+    end
+    if ok and result then
+        warnFormatters[key] = result
+    elseif not S.warnError then
+        S.warnError = tostring(result)
+    end
+    return warnFormatters[key] or nil
+end
+
+-- Sets (seconds) or clears (nil) an aura icon's warning, then its numbers
+-- in the Timer text picked. Only changes are sent. Out of combat only, as
+-- the aura containers' icons change (Buffs.lua F:Warns).
+function S:WarnText(cooldown, seconds)
+    if not cooldown or warned[cooldown] == seconds then return end
+    warned[cooldown] = seconds
+    self:TimerText(cooldown)
+end
+
+-- A cooldown's warning (seconds), or nil.
+function S:Warned(cooldown)
+    return cooldown and warned[cooldown] or nil
+end
+
+-- For /ccm debug: whether the game made the warnings' rules.
+function S:WarnReport()
+    local made, refused = 0, 0
+    for _, formatter in pairs(warnFormatters) do
+        if formatter then made = made + 1 else refused = refused + 1 end
+    end
+    return ("rules made %d, refused %d%s"):format(made, refused, S.warnError and ("; " .. S.warnError) or "")
+end
+
+-- One cooldown's numbers in the Timer text picked: the addon's own, or
+-- Blizzard's (a cosmetic setter, as its countdown's font is). A warned one
+-- (Warn at) takes its own rules, in that Timer text, red from its seconds.
+function S:TimerText(cooldown)
+    if not cooldown then return end
+    local minutes = ns.Get("countdownFormat") == "minutes"
+    local warn = warned[cooldown]
+    if not minutes and not warn and not timed[cooldown] then return end
+    local made = warn and WarnFormatter(minutes, warn) or nil
+    if not (minutes or made or timed[cooldown]) then return end
+    -- Read before the first change, so it can be put back.
+    local switch = GameSwitch()
+    local useFormatter, useSwitch = type(cooldown.SetCountdownFormatter) == "function",
+        type(cooldown.SetCountdownAbbrevThreshold) == "function"
+    if minutes or made then
+        made = made or Formatter()
+        if made and useFormatter then cooldown:SetCountdownFormatter(made) end
+        if switch and useSwitch then cooldown:SetCountdownAbbrevThreshold(MINUTE) end
+        timed[cooldown] = true
+    else
+        if useFormatter then cooldown:SetCountdownFormatter(nil) end
+        if switch and useSwitch then cooldown:SetCountdownAbbrevThreshold(switch) end
+        timed[cooldown] = nil
+    end
+end
+
 -- One of the addon's own cooldowns (your bars' icons, their buff and debuff
 -- times, the Buffs and Debuffs bars' icons, the panel's preview) in the
--- swipe and edge line picked. At the defaults these are the calls each was
--- always made with: a 70% black swipe and no edge line.
+-- swipe, edge line and Timer text picked. At the defaults these are the
+-- calls each was always made with: a 70% black swipe and no edge line.
 function S:CooldownLook(cooldown)
     local colour, alpha = self:Swipe()
     cooldown:SetSwipeColor(colour[1], colour[2], colour[3], alpha)
@@ -658,6 +888,7 @@ function S:CooldownLook(cooldown)
         local tint = self:EdgeColour(ns.ColourKey("edgeColour"))
         cooldown:SetEdgeColor(tint[1], tint[2], tint[3], 1)
     end
+    self:TimerText(cooldown)
 end
 
 -- The countdown's numbers in the spot picked: in the middle (moved up or
@@ -676,12 +907,13 @@ end
 
 -- An aura icon's countdown (the Buffs and Debuffs bars', and the buff and
 -- debuff times over your cooldown icons: the game's aura containers' own
--- icons) in the spot picked. Left where the game puts it, the middle, until
--- a spot is picked; after that, set again only when the spot changes.
--- parts: the icon's { cooldown }, which keeps the spot set last.
+-- icons) in the spot picked: placed as the icon is made, in the middle of
+-- its art as on your bars' icons (not left wherever the game would put it),
+-- then set again only when the spot changes. parts: the icon's
+-- { cooldown }, which keeps the spot set last.
 function S:AuraNumbers(parts)
     local spot = ns.Get("countdownSpot")
-    if parts.spot == spot or (parts.spot == nil and spot == "CENTER") then return end
+    if parts.spot == spot then return end
     local get = parts.cooldown.GetCountdownFontString
     local found = type(get) == "function" and get(parts.cooldown) or nil
     if not found then return end

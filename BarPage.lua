@@ -54,6 +54,406 @@ local function TickColour(window, parent, state)
     })
 end
 
+-- A ticked aura's own ticks' hovers (Glow when missing, Only when missing,
+-- Count ticks): the same on its row in the spell list and in its panel.
+local function GlowNote(bar, name)
+    local debuff = ns.BAR_KIND[bar] == "debuff" -- (Debuffs 2 too)
+    -- (A buff ticked Only when missing has a spot of its own.)
+    if name and not ns.Bars:MissingSpot(bar, name) then
+        return debuff and "Tick Show missing debuffs greyed first: the glow shows on a missing debuff's greyed spot."
+            or "Tick Show missing buffs greyed or Only when missing first: the glow shows on a missing buff's greyed spot."
+    end
+    if debuff then
+        return "Its icon glows while it's missing from an enemy you target, like a Judgement that fell off."
+    end
+    return "Its icon glows while it's missing, so you see to recast it, like a Seal that fell off."
+end
+
+-- (bar: the Buffs bar whose page or panel it's on: Buffs 2 has its own.)
+local function OnlyNote(bar)
+    if ns.BarData(bar or "buff").onlyMissing then
+        return "Not needed with Only show missing, which already shows every buff only while it's missing."
+    end
+    return "Shows this buff only while it's missing from you, so you see to recast it. The game hides your buffs"
+        .. " from addons in a fight, so changes then show once it ends."
+end
+
+local function TicksNote(bar, name, label)
+    local B = ns.Bars
+    local pace = name and B:TickPace(name) or 0
+    local clash = name and B:TickClash(bar, name)
+    local found = clash and ns.Spells:Find(clash)
+    if clash then
+        return "Can't count while it shares an icon with " .. (found and found.name or clash) .. ": the game can't tell the two apart."
+    end
+    return "Counts its ticks on its icon, every " .. pace .. (pace == 1 and " second" or " seconds")
+        .. " for " .. (label or "it") .. ", starting again when you reapply it."
+end
+
+-- Settings per spell ---------------------------------------------------------------
+-- (A player's idea: a font and size per icon.) Clicking an icon in a bar
+-- page's tray opens its own panel over the window: its icon with a
+-- countdown going round, at the bar's size, then its countdown's own font
+-- and size, each the Look page's until picked (kept by entry in your
+-- profile: Bars.lua B:SetSpellLook), and on the Buffs and Debuffs pages its
+-- own ticks from the spell list, so they're there without scrolling to its
+-- row. Like the Look page's panels its shade leaves the footer clear, so
+-- each control still says what it does there. Made the first time it opens.
+local PANEL = { width = 470, at = 96, row = 26, own = 84, tray = { 42, 64 } }
+local PANEL_TIME = 75 -- the preview's cooldown, round and round: past a minute, then seconds
+local PANEL_NOTE = "On every bar it's on, and on Blizzard's icon for it while the look is on the Cooldown Manager."
+local PANEL_AURAS = " The Buffs and Debuffs bars change once you're out of combat."
+local PANEL_OFF = " Show countdown numbers is off on this bar."
+local UNTESTED = " (experimental)"
+
+-- The preview's icon, in the middle of its tray, its cooldown starting
+-- again as it ends while the panel shows.
+local function PanelIcon(tray)
+    local icon = CreateFrame("Frame", nil, tray)
+    icon:SetSize(36, 36)
+    icon:SetPoint("CENTER")
+    icon.art = icon:CreateTexture(nil, "ARTWORK")
+    icon.art:SetAllPoints()
+    ns.Style:Zoom(icon.art)
+    local cooldown = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
+    cooldown:SetAllPoints(icon.art)
+    cooldown:SetSwipeTexture(ns.Style.FLAT)
+    cooldown:SetDrawBling(false)
+    cooldown:SetHideCountdownNumbers(false)
+    cooldown:SetScript("OnCooldownDone", function(self)
+        if tray:IsVisible() then self:SetCooldown(GetTime(), PANEL_TIME) end
+    end)
+    icon.cooldown = cooldown
+    return icon
+end
+
+-- The preview in the spell's look, at its size on its bar (its own, where
+-- its bar can show one; within the tray), drawn by the calls your bars'
+-- icons use.
+local function PaintPanelIcon(icon, bar, name)
+    local S = ns.Style
+    local shown = ns.IconSize(ns.BarData(bar))
+    if ns.Bars:OwnSizeUsable(bar) then shown = ns.IconSizeFor(bar, name, shown) end
+    local size = math.max(24, math.min(PANEL.tray[2] - 12, shown))
+    icon:SetSize(size, size)
+    icon.art:SetTexture(ns.Spells:Icon(name))
+    icon.art:SetDesaturated(ns.Spells:Find(name) == nil)
+    local cooldown = icon.cooldown
+    S:CooldownLook(cooldown)
+    cooldown:SetCountdownFont(S:Countdown(size, ns.SpellLook(name)))
+    local get = cooldown.GetCountdownFontString
+    local numbers = type(get) == "function" and get(cooldown) or nil
+    if numbers then S:NumbersAt(numbers, cooldown, 0) end
+end
+
+-- The font row: the Look page's first (its name in that font), then each
+-- font in its own face.
+local function PanelFont(window, dialog, shade, Changed)
+    local keys = { "look" }
+    for _, key in ipairs(ns.FONT_KEYS) do keys[#keys + 1] = key end
+    return ns.FontChoice(window, dialog, 260, {
+        keys = keys,
+        name = function(key) return key == "look" and "Look page" or ns.FONT_NAMES[key] end,
+        face = function(key) return ns.Style:SampleFont(key == "look" and ns.Get("font") or key) end,
+        note = function(key)
+            if key == "look" then return "The Look page's font, now " .. ns.FONT_NAMES[ns.Get("font")] .. "." end
+            return (ns.FONT_NOTES and ns.FONT_NOTES[key] or ns.FONT_NAMES[key]) .. ", just for this spell's countdown."
+        end,
+        pick = function(key)
+            ns.Bars:SetSpellLook(shade.name, "font", key ~= "look" and key or nil)
+            Changed()
+        end,
+        about = "This spell's countdown font: the Look page's, or one of its own. Click for the fonts." .. UNTESTED,
+    })
+end
+
+-- The size row: Its own, then how big while it's ticked (a percent, as
+-- Icon details' Size); unticked, the Look page's.
+local function PanelSize(window, dialog, shade, Changed)
+    local own = T:Check(dialog, "Its own", function(self)
+        local value = self:GetChecked() and (shade.size.current or ns.Get("countdownSize")) or nil
+        ns.Bars:SetSpellLook(shade.name, "size", value)
+        Changed()
+    end)
+    window:Hint(own, "Gives this spell's countdown a size of its own, in place of Icon details' Size on the Look page."
+        .. UNTESTED)
+    local size = T:Slider(dialog, "", ns.COUNTDOWN_SIZE, 5, PANEL.width - 16 - PANEL.at - PANEL.own, function(value)
+        if ns.SpellLook(shade.name) and ns.SpellLook(shade.name).size then
+            ns.Bars:SetSpellLook(shade.name, "size", value)
+            Changed()
+        end
+    end, 0)
+    size.value:SetWidth(36)
+    local set = size.Set
+    function size:Set(value)
+        set(self, value)
+        self.value:SetText(value .. "%")
+    end
+    window:Hint(size, function()
+        if not own:GetChecked() then return "Tick Its own first: until then it's Icon details' Size." end
+        return "How big this spell's countdown is: 100% is about half the icon. In the middle it still moves clear of a"
+            .. " keybind." .. UNTESTED
+    end)
+    return own, size
+end
+
+-- The icon's own size on this bar (a player's idea: more control over each
+-- icon's size): Its own, then how big while it's ticked, a percent of the
+-- bar's Icon size; unticked, the bar's. On a packed Buffs or Debuffs bar
+-- both are greyed, saying why: the game draws those icons, all one size.
+local function PackedNote(bar)
+    local word = ns.AURA_BARS[bar] and ns.AURA_BARS[bar].word or "buff"
+    return "This bar is packed: the game lays its icons out at one size. Tick Show missing " .. word
+        .. "s greyed to give each its own spot, then its own size."
+end
+
+local function PanelIconSize(window, dialog, shade, Changed)
+    local B = ns.Bars
+    local own = T:Check(dialog, "Its own", function(self)
+        B:SetOwnSize(shade.bar, shade.name, self:GetChecked() and (shade.iconSize.current or ns.ICON_SIZE[3]) or nil)
+        Changed()
+    end)
+    window:Hint(own, function()
+        if not B:OwnSizeUsable(shade.bar) then return PackedNote(shade.bar) end
+        return "Gives this icon a size of its own on " .. ns.BAR_NAMES[shade.bar] .. ", in place of the bar's Icon size." .. UNTESTED
+    end)
+    local size = T:Slider(dialog, "", ns.ICON_SIZE, 5, PANEL.width - 16 - PANEL.at - PANEL.own, function(value)
+        if ns.OwnSize(shade.bar, shade.name) then
+            B:SetOwnSize(shade.bar, shade.name, value)
+            Changed()
+        end
+    end, 0)
+    size.value:SetWidth(36)
+    local set = size.Set
+    function size:Set(value)
+        set(self, value)
+        self.value:SetText(value .. "%")
+    end
+    window:Hint(size, function()
+        if not B:OwnSizeUsable(shade.bar) then return PackedNote(shade.bar) end
+        if not own:GetChecked() then return "Tick Its own first: until then it's the bar's Icon size." end
+        return "How big this icon is: 100% is the bar's Icon size. The rest of the bar makes room for it." .. UNTESTED
+    end)
+    return own, size
+end
+
+-- Its own ticks from the spell list, each in a row of its own.
+local function PanelTicks(window, dialog, shade, Changed)
+    local B = ns.Bars
+    local glow = T:Check(dialog, "Glow when missing", function(self)
+        B:SetGlowMissing(shade.bar, shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(glow, function() return GlowNote(shade.bar, shade.name) end)
+    local only = T:Check(dialog, "Only when missing", function(self)
+        B:SetOnlyWhenMissing(shade.bar, shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(only, function() return OnlyNote(shade.bar) end)
+    local ticks = T:Check(dialog, "Count ticks", function(self)
+        B:SetCountTicks(shade.bar, shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(ticks, function() return TicksNote(shade.bar, shade.name, shade.label) end)
+    return glow, only, ticks
+end
+
+-- Warn at N seconds left (a player's idea: Siphon Life with 3 seconds left,
+-- Demon Armor with 10 minutes left), on the Buffs and Debuffs pages: Off,
+-- then each time offered, as pills (3s .. 10m).
+local function WarnLength(seconds)
+    if seconds >= 60 then
+        local minutes = math.floor(seconds / 60)
+        return ("%d %s"):format(minutes, minutes == 1 and "minute" or "minutes")
+    end
+    return ("%d %s"):format(seconds, seconds == 1 and "second" or "seconds")
+end
+
+local function WarnNote(bar, name, seconds)
+    local buff = ns.BAR_KIND[bar] == "buff" -- (Buffs 2 too)
+    if not ns.Bars:WarnUsable(bar, name) then
+        if ns.BarData(bar).onlyMissing then
+            return "Not with Only show missing: a buff has no icon while it's on you, so nothing to warn on."
+        end
+        return "Not for a buff shown Only when missing: it has no icon while it's on you, so nothing to warn on."
+    end
+    if seconds == 0 then return "No warning: its countdown stays as it is." end
+    local text = "Its countdown turns red with " .. WarnLength(seconds) .. " left"
+    if ns.BuffBar:Fixed(ns.BarData(bar)) then
+        text = text .. ", with a red edge round its icon" .. (buff and ". Out of combat its icon glows too" or "")
+    else
+        text = text .. ". Tick Show missing " .. (buff and "buffs" or "debuffs") .. " greyed for a red edge round its icon too"
+    end
+    return text .. "." .. UNTESTED
+end
+
+local function PanelWarn(window, dialog, shade)
+    local items = { { key = 0, label = "Off" } }
+    for _, seconds in ipairs(ns.WARN_SECONDS) do
+        items[#items + 1] = { key = seconds, label = seconds >= 60 and ("%dm"):format(math.floor(seconds / 60)) or (seconds .. "s") }
+    end
+    local warn = T:Segmented(dialog, items, PANEL.width - 16 - PANEL.at, function(seconds)
+        ns.Bars:SetWarnAt(shade.bar, shade.name, seconds)
+        window:Refresh()
+    end)
+    for _, button in ipairs(warn.buttons) do
+        window:Hint(button, function() return WarnNote(shade.bar, shade.name, button.key) end)
+    end
+    local label = T:Text(dialog, "GameFontHighlight")
+    label:SetText("Warn at")
+    return label, warn
+end
+
+-- Which of its own ticks the entry has on its bar: Glow when missing on the
+-- Buffs and Debuffs bars, Only when missing on Buffs, Count ticks on Debuffs
+-- for one that ticks. Each shown and set as its row in the list is.
+local function PaintTicks(shade, bar, name)
+    local B = ns.Bars
+    local aura, kind = ns.AURA_BARS[bar] ~= nil, ns.BAR_KIND[bar] -- (an extra bar goes by its kind)
+    shade.glow:SetChecked(B:GlowsMissing(bar, name))
+    shade.glow:SetUsable(B:MissingSpot(bar, name))
+    shade.only:SetChecked(B:OnlyWhenMissing(bar, name))
+    shade.only:SetUsable(not ns.BarData(bar).onlyMissing)
+    shade.ticks:SetChecked(B:CountsTicks(bar, name))
+    shade.ticks:SetUsable(shade.ticks:GetChecked() or not B:TickClash(bar, name))
+    return { aura and shade.glow or nil, kind == "buff" and shade.only or nil,
+        kind == "debuff" and B:TickPace(name) ~= nil and shade.ticks or nil }
+end
+
+local function SpellPanel(window)
+    local B = ns.Bars
+    local shade = CreateFrame("Frame", nil, window)
+    shade:SetPoint("TOPLEFT")
+    shade:SetPoint("BOTTOMRIGHT", 0, ns.WINDOW_FOOTER or 28)
+    -- Over the profile menu (60), under the tour (70) and Are you sure? (80).
+    shade:SetFrameLevel(window:GetFrameLevel() + 64)
+    shade:EnableMouse(true) -- nothing behind it can be clicked meanwhile
+    local dim = shade:CreateTexture(nil, "BACKGROUND")
+    dim:SetAllPoints()
+    dim:SetColorTexture(0, 0, 0, .45)
+    shade:Hide()
+    local dialog = CreateFrame("Frame", nil, shade, "BackdropTemplate")
+    dialog:SetSize(PANEL.width, 300)
+    dialog:SetPoint("CENTER", 0, -(ns.WINDOW_HEADER or 42) / 2)
+    T:Flat(dialog, T.PANEL, T.CONTROL_BORDER)
+    shade.dialog = dialog
+    local title = T:Heading(dialog, "")
+    title:SetPoint("TOPLEFT", 16, -16)
+    local quiet = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
+    quiet:SetPoint("LEFT", title, "RIGHT", 8, 0)
+    shade.title, shade.quiet = title, quiet
+    local tray = CreateFrame("Frame", nil, dialog, "BackdropTemplate")
+    tray:SetPoint("TOPLEFT", 16, -PANEL.tray[1])
+    tray:SetSize(PANEL.width - 32, PANEL.tray[2])
+    T:Flat(tray, T.FIELD, T.BORDER)
+    shade.tray, shade.preview = tray, PanelIcon(tray)
+    local function Changed() window:Refresh() end
+
+    -- The rows, each a label at the left and its choices from PANEL.at.
+    local top = -(PANEL.tray[1] + PANEL.tray[2] + 14)
+    local function At(region, x, row, down)
+        region:ClearAllPoints()
+        region:SetPoint("TOPLEFT", x, top - row * PANEL.row - (down or 0))
+    end
+    local fontLabel = T:Text(dialog, "GameFontHighlight")
+    fontLabel:SetText("Font")
+    At(fontLabel, 16, 0, 4)
+    shade.font = PanelFont(window, dialog, shade, Changed)
+    At(shade.font, PANEL.at, 0)
+    local sizeLabel = T:Text(dialog, "GameFontHighlight")
+    sizeLabel:SetText("Size")
+    At(sizeLabel, 16, 1, 4)
+    shade.own, shade.size = PanelSize(window, dialog, shade, Changed)
+    At(shade.own, PANEL.at, 1, 2)
+    At(shade.size, PANEL.at + PANEL.own, 1)
+    -- The icon's own size on this bar, under its countdown's.
+    local iconLabel = T:Text(dialog, "GameFontHighlight")
+    iconLabel:SetText("Icon size")
+    At(iconLabel, 16, 2, 4)
+    shade.ownIcon, shade.iconSize = PanelIconSize(window, dialog, shade, Changed)
+    At(shade.ownIcon, PANEL.at, 2, 2)
+    At(shade.iconSize, PANEL.at + PANEL.own, 2)
+    shade.glow, shade.only, shade.ticks = PanelTicks(window, dialog, shade, Changed)
+    shade.warnLabel, shade.warn = PanelWarn(window, dialog, shade)
+    local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
+    note:SetWidth(PANEL.width - 32)
+    shade.note = note
+    local done = T:Button(dialog, "Done", 90, 22)
+    done:SetPoint("BOTTOMRIGHT", -16, 14)
+    done:SetScript("OnClick", function() shade:Hide() end)
+    window:Hint(done, "Close this panel. Every choice is kept as you make it.")
+    local defaults = T:Button(dialog, "Defaults", 90, 22)
+    defaults:SetPoint("RIGHT", done, "LEFT", -6, 0)
+    defaults:SetScript("OnClick", function()
+        B:ClearSpellLook(shade.name)
+        B:SetOwnSize(shade.bar, shade.name, nil)
+        Changed()
+    end)
+    window:Hint(defaults, "This spell's countdown back in the Look page's font and size, and its icon at the bar's size."
+        .. " Its ticks stay as they are.")
+    shade.done, shade.defaults = done, defaults
+    window:HookScript("OnHide", function() shade:Hide() end)
+
+    -- The choices as they are now: its own ticks in rows under the size,
+    -- the note under them, and the panel as tall as they need. Gone with
+    -- its entry (taken off the bar).
+    function shade:Refresh()
+        local bar, name = self.bar, self.name
+        if not (bar and name and B:Index(bar, name)) then return self:Hide() end
+        local entry = ns.Spells:Find(name)
+        self.label = entry and entry.name or name
+        title:SetText(((entry and (entry.shown or entry.name)) or name):upper())
+        quiet:SetText("on " .. ns.BAR_NAMES[bar])
+        local look = ns.SpellLook(name) or {}
+        self.font:SetSelected(look.font or "look")
+        self.own:SetChecked(look.size ~= nil)
+        self.size:Set(look.size or ns.Get("countdownSize"))
+        self.size:SetUsable(look.size ~= nil)
+        -- Its icon's own size: kept on a packed bar, but greyed there.
+        local ownSize, sizable = ns.OwnSize(bar, name), B:OwnSizeUsable(bar)
+        self.ownIcon:SetChecked(ownSize ~= nil)
+        self.ownIcon:SetUsable(sizable)
+        self.iconSize:Set(ownSize or ns.ICON_SIZE[3])
+        self.iconSize:SetUsable(sizable and ownSize ~= nil)
+        local shown = PaintTicks(self, bar, name)
+        local rows = 3
+        -- Warn at, on the Buffs and Debuffs pages, under the size.
+        local aura = ns.AURA_BARS[bar] ~= nil
+        self.warnLabel:SetShown(aura)
+        self.warn:SetShown(aura)
+        if aura then
+            At(self.warnLabel, 16, rows, 4)
+            At(self.warn, PANEL.at, rows)
+            self.warn:SetSelected(B:WarnAt(bar, name) or 0)
+            self.warn:SetUsable(B:WarnUsable(bar, name))
+            rows = rows + 1
+        end
+        for _, tick in ipairs({ self.glow, self.only, self.ticks }) do
+            local on = tick == shown[1] or tick == shown[2] or tick == shown[3]
+            tick:SetShown(on)
+            if on then
+                At(tick, 16, rows, 2)
+                rows = rows + 1
+            end
+        end
+        note:SetText(PANEL_NOTE .. (aura and PANEL_AURAS or "") .. (ns.BarData(bar).showTimer and "" or PANEL_OFF))
+        At(note, 16, rows, 4)
+        local changed = look.font ~= nil or look.size ~= nil or ownSize ~= nil
+        defaults:SetEnabled(changed)
+        defaults:SetAlpha(changed and 1 or .45)
+        dialog:SetHeight(math.ceil(-top + rows * PANEL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
+        PaintPanelIcon(self.preview, bar, name)
+    end
+    -- Open for an entry on a bar: the preview's cooldown starts part way round.
+    function shade:Open(bar, name)
+        self.bar, self.name = bar, name
+        self:Show()
+        self.preview.cooldown:SetCooldown(GetTime() - 10, PANEL_TIME)
+        self:Refresh()
+    end
+    return shade
+end
+
 function ns.BuildBarPage(window, page, width)
     local B = ns.Bars
     local state = { bar = "cd", search = "" }
@@ -126,6 +526,47 @@ function ns.BuildBarPage(window, page, width)
             or ("Take every icon off " .. name .. also .. ". It asks for a second click." .. untested)
     end)
     page.clear = clear
+
+    -- Extra bars (a player's idea: Curse of the Elements on a bar apart from
+    -- three damage over time spells), left of Clear: on one of the four
+    -- bars' pages, "+ Another bar" adds its kind's second bar (Core.lua), or
+    -- once there, goes to its page; on that page, Remove bar (it asks
+    -- first). Its kind's item in the list, lit there, goes back.
+    local another = T:Button(page, "", 96, 20)
+    another:SetScript("OnClick", function()
+        local key = state.bar
+        local extra = ns.EXTRA_OF[key]
+        if not extra then
+            return window:Ask("Remove " .. ns.BAR_NAMES[key] .. "?", "Its spells and their settings go from this profile. You can"
+                .. " add it again on the " .. ns.BAR_NAMES[ns.BAR_KIND[key]] .. " page.", "Remove", function()
+                local ok, message = B:RemoveBar(key)
+                window:Say(message)
+                if ok then window:Select(ns.BAR_KIND[key]) else window:Refresh() end
+            end)
+        end
+        if ns.HasBar(extra) then return window:Select(extra) end
+        local ok, added, message = B:AddBar(key)
+        if not ok then
+            window:Say(added)
+            return window:Refresh()
+        end
+        window:Say(message)
+        window:Select(added)
+    end)
+    window:Hint(another, function()
+        local key = state.bar
+        local extra = ns.EXTRA_OF[key]
+        if not extra then
+            return "Remove " .. ns.BAR_NAMES[key] .. " from this profile, with its spells. It asks first. "
+                .. ns.BAR_NAMES[ns.BAR_KIND[key]] .. " in the list goes back to that bar. (experimental)"
+        end
+        if ns.HasBar(extra) then return "The " .. ns.BAR_NAMES[extra] .. " page: your second " .. ns.BAR_NAMES[key] .. " bar." end
+        local can, why = ns.CanAddBar(key)
+        if not can then return why end
+        return "Adds " .. ns.BAR_NAMES[extra] .. ": a second " .. ns.BAR_NAMES[key] .. " bar with its own spells, size, options"
+            .. " and Layout row, say to keep one spell apart from the rest. (experimental)"
+    end)
+    page.another = another
 
     -- The tray: the bar's icons, left to right --------------------------------------
     local tray = CreateFrame("Frame", nil, page, "BackdropTemplate")
@@ -302,17 +743,28 @@ function ns.BuildBarPage(window, page, width)
             end
         end)
         -- A spell or item dropped on an icon, or clicked onto it, joins the
-        -- bar, as on the tray round it; a click with nothing held does nothing.
+        -- bar, as on the tray round it; a click with nothing held opens the
+        -- icon's own panel (below).
         icon:SetScript("OnReceiveDrag", function() B:Dropped(state.bar) end)
         -- Right-clicked in a joined icon (a player's idea): this one shows,
         -- faded, while none of them is up; a dot marks it.
+        -- Clicked with nothing held (a player's idea, settings per spell): its
+        -- own panel, for its countdown's font and size and its own ticks.
         icon:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         icon:SetScript("OnClick", function(self, button)
             if button == "RightButton" then
                 if B:PickMissing(state.bar, self.index) then window:Refresh() end
                 return
             end
-            B:Dropped(state.bar)
+            if B:Holding() then
+                B:Dropped(state.bar)
+                return
+            end
+            local name = ns.BarData(state.bar).spells[self.index]
+            if not name then return end
+            window.spellPanel = window.spellPanel or SpellPanel(window)
+            window.spellPanel:Open(state.bar, name)
+            window:Refresh()
         end)
         icon.pick = icon:CreateTexture(nil, "OVERLAY")
         icon.pick:SetSize(6, 6)
@@ -326,17 +778,17 @@ function ns.BuildBarPage(window, page, width)
             if not self.name then return nil end
             if ns.Spells:SelfDebuffNote(self.spellName or self.name) then
                 -- This page's own tick, or where to find one (one line: 93 letters at most).
-                if SELF_TICK[state.bar] then
-                    return self.name .. " can't show here. Tick \"" .. SELF_TICK[state.bar] .. "\" and drag it off the bar."
+                if SELF_TICK[ns.BAR_KIND[state.bar]] then
+                    return self.name .. " can't show here. Tick \"" .. SELF_TICK[ns.BAR_KIND[state.bar]] .. "\" and drag it off the bar."
                 end
                 return self.name .. " can't show here. Drag it off, and tick \"" .. SELF_TICK.buff .. "\" on Buffs."
             end
             -- In a joined icon: right-click picks the one shown, faded, while none is up.
             if B:Joined(state.bar, self.index) or B:Joined(state.bar, self.index + 1) then
-                return self.name .. ". Right-click: the one shown, faded, while none of its icon is up. Drag it onto another"
-                    .. " icon to swap them."
+                return self.name .. ". Click: its own settings. Right-click: the one shown, faded, while none of its icon is up."
+                    .. " Drag it onto another icon to swap them."
             end
-            return self.name .. ". Drag it onto another icon to swap them, or off the bar to take it off."
+            return self.name .. ". Click: its own settings. Drag it onto another icon to swap them, or off the bar to take it off."
         end)
         page.icons[i] = icon
         return icon
@@ -395,13 +847,15 @@ function ns.BuildBarPage(window, page, width)
     -- of When ready (below), in the same spot under the sliders. Greyed while
     -- Only show missing (under it) is on, which it doesn't go with; its own
     -- choice is kept.
+    -- (Each by the page's own bar, or for an extra bar its kind: Buffs 2 as Buffs.)
     local showMissing = Option("Show missing buffs greyed", "showMissing", -85, function()
-        if state.bar == "buff" and ns.BarData("buff").onlyMissing then
+        local kind = ns.BAR_KIND[state.bar]
+        if kind == "buff" and ns.BarData(state.bar).onlyMissing then
             return "Not with Only show missing, which shows only the buffs you're missing."
         end
-        if state.bar ~= "debuff" then return "Buffs missing from you show greyed in their spot, instead of hidden." end
+        if kind ~= "debuff" then return "Buffs missing from you show greyed in their spot, instead of hidden." end
         -- Debuffs: only with an enemy targeted, unless kept greyed (under it).
-        if ns.BarData("debuff").greyedNoTarget then
+        if ns.BarData(state.bar).greyedNoTarget then
             return "Debuffs missing from your target show greyed in their spot, instead of hidden, with an enemy targeted or not."
         end
         return "Debuffs missing from your target show greyed in their spot while you have an enemy targeted, instead of hidden."
@@ -411,7 +865,7 @@ function ns.BuildBarPage(window, page, width)
     -- out while missing debuffs greyed is off, which it goes with; its own
     -- choice is kept.
     local keepGreyed = Option("Keep them greyed with no target", "greyedNoTarget", -107, function()
-        if not ns.BarData("debuff").showMissing then
+        if not ns.BarData(state.bar).showMissing then
             return "Tick Show missing debuffs greyed first: this keeps those greyed spots with no target."
         end
         return "Missing debuffs stay greyed in their spots with no enemy targeted, instead of hiding."
@@ -507,7 +961,7 @@ function ns.BuildBarPage(window, page, width)
     -- The Buffs and Debuffs bars, in the same spot, each its own (its label
     -- set on refresh: SELF_LABEL).
     local showSelf = Option(SELF_LABEL.buff, "selfDebuffs", -107, function()
-        if state.bar == "debuff" then
+        if ns.BAR_KIND[state.bar] == "debuff" then
             return "Debuffs you put on yourself, like Weakened Soul from your shield or Recently Bandaged, at the end of this bar."
                 .. " Not with missing debuffs greyed."
         end
@@ -661,12 +1115,14 @@ function ns.BuildBarPage(window, page, width)
     tickColour:SetText("Colour")
     local tickChoice = TickColour(window, options, state)
     tickChoice:SetPoint("TOPLEFT", 326, -151)
-    -- Whether any of the Debuffs bar's debuffs counts its ticks now: one of
-    -- yours (not another class's in a shared profile, whose tick you can't see).
+    -- Whether any of the page's Debuffs bar's debuffs (Debuffs 2's on its
+    -- own page) counts its ticks now: one of yours (not another class's in a
+    -- shared profile, whose tick you can't see).
     local function Counting()
-        local counts = ns.CountTicks("debuff")
-        for _, name in ipairs(ns.BarData("debuff").spells) do
-            if counts[name] and ns.Spells:ForMe(name, "debuff") and B:TickPace(name) then return true end
+        local key = state.bar
+        local counts = ns.CountTicks(key)
+        for _, name in ipairs(ns.BarData(key).spells) do
+            if counts[name] and ns.Spells:ForMe(name, key) and B:TickPace(name) then return true end
         end
         return false
     end
@@ -683,7 +1139,8 @@ function ns.BuildBarPage(window, page, width)
     listPanel:SetPoint("TOPLEFT", options, "BOTTOMLEFT", 0, -10)
     listPanel:SetPoint("BOTTOMRIGHT", -16, 12)
     T:Box(listPanel)
-    local search = T:Input(listPanel, "Search spells, or type a name or spell ID", 280)
+    -- (Narrow enough for Ticked only beside Show items and Show all ranks.)
+    local search = T:Input(listPanel, "Search by name or spell ID", 224)
     search:SetPoint("TOPLEFT", 8, -8)
     search:SetScript("OnTextChanged", function(self)
         state.search = (self:GetText() or ""):lower():match("^%s*(.-)%s*$")
@@ -709,7 +1166,16 @@ function ns.BuildBarPage(window, page, width)
     end)
     showRanks:SetPoint("LEFT", showItems, "RIGHT", 14, 0)
     window:Hint(showRanks, "Every rank you know as its own row, for casting a lower rank on purpose.")
-    page.showItems, page.showRanks = showItems, showRanks
+    -- Only the spells on this bar, so their own ticks are quick to reach (a
+    -- player's idea): after the two ticks, or beside the search where an
+    -- aura bar has neither (Refresh).
+    local ticked = T:Check(listPanel, "Ticked only", function(self)
+        ns.Set("listTicked", self:GetChecked())
+        window:Refresh()
+    end)
+    ticked:SetPoint("LEFT", showRanks, "RIGHT", 14, 0)
+    window:Hint(ticked, "Lists only the spells on this bar, with their own ticks. (experimental)")
+    page.showItems, page.showRanks, page.ticked = showItems, showRanks, ticked
     -- How the list shows ranks, on a line of its own under the search: too
     -- long to fit beside it with the two ticks.
     local ranks = T:Text(listPanel, "GameFontHighlightSmall", T.MUTED)
@@ -812,18 +1278,7 @@ function ns.BuildBarPage(window, page, width)
         row.glow:SetWidth(18 + (row.glow.text:GetStringWidth() or 0))
         row.glow:SetPoint("RIGHT", -8, 0)
         row.glow:SetFrameLevel(row.check:GetFrameLevel() + 2)
-        window:Hint(row.glow, function()
-            local debuffs = state.bar == "debuff"
-            -- (A buff ticked Only when missing has a spot of its own.)
-            if row.spell and not B:MissingSpot(state.bar, row.spell) then
-                return debuffs and "Tick Show missing debuffs greyed first: the glow shows on a missing debuff's greyed spot."
-                    or "Tick Show missing buffs greyed or Only when missing first: the glow shows on a missing buff's greyed spot."
-            end
-            if debuffs then
-                return "Its icon glows while it's missing from an enemy you target, like a Judgement that fell off."
-            end
-            return "Its icon glows while it's missing, so you see to recast it, like a Seal that fell off."
-        end)
+        window:Hint(row.glow, function() return GlowNote(state.bar, row.spell) end)
         row.glow:Hide()
         -- On the Buffs page, a ticked buff's own Only when missing (a
         -- player's ask), just left of Glow when missing: its icon shows only
@@ -837,13 +1292,7 @@ function ns.BuildBarPage(window, page, width)
         row.only:SetWidth(18 + (row.only.text:GetStringWidth() or 0))
         row.only:SetPoint("RIGHT", -8, 0)
         row.only:SetFrameLevel(row.check:GetFrameLevel() + 2)
-        window:Hint(row.only, function()
-            if ns.BarData("buff").onlyMissing then
-                return "Not needed with Only show missing, which already shows every buff only while it's missing."
-            end
-            return "Shows this buff only while it's missing from you, so you see to recast it. The game hides your buffs"
-                .. " from addons in a fight, so changes then show once it ends."
-        end)
+        window:Hint(row.only, function() return OnlyNote(state.bar) end)
         row.only:Hide()
         -- On the Debuffs page, a ticked debuff that ticks gets one there too
         -- (a player's idea: Bane of Agony's ticks): its icon counts them.
@@ -854,17 +1303,7 @@ function ns.BuildBarPage(window, page, width)
         row.ticks:SetWidth(18 + (row.ticks.text:GetStringWidth() or 0))
         row.ticks:SetPoint("RIGHT", -8, 0)
         row.ticks:SetFrameLevel(row.check:GetFrameLevel() + 2)
-        window:Hint(row.ticks, function()
-            local pace = row.spell and B:TickPace(row.spell) or 0
-            local clash = row.spell and B:TickClash(state.bar, row.spell)
-            local found = clash and ns.Spells:Find(clash)
-            if clash then
-                return "Can't count while it shares an icon with " .. (found and found.name or clash)
-                    .. ": the game can't tell the two apart."
-            end
-            return "Counts its ticks on its icon, every " .. pace .. (pace == 1 and " second" or " seconds")
-                .. " for " .. (row.label or "it") .. ", starting again when you reapply it."
-        end)
+        window:Hint(row.ticks, function() return TicksNote(state.bar, row.spell, row.label) end)
         row.ticks:Hide()
         rows[i] = row
         return row
@@ -922,11 +1361,12 @@ function ns.BuildBarPage(window, page, width)
             -- Only when missing, on the Buffs page for a buff on the bar,
             -- just left of Glow when missing; greyed while Only show missing
             -- does it for every buff.
-            local only = state.bar == "buff" and on
+            local kind = ns.BAR_KIND[state.bar] -- (an extra bar goes by its kind)
+            local only = kind == "buff" and on
             row.only:SetShown(only)
             row.only:SetChecked(B:OnlyWhenMissing(state.bar, entry.key))
             if only then
-                row.only:SetUsable(not ns.BarData("buff").onlyMissing)
+                row.only:SetUsable(not ns.BarData(state.bar).onlyMissing)
                 row.only:ClearAllPoints()
                 row.only:SetPoint("RIGHT", row.glow, "LEFT", -14, 0)
             end
@@ -934,7 +1374,7 @@ function ns.BuildBarPage(window, page, width)
             -- ticks, just left of Glow when missing; greyed while its icon
             -- can't count (its hint says why), unless it's ticked, so it can
             -- be unticked.
-            local ticks = state.bar == "debuff" and on and B:TickPace(entry.key) ~= nil
+            local ticks = kind == "debuff" and on and B:TickPace(entry.key) ~= nil
             row.ticks:SetShown(ticks)
             row.ticks:SetChecked(B:CountsTicks(state.bar, entry.key))
             if ticks then
@@ -953,18 +1393,38 @@ function ns.BuildBarPage(window, page, width)
     -- What this bar can hold: procs have no cooldown of their own and are
     -- buffs on you, items put no aura on anyone, and a fixed rank adds
     -- nothing to an aura bar, which already counts every rank.
-    local function Fits(entry)
-        local item = ns.Spells:IsItem(entry)
-        if state.bar == "buff" then return not item and entry.kind ~= "rank" end
-        if state.bar == "debuff" then return not item and entry.kind ~= "rank" and entry.kind ~= "proc" end
-        if item then return ns.Get("listItems") end
+    -- (With Ticked only, an item on the bar is listed with Show items off.)
+    local function Fits(entry, onlyTicked)
+        local item, kind = ns.Spells:IsItem(entry), ns.BAR_KIND[state.bar]
+        if kind == "buff" then return not item and entry.kind ~= "rank" end
+        if kind == "debuff" then return not item and entry.kind ~= "rank" and entry.kind ~= "proc" end
+        if item then return ns.Get("listItems") or onlyTicked end
         return entry.kind ~= "proc"
+    end
+
+    -- Whether a spell is on this page's bar: its row's tick.
+    local function OnBar(key)
+        if ns.AURA_BARS[state.bar] then return B:HasAura(state.bar, key) == true end
+        return B:Find(key) == state.bar
+    end
+
+    -- Ticked only: an entry and the lower ranks under it that are on the
+    -- bar, or nil when neither is. Otherwise all of them.
+    local function Listed(entry, lower, onlyTicked)
+        if not onlyTicked then return lower end
+        local ranks = {}
+        for _, fixed in ipairs(lower) do
+            if OnBar(fixed.key) then ranks[#ranks + 1] = fixed end
+        end
+        if OnBar(entry.key) or #ranks > 0 then return ranks end
+        return nil
     end
 
     local function RefreshList()
         y, n = 0, 0
         local list = ns.Spells:Fresh()
         local text, listRanks = state.search, ns.Get("listRanks") and not ns.AURA_BARS[state.bar]
+        local onlyTicked = ns.Get("listTicked") == true
         local id = tonumber(text)
         local line
         local known = {}
@@ -981,18 +1441,20 @@ function ns.BuildBarPage(window, page, width)
             -- only while it's on this bar (a priest's Fortitude you track):
             -- not one another character added to another bar (a hunter's
             -- Call Pet in a shared profile).
-            local elsewhere = state.bar == "buff" and entry.added and ns.Spells:AnotherClass(entry.key)
+            local elsewhere = ns.BAR_KIND[state.bar] == "buff" and entry.added and ns.Spells:AnotherClass(entry.key)
                 and not B:HasAura(state.bar, entry.key)
-            if Fits(entry) and not elsewhere and ns.Spells:ForMe(entry.key, state.bar)
-                and (text == "" or entry.name:lower():find(text, 1, true) or (id and entry.spellID == id)) then
+            local lower = listRanks and entry.lower or {}
+            local ranks = Fits(entry, onlyTicked) and not elsewhere and ns.Spells:ForMe(entry.key, state.bar)
+                and (text == "" or entry.name:lower():find(text, 1, true) or (id and entry.spellID == id))
+                and Listed(entry, lower, onlyTicked)
+            if ranks then
                 if text == "" and entry.line ~= line then
                     line = entry.line
                     Header(line or "")
                 end
-                local lower = listRanks and entry.lower or {}
                 Spell(entry, false, #lower > 0 and ("Highest (Rank " .. entry.rank .. ")") or entry.rankText)
                 -- Lower ranks under the spell, each fixed to that rank.
-                for _, fixed in ipairs(lower) do Spell(fixed, true, "") end
+                for _, fixed in ipairs(ranks) do Spell(fixed, true, "") end
             end
         end
         -- Searching also finds spells outside your spellbook, by name or ID.
@@ -1001,8 +1463,9 @@ function ns.BuildBarPage(window, page, width)
         -- (another class's spell, a buff's ID on the Cooldowns page), which
         -- is turned away too. On the Buffs and Debuffs bars, an ID for
         -- another spell of a name already in your lists (the second
-        -- Energized) is offered too: it goes on pinned to that ID.
-        if #text >= 3 or id then
+        -- Energized) is offered too: it goes on pinned to that ID. Not with
+        -- Ticked only: none of them is on the bar.
+        if not onlyTicked and (#text >= 3 or id) then
             local others = {}
             if id then
                 local name = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
@@ -1036,7 +1499,10 @@ function ns.BuildBarPage(window, page, width)
         -- shown, on every refresh, as a message lasts until the next one.
         local selfNote = ns.Spells:SelfDebuffMatch(text)
         if selfNote then window:Say(selfNote) end
-        if n == 0 then Header(selfNote and "A debuff on you: see below" or text == "" and "Nothing to list" or "No matches") end
+        if n == 0 then
+            Header(selfNote and "A debuff on you: see below" or text ~= "" and "No matches"
+                or onlyTicked and "Nothing on this bar yet" or "Nothing to list")
+        end
         for i = n + 1, #rows do rows[i]:Hide() end
         scroll.content:SetHeight(math.max(1, y))
         scroll:ScrollTo(scroll:GetVerticalScroll() or 0)
@@ -1083,7 +1549,7 @@ function ns.BuildBarPage(window, page, width)
         local trayHeight = 16 + lines * ICON + (lines - 1) * gap
         tray:SetHeight(trayHeight)
         empty:SetShown(#names == 0)
-        empty:SetText(EMPTY[state.bar])
+        empty:SetText(EMPTY[ns.BAR_KIND[state.bar]])
     end
 
     local function Refresh(key)
@@ -1114,6 +1580,17 @@ function ns.BuildBarPage(window, page, width)
         -- Also while only buffs that show there for no one are left, so they
         -- can go (B:Leftovers).
         clear:SetShown(#spells > 0 or state.armed == key or #B:Leftovers(key) > 0)
+        -- Extra bars: left of Clear (in its place while it's hidden), + Another
+        -- bar once the bar has spells, greyed while one can't be added (it
+        -- says why), or the way to the extra bar's page once it's there; on
+        -- that page, Remove bar. (Where it shows, the ?'s note stays away:
+        -- Window.lua.)
+        local extra = ns.EXTRA_OF[key]
+        another:SetShown(#spells > 0 or not extra or ns.HasBar(extra))
+        another:SetLabel(not extra and "Remove bar" or ns.HasBar(extra) and (ns.BAR_NAMES[extra] .. " >") or "+ Another bar")
+        another:SetAlpha((not extra or ns.HasBar(extra) or ns.CanAddBar(key)) and 1 or .45)
+        another:ClearAllPoints()
+        if clear:IsShown() then another:SetPoint("RIGHT", clear, "LEFT", -6, 0) else another:SetPoint("TOPRIGHT", -16, -12) end
         RefreshTray()
         size:Set(data.size)
         spacing:Set(data.spacing)
@@ -1136,8 +1613,9 @@ function ns.BuildBarPage(window, page, width)
         for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity }) do
             part:SetShown(not aura)
         end
-        -- The tick count's two rows, while the Debuffs bar counts any.
-        local counting = key == "debuff" and Counting()
+        -- The tick count's two rows, while a Debuffs bar counts any.
+        local kind = ns.BAR_KIND[key] -- (an extra bar's options are its kind's)
+        local counting = kind == "debuff" and Counting()
         for _, part in ipairs({ tickAt, tickAt.label, tickFrom, tickEdge, tickSize, tickColour, tickChoice }) do part:SetShown(counting) end
         tickChoice:Paint()
         tickAt:SetSelected(data.tickAt)
@@ -1152,7 +1630,7 @@ function ns.BuildBarPage(window, page, width)
         showMissing:SetShown(aura ~= nil)
         showMissing.text:SetText("Show missing " .. word .. "s greyed")
         showMissing:SetWidth(18 + (showMissing.text:GetStringWidth() or 0)) -- the label is its click area
-        onlyMissing:SetShown(key == "buff")
+        onlyMissing:SetShown(kind == "buff")
         onlyMissing:SetChecked(data.onlyMissing)
         -- Packed buffs have no fixed spot to put a name under.
         showNames:SetShown(not aura or not ns.BuffBar:Packed(data))
@@ -1160,7 +1638,7 @@ function ns.BuildBarPage(window, page, width)
         showMissing:SetChecked(data.showMissing)
         showMissing:SetUsable(not data.onlyMissing)
         -- The Debuffs bar's own, usable with missing debuffs greyed ticked.
-        keepGreyed:SetShown(key == "debuff")
+        keepGreyed:SetShown(kind == "debuff")
         keepGreyed:SetChecked(data.greyedNoTarget)
         keepGreyed:SetUsable(data.showMissing)
         showNames:SetChecked(data.showNames)
@@ -1170,7 +1648,8 @@ function ns.BuildBarPage(window, page, width)
         showAuras:SetChecked(data.showAuras)
         -- Swap with my form, for a character who knows a form (ticked in
         -- your profile); Editing with it ticked, naming whose icons show.
-        local forms, swaps = not aura and #ns.KnownForms() > 0, ns.Swaps(key)
+        -- (Not on an extra bar: Cooldowns and Utility only.)
+        local forms, swaps = ns.CanSwap(key) and #ns.KnownForms() > 0, ns.Swaps(key)
         swapForm:SetShown(forms)
         swapForm:SetChecked(swaps)
         if forms then
@@ -1187,18 +1666,26 @@ function ns.BuildBarPage(window, page, width)
         showSelf:SetShown(aura ~= nil)
         showSelf:SetChecked(data.selfDebuffs)
         if aura then
-            showSelf.text:SetText(SELF_LABEL[state.bar])
+            showSelf.text:SetText(SELF_LABEL[kind])
             showSelf:SetWidth(18 + (showSelf.text:GetStringWidth() or 0)) -- the label is its click area
         end
         showItems:SetShown(not aura)
         showRanks:SetShown(not aura)
         showItems:SetChecked(ns.Get("listItems"))
         showRanks:SetChecked(ns.Get("listRanks"))
+        ticked:ClearAllPoints()
+        ticked:SetPoint("LEFT", aura and search or showRanks, "RIGHT", 14, 0)
+        ticked:SetChecked(ns.Get("listTicked"))
         -- An aura bar already counts every rank; Show all ranks lists the lower ones.
         ranks:SetText(aura and "Each spell shows once, and counts every rank."
             or ns.Get("listRanks") and "Each spell at your highest rank, with the lower ranks you know under it."
             or "Each spell shows once, at your highest rank.")
         RefreshList()
+        -- A spell's own panel, while it's open for this bar (another bar's goes).
+        local panel = window.spellPanel
+        if panel and panel:IsShown() then
+            if panel.bar == key then panel:Refresh() else panel:Hide() end
+        end
     end
 
     -- A failure is reported once in chat instead of leaving the page half drawn.

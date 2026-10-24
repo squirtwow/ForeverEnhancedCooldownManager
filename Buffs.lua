@@ -61,7 +61,7 @@ end
 -- already does it for all). From the saved picks, so it's known before the
 -- bar is laid out.
 function F:Flagged(key, data)
-    if key ~= "buff" or data == nil or self:OnlyMissing(data) then return false end
+    if ns.BAR_KIND[key] ~= "buff" or data == nil or self:OnlyMissing(data) then return false end
     return next(ns.OnlyWhenMissing(key)) ~= nil
 end
 
@@ -99,27 +99,38 @@ function F:KeepGreyed(data)
 end
 
 -- Sizes an icon's numbers for its size, and shows or hides the countdown,
--- in the spot picked in Icon details.
-local function Fit(parts, size, showTimer)
-    parts.cooldown:SetCountdownFont(Style:Countdown(size))
+-- in the spot picked in Icon details; look: its entry's own countdown font
+-- and size (settings per spell), or nil for the Look page's.
+local function Fit(parts, size, showTimer, look)
+    parts.cooldown:SetCountdownFont(Style:Countdown(size, look))
     parts.cooldown:SetHideCountdownNumbers(not showTimer)
     parts.count:SetFontObject(Style:Count(size))
     Style:AuraNumbers(parts)
 end
 
 -- Icon details (the Look page) on the bar's icons as made: each packed
--- icon's and each fixed spot's, its numbers sized as laid out. Only out of
--- a fight (Bars.lua AuraDetails).
+-- icon's and each fixed spot's, its numbers sized as laid out (in its
+-- entry's own look). Only out of a fight (Bars.lua AuraDetails).
 function F:Details(bar)
-    local function Detail(parts, size)
+    local function Detail(parts, size, look)
         Style:CooldownLook(parts.cooldown)
-        parts.cooldown:SetCountdownFont(Style:Countdown(size))
+        parts.cooldown:SetCountdownFont(Style:Countdown(size, look))
         Style:AuraNumbers(parts)
     end
-    for _, parts in ipairs(bar.groupParts or {}) do Detail(parts, BASE) end
+    local looks = bar.looks or {}
+    for _, parts in ipairs(bar.groupParts or {}) do Detail(parts, BASE, parts.index and looks[parts.index]) end
     for _, holder in ipairs(bar.holders or {}) do
-        if holder.slot then Detail(holder.slot, holder.size or BASE) end
+        if holder.slot then Detail(holder.slot, holder.size or BASE, holder.look) end
     end
+end
+
+-- Settings per spell: a packed entry's icon in its entry's own look (or the
+-- Look page's again), set only when that changes. Out of a fight (F:Layout).
+local function GroupFont(parts, look)
+    local key = Style:LookKey(look)
+    if parts.lookKey == key then return end
+    parts.lookKey = key
+    parts.cooldown:SetCountdownFont(Style:Countdown(BASE, look))
 end
 
 -- Count ticks (a player's idea: how many times Bane of Agony has ticked),
@@ -387,8 +398,9 @@ end
 -- Runs once per icon, before the client restricts it in combat. Everything
 -- supplied to the icon must be a descendant of its button. A packed icon
 -- carries its own border and shadow; a fixed one's holder has them. A
--- Debuffs bar entry's icon can count ticks too (counts).
-local function Look(button, size, showTimer, decorate, counts)
+-- Debuffs bar entry's icon can count ticks too (counts). look: its entry's
+-- own countdown font and size (settings per spell), or nil.
+local function Look(button, size, showTimer, decorate, counts, look)
     button:EnableMouse(false)
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -415,7 +427,8 @@ local function Look(button, size, showTimer, decorate, counts)
         parts.decor = Style:Decor(button, button, 0, true)
         Style:ShowDecor(parts.decor, Style:DecorFor("icon"))
     end
-    Fit(parts, size, showTimer)
+    Fit(parts, size, showTimer, look)
+    parts.lookKey = Style:LookKey(look)
     return parts
 end
 
@@ -450,21 +463,78 @@ end
 local function SlotLook(holder, key)
     return function(button)
         button:SetAllPoints(holder)
-        holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, key == "debuff")
+        holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, ns.BAR_KIND[key] == "debuff", holder.look)
     end
 end
 
--- A packed entry's group (index: its place) keeps its icons' tick counts;
--- the group of your debuffs on you has none.
+-- A packed entry's group (index: its place) keeps its icons' tick counts
+-- and its entry's own look; the group of your debuffs on you has neither.
 local function GroupLook(bar, index)
     return function(button)
         button:SetSize(BASE, BASE)
-        local parts = Look(button, BASE, bar.data.showTimer, true, bar.key == "debuff" and index ~= nil)
+        local parts = Look(button, BASE, bar.data.showTimer, true, ns.BAR_KIND[bar.key] == "debuff" and index ~= nil,
+            index and bar.looks and bar.looks[index] or nil)
+        parts.index = index
         bar.groupParts[#bar.groupParts + 1] = parts
         if parts.ticks then
             bar.groupTicks[index] = bar.groupTicks[index] or {}
             table.insert(bar.groupTicks[index], parts.ticks)
         end
+    end
+end
+
+-- Warn at N seconds left -------------------------------------------------------------
+-- (A player's idea: Siphon Life warning with 3 seconds left on the target,
+-- Demon Armor with 10 minutes left on you.) The addon can't read an aura's
+-- time in a fight, so it hands the game rules it runs itself, set out of
+-- combat (F:Warns):
+-- * the entry's countdown turns red from N seconds left (its cooldown's
+--   formatter, Style:WarnText), packed or in a fixed spot;
+-- * round a fixed spot, a red edge from N seconds left: a second slot for the
+--   entry (w1..w16, beside b1..b16) on the same spells, whose icon draws only
+--   its time left, through a rule that writes the edge (a texture in its
+--   text) under N and nothing from N. Slots are independent, so both take
+--   the same aura, and the edge goes as it ends or is recast (the game
+--   starts its time again). A packed bar's icons have no spot to ring.
+-- * out of a fight, your own buff's spot glows from N seconds left (the
+--   Look page's ready glow), from your buffs read then (F:LowTime).
+local MARK = ns.MEDIA .. "LowEdge" -- a soft white square ring, tinted in its text
+local MARK_SPREAD = 1.25 -- the ring's art is this much bigger than the icon it sits round
+local MARK_COLOUR = "255:64:64"
+
+-- Whether the game can draw the edge: its number rules and an icon's time left.
+local function CanMark()
+    local util, enum = C_StringUtil, Enum
+    return type(util) == "table" and type(util.CreateNumericRuleFormatter) == "function" and type(enum) == "table"
+        and type(enum.DurationTextBindingProperty) == "table" and enum.DurationTextBindingProperty.RemainingDuration ~= nil
+end
+
+-- The edge as text, size across.
+local function Edge(size)
+    return ("|T%s:%d:%d:0:0:64:64:0:64:0:64:%s|t"):format(MARK, size, size, MARK_COLOUR)
+end
+
+-- A w-slot's icon: over its entry's spot, never taking the mouse, drawing
+-- only its time left (nothing until a rule is set) on a layer above the
+-- b-slot's icon, its sweep and its counts. Made as the slot is added.
+local function MarkLook(holder)
+    return function(button)
+        button:EnableMouse(false)
+        button:SetAllPoints(holder)
+        local ok, mark = pcall(function()
+            local formatter = C_StringUtil.CreateNumericRuleFormatter()
+            formatter:AddBreakpoint({ threshold = 0, format = "" })
+            local frame = CreateFrame("Frame", nil, button)
+            frame:SetAllPoints()
+            frame:SetFrameLevel(button:GetFrameLevel() + 5)
+            local text = frame:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+            text:SetPoint("CENTER")
+            button:SetDurationText(text, { textFormat = { formatString = "{}", components = {
+                { property = Enum.DurationTextBindingProperty.RemainingDuration, formatter = formatter } } } })
+            return { frame = frame, text = text, formatter = formatter, rule = "" }
+        end)
+        holder.mark = ok and mark or nil
+        if not ok and not F.markError then F.markError = tostring(mark) end
     end
 end
 
@@ -480,7 +550,8 @@ end
 function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
     bar.groupParts, bar.names, bar.up, bar.spots, bar.only = {}, {}, {}, {}, {}
-    bar.tickPaces, bar.tickShows, bar.groupTicks = {}, {}, {}
+    bar.tickPaces, bar.tickShows, bar.groupTicks, bar.looks = {}, {}, {}, {}
+    bar.warns, bar.appliedWarns = {}, {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -522,6 +593,18 @@ function F:Create(bar)
         F.lastError = tostring(err)
         print("|cffffd100" .. ns.TITLE .. ":|r the " .. ns.BAR_NAMES[bar.key] .. " bar couldn't start. Please report this: " .. F.lastError)
     end
+    -- Warn at: each entry's edge slot, made now with the rest (never later),
+    -- off until its entry warns. Where the game can't, none: the countdown
+    -- still turns red. A slot the game turns down leaves the bar as it is.
+    if not (ok and bar.container and CanMark()) then return end
+    local made, why = pcall(function()
+        for i = 1, ns.BUFF_SLOTS do
+            F.Add(bar.container, "AddAuraSlot", "w" .. i, aura.filter, { initializeFrame = F.Guard(MarkLook(bar.holders[i])) })
+            bar.container:SetAuraSlotEnabled("w" .. i, false)
+        end
+    end)
+    bar.marks = made or nil
+    if not made and not F.markError then F.markError = tostring(why) end
 end
 
 -- The border and shadow round each fixed spot, when chosen. They go with
@@ -752,9 +835,10 @@ function F:Layout(bar, data)
     local size, spacing = ns.IconSize(data), data.spacing
     local count, packed = 0, self:Packed(data)
     local picks, glows = ns.MissingPicks(bar.key), ns.GlowMissing(bar.key)
-    local counts = bar.key == "debuff" and ns.CountTicks(bar.key) or {}
+    local counts = ns.BAR_KIND[bar.key] == "debuff" and ns.CountTicks(bar.key) or {}
     -- Only when missing: the Buffs bar's, and not with Only show missing.
     local flags = self:Flagged(bar.key, data) and ns.OnlyWhenMissing(bar.key) or {}
+    local warns = ns.WarnAt(bar.key)
     -- A packed bar's slots sit in its container, scaled with the packed
     -- icons, so their numbers are sized as those icons' are.
     local fit = packed and BASE or size
@@ -780,27 +864,51 @@ function F:Layout(bar, data)
         if entry and next(ids) and count < ns.BUFF_SLOTS then
             count = count + 1
             local holder = bar.holders[count]
-            holder:SetSize(size, size)
-            holder.size, holder.showTimer = fit, data.showTimer
-            if holder.slot then Fit(holder.slot, fit, data.showTimer) end
+            -- Its own size (settings per spell; a joined icon: the first of
+            -- yours with one), on a bar whose spots are fixed: a packed bar's
+            -- icons are the game's, all one size (its spots too: F:Spots).
+            local own, sized = size, packed
+            for _, name in ipairs(yours) do
+                if not sized and ns.OwnSize(bar.key, name) then own, sized = ns.IconSizeFor(bar.key, name, size), true end
+            end
+            holder:SetSize(own, own)
+            holder.ownSize = own ~= size and own or nil
+            -- Its countdown in its entry's own look (settings per spell; a
+            -- joined icon: the first of yours with one).
+            local look = ns.SpellLookFor(yours)
+            local fits = packed and fit or own
+            holder.size, holder.showTimer, holder.look = fits, data.showTimer, look
+            bar.looks[count] = look
+            if holder.slot then Fit(holder.slot, fits, data.showTimer, look) end
             holder.icon:SetTexture(entry.icon)
-            holder.label:SetWidth(size + spacing)
+            holder.label:SetWidth(own + spacing)
             holder.label:SetText(#group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name)
             -- (A packed bar offers no names: its icons have no spot for one.)
             holder.label:SetShown(data.showNames and not packed)
-            MissingGlow(holder, glow, size)
+            MissingGlow(holder, glow, own)
             bar.slotIDs[count] = ids
             bar.names[count] = table.concat(group, "+")
             bar.tickPaces[count], bar.tickShows[count] = pace, shows
             bar.only[count] = only or nil
+            -- Warn at: the first of yours with one, unless it shows only
+            -- while it's missing (it has no icon while it's up).
+            local warn
+            for _, name in ipairs(yours) do
+                warn = warn or warns[name]
+            end
+            bar.warns[count] = not (only or self:OnlyMissing(data)) and warn or nil
         end
     end
     for i = count + 1, ns.BUFF_SLOTS do
         bar.holders[i]:Hide()
         MissingGlow(bar.holders[i], false)
         bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i], bar.only[i] = nil, nil, nil, nil, nil
+        bar.looks[i], bar.holders[i].look, bar.warns[i], bar.holders[i].ownSize = nil, nil, nil, nil
     end
-    for _, parts in ipairs(bar.groupParts) do parts.cooldown:SetHideCountdownNumbers(not data.showTimer) end
+    for _, parts in ipairs(bar.groupParts) do
+        parts.cooldown:SetHideCountdownNumbers(not data.showTimer)
+        if parts.index then GroupFont(parts, bar.looks[parts.index]) end
+    end
     bar.count = count
     -- Which are on you, then the spots that show. (Packed icons line up
     -- from the bar's centre, or from the edge the bar grows away from, past
@@ -809,6 +917,7 @@ function F:Layout(bar, data)
     self:Spots(bar)
     self:Apply(bar)
     self:UpdateTarget(bar)
+    self:LowTime(bar)
 end
 
 local function Signature(ids)
@@ -931,7 +1040,8 @@ function F:Apply(bar)
     end
     bar.pending = nil
     local data = bar.data
-    local on = ns.Bars:Enabled()
+    -- (An extra bar you don't have now: everything off, your debuffs on you too.)
+    local on = ns.Bars:Enabled() and ns.HasBar(bar.key)
     local packed = self:Packed(data)
     local scale = packed and ns.IconSize(data) / BASE or 1
     -- Packed icons line up from the bar's centre, or from the edge the bar
@@ -961,6 +1071,26 @@ function F:Apply(bar)
                 container:SetAuraSlotEnabled(key, true)
             else
                 container:SetAuraSlotEnabled(key, false)
+            end
+        end
+    end
+    -- Warn at: the edge slots, on the same spells as their entry's fixed
+    -- spot, for a warned entry with a spot that stays (not on a packed bar,
+    -- nor one shown only while it's missing).
+    if bar.marks then
+        for i = 1, ns.BUFF_SLOTS do
+            local ids = on and not packed and bar.warns[i] and bar.holders[i].mark and not self:Hides(bar, i)
+                and bar.slotIDs[i] or nil
+            local signature = Signature(ids)
+            if bar.appliedWarns[i] ~= signature then
+                bar.appliedWarns[i] = signature
+                local key = "w" .. i
+                if ids then
+                    container:SetAuraSlotCandidateFilters(key, Filters(bar, ids))
+                    container:SetAuraSlotEnabled(key, true)
+                else
+                    container:SetAuraSlotEnabled(key, false)
+                end
             end
         end
     end
@@ -1000,6 +1130,7 @@ function F:Apply(bar)
         container:SetScale(scale)
     end
     self:Ticks(bar)
+    self:Warns(bar)
 end
 
 -- Count ticks: each Debuffs bar icon's count set going at its entry's pace,
@@ -1092,4 +1223,152 @@ function F:Ticks(bar)
         if holder.slot and holder.slot.ticks then SetCount(holder.slot.ticks, seconds, shows, data, holder.size or BASE) end
         for _, ticks in ipairs(bar.groupTicks[i] or {}) do SetCount(ticks, seconds, shows, data, BASE) end
     end
+end
+
+-- Warn at: each entry's countdown red from its seconds (its fixed slot's and
+-- its packed group's icons), and its edge slot's rule: the edge, sized round
+-- its spot, under its seconds and nothing from them; nothing at all while it
+-- doesn't warn or has no spot. Out of combat only (F:Apply); each only sent
+-- as it changes, and a rule the game turns down leaves no edge.
+function F:Warns(bar)
+    local packed = self:Packed(bar.data)
+    for i = 1, ns.BUFF_SLOTS do
+        local holder, warn = bar.holders[i], bar.warns[i]
+        if holder.slot then Style:WarnText(holder.slot.cooldown, warn) end
+        local mark = holder.mark
+        if mark then
+            local seconds = not packed and warn or nil
+            local size = math.floor((holder.size or BASE) * MARK_SPREAD + .5)
+            local rule = seconds and (seconds .. ":" .. size) or ""
+            if mark.rule ~= rule then
+                local ok = pcall(function()
+                    mark.formatter:ClearBreakpoints()
+                    if seconds then
+                        mark.formatter:AddBreakpoint({ threshold = 0, format = Edge(size) })
+                        mark.formatter:AddBreakpoint({ threshold = seconds, format = "" })
+                    else
+                        mark.formatter:AddBreakpoint({ threshold = 0, format = "" })
+                    end
+                end)
+                mark.rule = ok and rule or nil -- (turned down: tried again as it next changes)
+            end
+        end
+    end
+    for _, parts in ipairs(bar.groupParts) do
+        if parts.index then Style:WarnText(parts.cooldown, bar.warns[parts.index]) end
+    end
+end
+
+-- Out of a fight, a warned buff's spot glows (the Look page's ready glow)
+-- from its seconds left, over the game's icon and clear of its edge; the
+-- glow on top of the bar's icons (the aura container sits 5 above the bar).
+local function LowGlow(bar, holder, on)
+    local host = holder.lowHost
+    if not on then
+        if host then ns.SetGlow(host, false) end
+        return
+    end
+    if not host then
+        host = CreateFrame("Frame", nil, holder)
+        host:SetPoint("CENTER")
+        host:EnableMouse(false)
+        host.top, host.glows = host, {}
+        holder.lowHost = host
+    end
+    host:SetFrameLevel(bar:GetFrameLevel() + 15)
+    local size = holder.size or BASE
+    host:SetSize(size, size)
+    ns.UseGlow(host)
+    ns.SetGlow(host, true)
+end
+
+-- Seconds left on an entry's buff on you, out of a fight: the soonest to
+-- end of its spells that are on you and run out (one that doesn't run out
+-- has no countdown to warn on). unknown: the game wouldn't say for one (a
+-- secret answer, or its time kept secret).
+local function TimeLeft(ids)
+    local auras = C_UnitAuras
+    local get = type(auras) == "table" and auras.GetPlayerAuraBySpellID
+    if type(get) ~= "function" then return nil, false end
+    local now, left, unknown = GetTime(), nil, false
+    for id in pairs(ids or {}) do
+        local ok, aura = pcall(get, id)
+        if not ok or not Open(aura) then
+            unknown = true
+        elseif type(aura) == "table" then
+            local ends = aura.expirationTime
+            if not Open(ends) then
+                unknown = true
+            elseif type(ends) == "number" and ends > 0 then
+                local this = ends - now
+                if not left or this < left then left = this end
+            end
+        end
+    end
+    return left, unknown
+end
+
+-- Whether a Buffs bar (key: Buffs unless given, or Buffs 2) reads your
+-- warned buffs' time left: with spots that stay (missing ones greyed), and
+-- any buff warned.
+function F:LowWatch(data, key)
+    return data ~= nil and self:Fixed(data) and next(ns.WarnAt(key or "buff")) ~= nil
+end
+
+-- The low-time glows on the Buffs bar's warned spots, read out of a fight:
+-- lit from the entry's seconds left until it's recast, ends or a fight
+-- starts (fighting: all out, the game's red numbers and edge take over).
+-- One with longer left sets one timer for the bar, for the soonest to cross
+-- (bar.lowDue: when); a later read for another moment stands it down, one
+-- for the same moment (your buffs changing often) leaves it be, so no
+-- timers pile up. bar.lowUnread: the game didn't answer for one, so the
+-- bars read again a moment later (Bars.lua, Again).
+local LOW_LATE = .05 -- the timer's margin past the moment, so the read finds it under
+function F:LowTime(bar, fighting)
+    if not (bar and bar.holders and ns.BAR_KIND[bar.key] == "buff" and bar.warns) then return end
+    local watch = not fighting and self:LowWatch(bar.data, bar.key) and ns.Bars:Enabled()
+    local readable = watch and Readable()
+    local soonest, unread = nil, false
+    for i = 1, ns.BUFF_SLOTS do
+        local holder, warn, lit = bar.holders[i], bar.warns[i], false
+        if watch and warn and i <= (bar.count or 0) and holder:IsShown() then
+            if readable then
+                local left, unknown = TimeLeft(bar.slotIDs[i])
+                if unknown then unread = true end
+                if left and left <= warn then
+                    lit = true
+                elseif left and (not soonest or left - warn < soonest) then
+                    soonest = left - warn
+                end
+            else
+                unread = true
+            end
+        end
+        LowGlow(bar, holder, lit)
+    end
+    bar.lowUnread = unread or nil
+    local due = soonest and GetTime() + soonest + LOW_LATE or nil
+    if due and bar.lowDue and math.abs(bar.lowDue - due) < .1 then return end
+    bar.lowTimer, bar.lowDue = (bar.lowTimer or 0) + 1, due
+    if due then
+        local timer = bar.lowTimer
+        C_Timer.After(soonest + LOW_LATE, function()
+            if bar.lowTimer ~= timer then return end
+            bar.lowDue = nil
+            F:LowTime(bar)
+        end)
+    end
+end
+
+-- For /ccm debug: entry i's warning, if it has one.
+function F:WarnReport(bar, i)
+    local warn = bar and bar.warns and bar.warns[i]
+    if not warn then return "" end
+    local holder = bar.holders[i]
+    local edge = not bar.marks and "none (the game can't)" or self:Packed(bar.data) and "none (packed)"
+        or (bar.appliedWarns[i] or "") ~= "" and ("on, rule " .. tostring(holder.mark and holder.mark.rule)) or "off"
+    local glow = holder.lowHost and holder.lowHost.glow
+    return (" | warn at %ds: red numbers %s, edge %s, low glow %s"):format(warn,
+        holder.slot and tostring(Style:Warned(holder.slot.cooldown) == warn) or "no icon yet", edge,
+        ns.BAR_KIND[bar.key] ~= "buff" and "not on Debuffs" or tostring(glow ~= nil and glow:IsShown()))
 end

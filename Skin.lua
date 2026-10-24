@@ -39,6 +39,11 @@ local sweeps = setmetatable({}, { __mode = "k" })
 local sweepHooks = setmetatable({}, { __mode = "k" })
 local painted = setmetatable({}, { __mode = "k" })
 local edged = setmetatable({}, { __mode = "k" })
+-- Settings per spell: each Essential, Utility and buff icon -> the spell
+-- look its countdown is in now (false: the Look page's), and those whose
+-- spell changes are hooked (only once any spell has a look).
+local looks = setmetatable({}, { __mode = "k" })
+local lookHooks = setmetatable({}, { __mode = "k" })
 M.decors, M.rows, M.keys = decors, rows, keys
 local hooked = {}
 local SPLIT_BOX = 46 -- the Split design's time box
@@ -102,6 +107,19 @@ local function SpellOf(item)
     return Read(item, "GetBaseSpellID")
 end
 
+-- The own look (settings per spell: a countdown font and size) of the
+-- spell an icon shows, by the spell's name as your bars list it; nil for
+-- none. Nothing is read while no spell has one.
+local function LookOf(item)
+    if not ns.HasSpellLooks() then return nil end
+    local id = SpellOf(item)
+    local get = C_Spell and C_Spell.GetSpellName
+    if not id or type(get) ~= "function" then return nil end
+    local ok, name = pcall(get, id)
+    if not ok or (issecretvalue and issecretvalue(name)) or type(name) ~= "string" then return nil end
+    return ns.SpellLook(name)
+end
+
 -- Keybinds ------------------------------------------------------------------------
 -- The key that casts each Essential and Utility icon's spell, from your action
 -- bars (Keybinds.lua), in the addon's own text on its own frame over the
@@ -130,7 +148,8 @@ end
 local function Room(item)
     local parts = keys[item]
     local keyed = parts and parts.keyed
-    local top, lift, spot = Style:CountUp(keyed), parts and parts.lift or 0, ns.Get("countdownSpot")
+    -- Lifted clear of a key only while one shows on it (not just with keybinds on).
+    local top, lift, spot = Style:CountUp(keyed), keyed == true and parts.lift or 0, ns.Get("countdownSpot")
     local was = room[item]
     if was then
         if was.top == top and was.lift == lift and was.spot == spot then return end
@@ -172,11 +191,13 @@ local function SafeShowKey(item, none)
     end
 end
 
--- Sized to the icon's own size in Blizzard's template, as the countdown is.
+-- Sized to the icon's own size in Blizzard's template, as the countdown is
+-- (at its spell's own size: settings per spell).
 local function KeyLook(item)
-    local parts = keys[item]
+    local parts, look = keys[item], looks[item]
     parts.frame:SetFrameLevel(Above(item))
-    parts.lift = Style:KeyLook(parts.text, parts.frame, parts.spec.size - 2 * INSET, Style:CountdownSize(parts.spec.size))
+    parts.lift = Style:KeyLook(parts.text, parts.frame, parts.spec.size - 2 * INSET,
+        Style:CountdownSize(parts.spec.size, look and look.size))
     Room(item)
 end
 
@@ -283,12 +304,64 @@ local function Sweep(item)
     end
 end
 
--- All of it on one icon: the countdown's size and colour, its spot (clear
--- of a key in the middle), and the swipe.
+-- All of it on one icon: the countdown's size, colour and text (Timer
+-- text), its spot (clear of a key in the middle), and the swipe.
 local function Detail(item, spec)
-    if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
+    if item.Cooldown then
+        item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, looks[item] or nil))
+        Style:TimerText(item.Cooldown)
+    end
     if keys[item] then KeyLook(item) else Room(item) end
     Sweep(item)
+end
+
+-- Settings per spell ------------------------------------------------------------
+-- A spell's own countdown font and size (set on a bar page of yours, by its
+-- tray icon) on Blizzard's icon for that spell too: the countdown's font,
+-- the cosmetic setter it always had, set again only when the look changes.
+-- Blizzard's icons are pooled and change spell, so once any spell has a
+-- look, each icon's spell being set or cleared is post-hooked to follow it.
+
+-- The icon's countdown in its spell's look now, or back in the Look page's.
+local function SpellFont(item)
+    local spec = sweeps[item]
+    if not (spec and item.Cooldown) then return end
+    local look, was = LookOf(item) or false, looks[item]
+    looks[item] = look
+    if Style:LookKey(look or nil) == Style:LookKey(was or nil) then return end
+    item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, look or nil))
+    if keys[item] then KeyLook(item) end
+end
+
+-- A failure is reported once per session, never thrown into Blizzard's code.
+local function SafeSpellFont(item)
+    local ok, err = pcall(SpellFont, item)
+    if not ok and not M.lastError then
+        M.lastError = tostring(err)
+        print("|cffffd100" .. ns.TITLE .. ":|r couldn't set a cooldown icon's own font. Please report this: " .. M.lastError)
+    end
+end
+
+-- Hooked once, as Blizzard gives the icon a spell or clears it.
+local function HookLook(item)
+    if lookHooks[item] then return end
+    lookHooks[item] = true
+    for _, method in ipairs({ "OnCooldownIDSet", "OnCooldownIDCleared" }) do
+        if type(item[method]) == "function" then
+            hooksecurefunc(item, method, function() SafeSpellFont(item) end)
+        end
+    end
+end
+
+-- As an icon is restyled: its countdown in its spell's look (or the Look
+-- page's), and hooked to follow its spell while any spell has a look.
+local function FirstLook(item, spec)
+    looks[item] = LookOf(item) or false
+    if ns.HasSpellLooks() then HookLook(item) end
+    if item.Cooldown then
+        item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, looks[item] or nil))
+        Style:TimerText(item.Cooldown)
+    end
 end
 
 -- Item frames -------------------------------------------------------------------
@@ -298,7 +371,7 @@ local function Cooldown(item, spec)
     SquareIcon(item, item.Icon)
     SquareSweep(item.Cooldown, item.Icon)
     Decorate(item, item.Icon)
-    if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
+    FirstLook(item, spec)
     Font(item.ChargeCount and item.ChargeCount.Current, Style:Count(spec.size))
     -- Out of range still tints the icon red; the modern shadow and the
     -- end-of-cooldown sparkle stay hidden.
@@ -314,7 +387,7 @@ local function Buff(item, spec)
     SquareIcon(item, item.Icon)
     SquareSweep(item.Cooldown, item.Icon)
     Decorate(item, item.Icon)
-    if item.Cooldown then item.Cooldown:SetCountdownFont(Style:Countdown(spec.size)) end
+    FirstLook(item, spec)
     Font(item.Applications and item.Applications.Applications, Style:Count(spec.size))
     Room(item)
     sweeps[item] = spec
@@ -624,6 +697,18 @@ function M:ApplyIconDetails()
             M.lastError = tostring(err)
             print("|cffffd100" .. ns.TITLE .. ":|r couldn't restyle a cooldown icon's details. Please report this: " .. M.lastError)
         end
+    end
+end
+
+-- Settings per spell changed (a look set or cleared, another profile): every
+-- Essential, Utility and buff icon in its spell's look, or the Look page's
+-- again; hooked to follow its spell from the first look on. Cosmetic
+-- setters only, so in combat too.
+function M:ApplySpellLooks()
+    local any = ns.HasSpellLooks()
+    for item in pairs(sweeps) do
+        if any then HookLook(item) end
+        SafeSpellFont(item)
     end
 end
 

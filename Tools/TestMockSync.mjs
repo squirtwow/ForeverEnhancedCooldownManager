@@ -1,6 +1,6 @@
 // Tools/TestRaidTimers.lua, Tools/TestPulse.lua, Tools/TestHelp.lua, Tools/TestLifecycle.lua,
 // Tools/TestAuraContainers.lua, Tools/TestCost.lua, Tools/TestHotPath.lua,
-// Tools/TestWidgets.lua, Tools/TestShare.lua, Tools/TestRoles.lua and Tools/TestForms.lua run on the same mock game as Tools/TestBars.lua: a copy of everything TestBars.lua
+// Tools/TestWidgets.lua, Tools/TestShare.lua, Tools/TestRoles.lua, Tools/TestForms.lua and Tools/TestExtraBars.lua run on the same mock game as Tools/TestBars.lua: a copy of everything TestBars.lua
 // builds before its first test, so each file runs on its own. This checks
 // each copy still matches. After changing TestBars' mocks, copy them across with:
 // node Tools/TestMockSync.mjs --write
@@ -24,6 +24,7 @@ const COPIES = [
   ['TestShare.lua', '-- Share: the game around it'],
   ['TestRoles.lua', '-- Roles: the game around it'],
   ['TestForms.lua', '-- Forms: the game around it'],
+  ['TestExtraBars.lua', '-- Extra bars: the game around it'],
 ];
 
 // A test file in three: its opening comment, the mock game, then its tests.

@@ -179,22 +179,33 @@ function L:IsHidden(key)
     return type(hidden) == "table" and hidden[key] == true
 end
 
+-- Whether a bar is in the layout now: not taken out, and one you have (an
+-- extra bar keeps its row while another profile is on, or it's removed).
+local function In(layout, key)
+    return key ~= nil and not layout.hidden[key] and ns.HasBar(key)
+end
+L.In = In -- and for the Layout page's drawing
+
 -- The bars in a place (above or below the display) that are in the layout.
 local function Placed(layout, place)
     local keys = {}
     for _, key in ipairs(layout[place]) do
-        if not layout.hidden[key] then keys[#keys + 1] = key end
+        if In(layout, key) then keys[#keys + 1] = key end
     end
     return keys
 end
 
--- Your widest row above or below the display, with every tile filled.
+-- Your widest row above or below the display, with every tile filled. A bar
+-- with no spells on it adds nothing (a new, empty Buffs 2 doesn't stretch the
+-- display to its 20 across).
 function L:WidestRow()
     local layout, widest = ns.LayoutData(), 0
     for _, place in ipairs({ "above", "below" }) do
         for _, key in ipairs(Placed(layout, place)) do
             local data = ns.BarData(key)
-            widest = math.max(widest, data.perRow * ns.IconSize(data) + (data.perRow - 1) * data.spacing)
+            if type(data.spells) == "table" and #data.spells > 0 then
+                widest = math.max(widest, data.perRow * ns.IconSize(data) + (data.perRow - 1) * data.spacing)
+            end
         end
     end
     return widest > 0 and widest or nil
@@ -262,7 +273,7 @@ function L:Stack()
     end
     for _, side in ipairs({ "left", "right" }) do
         local key = layout[side]
-        if key and not layout.hidden[key] then
+        if In(layout, key) then
             local data = Grow(key, side, "down")
             local x = side == "left" and display.x - display.width / 2 - gap or display.x + display.width / 2 + gap
             B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + ns.IconSize(data) / 2)
@@ -308,6 +319,11 @@ function L:Apply(key)
         end
     end
     layout.on, layout.preset, layout.base = true, key, key
+    -- An extra bar (Extra bars, Core.lua) goes under the display, last
+    -- (ns.LayoutData), with the layout's icon spacing too.
+    for _, bar in ipairs(ns.BAR_KEYS) do
+        if not ns.EXTRA_OF[bar] then ns.BarData(bar).spacing = layout.spacing end
+    end
     ns.LayoutData()
     if not ns.Bars:Enabled() then ns.Set("useBars", true) end
     ns.Bars:Rebuild()
@@ -408,7 +424,7 @@ function L:Rows()
     local layout, rows = ns.LayoutData(), {}
     for _, key in ipairs(Placed(layout, "above")) do rows[#rows + 1] = key end
     for _, side in ipairs({ "left", "right" }) do
-        if layout[side] and not layout.hidden[layout[side]] then rows[#rows + 1] = layout[side] end
+        if In(layout, layout[side]) then rows[#rows + 1] = layout[side] end
     end
     for _, key in ipairs(Placed(layout, "below")) do rows[#rows + 1] = key end
     return rows
@@ -465,7 +481,7 @@ function L:CanMoveDisplay(delta)
 end
 
 -- Moves the display up or down past one row, which changes sides of it
--- (taken-out rows on the way go with it).
+-- (taken-out rows on the way go with it, and an extra bar's you don't have).
 function L:MoveDisplay(delta)
     if InCombatLockdown() then return false, "Finish combat first." end
     if not self:CanMoveDisplay(delta) then return false end
@@ -479,7 +495,7 @@ function L:MoveDisplay(delta)
             moved = table.remove(layout.below, 1)
             table.insert(layout.above, moved)
         end
-    until not layout.hidden[moved]
+    until In(layout, moved)
     self:Stack()
     return true
 end

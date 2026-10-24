@@ -21,8 +21,9 @@
 -- their text height set, as Blizzard's times yours. Nothing is scaled or
 -- sized at 100%, and the boss frames and their cast bars never are. Icon
 -- details: a cooldown icon's or buff icon's own cooldown allows its swipe's
--- colour and its edge line (on, off and colour), the cosmetic setters only,
--- never whether it draws its swipe. Colour fade: a bar's fill allows its
+-- colour and its edge line (on, off and colour), and its countdown's text
+-- (Timer text: a formatter, and the switch to a count of minutes), the
+-- cosmetic setters only, never whether it draws its swipe. Colour fade: a bar's fill allows its
 -- gradient, a cosmetic setter too, and nothing else of Blizzard's does.
 local checks = 0
 -- Also fails on a secret the addon misused since the last check (below),
@@ -108,6 +109,9 @@ local FORBIDDEN = {
     UnregisterEvent = true, UnregisterAllEvents = true, SetAttribute = true,
     -- A cooldown's edge line: only where a part allows it (Icon details).
     SetDrawEdge = true, SetEdgeColor = true,
+    -- A cooldown's countdown text (Icon details' Timer text): only where a
+    -- part allows it; its switch is never read off Blizzard's frames.
+    SetCountdownFormatter = true, SetCountdownAbbrevThreshold = true, GetCountdownAbbrevThreshold = true,
     -- A gradient: only on a bar's fill, where it allows it (Colour fade).
     SetGradient = true,
 }
@@ -285,6 +289,11 @@ local function Counted(self) if not blizzardCalling then S[self].addonCalls = (S
 function Proto:SetSwipeColor(r, g, b, a) Counted(self); S[self].swipeColour = { r, g, b, a } end
 function Proto:SetDrawEdge(v) Counted(self); S[self].edge = v end
 function Proto:SetEdgeColor(r, g, b, a) Counted(self); S[self].edgeColour = { r, g, b, a } end
+-- Timer text: the countdown's formatter and its switch to a count of
+-- minutes (the game's own is 90 here, read off the addon's own cooldowns).
+function Proto:SetCountdownFormatter(formatter) S[self].formatter = { formatter } end
+function Proto:SetCountdownAbbrevThreshold(seconds) S[self].abbrev = seconds end
+function Proto:GetCountdownAbbrevThreshold() return S[self].abbrev or 90 end
 -- The addon's own fonts: the face each one is set in.
 function Proto:SetFont(file, size, flags) S[self].face = file .. " " .. size .. " " .. flags end
 function Proto:SetTexCoord(...)
@@ -422,7 +431,9 @@ local function CooldownItem()
     item.CooldownFlash = New("Frame", item)
     Seal(item)
     KeepsPlace(item)
-    S[item.Cooldown].allow = { SetSwipeColor = true, SetDrawEdge = true, SetEdgeColor = true } -- Icon details
+    -- Icon details: the swipe and edge line, and Timer text's two cosmetic setters on the countdown.
+    S[item.Cooldown].allow = { SetSwipeColor = true, SetDrawEdge = true, SetEdgeColor = true,
+        SetCountdownFormatter = true, SetCountdownAbbrevThreshold = true }
     return item, overlay
 end
 
@@ -435,7 +446,9 @@ local function BuffItem()
     item.Applications.Applications = New("FontString", item.Applications)
     Seal(item)
     KeepsPlace(item)
-    S[item.Cooldown].allow = { SetSwipeColor = true, SetDrawEdge = true, SetEdgeColor = true } -- Icon details
+    -- Icon details: the swipe and edge line, and Timer text's two cosmetic setters on the countdown.
+    S[item.Cooldown].allow = { SetSwipeColor = true, SetDrawEdge = true, SetEdgeColor = true,
+        SetCountdownFormatter = true, SetCountdownAbbrevThreshold = true }
     return item, overlay
 end
 
@@ -2005,6 +2018,11 @@ end
         .. "UnitHealthPercent(player, false, curve) UnitPower(player, 0) BreakUpLargeNumbers(secret) "
         .. "UnitHealthPercent(player, false, curve) UnitPowerPercent(player, 0, false, curve)",
         "Percent: the game's percent through its 0 to 100 curve, handed to the text as it is")
+    -- Percent (no sign), a player's idea: the same number with no % after it (full shows 100).
+    Pick("prdPowerCentre", "bare")
+    Equal(Said(mp.slots.centre) .. " | " .. Asked():match("UnitPowerPercent%([^)]*%)$"), "%.0f [secret] | UnitPowerPercent(player, 0, false, curve)",
+        "Percent (no sign): the game's 0 to 100 number with no % sign, handed to the text as it is")
+    Pick("prdPowerCentre", "percent")
     Pick("prdTextNumbers", "short")
     Pick("prdHealthCentre", "value")
     Equal(Said(hp.slots.centre) .. " " .. Asked():match("UnitHealth%(player%) %S+"), "%s [secret text] UnitHealth(player) AbbreviateNumbers(secret)",
@@ -2128,6 +2146,78 @@ end
         '"" | 1 couldn\'t show text', "refused: blank and quiet, one message to report")
     Equal(was .. " " .. now .. " " .. tostring(S[hp].shown) .. " " .. BlizzardText(display.HealthBarsContainer.healthBar), "000 false 111 false 111",
         "and put away at once, Blizzard's text back, staying that way")
+
+    -- Incoming heals and Absorbs at the health bar's ends, a player's idea.
+    -- Both are secret on Forever, so they're only handed on: to the game's
+    -- own calls, which write the number and leave it blank at 0, and from
+    -- them to the text; never compared, added up or joined. Their own events
+    -- are heard while one shows, and not after. Blizzard's own heal and
+    -- shield pieces on the bar are left as they are.
+    do
+        local util = _G.C_StringUtil
+        _G.UnitGetIncomingHeals = Game("UnitGetIncomingHeals", SECRET)
+        _G.UnitGetTotalAbsorbs = Game("UnitGetTotalAbsorbs", SECRET)
+        _G.C_StringUtil = { TruncateWhenZero = Game("TruncateWhenZero", WORDS), WrapString = Game("WrapString", WORDS) }
+        display = Fresh({ prdText = true, prdHealthAt = "sides", prdHealthLeft = "heals", prdHealthRight = "absorbs" })
+        local bar = display.HealthBarsContainer.healthBar
+        hp = ns.Resource.textHolders.health
+        Equal(Spots(hp) .. " | " .. Listening(hp), '"nil" | "secret" | "secret" | PLAYER_ENTERING_WORLD:true UNIT_ABSORB_AMOUNT_CHANGED:player'
+            .. " UNIT_HEALTH:player UNIT_HEAL_PREDICTION:player UNIT_MAXHEALTH:player",
+            "heals at the left and shields at the right, as the game wrote them, its heal and shield events heard too")
+        Fire("UNIT_HEAL_PREDICTION", "player")
+        Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+        local each = "UnitGetIncomingHeals(player) TruncateWhenZero(secret) WrapString(secret text, +, ) UnitGetTotalAbsorbs(player)"
+            .. " TruncateWhenZero(secret) WrapString(secret text, (, ))"
+        Equal(Asked(), each .. " " .. each, "each heal or shield change: the game's answers straight to its own blank-at-0 writer and on")
+        -- No blank-at-0 calls on this build: the number as the game writes it (0 too).
+        _G.C_StringUtil = nil
+        Fire("UNIT_HEAL_PREDICTION", "player")
+        Equal(Spots(hp) .. " | " .. Asked(), '"nil" | +%s [secret text] | (%s) [secret text] | UnitGetIncomingHeals(player)'
+            .. " BreakUpLargeNumbers(secret) UnitGetTotalAbsorbs(player) BreakUpLargeNumbers(secret)",
+            "without them: the game's own number writer, in the same marks")
+        -- None coming at all (no number): blank, nothing more asked.
+        _G.C_StringUtil = { TruncateWhenZero = Game("TruncateWhenZero", WORDS), WrapString = Game("WrapString", WORDS) }
+        _G.UnitGetIncomingHeals = Game("UnitGetIncomingHeals", nil)
+        Fire("UNIT_HEAL_PREDICTION", "player")
+        Equal(Said(hp.slots.left) .. " | " .. Asked(), '"" | UnitGetIncomingHeals(player) UnitGetTotalAbsorbs(player) TruncateWhenZero(secret)'
+            .. " WrapString(secret text, (, ))", "no number for heals: blank, never handed on")
+        -- Blizzard's own pieces: the heals' only as the restyle set them, the shield's untouched.
+        local untouched = true
+        for _, key in ipairs({ "totalAbsorb", "totalAbsorbOverlay", "overAbsorbGlow" }) do
+            local s = S[bar[key]]
+            if s.file or s.alpha ~= 1 or s.tint or next(s.calls) then untouched = false end
+        end
+        Equal(tostring(untouched) .. " " .. S[bar.myHealPrediction].alpha .. " " .. tostring(S[bar.myHealPrediction].shown),
+            "true 1 true", "Blizzard's heal and shield pieces on the bar left as they are")
+        -- Shields at the right alone, the value back at the left: still heard.
+        ns.Set("prdHealthLeft", "value")
+        ns.Resource:Apply()
+        Asked()
+        Fire("UNIT_ABSORB_AMOUNT_CHANGED", "player")
+        Equal(Spots(hp) .. " | " .. Listening(hp) .. " | " .. Asked(), '"nil" | %s [secret text] | "secret" | PLAYER_ENTERING_WORLD:true'
+            .. " UNIT_ABSORB_AMOUNT_CHANGED:player UNIT_HEALTH:player UNIT_HEAL_PREDICTION:player UNIT_MAXHEALTH:player |"
+            .. " UnitHealth(player) BreakUpLargeNumbers(secret) UnitGetTotalAbsorbs(player) TruncateWhenZero(secret)"
+            .. " WrapString(secret text, (, ))", "shields at the right alone: their event still heard, the value at the left as ever")
+        -- Back to the value and percent: their events no longer heard.
+        ns.Set("prdHealthLeft", "value")
+        ns.Set("prdHealthRight", "percent")
+        ns.Resource:Apply()
+        Equal(Spots(hp) .. " | " .. Listening(hp), '"nil" | %s [secret text] | %.0f%% [secret] | PLAYER_ENTERING_WORLD:true UNIT_HEALTH:player'
+            .. " UNIT_MAXHEALTH:player", "back to the value and percent: the heal and shield events no longer heard")
+        Equal(#printed, 0, "no errors")
+        -- A build without the calls: blank at both ends, no error.
+        _G.UnitGetIncomingHeals, _G.UnitGetTotalAbsorbs = nil, nil
+        display = Fresh({ prdText = true, prdHealthAt = "sides", prdHealthLeft = "heals", prdHealthRight = "absorbs" })
+        hp = ns.Resource.textHolders.health
+        Fire("UNIT_HEALTH", "player")
+        Equal(Spots(hp) .. " [" .. Asked() .. "] " .. #printed, '"nil" | "" | "" [] 0', "no heal or shield calls: both ends blank, quietly")
+        -- Only the health bar's ends take them: anything else saved goes back.
+        Fresh({ prdHealthCentre = "heals", prdPowerLeft = "heals", prdPowerRight = "absorbs", prdExtraLeft = "absorbs", prdEnergyRight = "heals" })
+        Equal(table.concat({ ns.Get("prdHealthCentre"), ns.Get("prdPowerLeft"), ns.Get("prdPowerRight"), ns.Get("prdExtraLeft"),
+            ns.Get("prdEnergyRight") }, " "), "value value percent value percent",
+            "heals and shields only at the health bar's ends: in its middle or on another bar, back to the default")
+        _G.C_StringUtil = util
+    end
 
     for _, name in ipairs({ "UnitHealth", "UnitHealthMax", "UnitHealthPercent", "UnitPower", "UnitPowerMax", "UnitPowerPercent",
         "BreakUpLargeNumbers", "AbbreviateNumbers", "CurveConstants" }) do
@@ -2583,12 +2673,14 @@ do
     end
     S[utility].equipSlot = nil
     Blizzard(views.utility, "OnAcquireItemFrame", utility)
-    Equal(tostring(S[small.text].shown) .. " " .. Count(utility), "false BOTTOMRIGHT true BOTTOMRIGHT -2 2",
-        "a trinket's Utility icon handed out again empty: no key either, its count at the bottom")
+    Equal(tostring(S[small.text].shown) .. " " .. Count(utility) .. " | " .. At(S[utility.Cooldown].numbers, utility.Cooldown),
+        "false BOTTOMRIGHT true BOTTOMRIGHT -2 2 | CENTER true CENTER 0 0",
+        "a trinket's Utility icon handed out again empty: no key either, its count at the bottom, its countdown back in the middle")
     S[utility].equipSlot = 13
     Blizzard(utility, "OnCooldownIDSet")
-    Equal(S[small.text].text .. " " .. tostring(S[small.text].shown) .. " " .. Count(utility), "2 true TOPRIGHT true TOPRIGHT -2 -2",
-        "and back with its trinket, its count up")
+    Equal(S[small.text].text .. " " .. tostring(S[small.text].shown) .. " " .. Count(utility) .. " | "
+        .. At(S[utility.Cooldown].numbers, utility.Cooldown), "2 true TOPRIGHT true TOPRIGHT -2 -2 | CENTER true CENTER 0 2",
+        "and back with its trinket, its count up, its countdown up clear of the key again")
     S[essential].baseSpell = nil
     Blizzard(essential, "OnCooldownIDCleared")
     Equal(tostring(S[text].shown), "false", "cleared, as for Edit Mode's placeholders: gone")
@@ -3752,6 +3844,33 @@ do
         .. Numbers(item) .. " | " .. Numbers(buff) .. " | " .. S[item.ChargeCount.Current].points[1][1],
         "FECMCountdown30 FECMCountdown24 1,0.25,0.2 | BOTTOM true BOTTOM 0 1 | BOTTOM true BOTTOM 0 1 | BOTTOMRIGHT",
         "the numbers 120% in red, along the bottom of each icon, the charge count where Blizzard keeps it")
+    -- Timer text: minutes then seconds on Blizzard's icons too, through the
+    -- two cosmetic setters each one's cooldown allows (the game's own switch
+    -- read off a cooldown of the addon's own, never Blizzard's), kept over
+    -- Blizzard's refreshes; then the game's own again.
+    do
+        local made = setmetatable({}, { __index = function() return function() end end })
+        local util, enum = _G.C_StringUtil, _G.Enum
+        _G.C_StringUtil = { CreateSecondsFormatter = function() return made end }
+        _G.Enum = setmetatable({ SecondsFormatterAbbreviation = { OneLetter = 2 }, SecondsFormatterInterval = { Seconds = 0 },
+            SecondsFormatterRounding = { RoundUp = 0 } }, { __index = enum or {} })
+        local function Text(frame)
+            local s = S[frame.Cooldown]
+            return (s.formatter == nil and "-" or s.formatter[1] == made and "m" or tostring(s.formatter[1])) .. "/" .. tostring(s.abbrev)
+        end
+        local before = Text(item) .. " " .. Text(buff)
+        ns.Set("countdownFormat", "minutes")
+        ns.Skin:ApplyIconDetails()
+        local on = Text(item) .. " " .. Text(buff)
+        Refresh()
+        local after = Text(item) .. " " .. Text(buff)
+        ns.Set("countdownFormat", "game")
+        ns.Skin:ApplyIconDetails()
+        Equal(before .. " | " .. on .. " | " .. after .. " | " .. Text(item) .. " " .. Text(buff) .. " | " .. #printed,
+            "-/nil -/nil | m/60 m/60 | m/60 m/60 | nil/90 nil/90 | 0", "Timer text: untouched till picked, then minutes then seconds"
+            .. " on each icon, kept after Blizzard's refreshes; back to the game's own formatter and switch")
+        _G.C_StringUtil, _G.Enum = util, enum
+    end
     -- A failure is reported once, never thrown into Blizzard's refresh.
     local swipe = ns.Style.Swipe
     ns.Style.Swipe = function() error("a broken swipe") end
@@ -3964,6 +4083,169 @@ do
         "refused: flat in its colour, every bar after it flat too, nothing said")
     _G.CreateColor = nil
     Equal(#printed, 0, "no errors")
+end
+
+-- Settings per spell on Blizzard's icons ---------------------------------------------------
+-- A spell's own countdown font and size (set on a bar page of the addon's
+-- own, kept by entry in the profile) on Blizzard's Essential, Utility and
+-- buff icons for that spell, by its name: the countdown's font only, the
+-- cosmetic setter it always had, set again only when the look changes.
+-- With no spell given a look nothing more is read or hooked; from the first
+-- one, each icon's spell being set or cleared is post-hooked to follow it.
+-- A spell kept secret in a fight gets the Look page's. The key on an icon
+-- stays clear of a countdown at its own size.
+do
+    Environment()
+    local v = Viewers(1)
+    local slots, keyOf = {}, {}
+    _G.C_Timer = { After = function(_, fn) fn() end }
+    _G.GetActionInfo = function(slot) local a = slots[slot]; if a then return a[1], a[2], a[3] end end
+    _G.GetBindingKey = function(binding) return keyOf[binding] end
+    _G.GetInventoryItemID = function() return nil end
+    _G.C_Spell = { GetSpellName = function(id) return ({ [8921] = "Moonfire", [8924] = "Moonfire", [5176] = "Wrath", [467] = "Thorns" })[id] end }
+    _G.issecretvalue = function(value) return rawequal(value, SECRET) end
+    local ns = Load(nil)
+    local item, utility, buff = First(v.essentialActive), First(v.utilityActive), First(v.buffsActive)
+    local function Fonts()
+        return S[item.Cooldown].countdownFont .. " " .. S[utility.Cooldown].countdownFont .. " " .. S[buff.Cooldown].countdownFont
+    end
+    local function At(region, anchor)
+        local p = S[region].points[1]
+        if not p then return "unmoved" end
+        return p[1] .. " " .. tostring(p[2] == anchor) .. " " .. p[3] .. " " .. p[4] .. " " .. p[5]
+    end
+    -- No spell with a look: Blizzard's icons as before, nothing read for them.
+    local reads, GetBase = 0, Proto.GetBaseSpellID
+    function Proto:GetBaseSpellID()
+        reads = reads + 1
+        return GetBase(self)
+    end
+    S[item].baseSpell, S[buff].baseSpell = 8924, 467
+    Blizzard(item, "OnCooldownIDSet")
+    Blizzard(buff, "OnCooldownIDSet")
+    ns.Skin:ApplySpellLooks()
+    Equal(Fonts() .. " " .. reads .. " " .. tostring(ns.HasSpellLooks()), "FECMFont25 FECMFont15 FECMFont20 0 false",
+        "no spell with a look of its own: every icon as before, and nothing read for it")
+    Proto.GetBaseSpellID = GetBase
+
+    -- A look only for an entry on one of your lists, each field checked.
+    local lists = ns.ProfileLists()
+    lists.cd, lists.buff = { "Moonfire" }, { "Thorns" }
+    Equal(table.concat({ tostring(ns.SetSpellLook("Moonfire", "font", "barlow")), tostring(ns.SetSpellLook("Moonfire", "size", 120)),
+        tostring(ns.SetSpellLook("Moonfire", "size", 120)), tostring(ns.SetSpellLook("Wrath", "font", "fira")),
+        tostring(ns.SetSpellLook("Thorns", "font", "comic")), tostring(ns.SetSpellLook("Thorns", "size", 151)),
+        tostring(ns.SetSpellLook("Thorns", "size", 72.5)), tostring(ns.SetSpellLook("Thorns", "colour", "red")) }, " "),
+        "true true false false false false false false",
+        "a font and size for a spell on a list; the same again, one on no list, an odd font, size or field: nothing kept")
+    Equal(ns.Style:LookKey(ns.SpellLook("Moonfire")) .. " " .. tostring(ns.SpellLook("Thorns")) .. " " .. tostring(ns.HasSpellLooks()),
+        "barlow/120 nil true", "kept by entry, none for the rest")
+    ns.Skin:ApplySpellLooks()
+    Equal(Fonts() .. " | " .. S[_G.FECMFontbarlow30].face, "FECMFontbarlow30 FECMFont15 FECMFont20 | "
+        .. "Interface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Fonts\\BarlowSemiCondensed-SemiBold.ttf 30 THICKOUTLINE",
+        "Moonfire's icon in Barlow at 120% of its size (25 to 30), from the addon's own folder; the rest as before")
+
+    -- Pooled icons change spell: the look follows, set only when it changes.
+    local sets, SetFont = 0, Proto.SetCountdownFont
+    function Proto:SetCountdownFont(font)
+        if self == item.Cooldown then sets = sets + 1 end
+        return SetFont(self, font)
+    end
+    S[item].baseSpell = 5176
+    Blizzard(item, "OnCooldownIDSet")
+    local wrath = S[item.Cooldown].countdownFont
+    S[item].baseSpell = 8924
+    Blizzard(item, "OnCooldownIDSet")
+    Blizzard(item, "OnCooldownIDSet")
+    Equal(wrath .. " " .. S[item.Cooldown].countdownFont .. " " .. sets, "FECMFont25 FECMFontbarlow30 2",
+        "given Wrath: the Look page's; Moonfire again: its own; the same spell again: nothing set")
+    S[item].baseSpell = nil
+    Blizzard(item, "OnCooldownIDCleared")
+    Equal(S[item.Cooldown].countdownFont .. " " .. sets, "FECMFont25 3", "cleared: the Look page's")
+    Proto.SetCountdownFont = SetFont
+
+    -- A buff icon too, hooked once any spell has a look.
+    ns.SetSpellLook("Thorns", "size", 50)
+    ns.Skin:ApplySpellLooks()
+    Equal(S[buff.Cooldown].countdownFont, "FECMFont10", "Thorns' buff icon at half its size (20 to 10)")
+    S[buff].baseSpell = 8924
+    Blizzard(buff, "OnCooldownIDSet")
+    Equal(S[buff.Cooldown].countdownFont, "FECMFontbarlow24", "the buff icon given Moonfire follows it (its 40 icon: 20 to 24)")
+    S[buff].baseSpell = 467
+    Blizzard(buff, "OnCooldownIDSet")
+
+    -- A spell kept secret in a fight: the Look page's, no error, nothing misused.
+    combat = true
+    S[item].baseSpell = SECRET
+    Blizzard(item, "OnCooldownIDSet")
+    Equal(S[item.Cooldown].countdownFont .. " " .. #printed, "FECMFont25 0", "a secret spell in a fight: the Look page's")
+    S[item].baseSpell = 8924
+    Blizzard(item, "OnCooldownIDSet")
+    Equal(S[item.Cooldown].countdownFont, "FECMFontbarlow30", "in a fight too, as the countdown's font is only a setter")
+    combat = false
+
+    -- Icon details keep each icon's look: a coloured countdown in its own font.
+    ns.Set("countdownColour", "gold")
+    ns.Skin:ApplyIconDetails()
+    Equal(Fonts() .. " | " .. table.concat(S[_G.FECMCountdownbarlow30].textColour, ",") .. " " .. S[_G.FECMCountdownbarlow30].face,
+        "FECMCountdownbarlow30 FECMCountdown15 FECMCountdown10 | 1,0.82,0 "
+        .. "Interface\\AddOns\\ForeverEnhancedCooldownManager\\Media\\Fonts\\BarlowSemiCondensed-SemiBold.ttf 30 THICKOUTLINE",
+        "gold numbers: in each icon's own font and size")
+    ns.Set("countdownColour", "white")
+    ns.Skin:ApplyIconDetails()
+
+    -- The key stays clear of the countdown at its own size.
+    slots[1], keyOf.ACTIONBUTTON1 = { "spell", 8921 }, "SHIFT-1"
+    ns.Set("keybinds", true)
+    ns.Keybinds:Update()
+    ns.Skin:ApplyKeybinds()
+    local numbers = S[item.Cooldown].numbers
+    local _, lift = ns.Style:KeyFit(46, 30, "BOTTOM", 100)
+    Equal(S[ns.Skin.keys[item].text].text .. " " .. At(numbers, item.Cooldown), "S1 CENTER true CENTER 0 " .. lift,
+        "keyed: the countdown at 120% moves up clear of the key (" .. lift .. ")")
+    ns.SetSpellLook("Moonfire", "size", 150)
+    ns.Skin:ApplySpellLooks()
+    local _, bigger = ns.Style:KeyFit(46, 38, "BOTTOM", 100)
+    Equal(tostring(bigger > lift) .. " " .. At(numbers, item.Cooldown) .. " " .. S[item.Cooldown].countdownFont, "true CENTER true CENTER 0 "
+        .. bigger .. " FECMFontbarlow38", "bigger: further up")
+
+    -- Both back to the Look page's: the icons as before, and no look kept.
+    ns.SetSpellLook("Moonfire", "font", nil)
+    ns.SetSpellLook("Moonfire", "size", nil)
+    ns.SetSpellLook("Thorns", "size", nil)
+    ns.Skin:ApplySpellLooks()
+    Equal(Fonts() .. " " .. At(numbers, item.Cooldown) .. " " .. tostring(ns.HasSpellLooks()) .. " " .. tostring(lists.spellLook),
+        "FECMFont25 FECMFont15 FECMFont20 CENTER true CENTER 0 0 false nil", "back to the Look page's: as before, and nothing kept")
+    Equal(#printed .. " " .. tostring(next(item)) .. " " .. tostring(next(buff)), "0 nil nil", "no errors, nothing written on Blizzard's icons")
+    _G.issecretvalue, _G.C_Spell = nil, nil
+end
+
+-- The looks are the profile's: a character only known at login gets its
+-- profile's looks on Blizzard's icons then, and each profile switched to
+-- puts its own on them (or the Look page's back, for one with none).
+do
+    Environment()
+    local v = Viewers(1)
+    local guid
+    _G.UnitGUID = function() return guid end
+    _G.C_Spell = { GetSpellName = function(id) return ({ [8924] = "Moonfire" })[id] end }
+    local item = First(v.essentialActive)
+    S[item].baseSpell = 8924
+    local ns = Load({ chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {}, spellLook = { Moonfire = { font = "barlow", size = 120 } } },
+        Plain = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } } })
+    local function Now() return S[item.Cooldown].countdownFont .. " " .. tostring(ns.ProfileName()) end
+    local before = Now()
+    guid = "Player-1-0001"
+    Fire("PLAYER_LOGIN")
+    local login = Now()
+    ns.UseProfile("Plain")
+    local plain = Now()
+    ns.UseProfile("Mine")
+    Equal(before .. " | " .. login .. " | " .. plain .. " | " .. Now(),
+        "FECMFont25 nil | FECMFontbarlow30 Mine | FECMFont25 Plain | FECMFontbarlow30 Mine",
+        "the character known at login: its profile's look; switched to one with none: the Look page's; and back")
+    Equal(#printed .. " " .. tostring(next(item)), "0 nil", "no errors, nothing written on Blizzard's icon")
+    _G.UnitGUID, _G.C_Spell = nil, nil
 end
 
 -- Nothing was ever left on a sealed frame, even by rawset, which skips the seal.

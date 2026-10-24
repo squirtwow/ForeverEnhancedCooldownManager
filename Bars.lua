@@ -10,7 +10,8 @@ local B = {}
 ns.Bars = B
 
 local Style = ns.Style
-local DEFAULT_Y = { debuff = 278, buff = 234, cd = 190, util = 146 } -- just above the action bar
+-- Just above the action bar, an extra bar (Extra bars, Core.lua) higher up.
+local DEFAULT_Y = { debuff = 278, buff = 234, cd = 190, util = 146, debuff2 = 322, buff2 = 366, util2 = 410, cd2 = 454 }
 -- Blizzard's own Cooldown Manager tints.
 local TINT = {
     ready = { 1, 1, 1 },
@@ -484,12 +485,57 @@ local function Outline(bar, frames, count, across, rows, size, step, data)
     bar.short = true
 end
 
+-- Icons with sizes of their own (settings per spell, frame.ownSize: a
+-- player's idea), in rows of up to perRow as below: each row as wide as its
+-- icons and as tall as its biggest, each icon centred in its row's height,
+-- the rows lined up by the bar's grow choice. The bar is at least as big as
+-- its rows would be at its own size, and as room would keep it. No box round
+-- a short last row: its icons aren't one size.
+local function Sized(bar, frames, count, data, room, size, spacing)
+    local across = math.max(1, math.min(data.perRow, room))
+    local lines, under = math.ceil(room / across), spacing + (data.showNames and NAMES or 0)
+    local widths, heights, widest = {}, {}, across * size + (across - 1) * spacing
+    for line = 1, lines do
+        local first, last = (line - 1) * across + 1, math.min(line * across, count)
+        local width, height = 0, size -- a row kept only for room is at the bar's size
+        if first <= last then height = 0 end
+        for i = first, last do
+            local own = frames[i].ownSize or size
+            width, height = width + own + (i > first and spacing or 0), math.max(height, own)
+        end
+        widths[line], heights[line] = width, height
+        widest = math.max(widest, width)
+    end
+    local y = 0
+    for line = 1, lines do
+        local first, last = (line - 1) * across + 1, math.min(line * across, count)
+        local x = data.grow == "left" and widest or data.grow == "right" and 0 or (widest - widths[line]) / 2
+        for i = first, last do
+            local frame = frames[i]
+            local own = frame.ownSize or size
+            local inset = (heights[line] - own) / 2
+            if data.grow == "left" then x = x - own end
+            frame:ClearAllPoints()
+            if data.wrap == "up" then
+                frame:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", x, y + inset)
+            else
+                frame:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -(y + inset))
+            end
+            x = data.grow == "left" and x - spacing or x + own + spacing
+        end
+        y = y + heights[line] + (line < lines and under or 0)
+    end
+    Whole(bar)
+    return widest, y
+end
+
 -- Rows of up to perRow icons (or aura spots). Each row lines up by the bar's
 -- grow choice: centred, from the right edge (growing left, first icon on the
 -- right) or from the left edge; a new row goes below or above. Icons are at
--- their size on screen (ns.IconSize). Returns the bar's size. With room, the
--- bar keeps its size for that many (the Buffs bar's Only show missing: the
--- spots showing are fewer than its entries), and the ones there line up in it.
+-- their size on screen (ns.IconSize), or one of their own (Sized). Returns
+-- the bar's size. With room, the bar keeps its size for that many (the Buffs
+-- bar's Only show missing: the spots showing are fewer than its entries),
+-- and the ones there line up in it.
 function B:Arrange(bar, frames, count, data, room)
     local size, spacing = ns.IconSize(data), data.spacing
     room = math.max(room or count, count)
@@ -497,6 +543,9 @@ function B:Arrange(bar, frames, count, data, room)
     if room < 1 then
         Whole(bar)
         return 3 * size + 2 * spacing, size
+    end
+    for i = 1, count do
+        if frames[i].ownSize then return Sized(bar, frames, count, data, room, size, spacing) end
     end
     local across = math.max(1, math.min(data.perRow, room))
     local rows = math.ceil(room / across)
@@ -575,13 +624,20 @@ local function Place(bar)
     end
 end
 
-local function SavePosition(bar)
+-- Where a bar is on screen now: the point it's held by (Point), from the
+-- middle of the screen. Nil before it has a place.
+local function Where(bar)
     local x, y = bar:GetCenter()
     local cx, cy = UIParent:GetCenter()
-    if not (x and cx) then return end
-    local point = Point(bar.data)
-    local offsetX, offsetY = Offset(point, bar:GetWidth() or 0, bar:GetHeight() or 0)
-    bar.data.x, bar.data.y, bar.data.point = Round(x - cx + offsetX), Round(y - cy + offsetY), point
+    if not (x and cx) then return nil end
+    local offsetX, offsetY = Offset(Point(bar.data), bar:GetWidth() or 0, bar:GetHeight() or 0)
+    return Round(x - cx + offsetX), Round(y - cy + offsetY)
+end
+
+local function SavePosition(bar)
+    local x, y = Where(bar)
+    if not x then return end
+    bar.data.x, bar.data.y, bar.data.point = x, y, (Point(bar.data))
     -- A bar moved by hand leaves the layout it was stacked in.
     if ns.Layout then ns.Layout:Moved() end
     Place(bar)
@@ -611,6 +667,8 @@ local function Drop(bar)
     bar:StopMovingOrSizing()
     if bar.SetUserPlaced then bar:SetUserPlaced(false) end
     SavePosition(bar)
+    -- The Layout page's numbers (and what it says) show where it went.
+    if ns.window and ns.window:IsShown() then ns.window:Refresh() end
 end
 
 -- The border and shadow round a whole bar, when chosen, only go round icons
@@ -793,6 +851,8 @@ local function NewBar(key)
     mover:SetScript("OnDragStart", function()
         if not Locked(bar) then
             bar.dragging = true
+            -- The Layout page's numbers follow the bar you last dragged.
+            B.moving = key
             bar:StartMoving()
         end
     end)
@@ -845,7 +905,7 @@ local function LayoutAuras(bar, data)
         ns.BuffBar:Create(bar)
     end
     ns.BuffBar:Layout(bar, data)
-    if ns.BuffBar:Watches(bar.key, data) then Again(bar) end
+    if ns.BuffBar:Watches(bar.key, data) or bar.lowUnread then Again(bar) end
     -- Fixed spots go in rows like icons; packed buffs are laid out by the
     -- game in one row (after the spots of buffs ticked Only when missing,
     -- placed by Buffs.lua). With Only show missing the spots showing close
@@ -874,8 +934,9 @@ local function Room(icon)
     Style:KeyRoom(icon.count, icon, 1, Numbers(icon.cooldown), icon.cooldown, icon.lift or 0, icon.keyed)
 end
 
+-- (Clear of the icon's countdown at its own size: settings per spell.)
 local function KeyLook(icon, size)
-    icon.lift = Style:KeyLook(icon.key, icon, size, Style:CountdownSize(size))
+    icon.lift = Style:KeyLook(icon.key, icon, size, Style:CountdownSize(size, icon.look and icon.look.size))
     Room(icon)
 end
 
@@ -917,18 +978,25 @@ local function Layout(bar)
             count = count + 1
             local icon = bar.icons[count] or NewIcon(bar)
             bar.icons[count] = icon
-            icon:SetSize(size, size)
-            icon.cooldown:SetCountdownFont(Style:Countdown(size))
+            -- At its own size on this bar, if it has one (settings per spell),
+            -- with everything on it sized for that.
+            local own = ns.IconSizeFor(bar.key, name, size)
+            icon.size, icon.ownSize = own, own ~= size and own or nil
+            icon:SetSize(own, own)
+            -- Its countdown in the spell's own font and size, if it has them
+            -- (settings per spell), else the Look page's.
+            icon.look = ns.SpellLook(name)
+            icon.cooldown:SetCountdownFont(Style:Countdown(own, icon.look))
             icon.cooldown:SetHideCountdownNumbers(not data.showTimer)
-            icon.count:SetFontObject(Style:Count(size))
+            icon.count:SetFontObject(Style:Count(own))
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
             icon.kind, icon.itemID, icon.slot, icon.current = entry.kind, entry.itemID, entry.slot, entry.current
             WatchRange(icon, on and not ITEM_KINDS[entry.kind] and entry.spellID or nil)
-            KeyLook(icon, size)
+            KeyLook(icon, own)
             ShowKey(icon)
             icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
             icon.count:SetText("")
-            icon.label:SetWidth(size + spacing)
+            icon.label:SetWidth(own + spacing)
             icon.label:SetText(Label(entry))
             icon.label:SetShown(data.showNames)
             icon:Show()
@@ -980,6 +1048,13 @@ local function Missing(bar, all)
     if not ns.BuffBar:Packed(bar.data) then B:Arrange(bar, spots, #spots, bar.data, bar.count) end
 end
 
+-- The same for each Buffs bar you have (Buffs 2 too), with all.
+local function MissingAll()
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if ns.BAR_KIND[key] == "buff" then Missing(bars[key], true) end
+    end
+end
+
 -- Public ------------------------------------------------------------------------------
 
 function B:Enabled()
@@ -999,7 +1074,8 @@ local function ReportEntry(bar, i, say)
         only = (ns.BuffBar:OnlyMissing(bar.data) and "" or " | only when missing")
             .. " | on you " .. tostring(bar.up ~= nil and bar.up[i] == true)
     end
-    return ("  %d. %s | spells %s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only)
+    return ("  %d. %s | spells %s%s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only,
+        ns.BuffBar:WarnReport(bar, i))
 end
 
 -- For /ccm debug (Debug.lua): each of your bars and the icons on it as they
@@ -1011,6 +1087,19 @@ end
 -- answer into "secret".
 function B:Report(add, say)
     add("Use my bars: " .. tostring(self:Enabled()))
+    -- Extra bars in your profile (Core.lua), and icons with sizes of their own.
+    local extras, sizes = {}, {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if not ns.EXTRA_OF[key] then extras[#extras + 1] = key end
+        local names = {}
+        for name, percent in pairs(type(ns.ProfileLists().iconSize) == "table" and ns.ProfileLists().iconSize[key] or {}) do
+            names[#names + 1] = say(name) .. " " .. tostring(percent) .. "%"
+        end
+        table.sort(names)
+        if #names > 0 then sizes[#sizes + 1] = key .. ": " .. table.concat(names, ", ") end
+    end
+    add(("Extra bars: %s | icon sizes: %s"):format(#extras > 0 and table.concat(extras, ", ") or "none",
+        #sizes > 0 and table.concat(sizes, "; ") or "none"))
     for _, key in ipairs(ns.BAR_KEYS) do
         local bar = bars[key]
         if bar then
@@ -1042,7 +1131,7 @@ function B:Report(add, say)
                 end
                 add(("  when ready %s, on cooldown %s, dim when you can't cast it %s, dimmed icons %s%%"):format(
                     tostring(data.whenReady), tostring(data.onCooldown), tostring(data.dimUnusable), tostring(data.dimOpacity)))
-            elseif key == "debuff" then
+            elseif ns.BAR_KIND[key] == "debuff" then
                 -- Its greyed spots: ticked, kept with no target, and up now
                 -- (a player asking why they go without one).
                 local data = bar.data
@@ -1111,10 +1200,11 @@ function B:ApplyFont()
     end
 end
 
--- Keybinds placed and sized as chosen on the Look page.
+-- Keybinds placed and sized as chosen on the Look page (each icon at the
+-- size it's laid out at: its own, settings per spell).
 function B:ApplyKeybinds()
     EachKey(function(icon, bar)
-        KeyLook(icon, ns.IconSize(bar.data))
+        KeyLook(icon, icon.size or ns.IconSize(bar.data))
         ShowKey(icon)
     end)
 end
@@ -1133,9 +1223,10 @@ function B:ApplyIconDetails()
         local size = bar.data and ns.IconSize(bar.data)
         for _, icon in ipairs(bar.icons or {}) do
             Style:CooldownLook(icon.cooldown)
-            if size then
-                icon.cooldown:SetCountdownFont(Style:Countdown(size))
-                KeyLook(icon, size)
+            local own = icon.size or size
+            if own then
+                icon.cooldown:SetCountdownFont(Style:Countdown(own, icon.look))
+                KeyLook(icon, own)
             end
         end
         AuraDetails(bar)
@@ -1193,12 +1284,14 @@ function B:UpdateShown()
     local on = self:Enabled()
     if not on then unlocked = false end
     local awake = Awake()
-    for _, key in ipairs(ns.BAR_KEYS) do
+    -- Every bar made: an extra bar you don't have now (removed, or another
+    -- profile's) is laid out empty (Rebuild) and goes, as one taken out does.
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
         local bar = bars[key]
         if bar then
             local mode = awake and "show" or bar.data.outOfCombat
             -- A bar taken out of your layout doesn't show at all.
-            local out = ns.Layout ~= nil and ns.Layout:IsHidden(key)
+            local out = ns.Layout ~= nil and ns.Layout:IsHidden(key) or not ns.HasBar(key)
             if bar.kind == "aura" then
                 -- Shown whenever it has entries (or your debuffs on you
                 -- ticked), never in a fight; hiding out of combat fades it
@@ -1251,7 +1344,7 @@ function B:SetUnlocked(value)
     -- and so do buffs on you with Only show missing.
     if self.started and was ~= unlocked then
         Relay()
-        Missing(bars.buff, true)
+        MissingAll()
     end
     self:UpdateShown()
     self:RefreshAll()
@@ -1312,6 +1405,17 @@ local function Rebuild()
             -- the driver didn't hear that fight end, so it's done now.
             if bar.pendingDecor then GroupDecor(bar) end
             if bar.pendingDetails then AuraDetails(bar) end
+            bar.retired = nil
+        end
+        -- An extra bar you don't have now (removed, or another profile's):
+        -- frames can't be thrown away, so it's laid out once with nothing on
+        -- it (its aura slots and range checks off) and goes (UpdateShown).
+        for _, key in ipairs(ns.ALL_BAR_KEYS) do
+            local bar = bars[key]
+            if bar and not ns.HasBar(key) and not bar.retired then
+                Layout(bar)
+                bar.retired = not bar.pendingLayout or nil
+            end
         end
     end
     B:UpdateShown()
@@ -1334,7 +1438,9 @@ function B:Changed()
     self:Rebuild()
 end
 
-local SPELL_BARS = { "cd", "util" }
+-- The cooldown bars a spell can be on, Cooldowns' first (a spell on both
+-- shows there), then Utility, then an extra one (Cooldowns 2, Utility 2).
+local SPELL_BARS = { "cd", "util", "cd2", "util2" }
 
 local function IndexOf(key, name)
     for i, spell in ipairs(ns.BarData(key).spells) do
@@ -1345,7 +1451,7 @@ end
 -- The cooldown bar a spell is on, and its place there.
 function B:Find(name)
     for _, key in ipairs(SPELL_BARS) do
-        local index = IndexOf(key, name)
+        local index = ns.HasBar(key) and IndexOf(key, name)
         if index then return key, index end
     end
 end
@@ -1415,7 +1521,7 @@ end
 function B:FamilyHere(key, name)
     if not (ns.AURA_BARS[key] and ns.Get("groupFamilies")) then return nil end
     local family = self:Family(name)
-    return family and family.bar == key and family or nil
+    return family and family.bar == ns.BAR_KIND[key] and family or nil
 end
 
 -- Group one-at-a-time spells (the General page) ticked or unticked: unticked
@@ -1426,8 +1532,8 @@ function B:SetFamilies(on)
     if ns.Get("groupFamilies") == on then return true end
     ns.Set("groupFamilies", on)
     if not on then
-        for key in pairs(ns.AURA_BARS) do
-            if self:SlotsUsed(key) > ns.BUFF_SLOTS then
+        for _, key in ipairs(ns.BAR_KEYS) do
+            if ns.AURA_BARS[key] and self:SlotsUsed(key) > ns.BUFF_SLOTS then
                 ns.Set("groupFamilies", true)
                 return false, ns.BAR_NAMES[key] .. " has no room to split them: take a spell or two off it first."
             end
@@ -1536,20 +1642,36 @@ end
 
 -- An aura bar's entry gone from its list (not just moved along it): its own
 -- choices go with it (the icon shown faded, Glow when missing, Count ticks,
--- Only when missing), so putting it back starts afresh, as after a reload
--- (Core.lua Lists).
+-- Only when missing, Warn at), so putting it back starts afresh, as after a
+-- reload (Core.lua Lists). Any bar's: its own countdown look too (settings
+-- per spell), once none of your lists has it.
 local function Forget(key, name)
+    if name then
+        ns.ForgetSpellLook(name)
+        -- And its icon's own size on this bar, once none of its lists has it.
+        ns.ForgetOwnSize(key, name)
+    end
     if not (ns.AURA_BARS[key] and name) then return name end
     ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
-    if key == "buff" then ns.OnlyWhenMissing(key)[name] = nil end
+    if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name] = nil end
+    ns.SetWarnAt(key, name, nil)
     return name
 end
 
 -- Takes an entry off the other cooldown bar's lists that show beside this
 -- bar's list now (ns.BesideLists): with Swap with my form the two bars'
 -- lists can differ by form, and a spell sits on one of the two in each.
+-- An extra cooldown bar (Cooldowns 2, Utility 2) never swaps: a spell on it
+-- is on no other cooldown bar's list, in any form, and one put on another
+-- comes off it.
 local function Apart(key, name)
-    for _, list in ipairs(ns.BesideLists(key, ns.ShownForm(key))) do
+    local lists = ns.BesideLists(key, ns.ShownForm(key))
+    for _, other in ipairs(SPELL_BARS) do
+        if other ~= key and ns.HasBar(other) and (not ns.CanSwap(other) or not ns.CanSwap(key)) then
+            for _, list in ipairs(ns.BarLists(other)) do lists[#lists + 1] = list end
+        end
+    end
+    for _, list in ipairs(lists) do
         for i = #list, 1, -1 do
             if list[i] == name then table.remove(list, i) end
         end
@@ -1563,7 +1685,11 @@ function B:Assign(name, key)
     local current, index = self:Find(name)
     if current == key then return true end
     if key and not Space(key, name) then return false end
-    if current then Take(current, index) end
+    if current then
+        Take(current, index)
+        ns.ForgetOwnSize(current, name)
+    end
+    if not key then ns.ForgetSpellLook(name) end
     if key then
         if not IndexOf(key, name) then
             local spells = ns.BarData(key).spells
@@ -1644,7 +1770,7 @@ function B:Fits(key, entry, byID)
     if ns.AURA_BARS[key] and entry.kind == "rank" then
         return false, "Fixed ranks can't go on the " .. bar .. " bar, which counts every rank already."
     end
-    if entry.kind == "proc" and key ~= "buff" then
+    if entry.kind == "proc" and ns.BAR_KIND[key] ~= "buff" then
         return false, "Procs only go on the Buffs bar."
     end
     local passive = not byID and ns.Spells:PassiveNote(entry.key, key)
@@ -2039,14 +2165,14 @@ end
 -- missing does for every buff (Buffs.lua). Not on the Debuffs bar: your
 -- target's debuffs change in a fight, when the addon can't read them.
 function B:SetOnlyWhenMissing(key, name, on)
-    if key ~= "buff" or not IndexOf(key, name) then return false end
+    if ns.BAR_KIND[key] ~= "buff" or not IndexOf(key, name) then return false end
     ns.OnlyWhenMissing(key)[name] = on and true or nil
     self:Changed()
     return true
 end
 
 function B:OnlyWhenMissing(key, name)
-    return key == "buff" and ns.OnlyWhenMissing(key)[name] == true
+    return ns.BAR_KIND[key] == "buff" and ns.OnlyWhenMissing(key)[name] == true
 end
 
 -- Whether a buff's icon has a greyed spot while it's missing (for Glow when
@@ -2057,7 +2183,7 @@ function B:MissingSpot(key, name)
     local data = ns.BarData(key)
     if not ns.BuffBar:Packed(data) then return true end
     local index = IndexOf(key, name)
-    if key ~= "buff" or not index then return false end
+    if ns.BAR_KIND[key] ~= "buff" or not index then return false end
     local first, last = Group(key, index)
     for i = first, last do
         local spell = data.spells[i]
@@ -2076,14 +2202,129 @@ function B:TickPace(name)
 end
 
 function B:SetCountTicks(key, name, on)
-    if key ~= "debuff" or not IndexOf(key, name) or not self:TickPace(name) then return false end
+    if ns.BAR_KIND[key] ~= "debuff" or not IndexOf(key, name) or not self:TickPace(name) then return false end
     ns.CountTicks(key)[name] = on and true or nil
     self:Changed()
     return true
 end
 
 function B:CountsTicks(key, name)
-    return key == "debuff" and ns.CountTicks(key)[name] == true
+    return ns.BAR_KIND[key] == "debuff" and ns.CountTicks(key)[name] == true
+end
+
+-- Warn at N seconds left (a player's idea: Siphon Life with 3 seconds left
+-- on the target, Demon Armor with 10 minutes left on you): an entry on the
+-- Buffs or Debuffs bar whose icon warns as its time runs low (seconds; nil
+-- or 0 for none). The game draws it, as the addon can't read an aura's time
+-- in a fight (Buffs.lua F:Warns): its countdown turns red, a red edge shows
+-- round a fixed spot, and out of a fight your own buff's spot glows. The
+-- icons change once out of a fight. False for an entry not on that bar.
+function B:SetWarnAt(key, name, seconds)
+    if seconds == 0 then seconds = nil end
+    if not ns.AURA_BARS[key] or not IndexOf(key, name) or (seconds ~= nil and not ns.WarnValue(seconds)) then return false end
+    if ns.SetWarnAt(key, name, seconds) then self:Changed() end
+    return true
+end
+
+function B:WarnAt(key, name)
+    if not ns.AURA_BARS[key] then return nil end
+    return ns.WarnAt(key)[name]
+end
+
+-- Whether an entry's warning can show: not on the Buffs bar with Only show
+-- missing, nor for a buff ticked Only when missing or joined to one (it has
+-- no icon while it's up).
+function B:WarnUsable(key, name)
+    if not ns.AURA_BARS[key] then return false end
+    if ns.BAR_KIND[key] ~= "buff" then return true end
+    if ns.BarData(key).onlyMissing then return false end
+    local index = IndexOf(key, name)
+    if not index then return false end
+    local first, last = Group(key, index)
+    for i = first, last do
+        if self:OnlyWhenMissing(key, ns.BarData(key).spells[i]) then return false end
+    end
+    return true
+end
+
+-- Settings per spell (a player's idea: a font and size per icon): an
+-- entry's own countdown font and size (field "font" or "size"; nil for the
+-- Look page's again), set in the panel its tray icon opens on a bar's page.
+-- Your bars' icons change at once, in a fight too; the Buffs and Debuffs
+-- bars' and the buff and debuff times over your icons (the game's aura
+-- containers' icons) once out of a fight; Blizzard's icons for its spell
+-- at once (a cosmetic setter). True when it changed.
+function B:SetSpellLook(name, field, value)
+    if not ns.SetSpellLook(name, field, value) then return false end
+    self:ApplySpellLooks()
+    return true
+end
+
+-- Both back to the Look page's (the panel's Defaults). True when it changed.
+function B:ClearSpellLook(name)
+    local font = ns.SetSpellLook(name, "font", nil)
+    local size = ns.SetSpellLook(name, "size", nil)
+    if not (font or size) then return false end
+    self:ApplySpellLooks()
+    return true
+end
+
+-- Every bar made laid out again with the looks as they are now (each
+-- slider step sends one, so nothing is read again), and Blizzard's icons.
+function B:ApplySpellLooks()
+    if self.started then
+        for _, key in ipairs(ns.BAR_KEYS) do
+            if bars[key] then Layout(bars[key]) end
+        end
+        self:UpdateShown()
+        self:RefreshAll()
+    end
+    if ns.Skin and ns.Skin.started then ns.Skin:ApplySpellLooks() end
+end
+
+-- An icon's own size on a bar (settings per spell; a player's idea: more
+-- control over each icon's size): a percent of the bar's icon size, or nil
+-- for the bar's again, set in the panel its tray icon opens. Your Cooldowns
+-- and Utility icons change at once, in a fight too (the addon's own frames);
+-- a Buffs or Debuffs bar's fixed spots once out of a fight. A packed one's
+-- icons are the game's, all one size: kept, but used once its spots are
+-- fixed (B:OwnSizeUsable). True when it changed.
+function B:SetOwnSize(key, name, percent)
+    if not ns.SetOwnSize(key, name, percent) then return false end
+    if self.started and bars[key] then
+        Layout(bars[key])
+        self:UpdateShown()
+        self:RefreshAll()
+        if ns.Layout then ns.Layout:Stack() end
+    end
+    return true
+end
+
+-- Whether a bar's icons can each have a size of their own now: always on
+-- the Cooldowns and Utility bars, and on a Buffs or Debuffs bar while its
+-- spots are fixed (missing ones greyed, or Only show missing).
+function B:OwnSizeUsable(key)
+    return not ns.AURA_BARS[key] or not ns.BuffBar:Packed(ns.BarData(key))
+end
+
+-- Extra bars (Core.lua): a kind's second bar added to your profile and made,
+-- empty: true, its key and what happened; or false and why not. Out of a
+-- fight only.
+function B:AddBar(kind)
+    local ok, key = ns.AddBar(kind)
+    if not ok then return false, key end
+    self:Changed()
+    return true, key, ns.BAR_NAMES[key] .. " added. Tick spells for it in the list below."
+end
+
+-- An extra bar taken out of your profile, with its spells: its frame laid
+-- out empty and gone (Rebuild). True and what happened, or false and why not.
+function B:RemoveBar(key)
+    local ok, why = ns.RemoveBar(key)
+    if not ok then return false, why end
+    if self.moving == key then self.moving = "cd" end
+    self:Changed()
+    return true, ns.BAR_NAMES[key] .. " removed, with its spells."
 end
 
 -- How long a debuff lasts, each length its ranks have (seconds; Buffs.lua's
@@ -2366,6 +2607,62 @@ function B:ResetPositions()
     self:Changed()
 end
 
+-- Moving a bar by numbers (the Layout page, a player's idea): where it is,
+-- as the point it's held by from the middle of the screen, typed in or
+-- nudged a pixel at a time. Your own bars only, out of a fight; like a drag,
+-- it takes the bar out of the layout it was stacked in. Blizzard's Cooldown
+-- Manager is moved in Edit Mode. B.moving: the bar the page moves, the one
+-- last dragged on screen or picked there.
+B.moving = "cd"
+
+-- A bar's place now, nil before it has one. One kept for another point (a
+-- layout's, or from before rows) is worked out for this one, as Place
+-- would, without moving anything (in a fight too).
+function B:BarPlace(key)
+    local bar = bars[key]
+    if not (bar and bar.data) then return nil end
+    local data = bar.data
+    if not (data.x and data.y) then return Where(bar) end
+    local point, from = Point(data), data.point or "CENTER"
+    if from == point then return data.x, data.y end
+    local width, height = bar:GetWidth() or 0, bar:GetHeight() or 0
+    local fromX, fromY = Offset(from, width, height)
+    local toX, toY = Offset(point, width, height)
+    return Round(data.x - fromX + toX), Round(data.y - fromY + toY)
+end
+
+-- Puts a bar at x, y (the whole bar kept on the screen, as a drag keeps it,
+-- so the numbers say where it really is). False and why when it can't.
+function B:MoveBar(key, x, y)
+    if InCombatLockdown() then return false, "Finish combat first, then move your bars." end
+    local bar = bars[key]
+    if not (bar and self:Enabled()) then return false, "Turn your bars on first." end
+    if type(x) ~= "number" or type(y) ~= "number" or x ~= x or y ~= y then return false, "Type a number." end
+    if bar.dragging then return false, "Let go of the bar first." end
+    local wide, tall = UIParent:GetWidth() or 0, UIParent:GetHeight() or 0
+    if wide > 0 and tall > 0 then
+        -- x, y is the point the bar is held by (a corner, or an edge's
+        -- middle): the bar's middle is kept far enough in for all of it.
+        local width, height = bar:GetWidth() or 0, bar:GetHeight() or 0
+        local offsetX, offsetY = Offset(Point(bar.data), width, height)
+        local roomX, roomY = math.max(0, (wide - width) / 2), math.max(0, (tall - height) / 2)
+        x = math.max(-roomX, math.min(roomX, x - offsetX)) + offsetX
+        y = math.max(-roomY, math.min(roomY, y - offsetY)) + offsetY
+    end
+    local data = bar.data
+    data.x, data.y, data.point = Round(x), Round(y), (Point(data))
+    if ns.Layout then ns.Layout:Moved() end
+    Place(bar)
+    return true
+end
+
+-- Moves a bar by dx, dy pixels, from its place to the nearest whole pixel.
+function B:NudgeBar(key, dx, dy)
+    local x, y = self:BarPlace(key)
+    if not x then return false, self:Enabled() and "Show the bar first: it has no place yet." or "Turn your bars on first." end
+    return self:MoveBar(key, math.floor(x + .5) + dx, math.floor(y + .5) + dy)
+end
+
 -- Your spellbook, gear and bags changing ------------------------------------------------
 -- Each change only notes that the list of your spells and items wants
 -- reading again. The bars (when on) and an open /ccm window are redrawn once
@@ -2433,28 +2730,43 @@ local tries, waiting = 0, false
 local FORM_EVENTS = { UPDATE_SHAPESHIFT_FORM = true, UPDATE_SHAPESHIFT_FORMS = true, UPDATE_STEALTH = true }
 local shifting = false
 
+-- Whether a Buffs bar's last read (Buffs, or Buffs 2: Extra bars) left some
+-- of your buffs unanswered (Again, below).
+local function Unread()
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = ns.BAR_KIND[key] == "buff" and bars[key]
+        if bar and (bar.unread or bar.lowUnread) then return true end
+    end
+    return false
+end
+
 local function OnEvent(_, event, arg)
     if event == "UNIT_AURA" then
         checking = true
     elseif event == "UNIT_FLAGS" then
-        -- Your target died (or came back): the Debuffs bar's Glow when
+        -- Your target died (or came back): a Debuffs bar's Glow when
         -- missing goes out on a corpse. FECM's own frames only.
-        ns.BuffBar:TargetGlow(bars.debuff)
+        for _, key in ipairs(ns.BAR_KEYS) do
+            if ns.BAR_KIND[key] == "debuff" then ns.BuffBar:TargetGlow(bars[key]) end
+        end
     elseif FORM_EVENTS[event] then
         shifting = true
     elseif event == "ADDON_RESTRICTION_STATE_CHANGED" or event == "ENCOUNTER_END" then
         -- Buffs the game wouldn't answer for may be readable now: read on
         -- the next frame (not as the event comes, when the game may not
         -- have caught up yet), and again a few times if still not.
-        if bars.buff and bars.buff.unread then tries, checking = 0, true end
+        if Unread() then tries, checking = 0, true end
     elseif event == "PLAYER_REGEN_DISABLED" then
         inCombat = true
-        -- Nothing on the Buffs bar changes in a fight: your buffs aren't heard.
+        -- Nothing on a Buffs bar changes in a fight: your buffs aren't heard.
         HearAuras()
-        -- A Buffs or Debuffs bar still being dragged is let go where it
-        -- is, just before the fight locks it in place.
-        for key in pairs(ns.AURA_BARS) do
-            if bars[key] then Drop(bars[key]) end
+        for _, key in ipairs(ns.BAR_KEYS) do
+            -- A buff's low-time glow (Warn at) goes out: in a fight its time
+            -- is secret, and the game's red numbers and edge take over.
+            if ns.BAR_KIND[key] == "buff" then ns.BuffBar:LowTime(bars[key], true) end
+            -- A Buffs or Debuffs bar still being dragged is let go where it
+            -- is, just before the fight locks it in place.
+            if ns.AURA_BARS[key] and bars[key] then Drop(bars[key]) end
         end
         -- Another form's list picked on the bar's page (Swap with my form)
         -- lets go: in a fight your bars follow your form.
@@ -2470,16 +2782,26 @@ local function OnEvent(_, event, arg)
         -- buffs that came or went in it (Only show missing: read again a
         -- few times if the game doesn't answer yet).
         tries = 0
-        for key in pairs(ns.AURA_BARS) do
-            local bar = bars[key]
+        for _, key in ipairs(ns.ALL_BAR_KEYS) do
+            local bar = ns.AURA_BARS[key] and bars[key]
             if bar and bar.pendingLayout then
                 Layout(bar)
+                -- (An extra bar you don't have now, emptied at last.)
+                if not ns.HasBar(key) then bar.retired = not bar.pendingLayout or nil end
             elseif bar then
                 Missing(bar)
                 if bar.pending then ns.BuffBar:Apply(bar) end
             end
             if bar and bar.pendingDecor then GroupDecor(bar) end
             if bar then bar.pendingShown = nil end
+        end
+        -- Your buffs' time left read again (Warn at: the low-time glow),
+        -- and again a moment later if the game doesn't answer yet.
+        for _, key in ipairs(ns.BAR_KEYS) do
+            if ns.BAR_KIND[key] == "buff" and bars[key] then
+                ns.BuffBar:LowTime(bars[key])
+                Again(bars[key])
+            end
         end
         -- And the buff and debuff times on the cooldown icons. Then Icon
         -- details changed in the fight, on the aura containers' icons.
@@ -2531,9 +2853,16 @@ local function OnEvent(_, event, arg)
         cooling = true
     else
         if event == "PLAYER_TARGET_CHANGED" then
-            ns.BuffBar:UpdateTarget(bars.debuff)
-            ns.IconAuras:UpdateTarget(bars.cd)
-            ns.IconAuras:UpdateTarget(bars.util)
+            -- Each Debuffs bar, and the buff and debuff times on each
+            -- cooldown bar's icons.
+            for _, key in ipairs(ns.BAR_KEYS) do
+                local bar = bars[key]
+                if ns.BAR_KIND[key] == "debuff" then
+                    ns.BuffBar:UpdateTarget(bar)
+                elseif not ns.AURA_BARS[key] then
+                    ns.IconAuras:UpdateTarget(bar)
+                end
+            end
             B:UpdateShown()
         end
         -- Usable, in or out of range, lit or put out by the game, or a new
@@ -2548,7 +2877,15 @@ end
 local function Tick()
     if checking then
         checking = false
-        Missing(bars.buff)
+        for _, key in ipairs(ns.BAR_KEYS) do
+            local bar = ns.BAR_KIND[key] == "buff" and bars[key]
+            if bar then
+                Missing(bar)
+                -- And how long your warned buffs have left (Warn at: the low-time glow).
+                ns.BuffBar:LowTime(bar, inCombat)
+                Again(bar)
+            end
+        end
     end
     -- Your form changed: read once, and each bar swapping with it shows that
     -- form's list (B:FormChanged), when it's another; so does /ccm, open.
@@ -2565,12 +2902,21 @@ end
 
 -- Your buffs coming and going (UNIT_AURA for you) are heard only while the
 -- Buffs bar shows only missing ones (all, or those ticked Only when
--- missing), your bars are on and you're out of a fight. In one the bar
--- stays as it is (your buffs are secret then), so nothing is heard; they're
--- read again as it ends.
+-- missing), or a buff in a spot of its own warns as it runs low (Warn at),
+-- your bars are on and you're out of a fight. In one the bar stays as it
+-- is (your buffs are secret then), so nothing is heard; they're read again
+-- as it ends.
 local hearing = false
 HearAuras = function()
-    local want = listening and not inCombat and ns.BuffBar:Watches("buff", ns.BarData("buff")) or false
+    -- (Any Buffs bar: Buffs 2 too, once added.)
+    local any = false
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if ns.BAR_KIND[key] == "buff" then
+            local data = ns.BarData(key)
+            any = any or ns.BuffBar:Watches(key, data) or ns.BuffBar:LowWatch(data, key)
+        end
+    end
+    local want = listening and not inCombat and any or false
     if want == hearing then return end
     hearing = want
     if want then
@@ -2596,15 +2942,18 @@ HearForms = function()
     if not want then shifting = false end
 end
 
--- The Buffs bar's last read (Missing, or its layout) left some of your buffs
+-- The Buffs bar's last read (Missing, its layout, or the time left on warned
+-- buffs: bar.lowUnread, Buffs.lua F:LowTime) left some of your buffs
 -- unanswered: the game still keeps them secret as a fight ends, say, or out
 -- of one in an encounter. Read again half a second later, four times at
 -- most, and only while your buffs are heard (out of a fight, the setting
 -- on); a read answered in full, a fight ending or the game's restrictions
 -- changing start the count again. Never more than that: no polling.
 local AGAIN, TRIES = .5, 4
-Again = function(bar)
-    if not bar.unread then
+-- (With Buffs 2 too, any Buffs bar unanswered counts, so one bar answered in
+-- full never starts the count again while the other still isn't.)
+Again = function()
+    if not Unread() then
         tries = 0
         return
     end
@@ -2612,8 +2961,7 @@ Again = function(bar)
     tries, waiting = tries + 1, true
     C_Timer.After(AGAIN, function()
         waiting = false
-        local buff = bars.buff
-        if hearing and buff and buff.unread then checking = true end
+        if hearing and Unread() then checking = true end
     end)
 end
 
@@ -2673,7 +3021,7 @@ function B:Start()
             -- room; buffs on you with Only show missing show too.
             local any = next(absent) ~= nil
             if any then Relay() end
-            Missing(bars.buff, true)
+            MissingAll()
             B:UpdateShown()
             B:RefreshAll()
             if any and ns.Layout then ns.Layout:Stack() end
@@ -2682,7 +3030,7 @@ function B:Start()
         editor:HookScript("OnHide", function()
             editMode = false
             if next(absent) then Relay() end
-            Missing(bars.buff, true)
+            MissingAll()
             B:UpdateShown()
             B:RefreshAll()
             if ns.Layout then ns.Layout:Stack() end

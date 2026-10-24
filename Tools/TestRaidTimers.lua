@@ -1135,7 +1135,8 @@ do
 end
 
 -- Every control says what it does on hover.
-local controls = { page.pullTick, page.warningTick, page.bossTick, page.shadow, page.editMode }
+-- (The font is one box with a list of every font: the box and each row.)
+local controls = { page.pullTick, page.warningTick, page.bossTick, page.shadow, page.editMode, page.font }
 for _, group in ipairs({ page.numbers, page.font, page.outline }) do
     for _, button in ipairs(group.buttons) do controls[#controls + 1] = button end
 end
@@ -1148,7 +1149,7 @@ for _, control in ipairs(controls) do
     local hint = type(control.hint) == "function" and control.hint(control) or control.hint
     if type(hint) ~= "string" or hint == "" or hint:find("\226\128\148", 1, true) then quiet = quiet + 1 end
 end
-Equal(#controls .. " " .. quiet, "45 0", "every tick, choice, colour, size and button has a note, none with an em dash")
+Equal(#controls .. " " .. quiet, "49 0", "every tick, choice, colour, size and button has a note, none with an em dash")
 -- No "In the game" section: no heading, no how-to lines anywhere on the page.
 -- The boss cast bars' how-to stays in the Edit Mode button's own note.
 do

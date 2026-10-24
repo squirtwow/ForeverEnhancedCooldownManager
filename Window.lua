@@ -7,6 +7,7 @@ local T = ns.Theme
 
 local WIDTH, HEIGHT = 820, 560
 local HEADER, FOOTER, NAV = 42, 28, 180
+ns.WINDOW_HEADER, ns.WINDOW_FOOTER = HEADER, FOOTER -- for a bar page's spell panel (BarPage.lua)
 local PREVIEW = 9 -- icons previewed under each bar's name
 local HEART = "Heart.tga" -- white on clear, tinted to the accent in the footer's credit
 -- A list's scroll thumb, wherever there's one: the bar pages, Look and the profiles.
@@ -47,7 +48,12 @@ local FONT_NOTES = {
     morpheus = "Morpheus, the game's storybook lettering",
     skurri = "Skurri, heavy like the game's big numbers",
     game = "Game font, your game's own, for names in any language",
+    -- The free fonts that come with the addon (Media\Fonts).
+    barlow = "Barlow Semi Condensed, narrow like road signs",
+    saira = "Saira Semi Condensed, square and narrow",
+    fira = "Fira Sans Condensed, narrow, with Cyrillic too",
 }
+ns.FONT_NOTES = FONT_NOTES -- and a spell's own font (BarPage.lua)
 local FONT_USE = ", for countdowns, counts, keys and names on icons, and the text on your cast bar and Tracked Bars."
 local TEXTURE_NOTES = {
     flat = "Flat colour",
@@ -188,7 +194,7 @@ end
 local function OpenPopup(button)
     ClosePopup()
     local popup, window = button.popup, button.window
-    PaintChoice(button)
+    button:Paint() -- a colour row's swatches, or a font row's list (FontChoice)
     popup:ClearAllPoints()
     local bottom, floor = button:GetBottom(), window:GetBottom()
     if type(bottom) == "number" and type(floor) == "number" and bottom - popup:GetHeight() - 4 < floor + FOOTER then
@@ -428,6 +434,140 @@ end
 -- Shared with the Cast bar, Raid Timers and bar pages.
 ns.ColourChoice, ns.SettingChoice = ColourChoice, SettingChoice
 
+-- Font rows ----------------------------------------------------------------------------
+-- Every font choice (the Look page's, the Health and power text's, the
+-- Presets' Make it yours, Raid Timers' and a spell's own) is one box with
+-- the font in use, its name in its own face, and a small arrow: there are
+-- more fonts than a row of buttons has room for. Clicking it opens a list
+-- under it (over it near the window's foot), each font's name in its own
+-- face, the one in use filled in the accent; a click picks one and closes
+-- it. It closes as a colour row's pop-up does: Escape, a click elsewhere,
+-- another page, its row going or the window closing. Its list's rows are
+-- .buttons, each with its .key and .label, as a row of choices' are, and
+-- :SetSelected(key) shows the choice.
+local FONT_ROW, FONT_PAD = 18, 4
+local FONT_LIST = 200 -- the list's narrowest
+
+-- The box in the font chosen, and the list with it filled in.
+local function PaintFonts(button)
+    local spec, chosen = button.spec, button.selected
+    if chosen ~= nil then
+        button.label:SetFontObject(spec.face(chosen))
+        button.label:SetText(spec.name(chosen))
+        local c = T.TEXT
+        button.label:SetTextColor(c[1], c[2], c[3])
+    end
+    local accent, on = T:Accent(), T:OnAccent()
+    for _, row in ipairs(button.buttons) do
+        local picked = row.key == chosen
+        row.fill:SetShown(picked)
+        T:Fill(row.fill, accent)
+        row.label:SetFontObject(spec.face(row.key))
+        local c = picked and on or T.TEXT
+        row.label:SetTextColor(c[1], c[2], c[3])
+    end
+end
+
+-- A font row's box and its list; the row places the box. spec: keys (in
+-- order), name(key) (each one's name), note(key) (each one's hover: text,
+-- or a function of its key), pick(key) (one clicked), about (the box's own
+-- hover), and face(key) (the font its name is shown in: its own, unless
+-- given).
+local function FontChoice(window, parent, width, spec)
+    spec.face = spec.face or function(key) return ns.Style:SampleFont(key) end
+    local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    button:SetSize(width, 20)
+    T:Flat(button, T.FIELD, T.CONTROL_BORDER)
+    button.window, button.spec, button.Paint = window, spec, PaintFonts
+    local label = button:CreateFontString(nil, "OVERLAY")
+    label:SetFontObject(spec.face(spec.keys[1]))
+    label:SetPoint("LEFT", 8, 0)
+    label:SetPoint("RIGHT", -18, 0)
+    label:SetJustifyH("LEFT")
+    label:SetWordWrap(false)
+    button.label = label
+    local arrow = button:CreateTexture(nil, "ARTWORK")
+    arrow:SetTexture(ns.MEDIA .. "TourArrow.tga")
+    arrow:SetTexCoord(0, 1, 1, 0) -- pointing down
+    arrow:SetSize(8, 5)
+    arrow:SetPoint("RIGHT", -6, 0)
+    arrow:SetVertexColor(T.MUTED[1], T.MUTED[2], T.MUTED[3], 1)
+    local hover = button:CreateTexture(nil, "HIGHLIGHT")
+    hover:SetAllPoints()
+    hover:SetColorTexture(1, 1, 1, .06)
+    window:Hint(button, spec.about)
+
+    -- The list: on the window, so nothing on the page covers it.
+    local across = math.max(width, FONT_LIST)
+    local popup = CreateFrame("Frame", nil, window, "BackdropTemplate")
+    popup:SetSize(across, FONT_PAD * 2 + #spec.keys * FONT_ROW)
+    popup:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -4)
+    popup:SetFrameLevel(window:GetFrameLevel() + POP_LEVEL)
+    popup:SetClampedToScreen(true)
+    popup:EnableMouse(true)
+    T:Flat(popup, T.PANEL, T.CONTROL_BORDER)
+    T:Paint(function(accent) popup:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
+    popup:Hide()
+    popup.window, popup.owner = window, button
+    popup:SetScript("OnHide", function(self)
+        Forget(self)
+        if self:IsShown() then self:Hide() end
+    end)
+    popup:SetScript("OnEvent", function(self)
+        if popupOpen == self and not self:IsMouseOver() and not button:IsMouseOver() then ClosePopup() end
+    end)
+    window:Hint(popup, "Pick a font. Escape or a click elsewhere closes this.")
+    button.popup = popup
+    local rows, note = {}, spec.note
+    for i, key in ipairs(spec.keys) do
+        local row = CreateFrame("Button", nil, popup)
+        row:SetSize(across - FONT_PAD * 2, FONT_ROW)
+        row:SetPoint("TOPLEFT", FONT_PAD, -FONT_PAD - (i - 1) * FONT_ROW)
+        row.fill = row:CreateTexture(nil, "BACKGROUND")
+        row.fill:SetAllPoints()
+        row.fill:Hide()
+        local shine = row:CreateTexture(nil, "HIGHLIGHT")
+        shine:SetAllPoints()
+        shine:SetColorTexture(1, 1, 1, .08)
+        row.label = row:CreateFontString(nil, "OVERLAY")
+        row.label:SetFontObject(spec.face(key))
+        row.label:SetPoint("LEFT", 8, 0)
+        row.label:SetPoint("RIGHT", -8, 0)
+        row.label:SetJustifyH("LEFT")
+        row.label:SetWordWrap(false)
+        row.label:SetText(spec.name(key))
+        row.key = key
+        row:SetScript("OnClick", function()
+            ClosePopup()
+            spec.pick(key)
+        end)
+        window:Hint(row, type(note) == "function" and function() return note(key) end or note)
+        rows[i] = row
+    end
+    button.buttons = rows
+
+    button:SetScript("OnClick", function(self)
+        if popupOpen == self.popup then ClosePopup() else OpenPopup(self) end
+    end)
+    button:HookScript("OnHide", function(self)
+        if popupOpen == self.popup then ClosePopup() end
+    end)
+    function button:SetSelected(key)
+        self.selected = key
+        PaintFonts(self)
+    end
+    -- Greyed out and unclickable while it doesn't apply; still says why on hover.
+    function button:SetUsable(usable)
+        self:SetEnabled(usable)
+        self:SetMotionScriptsWhileDisabled(true)
+        self:SetAlpha(usable and 1 or .35)
+        if not usable and popupOpen == self.popup then ClosePopup() end
+    end
+    T:Paint(function() if button.selected ~= nil then PaintFonts(button) end end)
+    return button
+end
+ns.FontChoice = FontChoice
+
 -- Health and power text --------------------------------------------------------------
 -- A panel over the window from the Look page's Set up: where the text goes
 -- on each of the display's bars and what it shows, how its numbers are
@@ -437,12 +577,13 @@ ns.ColourChoice, ns.SettingChoice = ColourChoice, SettingChoice
 -- while it's off, the panel says so, with a way to turn it on. Its shade
 -- leaves the window's footer clear, so each control still says what it
 -- does there. Made the first time it opens.
-local PANEL_WIDTH = 460
+local PANEL_WIDTH = 540
 local PANEL_PREVIEW_TOP = 38 -- the preview, under the title; the rows start 12 under it
 local PANEL_ROW = 25 -- from one row to the next
 local PANEL_AT = 100 -- where each row's choices start, clear of its label
 local PANEL_PILLS = 300 -- a row's choices
-local PANEL_FONTS = 340 -- the fonts' five
+local PANEL_FONTS = 340 -- the fonts' six
+local PANEL_SPOTS = 420 -- what a spot can show: up to seven, at the health bar's ends
 local PREVIEW_BAR = { 260, 18 }
 -- Each sample bar: its colour while it's Blizzard's own, how full it is, and
 -- where; a druid's extra mana bar (in your power colour, as on the display)
@@ -468,6 +609,9 @@ local FORMAT_NOTES = {
     value = "What you have now, like 4,321.",
     both = "What you have now and the most you can have, like 4,321 / 5,120.",
     percent = "As a percent, like 84%.",
+    bare = "As a percent with no % sign, like 84. Full shows 100. (experimental)",
+    heals = "Heals on their way to you, like +1200. Blank while none are coming. (experimental)",
+    absorbs = "Shields on you, like (850) from Power Word: Shield. Blank while you have none. (experimental)",
 }
 local NUMBER_NOTES = {
     full = "Numbers in full, like 4,321.",
@@ -476,7 +620,8 @@ local NUMBER_NOTES = {
 
 -- A row of choices that sets key, with its label; each choice says what it does.
 local function PanelPills(window, dialog, label, key, keys, names, width, notes, Changed)
-    local items = { fit = key == "prdTextFont" } -- the fonts, by their names' length
+    -- The fonts and what a spot shows, by their names' length (Percent (no sign) is long).
+    local items = { fit = key == "prdTextFont" or names == ns.TEXT_FORMAT_NAMES }
     for _, choice in ipairs(keys) do items[#items + 1] = { key = choice, label = names[choice] } end
     local pills = T:Segmented(dialog, items, width, function(value)
         ns.Set(key, value)
@@ -505,9 +650,11 @@ local function PanelBar(window, dialog, rows, kind, prefix, Changed, picked)
     atRow.when = function() return picked() == kind end
     rows[#rows + 1] = atRow
     local function Is(where) return function() return picked() == kind and ns.Get(at) == where end end
-    for _, spot in ipairs({ { "Centre", centreKeys, centreNotes, "centre" }, { "Left", ns.TEXT_FORMAT_KEYS, FORMAT_NOTES, "sides" },
-        { "Right", ns.TEXT_FORMAT_KEYS, FORMAT_NOTES, "sides" } }) do
-        local row = PanelPills(window, dialog, spot[1], prefix .. spot[1], spot[2], ns.TEXT_FORMAT_NAMES, PANEL_PILLS, spot[3], Changed)
+    -- The health bar's ends can show heals and shields too.
+    local sides = kind == "health" and ns.TEXT_HEALTH_KEYS or ns.TEXT_FORMAT_KEYS
+    for _, spot in ipairs({ { "Centre", centreKeys, centreNotes, "centre" }, { "Left", sides, FORMAT_NOTES, "sides" },
+        { "Right", sides, FORMAT_NOTES, "sides" } }) do
+        local row = PanelPills(window, dialog, spot[1], prefix .. spot[1], spot[2], ns.TEXT_FORMAT_NAMES, PANEL_SPOTS, spot[3], Changed)
         -- Under the bar's own row, its label set in and quieter.
         row.parts[1][2] = 28
         row.parts[1][1]:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
@@ -638,18 +785,25 @@ local function TextPanel(window)
     shade.sizes = sizes
     rows[#rows + 1] = PanelPills(window, dialog, "Numbers", "prdTextNumbers", ns.TEXT_NUMBER_KEYS, ns.TEXT_NUMBER_NAMES, 160,
         NUMBER_NOTES, Changed)
-    -- The Look page's font first, its name in that font; then the game's own,
-    -- each in its own face.
-    local fontNames, fontNotes = { look = "Look page" }, {}
-    for _, key in ipairs(ns.FONT_KEYS) do
-        fontNames[key] = ns.FONT_NAMES[key]:match("^%S+")
-        fontNotes[key] = FONT_NOTES[key] .. ", just for this text."
-    end
-    fontNotes.look = function() return "The font picked on the Look page, now " .. ns.FONT_NAMES[ns.Get("font")] .. "." end
-    local fonts = PanelPills(window, dialog, "Font", "prdTextFont", ns.TEXT_FONT_KEYS, fontNames, PANEL_FONTS, fontNotes, Changed)
-    for _, button in ipairs(fonts.pills.buttons) do
-        if button.key ~= "look" then button.label:SetFontObject(ns.Style:SampleFont(button.key)) end
-    end
+    -- The Look page's font first, its name in that font; then each of the
+    -- others in its own face, in a list from one box (FontChoice).
+    local fontChoice = FontChoice(window, dialog, PANEL_FONTS, {
+        keys = ns.TEXT_FONT_KEYS,
+        name = function(key) return key == "look" and "Look page" or ns.FONT_NAMES[key] end,
+        face = function(key) return ns.Style:SampleFont(key == "look" and ns.Get("font") or key) end,
+        note = function(key)
+            if key == "look" then return "The font picked on the Look page, now " .. ns.FONT_NAMES[ns.Get("font")] .. "." end
+            return FONT_NOTES[key] .. ", just for this text."
+        end,
+        pick = function(key)
+            ns.Set("prdTextFont", key)
+            Changed()
+        end,
+        about = "The font for this text: the Look page's, or one just for it. Click for the fonts.",
+    })
+    local fontLabel = T:Text(dialog, "GameFontHighlight")
+    fontLabel:SetText("Font")
+    local fonts = { key = "prdTextFont", pills = fontChoice, parts = { { fontLabel, 16, -4 }, { fontChoice, PANEL_AT, 0 } } }
     rows[#rows + 1] = fonts
     shade.rows, shade.fonts = rows, fonts.pills
 
@@ -714,8 +868,9 @@ end
 -- Icon details -----------------------------------------------------------------------
 -- A panel over the window from the Look page's Icon details, beside the
 -- preview's icons: the cooldown swipe's colour and how much of the icon
--- shows through it, the countdown numbers' size, colour and spot, and a
--- line along the swipe's edge (Style.lua's Icon details). Each shows at once
+-- shows through it, the countdown numbers' size, colour, spot and text
+-- (Timer text), and a line along the swipe's edge (Style.lua's Icon
+-- details). Each shows at once
 -- on the panel's own icons (their cooldowns running round, drawn by the
 -- calls your bars' icons use), on your bars and on Blizzard's icons.
 -- Everything starts as the icons always looked; Defaults puts it all back.
@@ -853,7 +1008,18 @@ local function CountdownRows(window, dialog, Changed)
             or ("The countdown at the " .. ns.COUNTDOWN_SPOT_NAMES[button.key]:lower() .. " of each icon. It can sit over a keybind"
                 .. " or a count in the same spot."))
     end
-    return size, colourLabel, colour, spot
+    -- Its text (Timer text): as the game writes it, or minutes then seconds.
+    local formats = {}
+    for _, key in ipairs(ns.COUNTDOWN_FORMATS) do formats[#formats + 1] = { key = key, label = ns.COUNTDOWN_FORMAT_NAMES[key] } end
+    local format = T:Segmented(dialog, formats, DETAIL.width - 16 - DETAIL.at, function(key)
+        ns.Set("countdownFormat", key)
+        Changed()
+    end)
+    for _, button in ipairs(format.buttons) do
+        window:Hint(button, button.key == "game" and "The countdown as the game writes it, like 2:52, as it's always been."
+            or "Whole minutes, then seconds under a minute: 3m, 2m, 1m, then 59s. On your bars and Blizzard's icons. (experimental)")
+    end
+    return size, colourLabel, colour, spot, format
 end
 
 -- The edge line's row: the tick, and its colour while it's ticked.
@@ -916,24 +1082,28 @@ local function IconPanel(window)
     At(swipeColour, DETAIL.at, 0)
     At(seeThrough, DETAIL.width - 16 - 292, 0)
     At(DetailLabel(dialog, "Countdown"), 16, 1, 4)
-    local size, colourLabel, countdownColour, spot = CountdownRows(window, dialog, Changed)
+    local size, colourLabel, countdownColour, spot, format = CountdownRows(window, dialog, Changed)
     At(size, DETAIL.at, 1)
     At(colourLabel, DETAIL.at + 248, 1, 4)
     At(countdownColour, DETAIL.at + 298, 1)
-    local spotLabel = DetailLabel(dialog, "Spot")
-    spotLabel:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
-    At(spotLabel, 28, 2, 4)
+    -- The countdown's own two rows under it, their labels set in and quieter.
+    for row, label in ipairs({ "Spot", "Text" }) do
+        local text = DetailLabel(dialog, label)
+        text:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
+        At(text, 28, row + 1, 4)
+    end
     At(spot, DETAIL.at, 2)
+    At(format, DETAIL.at, 3)
     local edge, edgeColour = EdgeRow(window, dialog, Changed)
-    At(edge, 16, 3, 2)
-    At(edgeColour, DETAIL.at, 3)
+    At(edge, 16, 4, 2)
+    At(edgeColour, DETAIL.at, 4)
     shade.swipeColour, shade.seeThrough, shade.size, shade.countdownColour = swipeColour, seeThrough, size, countdownColour
-    shade.spot, shade.edge, shade.edgeColour = spot, edge, edgeColour
+    shade.spot, shade.format, shade.edge, shade.edgeColour = spot, format, edge, edgeColour
 
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     note:SetWidth(DETAIL.width - 32)
     note:SetText(DETAIL_NOTE)
-    At(note, 16, 4, 4)
+    At(note, 16, 5, 4)
     local done = T:Button(dialog, "Done", 90, 22)
     done:SetPoint("BOTTOMRIGHT", -16, 14)
     done:SetScript("OnClick", function() shade:Hide() end)
@@ -954,7 +1124,7 @@ local function IconPanel(window)
     -- time it shows, as the other panels are (a hidden note may not have
     -- measured its lines yet).
     local function Height()
-        dialog:SetHeight(math.ceil(-y + 4 * DETAIL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
+        dialog:SetHeight(math.ceil(-y + 5 * DETAIL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
     end
     Height()
 
@@ -969,6 +1139,7 @@ local function IconPanel(window)
         seeThrough:Set(ns.Get("swipeSeeThrough"))
         size:Set(ns.Get("countdownSize"))
         spot:SetSelected(ns.Get("countdownSpot"))
+        format:SetSelected(ns.Get("countdownFormat"))
         local edgeOn = ns.Get("swipeEdge") == true
         edge:SetChecked(edgeOn)
         edgeColour:SetEnabled(edgeOn)
@@ -1153,17 +1324,27 @@ local function PresetsPanel(window)
         label:SetText(text)
     end
     OwnLabel("Font", PRESET_OWN)
-    local fontItems = { { key = "look", label = "Look's own" }, fit = true }
-    for _, key in ipairs(ns.FONT_KEYS) do fontItems[#fontItems + 1] = { key = key, label = ns.FONT_NAMES[key]:match("^%S+") } end
-    local fonts = T:Segmented(dialog, fontItems, 380, function(key)
-        own.font = key ~= "look" and key or nil
-        Show()
-    end)
-    fonts:SetPoint("TOPLEFT", 100, -PRESET_OWN)
-    for _, button in ipairs(fonts.buttons) do
-        if button.key ~= "look" then button.label:SetFontObject(ns.Style:SampleFont(button.key)) end
-        window:Hint(button, button.key == "look" and "The font the look comes with." or (FONT_NOTES[button.key] .. ", in place of the look's."))
+    local fontKeys = { "look" }
+    for _, key in ipairs(ns.FONT_KEYS) do fontKeys[#fontKeys + 1] = key end
+    -- The look's own font's name in its face, the rest each in its own.
+    local function LookFont()
+        local look = P.LookValues(picked) or {}
+        return look.font or ns.GetSaved("font")
     end
+    local fonts = FontChoice(window, dialog, 240, {
+        keys = fontKeys,
+        name = function(key) return key == "look" and "Look's own" or ns.FONT_NAMES[key] end,
+        face = function(key) return ns.Style:SampleFont(key == "look" and LookFont() or key) end,
+        note = function(key)
+            return key == "look" and "The font the look comes with." or (FONT_NOTES[key] .. ", in place of the look's.")
+        end,
+        pick = function(key)
+            own.font = key ~= "look" and key or nil
+            Show()
+        end,
+        about = "A font for your numbers and text in place of the look's. Click for the fonts.",
+    })
+    fonts:SetPoint("TOPLEFT", 100, -PRESET_OWN)
     OwnLabel("Colour", PRESET_OWN + 26)
     local colourKeys = { "look" }
     for _, key in ipairs(ns.BAR_COLOUR_KEYS) do colourKeys[#colourKeys + 1] = key end
@@ -1673,21 +1854,20 @@ local function BuildLook(window, page, width)
     local fontLabel = T:Text(options, "GameFontHighlight")
     fontLabel:SetPoint("TOPLEFT", KEYS_X, -92)
     fontLabel:SetText("Font")
-    local fontItems = { fit = true }
-    for _, key in ipairs(ns.FONT_KEYS) do
-        fontItems[#fontItems + 1] = { key = key, label = ns.FONT_NAMES[key]:match("^%S+") }
-    end
-    local font = T:Segmented(options, fontItems, inner - FACES_X, function(key)
-        ns.Set("font", key)
-        Refont()
-    end)
+    -- Each font's name in its own face, in a list from one box (FontChoice).
+    -- Friz Quadrata the one seen in game (the default's Game font where the
+    -- game is in Chinese, Korean or Russian, not yet seen there).
+    local font = FontChoice(window, options, inner - FACES_X, {
+        keys = ns.FONT_KEYS,
+        name = function(key) return ns.FONT_NAMES[key] end,
+        note = function(key) return FONT_NOTES[key] .. FONT_USE .. (key ~= "friz" and UNTESTED or "") end,
+        pick = function(key)
+            ns.Set("font", key)
+            Refont()
+        end,
+        about = "The font for the numbers and text on icons and bars. Click for the fonts.",
+    })
     font:SetPoint("TOPLEFT", FACES_X, -88)
-    for _, button in ipairs(font.buttons) do
-        button.label:SetFontObject(ns.Style:SampleFont(button.key))
-        -- Friz Quadrata the one seen in game (the default's Game font where
-        -- the game is in Chinese, Korean or Russian, not yet seen there).
-        window:Hint(button, FONT_NOTES[button.key] .. FONT_USE .. (button.key ~= "friz" and UNTESTED or ""))
-    end
     local textureLabel = T:Text(options, "GameFontHighlight")
     textureLabel:SetPoint("TOPLEFT", KEYS_X, -120)
     textureLabel:SetText("Texture")
@@ -2516,10 +2696,15 @@ local function BuildHelp(window, header)
     end
     -- The note only where nothing is under it: the bar pages and General.
     -- Elsewhere buttons or words sit at the right of the page's top row, so
-    -- there only the ? pulses.
+    -- there only the ? pulses: on a bar page too while it shows its extra
+    -- bar's button (BarPage.lua; with Clear, once the bar has spells).
     local function Room()
         local key = window.selected
-        return ns.BAR_NAMES[key] ~= nil or key == "general"
+        if ns.BAR_NAMES[key] ~= nil then
+            local another = window.pages and window.pages.bar.another
+            return not (another and another:IsShown())
+        end
+        return key == "general"
     end
     local function Update(_, elapsed)
         since = (since + (elapsed or 0)) % NUDGE_PERIOD
@@ -2625,7 +2810,8 @@ local function BuildWindow()
     yours:SetText("YOUR BARS")
     window.yourBars = yours
     local y = 28
-    for _, key in ipairs(ns.BAR_KEYS) do
+    -- The four bars: an extra bar's page is reached from its kind's (BarPage.lua).
+    for _, key in ipairs(ns.BASE_BAR_KEYS) do
         window.nav[key] = NavItem(window, nav, key, ns.BAR_NAMES[key], y, true)
         y = y + 48
     end
@@ -2707,16 +2893,22 @@ local function BuildWindow()
         if self.textPanel then self.textPanel:Hide() end
         if self.presetsPanel then self.presetsPanel:Hide() end
         if self.iconPanel then self.iconPanel:Hide() end
+        if self.spellPanel then self.spellPanel:Hide() end
         self:Refresh()
         if ns.Tour then ns.Tour:Sync() end
     end
 
     function window:Refresh()
         self:RefreshProfiles()
+        -- An extra bar's page (Extra bars, Core.lua) whose bar is gone (removed,
+        -- or another profile switched to): its kind's page instead.
+        if ns.BAR_NAMES[self.selected] and not ns.HasBar(self.selected) then self.selected = ns.BAR_KIND[self.selected] end
         local selected = self.selected
         local barPage = ns.BAR_NAMES[selected] ~= nil
+        -- The list has the four bars: an extra bar's page lights its kind's.
+        local lit = ns.BAR_KIND[selected] or selected
         for key, item in pairs(self.nav) do
-            local chosen = key == selected
+            local chosen = key == lit
             item.fill:SetShown(chosen)
             item.glow:SetShown(chosen)
             item.mark:SetShown(chosen)
@@ -2760,6 +2952,7 @@ function ns.ShowWindow()
     if window.textPanel then window.textPanel:Hide() end
     if window.presetsPanel then window.presetsPanel:Hide() end
     if window.iconPanel then window.iconPanel:Hide() end
+    if window.spellPanel then window.spellPanel:Hide() end
     window:Show()
     window:Raise()
 end

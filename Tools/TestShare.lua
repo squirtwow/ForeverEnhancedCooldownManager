@@ -983,10 +983,19 @@ function H.Sane(ns, shared)
     end
     local function ID(v) return type(v) == "number" and v == math.floor(v) and v >= 1 and v <= 2147483647 end
     local known = { lists = true, forms = true, swap = true, joins = true, only = true, pick = true, style = true, added = true,
-        setup = true, count = true, picks = true, skipped = true, name = true, version = true }
+        looks = true, warns = true, setup = true, count = true, picks = true, skipped = true, name = true, version = true,
+        extras = true, sizes = true }
     for k in pairs(shared) do
         if not known[k] then return "an unknown key " .. tostring(k) end
     end
+    -- Extra bars: one of each kind, two at most, true each.
+    if type(shared.extras) ~= "table" then return "extras" end
+    local extras = 0
+    for k, v in pairs(shared.extras) do
+        if not (k == "cd2" or k == "util2" or k == "buff2" or k == "debuff2") or v ~= true then return "an extra bar " .. tostring(k) end
+        extras = extras + 1
+    end
+    if extras > 2 then return "extra bars" end
     if type(shared.skipped) ~= "number" or shared.skipped < 0 then return "skipped" end
     -- The bars swapping with your form: the Cooldowns and Utility bars, true each.
     if type(shared.swap) ~= "table" then return "swap" end
@@ -998,15 +1007,21 @@ function H.Sane(ns, shared)
     local count, on, cooldown = 0, {}, {}
     for k in pairs(shared.lists) do
         if not ns.BAR_NAMES[k] then return "a list for no bar" end
+        if not (ns.EXTRA_OF[k] or shared.extras[k]) then return "a list for an extra bar it hasn't: " .. k end
     end
-    for _, key in ipairs(ns.BAR_KEYS) do
+    local keys = {}
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        if ns.EXTRA_OF[key] or shared.extras[key] then keys[#keys + 1] = key end
+    end
+    for _, key in ipairs(keys) do
         local list, seen = shared.lists[key], {}
+        local spells = not ns.AURA_BARS[key] -- a cooldown bar's: on one of them, not two
         if type(list) ~= "table" or #list > 40 then return "the " .. key .. " list" end
         for k, v in pairs(list) do
             if type(k) ~= "number" or not Word(v) or seen[v] then return "an entry on " .. key end
-            if (key == "cd" or key == "util") and cooldown[v] then return "on both cooldown bars: " .. v end
+            if spells and cooldown[v] then return "on two cooldown bars: " .. v end
             seen[v], on[v] = true, true
-            if key == "cd" or key == "util" then cooldown[v] = true end
+            if spells then cooldown[v] = true end
             if v:find("^item:") and not v:find("^item:[1-9]%d*$") then return "an item key " .. v end
             if v:find("^slot:") and v ~= "slot:13" and v ~= "slot:14" then return "a slot key " .. v end
             -- A spell pinned to one ID: a name, # and a whole ID, nothing else.
@@ -1037,12 +1052,15 @@ function H.Sane(ns, shared)
             if v ~= true or not on[name] or shared.lists[key][1] == name then return "a join " .. tostring(name) end
         end
     end
-    -- Only when missing: the Buffs bar's only, names on its list, true each.
+    -- Only when missing: a Buffs bar's only (Buffs 2's with it), names on its
+    -- list, true each.
     if type(shared.only) ~= "table" then return "only" end
     for key, set in pairs(shared.only) do
-        if key ~= "buff" or type(set) ~= "table" then return "only when missing on " .. tostring(key) end
+        if ns.BAR_KIND[key] ~= "buff" or not shared.lists[key] or type(set) ~= "table" then
+            return "only when missing on " .. tostring(key)
+        end
         local listed = {}
-        for _, v in ipairs(shared.lists.buff) do listed[v] = true end
+        for _, v in ipairs(shared.lists[key]) do listed[v] = true end
         for name, v in pairs(set) do
             if v ~= true or not listed[name] then return "only when missing " .. tostring(name) end
         end
@@ -1060,6 +1078,54 @@ function H.Sane(ns, shared)
         if not on[name] or #ids < 1 or #ids > 10 or name:find("#", 1, true) then return "added " .. tostring(name) end
         for _, id in pairs(ids) do
             if not ID(id) then return "an added ID" end
+        end
+    end
+    -- Each entry's own countdown look: names on its lists, a font this
+    -- version has and a whole size from 50 to 150, at least one of them.
+    if type(shared.looks) ~= "table" then return "looks" end
+    local fonts, looks = {}, 0
+    for _, key in ipairs(ns.FONT_KEYS) do fonts[key] = true end
+    for name, look in pairs(shared.looks) do
+        if not on[name] or type(look) ~= "table" or not (look.font or look.size) then return "a look " .. tostring(name) end
+        for field, v in pairs(look) do
+            if field == "font" then
+                if not fonts[v] then return "a look's font" end
+            elseif field == "size" then
+                if not (type(v) == "number" and v == math.floor(v) and v >= 50 and v <= 150) then return "a look's size" end
+            else
+                return "a look's " .. tostring(field)
+            end
+        end
+        looks = looks + 1
+    end
+    if looks > 200 then return "looks" end
+    -- Warn at: the Buffs and Debuffs bars' only, names on that bar's list,
+    -- a whole number of seconds from 1 to an hour each.
+    if type(shared.warns) ~= "table" then return "warns" end
+    for key, set in pairs(shared.warns) do
+        if not ns.AURA_BARS[key] or not shared.lists[key] or type(set) ~= "table" then return "warns on " .. tostring(key) end
+        local listed = {}
+        for _, v in ipairs(shared.lists[key]) do listed[v] = true end
+        for name, v in pairs(set) do
+            if not listed[name] or not (type(v) == "number" and v == math.floor(v) and v >= 1 and v <= 3600) then
+                return "a warning " .. tostring(name)
+            end
+        end
+    end
+    -- An icon's own size: a bar it has, names on that bar's lists (a form's
+    -- too), a whole percent from 50 to 150 each.
+    if type(shared.sizes) ~= "table" then return "sizes" end
+    for key, set in pairs(shared.sizes) do
+        if not shared.lists[key] or type(set) ~= "table" then return "sizes on " .. tostring(key) end
+        local listed = {}
+        for _, v in ipairs(shared.lists[key]) do listed[v] = true end
+        for _, lists in pairs(shared.forms) do
+            for _, v in ipairs(lists[key] or {}) do listed[v] = true end
+        end
+        for name, v in pairs(set) do
+            if not listed[name] or not (type(v) == "number" and v == math.floor(v) and v >= 50 and v <= 150) then
+                return "a size " .. tostring(name)
+            end
         end
     end
     local setup = shared.setup
@@ -1159,7 +1225,7 @@ function H.Spy(ns)
 end
 
 -- Settings a shared profile never carries: switching a part on or off, and the window's own.
-H.NOT_SHARED = { "skin", "useBars", "groupFamilies", "listItems", "listRanks", "accent", "prdSkin", "prdCombo", "prdEnergy", "prdText", "castBar", "castBatch", "castTicks", "castTickSound", "castLatency", "swingTimer",
+H.NOT_SHARED = { "skin", "useBars", "groupFamilies", "listItems", "listRanks", "listTicked", "accent", "prdSkin", "prdCombo", "prdEnergy", "prdText", "castBar", "castBatch", "castTicks", "castTickSound", "castLatency", "swingTimer",
     "pullTimer", "raidWarnings", "bossCasts", "pulse", "keybinds", "layoutPreview", "growArrows", "minimap", "minimapAngle",
     "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice" }
 
@@ -1451,6 +1517,273 @@ do
     Equal(H.Sane(ns, wrong) .. "|" .. wrong.skipped .. " " .. H.Text(wrong.only), "|1 {}", "not a table: left out, and counted")
     Equal(#printed, 0, "no errors")
 end
+
+-- Settings per spell in profiles and strings --------------------------------------------------------
+-- Each entry's own countdown font and size (a player's idea; i: entry ->
+-- { font, size }) go with the profile: kept at load only for entries on its
+-- lists (a form's too) and only what this version can use, so a profile
+-- from before them loads as it was; copied with Copy, sharing nothing;
+-- shared and imported with or without the look, into the new profile only,
+-- and shared back the same. A string made before them has none (an older
+-- version reading a newer string counts i as 1 left out: KNOWN). Anything
+-- odd is left out and counted. The fonts shipped with the addon go in a
+-- shared look like the game's own.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local saved = { notesSeen = "dev", helpSeen = true, useBars = true, chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Moonfire" }, util = {}, buff = { "Thorns" }, debuff = {}, forms = { [5] = { cd = { "Growl" } } },
+            spellLook = { Moonfire = { font = "barlow", size = 120 }, Thorns = { font = "comic", size = 80 }, Growl = { font = "saira" },
+                Wrath = { font = "fira" }, Gone = "x", Starfire = { size = 500 } } },
+        Old = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } } }
+    local ns = Start(saved)
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    local MINE = '{["Growl"]={["font"]="saira"},["Moonfire"]={["font"]="barlow",["size"]=120},["Thorns"]={["size"]=80}}'
+    Equal(ns.ProfileName() .. " " .. H.Text(db.profiles.Mine.spellLook) .. " " .. tostring(db.profiles.Old.spellLook), "Mine " .. MINE .. " nil",
+        "loaded: only entries on its lists (a form's too), each field this version uses; a profile from before them gets none")
+
+    -- Copy: the new profile has them, sharing nothing with yours.
+    ns.CopyProfile("Copy")
+    local copy, mine = db.profiles.Copy.spellLook, db.profiles.Mine.spellLook
+    Equal(ns.ProfileName() .. " " .. H.Text(copy) .. " " .. tostring(copy ~= mine and copy.Moonfire ~= mine.Moonfire), "Copy " .. MINE .. " true",
+        "Copy carries each entry's own look, sharing nothing")
+    B:SetSpellLook("Moonfire", "size", 90)
+    Equal(copy.Moonfire.size .. " " .. mine.Moonfire.size, "90 120", "a change on the copy leaves the profile it came from as it was")
+    -- An entry taken off its last list lets its look go; one still on another keeps it.
+    B:Assign("Moonfire", nil)
+    Equal(tostring(copy.Moonfire) .. " " .. tostring(mine.Moonfire ~= nil), "nil true", "off every list: its look goes, in that profile only")
+
+    -- Share and Import.
+    ns.UseProfile("Mine")
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. H.Text(shared.looks) .. " | " .. P.Describe(shared),
+        "|0 " .. MINE .. " | Holds 2 bar entries, with icons for 1 form, own countdowns for 3 spells and its look and layout.",
+        "Share: each entry's own look goes with the profile, and the line says so (commas, then and before the last)")
+    local ok = P.Import("Theirs", shared, false)
+    Equal(tostring(ok) .. " " .. ns.ProfileName() .. " " .. H.Text(db.profiles.Theirs.spellLook) .. " "
+        .. ns.Style:LookKey(ns.SpellLook("Moonfire")) .. " " .. H.Text(db.profiles.Mine.spellLook),
+        "true Theirs " .. MINE .. " barlow/120 " .. MINE, "imported without its look: the new profile has them, yours as it was")
+    Equal(P.Export(), text, "and it shares the very same string back")
+    P.Import("Theirs too", shared, true)
+    Equal(H.Text(db.profiles["Theirs too"].spellLook), MINE, "with its look too")
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = { "Thorns" }, debuff = {} } end
+    local old = P.Read(H.String({ a = "1.9.1", l = Lists() }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. H.Text(old.looks), "|0 {}", "a string from before them: none, nothing left out")
+    P.Import("Old string", old, false)
+    Equal(tostring(db.profiles["Old string"].spellLook) .. " " .. tostring(ns.SpellLook("Moonfire")) .. " " .. tostring(ns.HasSpellLooks()),
+        "nil nil false", "imported: none")
+    local odd = P.Read(H.String({ l = Lists(), i = { Moonfire = { font = "barlow", size = 120, colour = "red" }, Thorns = { font = "comic" },
+        Wrath = { size = 100 }, Starfire = "big", [""] = { size = 90 } } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. H.Text(odd.looks), '|5 {["Moonfire"]={["font"]="barlow",["size"]=120}}',
+        "a field this version doesn't know, a font it doesn't have, names not on its lists, not a look: left out and counted")
+    local wrong = P.Read(H.String({ l = Lists(), i = "Moonfire" }))
+    Equal(H.Sane(ns, wrong) .. "|" .. wrong.skipped .. " " .. H.Text(wrong.looks), "|1 {}", "not a table: left out, and counted")
+
+    -- The fonts shipped with the addon in a shared look: kept as the game's are.
+    local fonts = P.Read(H.String({ l = Lists(), g = { s = { font = "saira", warningFont = "fira", prdTextFont = "barlow" }, b = {}, l = {},
+        k = {} } }))
+    Equal(H.Sane(ns, fonts) .. "|" .. fonts.skipped .. " " .. fonts.setup.look.font .. " " .. fonts.setup.look.warningFont .. " "
+        .. fonts.setup.look.prdTextFont, "|0 saira fira barlow", "the shipped fonts in a look: kept")
+    local newer = P.Read(H.String({ l = Lists(), g = { s = { font = "expressway" }, b = {}, l = {}, k = {} } }))
+    Equal(newer.skipped .. " " .. tostring(newer.setup.look.font), "1 nil", "a font this version doesn't have: left out, and counted")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Warn at N seconds left in profiles and strings ---------------------------------------------------
+-- (A player's idea: Siphon Life at 3 seconds, Demon Armor at 10 minutes.)
+-- Each aura bar's warned entries (t: bar -> name -> seconds) go with the
+-- profile: kept at load only for an aura bar's entries on its list and a
+-- whole number of seconds from 1 to an hour, so a profile from before
+-- loads as it was; copied with Copy, sharing nothing; forgotten as an
+-- entry leaves its bar; shared and imported with or without the look, into
+-- the new profile only, and shared back the same. A string from before has
+-- none; anything odd is left out and counted.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local saved = { notesSeen = "dev", helpSeen = true, useBars = true, chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Moonfire" }, util = {}, buff = { "Thorns" }, debuff = { "Moonfire" },
+            warnAt = { buff = { Thorns = 600, Gone = 5, Moonfire = 3, Rejuvenation = 7.5 }, debuff = { Moonfire = 3, Wrath = 0 },
+                cd = { Moonfire = 3 } } },
+        Odd = { cd = {}, util = {}, buff = { "Thorns" }, debuff = {}, warnAt = { buff = { Thorns = 0 }, debuff = "x" } },
+        Old = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } } }
+    local ns = Start(saved)
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    local MINE = '{["buff"]={["Thorns"]=600},["debuff"]={["Moonfire"]=3}}'
+    Equal(ns.ProfileName() .. " " .. H.Text(db.profiles.Mine.warnAt) .. " " .. tostring(db.profiles.Old.warnAt) .. " "
+        .. tostring(db.profiles.Odd.warnAt), "Mine " .. MINE .. " nil nil", "loaded: only an aura bar's entries on its list, whole"
+        .. " seconds from 1 to an hour; a profile from before them, or with none left, keeps no table")
+    Equal(tostring(B:WarnAt("buff", "Thorns")) .. " " .. tostring(B:WarnAt("debuff", "Moonfire")) .. " " .. tostring(B:WarnAt("cd", "Moonfire")),
+        "600 3 nil", "read by bar and entry; none on the Cooldowns bar")
+
+    -- Copy: the new profile has them, sharing nothing with yours.
+    ns.CopyProfile("Copy")
+    local copy, mine = db.profiles.Copy.warnAt, db.profiles.Mine.warnAt
+    Equal(ns.ProfileName() .. " " .. H.Text(copy) .. " " .. tostring(copy ~= mine and copy.buff ~= mine.buff), "Copy " .. MINE .. " true",
+        "Copy carries each warned entry, sharing nothing")
+    B:SetWarnAt("buff", "Thorns", 300)
+    Equal(copy.buff.Thorns .. " " .. mine.buff.Thorns, "300 600", "a change on the copy leaves the profile it came from as it was")
+    -- Taken off its bar: its warning goes, in that profile only; put back, none.
+    B:SetAura("debuff", "Moonfire", false)
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(tostring(copy.debuff) .. " " .. tostring(mine.debuff.Moonfire) .. " " .. tostring(B:WarnAt("debuff", "Moonfire")), "nil 3 nil",
+        "off its bar: forgotten there (and put back, none), in that profile only")
+    -- Off again: Off (0) or nil clears it; an odd number or an entry not on the bar is turned away.
+    Equal(table.concat({ tostring(B:SetWarnAt("buff", "Thorns", 7.5)), tostring(B:SetWarnAt("buff", "Rejuvenation", 3)),
+        tostring(B:SetWarnAt("cd", "Moonfire", 3)), tostring(B:SetWarnAt("buff", "Thorns", 4000)), tostring(B:SetWarnAt("buff", "Thorns", 0)),
+        tostring(db.profiles.Copy.warnAt) }, " "), "false false false false true nil", "half a second, an entry not on the bar, the Cooldowns bar, over an"
+        .. " hour: turned away; Off clears it, and with none left no table is kept")
+
+    -- Share and Import.
+    ns.UseProfile("Mine")
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. H.Text(shared.warns) .. " | " .. P.Describe(shared),
+        "|0 " .. MINE .. " | Holds 3 bar entries, with low-time warnings for 2 auras and its look and layout.",
+        "Share: each warned entry goes with the profile, and the line says so")
+    local ok = P.Import("Theirs", shared, false)
+    Equal(tostring(ok) .. " " .. ns.ProfileName() .. " " .. H.Text(db.profiles.Theirs.warnAt) .. " " .. tostring(B:WarnAt("buff", "Thorns"))
+        .. " " .. H.Text(db.profiles.Mine.warnAt), "true Theirs " .. MINE .. " 600 " .. MINE,
+        "imported without its look: the new profile has them, yours as it was")
+    Equal(P.Export(), text, "and it shares the very same string back")
+    P.Import("Theirs too", shared, true)
+    Equal(H.Text(db.profiles["Theirs too"].warnAt), MINE, "with its look too")
+    local function Lists() return { cd = {}, util = {}, buff = { "Thorns" }, debuff = { "Moonfire" } } end
+    local old = P.Read(H.String({ a = "1.9.1", l = Lists() }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. H.Text(old.warns), "|0 {}", "a string from before them: none, nothing left out")
+    P.Import("Old string", old, false)
+    Equal(tostring(db.profiles["Old string"].warnAt) .. " " .. tostring(B:WarnAt("buff", "Thorns")), "nil nil", "imported: none")
+    local odd = P.Read(H.String({ l = Lists(), t = { buff = { Thorns = 10, Moonfire = 3, Starfire = "x", Gone = 0 },
+        debuff = { Moonfire = 4000 }, cd = { Moonfire = 3 } } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. H.Text(odd.warns), '|5 {["buff"]={["Thorns"]=10}}',
+        "a name not on that bar's list, not a number, 0, over an hour, a bar with none: left out and counted")
+    local wrong = P.Read(H.String({ l = Lists(), t = "Thorns" }))
+    Equal(H.Sane(ns, wrong) .. "|" .. wrong.skipped .. " " .. H.Text(wrong.warns), "|1 {}", "not a table: left out, and counted")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Every new choice of one update at once, out and back ----------------------------------------------
+-- (The warlock's list, built in groups: each group's own block is above.)
+-- Two extra bars with their lists, settings and a spot moved by numbers,
+-- own countdowns, Warn at on an extra bar and a base one, own icon sizes,
+-- and in the look the minutes countdown, the shipped fonts, heals and
+-- absorbs at the health bar's ends and a percent with no sign, all in one
+-- profile: none drops another. Read back sane with nothing left out, said
+-- in one line, copied sharing no table, kept over a switch to a profile
+-- without the extras and a reload, imported on another account with and
+-- without the look into new profiles (the look only when asked; Ticked only
+-- never goes), and shared back as the very same string.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, prdText = true, listTicked = true,
+        countdownFormat = "minutes", font = "barlow", warningFont = "saira", prdTextFont = "fira",
+        prdHealthAt = "sides", prdHealthLeft = "heals", prdHealthRight = "absorbs", prdPowerCentre = "bare" })
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    local mine = ns.ProfileName()
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "util")
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetAura("buff", "Thorns", true)
+    local added = { B:AddBar("debuff") }
+    added[#added + 1] = select(2, B:AddBar("buff"))
+    B:SetAura("debuff2", "Wrath", true)
+    B:SetAura("buff2", "Mark of the Wild", true)
+    B:SetOption("debuff2", "showMissing", true)
+    B:SetOption("buff2", "showMissing", true)
+    B:SetOption("debuff2", "size", 44)
+    B:SetSpellLook("Wrath", "font", "saira")
+    B:SetSpellLook("Wrath", "size", 130)
+    B:SetSpellLook("Moonfire", "font", "fira")
+    B:SetWarnAt("debuff2", "Wrath", 3)
+    B:SetWarnAt("buff2", "Mark of the Wild", 600)
+    B:SetWarnAt("debuff", "Moonfire", 5)
+    B:SetOwnSize("debuff2", "Wrath", 130)
+    B:SetOwnSize("cd", "Moonfire", 75)
+    local moved = B:MoveBar("debuff2", 120, -40)
+    Equal(tostring(added[1]) .. " " .. tostring(added[2]) .. " " .. tostring(added[4]) .. " " .. tostring(moved) .. " | "
+        .. table.concat(ns.BAR_KEYS, " "), "true debuff2 buff2 true | cd util buff buff2 debuff debuff2",
+        "two extra bars added, each after its kind, and Debuffs 2 moved by numbers")
+    -- What a profile carries of this update's: the lists, the extra bars, own countdowns, warnings and sizes.
+    local function Carried(p)
+        return H.Text({ cd = p.cd, util = p.util, buff = p.buff, buff2 = p.buff2, debuff = p.debuff, debuff2 = p.debuff2,
+            extraBars = p.extraBars, spellLook = p.spellLook, warnAt = p.warnAt, iconSize = p.iconSize })
+    end
+    local carried = Carried(ns.ProfileLists())
+    Equal(carried, '{["buff"]={[1]="Thorns"},["buff2"]={[1]="Mark of the Wild"},["cd"]={[1]="Moonfire"},["debuff"]={[1]="Moonfire"},'
+        .. '["debuff2"]={[1]="Wrath"},["extraBars"]={["buff2"]=true,["debuff2"]=true},["iconSize"]={["cd"]={["Moonfire"]=75},'
+        .. '["debuff2"]={["Wrath"]=130}},["spellLook"]={["Moonfire"]={["font"]="fira"},["Wrath"]={["font"]="saira",["size"]=130}},'
+        .. '["util"]={[1]="Wrath"},["warnAt"]={["buff2"]={["Mark of the Wild"]=600},["debuff"]={["Moonfire"]=5},["debuff2"]={["Wrath"]=3}}}',
+        "all kept in the profile together")
+
+    local text = P.Export()
+    local shared = P.Read(text)
+    local look, d2 = shared.setup.look, shared.setup.bars.debuff2
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. tostring(#text < 2000) .. " | " .. H.Text({ extras = shared.extras,
+        looks = shared.looks, warns = shared.warns, sizes = shared.sizes, debuff2 = shared.lists.debuff2, buff2 = shared.lists.buff2 }),
+        '|0 true | {["buff2"]={[1]="Mark of the Wild"},["debuff2"]={[1]="Wrath"},["extras"]={["buff2"]=true,["debuff2"]=true},'
+        .. '["looks"]={["Moonfire"]={["font"]="fira"},["Wrath"]={["font"]="saira",["size"]=130}},["sizes"]={["cd"]={["Moonfire"]=75},'
+        .. '["debuff2"]={["Wrath"]=130}},["warns"]={["buff2"]={["Mark of the Wild"]=600},["debuff"]={["Moonfire"]=5},["debuff2"]={["Wrath"]=3}}}',
+        "read back sane, nothing left out, short enough for one Discord message: every new part of the profile")
+    Equal(table.concat({ tostring(look.countdownFormat), tostring(look.font), tostring(look.warningFont), tostring(look.prdTextFont),
+        tostring(look.prdHealthAt), tostring(look.prdHealthLeft), tostring(look.prdHealthRight), tostring(look.prdPowerCentre),
+        tostring(look.listTicked), tostring(look.prdText) }, " "), "minutes barlow saira fira sides heals absorbs bare nil nil",
+        "and in its look every new choice, never Ticked only nor a tick switching a part on")
+    Equal(tostring(d2.size) .. " " .. tostring(d2.showMissing) .. " " .. tostring(d2.x == ns.BarData("debuff2").x and d2.y == ns.BarData("debuff2").y),
+        "44 true true", "Debuffs 2's own settings, and the spot it was moved to")
+    Equal(P.Describe(shared), "Holds 6 bar entries, with own countdowns for 2 spells, low-time warnings for 3 auras, 2 extra bars, own"
+        .. " sizes for 2 icons and its look and layout.", "said in one line: commas, then and before the last")
+
+    -- Copy: the same, sharing no table; a switch away and back; a reload.
+    ns.CopyProfile("Copy")
+    local copy, original, shares = db.profiles.Copy, db.profiles[mine], {}
+    for _, field in ipairs({ "extraBars", "spellLook", "warnAt", "iconSize", "debuff2", "buff2" }) do
+        if copy[field] == original[field] then shares[#shares + 1] = field end
+        for key, value in pairs(type(copy[field]) == "table" and copy[field] or {}) do
+            if type(value) == "table" and value == original[field][key] then shares[#shares + 1] = field .. "." .. key end
+        end
+    end
+    Equal(Carried(ns.ProfileLists()) .. " " .. table.concat(shares, " ") .. "| " .. tostring(P.Export() == text), carried .. " | true",
+        "Copy carries all of it, sharing no table, and shares the same string")
+    ns.UseProfile(mine)
+    ns.CopyProfile("Plain")
+    B:RemoveBar("debuff2")
+    B:RemoveBar("buff2")
+    local plain = table.concat(ns.BAR_KEYS, " ")
+    ns.UseProfile(mine)
+    Equal(plain .. " | " .. table.concat(ns.BAR_KEYS, " ") .. " | " .. Carried(ns.ProfileLists()) .. " " .. tostring(P.Export() == text),
+        "cd util buff debuff | cd util buff buff2 debuff debuff2 | " .. carried .. " true",
+        "a profile with the extras removed, then back: all there, the same string")
+    local reloaded = Start(db)
+    Equal(reloaded.ProfileName() .. " " .. tostring(reloaded.ProfileShare.Export() == text) .. " " .. tostring(reloaded.Get("listTicked"))
+        .. " " .. reloaded.Get("countdownFormat"), mine .. " true true minutes", "over a reload: the same string, your own choices kept")
+
+    -- Another account, with its look, then without it on a third.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local db2 = ForeverEnhancedCooldownManagerDB
+    local own = ns2.ProfileName()
+    local ownBefore = H.Text(db2.profiles[own])
+    local ok = ns2.ProfileShare.Import("With look", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. ns2.ProfileName() .. " | " .. Carried(ns2.ProfileLists()) .. " | " .. table.concat(ns2.BAR_KEYS, " ")
+        .. " " .. ns2.BarData("debuff2").size .. " " .. tostring(ns2.ProfileShare.Export() == text) .. " " .. tostring(H.Text(db2.profiles[own]) == ownBefore),
+        "true With look | " .. carried .. " | cd util buff buff2 debuff debuff2 44 true true",
+        "imported with its look: a new profile with all of it and the extra bars, the same string back, the importer's own as it was")
+    Equal(table.concat({ ns2.Get("countdownFormat"), ns2.Get("font"), ns2.Get("warningFont"), ns2.Get("prdTextFont"), ns2.Get("prdHealthAt"),
+        ns2.Get("prdHealthLeft"), ns2.Get("prdHealthRight"), ns2.Get("prdPowerCentre"), tostring(ns2.Get("listTicked")) }, " "),
+        "minutes barlow saira fira sides heals absorbs bare false", "the look came; Ticked only stayed the importer's own")
+    character = { guid = "Player-1-0088", name = "Tam", realm = "Zephras" }
+    local ns3 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns3.ProfileShare.Import("No look", ns3.ProfileShare.Read(text), false)
+    Equal(Carried(ns3.ProfileLists()) .. " | " .. ns3.Get("countdownFormat") .. " " .. ns3.Get("font") .. " " .. ns3.Get("prdHealthLeft") .. " "
+        .. tostring(ns3.ProfileShare.Export() == text), carried .. " | game friz value false",
+        "imported without its look: all of the profile's, the look the importer's own (so its string differs)")
+    Equal(#printed, 0, "no errors")
+end)()
 
 -- Keep them greyed with no target in strings --------------------------------------------------------
 -- The Debuffs bar's tick goes with the look and layout like its other
@@ -2332,8 +2665,8 @@ do
 end
 
 -- Icon details, shared ---------------------------------------------------------------------------
--- The swipe's colour and see-through, the countdown's size, colour and spot,
--- and the edge line go with the look, each where it differs from the
+-- The swipe's colour and see-through, the countdown's size, colour, spot and
+-- text (Timer text), and the edge line go with the look, each where it differs from the
 -- default (Custom with its own colour beside it); another account takes
 -- them, on its icons too, and shares the very same string. Odd values are
 -- left out and counted, and a string from before them reads as it did.
@@ -2341,8 +2674,8 @@ end
 do
     character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, swipeColour = "custom", swipeColourCustom = "112233",
-        swipeSeeThrough = 55, countdownSize = 130, countdownColour = "gold", countdownSpot = "TOPRIGHT", swipeEdge = true,
-        edgeColour = "purple", bars = { cd = { spells = { "Moonfire" } } } })
+        swipeSeeThrough = 55, countdownSize = 130, countdownColour = "gold", countdownSpot = "TOPRIGHT", countdownFormat = "minutes",
+        swipeEdge = true, edgeColour = "purple", bars = { cd = { spells = { "Moonfire" } } } })
     local P = ns.ProfileShare
     local setup = H.SetupNow(ns)
     local text = P.Export()
@@ -2350,7 +2683,7 @@ do
     local look, kept = shared.setup.look, {}
     for _, key in ipairs(ns.ICON_DETAILS) do kept[#kept + 1] = tostring(look[key]) end
     Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. table.concat(kept, " ") .. " " .. tostring(look.swipeColourCustom) .. " "
-        .. tostring(look.countdownColourCustom), "|0 | custom 55 130 gold TOPRIGHT true purple 112233 nil",
+        .. tostring(look.countdownColourCustom), "|0 | custom 55 130 gold TOPRIGHT minutes true purple 112233 nil",
         "shared: every detail unlike the default, Custom with its own colour, nothing left out")
     -- Another account takes all of it, on its icons too, and shares the same string.
     character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
@@ -2363,14 +2696,64 @@ do
         .. ("%.2f,%.2f,%.2f"):format(edge[1], edge[2], edge[3]) .. " " .. tostring(Last(cooldown, "SetCountdownFont")),
         "true true | 0.067,0.133,0.200,0.45 true 0.60,0.43,0.91 FECMCountdown23",
         "imported: the same look and string, and its icons in the details at once")
+    Equal(ns2.Get("countdownFormat"), "minutes", "and minutes then seconds with it")
     -- Odd values left out and counted; a string from before them reads as it did.
     local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {} } end
     local odd = P.Read(H.String({ l = Lists(), g = { s = { swipeColour = "custom", swipeSeeThrough = 120, countdownSize = 40,
-        countdownColour = "pink", countdownSpot = "MIDDLE", swipeEdge = "yes", edgeColour = "gold", countdownColourCustom = "#00ff00" },
-        b = {}, l = {} } }))
-    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look), "|8 | {}", "odd details: all left out, and counted")
+        countdownColour = "pink", countdownSpot = "MIDDLE", swipeEdge = "yes", edgeColour = "gold", countdownColourCustom = "#00ff00",
+        countdownFormat = "hours" }, b = {}, l = {} } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look), "|9 | {}", "odd details: all left out, and counted")
     local before = P.Read(H.String({ a = "1.8.2", l = Lists(), g = { s = { iconBorder = "icon" }, b = {}, l = {} } }))
     Equal(H.Sane(ns, before) .. "|" .. before.skipped .. " " .. tostring(before.setup.look.swipeColour), "|0 nil", "a string from before reads as it did")
+end
+
+-- Percent (no sign), shared ------------------------------------------------------------------------
+-- A spot of the display's text showing the percent with no % sign goes with
+-- the look like the other formats; another account takes it and shares the
+-- same string. A string from before it reads as it did.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, prdPowerAt = "sides", prdPowerRight = "bare" })
+    local text = ns.ProfileShare.Export()
+    local shared = ns.ProfileShare.Read(text)
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.ProfileShare.Import("Bare", ns2.ProfileShare.Read(text), true)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. tostring(shared.setup.look.prdPowerRight) .. " " .. ns2.Get("prdPowerRight")
+        .. " " .. tostring(ns2.ProfileShare.Export() == text), "|0 | bare bare true",
+        "shared: Percent (no sign) with the look, taken by another account, the same string back")
+end
+
+-- Incoming heals and Absorbs, shared ---------------------------------------------------------------
+-- The health bar's ends showing heals and shields go with the look like the
+-- other formats; another account takes them and shares the same string. A
+-- string with them in the health bar's middle or on another bar has them
+-- left out and counted (as an older version counts these), and one from
+-- before them reads as it did.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, prdHealthAt = "sides", prdHealthLeft = "heals",
+        prdHealthRight = "absorbs" })
+    local P = ns.ProfileShare
+    local text = P.Export()
+    local shared = P.Read(text)
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.ProfileShare.Import("Heals", ns2.ProfileShare.Read(text), true)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. tostring(shared.setup.look.prdHealthLeft) .. " "
+        .. tostring(shared.setup.look.prdHealthRight) .. " " .. ns2.Get("prdHealthLeft") .. " " .. ns2.Get("prdHealthRight") .. " "
+        .. tostring(ns2.ProfileShare.Export() == text), "|0 | heals absorbs heals absorbs true",
+        "shared: Incoming heals and Absorbs with the look, taken by another account, the same string back")
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {} } end
+    local odd = P.Read(H.String({ l = Lists(), g = { s = { prdHealthCentre = "heals", prdPowerLeft = "absorbs",
+        prdExtraRight = "heals", prdEnergyLeft = "absorbs", prdHealthRight = "heals" }, b = {}, l = {} } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look), '|4 | {["prdHealthRight"]="heals"}',
+        "anywhere but the health bar's ends: left out and counted")
+    local before = P.Read(H.String({ a = "1.9.1", l = Lists(), g = { s = { prdHealthAt = "sides", prdHealthLeft = "value" }, b = {}, l = {} } }))
+    Equal(H.Sane(ns, before) .. "|" .. before.skipped .. " " .. tostring(before.setup.look.prdHealthLeft), "|0 value",
+        "a string from before them reads as it did")
 end
 
 -- Block and Colour fade, shared ------------------------------------------------------------------
