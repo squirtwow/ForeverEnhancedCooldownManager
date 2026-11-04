@@ -1558,8 +1558,10 @@ end)()
         return table.concat(titles, ", ")
     end
     local steps = Steps("debuff")
-    Equal(tostring(steps == Steps("debuff2")) .. " " .. tostring(steps:find("Missing ones greyed", 1, true) ~= nil), "true true",
-        "Debuffs 2's walkthrough has the Debuffs page's steps, those only for Buffs and Debuffs bars too")
+    -- (All but Extra bars: an extra bar's own page has Remove bar instead.)
+    local spare = (steps:gsub(", Extra bars", ""))
+    Equal(tostring(spare ~= steps) .. " " .. tostring(spare == Steps("debuff2")) .. " " .. tostring(steps:find("Missing ones greyed", 1, true) ~= nil), "true true true",
+        "Debuffs 2's walkthrough has the Debuffs page's steps but Extra bars, those only for Buffs and Debuffs bars too")
     -- A new target, then that target dying: each Debuffs bar's Glow when
     -- missing lit, then out; each counts Moonfire's ticks.
     for _, key in ipairs({ "debuff", "debuff2" }) do

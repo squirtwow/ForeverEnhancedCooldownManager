@@ -171,6 +171,11 @@ local STEPS = {
         title = "The look",
         text = function()
             if not ns.CooldownManagerOn() then
+                -- Your bars coming on turn it off (ns.SetBars): nothing's wrong.
+                if ns.Bars:Enabled() then
+                    return "Your bars have taken over from Blizzard's Cooldown Manager, so it's off."
+                        .. " Your bars still use the design, colour, border and shadow picked here. Turn on brings it back if you want both."
+                end
                 return "Blizzard's Cooldown Manager is off, and its new look needs it. Turn on switches it on."
             end
             -- Only say it has the look when the look really started at login.
@@ -187,7 +192,7 @@ local STEPS = {
             return "Blizzard's Cooldown Manager already has the new look." .. PICK
         end,
         target = function(w)
-            if ns.CooldownManagerOn() then return w.lookOptions end
+            if ns.CooldownManagerOn() or ns.Bars:Enabled() then return w.lookOptions end
             return w.turnOnManager
         end,
         side = "below",
@@ -621,6 +626,33 @@ local NEWS = {
         -- The picker under the tick marks' tick; the box under it at its
         -- right end, inside the page.
         target = function(w) return w.pages.cast.tickSound end,
+        side = "below",
+        align = "end",
+    },
+    {
+        version = "1.10.0",
+        page = "cd",
+        title = "An icon's own settings",
+        text = "Click an icon on this bar for its own settings: its countdown's font and size, its ticks, and Warn at on"
+            .. " Buffs and Debuffs bars.",
+        -- The tray of this bar's icons; the box under it.
+        target = function(w) return w.pages.bar.tray end,
+        side = "below",
+    },
+    {
+        version = "1.10.0",
+        page = "cd",
+        -- On the first bars' pages: an extra bar's page has Remove bar instead.
+        when = function() return ns.EXTRA_OF[ShownBar()] ~= nil end,
+        title = "Extra bars",
+        text = "Once this bar has a spell, + Another bar adds a second bar of its kind, with its own spells, size and options"
+            .. " and its own row on the Layout page.",
+        -- The button beside Clear, or the tray while the button waits for a
+        -- spell; the box under it at its right end.
+        target = function(w)
+            local page = w.pages.bar
+            return page.another:IsShown() and page.another or page.tray
+        end,
         side = "below",
         align = "end",
     },

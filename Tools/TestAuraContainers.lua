@@ -1959,20 +1959,30 @@ end)()
     Equal(Joined(links[1259705]) .. " | " .. Joined(links[1259686]) .. " | " .. Joined(links[8512]) .. " | " .. Joined(links[8227])
         .. " | " .. Joined(links[400574]) .. " | " .. Joined(links[1240827]) .. " | " .. Joined(links[1499]) .. " | " .. Joined(links[13809]),
         "1259691,1270842 | 1259688,1270893 | 8515,10609,10612 | 8230,8250,10521,15036 | 400573 | 401877,1240848,1240849"
-        .. " | 3355,14308,14309 | 13810", "Read Leyline to both Energized, Skysight to both Elemental Blessing, a totem to its"
-        .. " buff (not Windfury's moment's extra attack, 8516), Arcane Blast to its stacks, Prayer of Mending to every rank's buff,"
-        .. " the traps to theirs")
+        .. " | 3355,14308,14309 | 13810", "Read Leyline to Attuned and Energized, Skysight to Elemental Blessing and Charged, a totem"
+        .. " to its buff (not Windfury's moment's extra attack, 8516), Arcane Blast to its stacks, Prayer of Mending to every rank's"
+        .. " buff, the traps to theirs")
+    -- Attuned and Charged, an hour each, were the second Energized and the
+    -- second Elemental Blessing until build 70753 named them: no rule by
+    -- name finds them now, so the generator links them by ID (SCRIPT_AURAS).
+    -- Both stay auras no one learns, not spells of their own.
+    Equal(tostring(Has(links[1259705], 1259691)) .. " " .. tostring(Has(links[1259686], 1270893)) .. " | "
+        .. tostring(data.AURA_ONLY[1259691]) .. " " .. tostring(data.AURA_ONLY[1270893]) .. " | "
+        .. tostring(data.RANKS.Attuned) .. " " .. tostring(data.RANKS.Charged),
+        "true true | true true | nil nil", "Read Leyline leads to Attuned and Skysight to Charged, by ID")
+    -- (A hunter's Lacerate, a bleed no class listed, was a family here until
+    -- it went into ns.RANKS beside the druid's, 2026-11-01.)
     Equal(Joined(FamilyOf(8076)) .. " | " .. Joined(FamilyOf(24118)) .. " | " .. tostring(Has(FamilyOf(1248406), 1248420, 19709))
         .. " | " .. tostring(FamilyOf(1259691)) .. " " .. tostring(FamilyOf(1270842)) .. " " .. tostring(FamilyOf(1259688)),
-        "8076,8162,8163,10441,25362 | 24118,24119,24120,1299332 | true | nil nil nil",
-        "one aura in several IDs: a totem buff's ranks, a bleed no class lists, Well Fed from any food; never the two Energized"
-        .. " or the two Elemental Blessing")
+        "8076,8162,8163,10441,25362 | none | true | nil nil nil",
+        "one aura in several IDs: a totem buff's ranks, Well Fed from any food; never a spell's ranks in ns.RANKS (the hunter's"
+        .. " Lacerate), the two Energized or the two Elemental Blessing")
     -- A talent ability's ranks are its own name's in ns.RANKS now (2026-10-20),
     -- every rank its buff had as a family before.
     Equal(tostring(FamilyOf(19506)) .. " " .. Joined(data.RANKS["Trueshot Aura"]) .. " | " .. tostring(FamilyOf(1310687)) .. " "
         .. Joined(data.RANKS["Sniper Shot"]) .. " | " .. tostring(FamilyOf(20925)) .. " " .. Joined(data.RANKS["Holy Shield"]),
-        "nil 1299346,1299348,19506,20905,20906 | nil 1310687,1310785,1310786 | nil 20925,20927,20928",
-        "a talent aura's ranks all in ns.RANKS (Trueshot Aura, Sniper Shot's three, Holy Shield), no family needed")
+        "nil 1299346,1299348,19506,20905,20906 | nil 1310687,1310785,1310786 | nil 20925,20927,20928,1239570",
+        "a talent aura's ranks all in ns.RANKS (Trueshot Aura, Sniper Shot's three, Holy Shield's four), no family needed")
     Equal(Joined(FamilyOf(8182)) .. " | " .. Joined(FamilyOf(8185)) .. " | " .. Joined(FamilyOf(10596)),
         "8182,10476,10477 | 8185,10534,10535 | 10596,10598,10599",
         "a totem's Frost, Fire and Nature Resistance too, though a hunter's pet's passives hold those names")
@@ -1988,6 +1998,11 @@ end)()
     Equal(tostring(data.RANKS["Immolation Trap Effect"]) .. " | " .. Joined(data.RANKS["Immolation Trap"]),
         "nil | 13795,13797,14298,14302,14299,14303,14300,14304,14301,14305",
         "build 70291 renamed Immolation Trap Effect: its burns are Immolation Trap's now")
+    Equal(tostring(data.RANKS["Explosive Trap Effect"]) .. " " .. tostring(data.SPELL_CLASSES["Explosive Trap Effect"]) .. " | "
+        .. Joined(data.RANKS["Explosive Trap"]) .. " " .. tostring(data.SPELL_CLASSES["Explosive Trap"]) .. " | "
+        .. Joined(links[13813]) .. " " .. Joined(links[14317]),
+        "nil nil | 13812,13813,14314,14316,14315,14317 HUNTER | 13812,14314,14315 13812,14314,14315",
+        "build 70707 renamed Explosive Trap Effect: its fire is Explosive Trap's now, and each trap leads to every rank's fire")
 
     local NAMES = { [2818] = "Deadly Poison", [13218] = "Wound Poison", [13224] = "Wound Poison", [29131] = "Bloodrage",
         [1259691] = "Energized", [1270842] = "Energized", [1259688] = "Elemental Blessing", [1270893] = "Elemental Blessing",
@@ -2140,6 +2155,18 @@ end)()
         "beside them, the two Energized still go on one each")
     Equal(#printed, 0, "no errors")
 
+    -- The same under build 70753's names: each racial lights for its
+    -- Attuned or Charged by ID, whatever your game calls them.
+    NAMES[1259691], NAMES[1270893] = "Attuned", "Charged"
+    Start("DRUID", nil, { { name = "Read Leyline", subName = "Racial", spellID = 1259705, iconID = 1 },
+        { name = "Skysight", subName = "Racial", spellID = 1259686, iconID = 1 } })
+    B:SetAura("buff", "Read Leyline", true)
+    B:SetAura("buff", "Skysight", true)
+    Equal(Lit("buff", 1259691) .. " | " .. Lit("buff", 1270842) .. " | " .. Lit("buff", 1270893) .. " | " .. Lit("buff", 1259688),
+        "g1 | g1 | g2 | g2", "Read Leyline lights for Attuned and Energized, Skysight for Charged and Elemental Blessing")
+    NAMES[1259691], NAMES[1270893] = "Energized", "Elemental Blessing"
+    Equal(#printed, 0, "no errors")
+
     -- A hunter's pet abilities: on the Cooldowns bar each goes by the pet's
     -- own spell, the one with the cooldown. Added by its ID, that ID; by
     -- name, the highest rank your pet knows; saved by a Beast Training
@@ -2183,34 +2210,103 @@ end)()
         "saved by a druid's or warrior's rank, or the pet's old one: the pet's own spells, and their cooldowns asked of them")
     Equal(#printed, 0, "no errors")
 
-    -- Saved by the trap debuffs' old names (build 70291 dropped "Effect"):
-    -- each still watches every rank, and is still a hunter's only.
+    -- Saved by the trap debuffs' old names (build 70291 dropped "Effect",
+    -- build 70707 Explosive Trap's too): each still watches every rank, and
+    -- is still a hunter's only.
     local old = { useBars = true, notesSeen = "dev", everyone = "Old",
-        custom = { ["Immolation Trap Effect"] = { 13797 }, ["Freezing Trap Effect"] = { 3355 } },
-        profiles = { Old = { cd = {}, util = {}, buff = {}, debuff = { "Immolation Trap Effect", "Freezing Trap Effect" }, joins = {} } } }
+        custom = { ["Immolation Trap Effect"] = { 13797 }, ["Freezing Trap Effect"] = { 3355 }, ["Explosive Trap Effect"] = { 13812 } },
+        profiles = { Old = { cd = {}, util = {}, buff = {}, joins = {},
+            debuff = { "Immolation Trap Effect", "Freezing Trap Effect", "Explosive Trap Effect" } } } }
     Start("HUNTER", old)
     local burns, freezes = Sp:Find("Immolation Trap Effect").ids, Sp:Find("Freezing Trap Effect").ids
-    Equal(tostring(Has(burns, 13797, 14298, 14299, 14300, 14301)) .. " " .. tostring(Has(freezes, 3355, 14308, 14309)) .. " | "
-        .. Lit("debuff", 14301) .. " | " .. Lit("debuff", 14309), "true true | g1 | g2",
+    local fires = Sp:Find("Explosive Trap Effect").ids
+    Equal(tostring(Has(burns, 13797, 14298, 14299, 14300, 14301)) .. " " .. tostring(Has(freezes, 3355, 14308, 14309)) .. " "
+        .. tostring(Has(fires, 13812, 14314, 14315)) .. " | " .. Lit("debuff", 14301) .. " | " .. Lit("debuff", 14309) .. " | "
+        .. Lit("debuff", 14315) .. " | " .. tostring(Sp:ForMe("Explosive Trap Effect", "debuff")), "true true true | g1 | g2 | g3 | true",
         "each lights for its top rank, as for its first")
     Start("DRUID", old)
-    Equal(tostring(Sp:ForMe("Immolation Trap Effect", "debuff")) .. " " .. B:Get("debuff").count, "false 0",
-        "a druid sharing the profile doesn't see them")
+    Equal(tostring(Sp:ForMe("Immolation Trap Effect", "debuff")) .. " " .. tostring(Sp:ForMe("Explosive Trap Effect", "debuff")) .. " "
+        .. B:Get("debuff").count, "false false 0", "a druid sharing the profile doesn't see them")
     Equal(#printed, 0, "no errors")
 
     -- Build 70425 renamed the Skyborne's Read Ley Line (Read Leyline) and
     -- the paladin's Blessing of Salvation and Greater Blessing of Salvation
     -- (Salvation and Mass Salvation), keeping their IDs; and brought Frost
     -- Blast, Revoke, a fourth Mana Tide Totem (its buff one of the Mana Tide
-    -- family) and Reckoning's buff.
+    -- family) and Reckoning's buff. Build 70707 took Frost Blast out of the
+    -- spellbook, and since the 30 Oct hotfix no trainer teaches Salvation,
+    -- Mass Salvation, Blessing of Light, Greater Blessing of Light or Revoke
+    -- (build 70753's data has no name for them): no one learns them, so the
+    -- data offers none of them.
     Equal(tostring(data.RANKS["Read Ley Line"]) .. " " .. Joined(data.RANKS["Read Leyline"]) .. " " .. tostring(data.SPELL_RACES["Read Leyline"])
         .. " | " .. tostring(data.RANKS["Blessing of Salvation"]) .. " " .. tostring(data.RANKS["Greater Blessing of Salvation"]) .. " "
         .. Joined(data.RANKS.Salvation) .. " " .. Joined(data.RANKS["Mass Salvation"]) .. " " .. tostring(data.SPELL_CLASSES["Mass Salvation"]),
-        "nil 1259705 95 | nil nil 1038 25895 PALADIN", "the new names, the same IDs")
+        "nil 1259705 95 | nil nil none none nil", "the new name, the same ID; neither Salvation is taught now")
     Equal(Joined(data.RANKS["Frost Blast"]) .. " " .. tostring(Has(data.DEBUFFS.MAGE, "Frost Blast")) .. " | " .. Joined(data.RANKS.Revoke)
-        .. " " .. tostring(data.SPELL_CLASSES.Revoke) .. " | " .. Joined(data.RANKS["Mana Tide Totem"]) .. " " .. Joined(FamilyOf(1325257))
-        .. " | " .. Joined(data.PASSIVE_BUFFS[20177]), "1326053,1326054,1326055 true | 1325499 PALADIN | 16190,17354,17359,1325256"
-        .. " 16191,17355,17360,1325257 | 1326084", "Frost Blast (a mage's debuff), Revoke, Mana Tide's fourth rank, Reckoning's buff")
+        .. " " .. tostring(data.SPELL_CLASSES.Revoke) .. " " .. Joined(data.RANKS["Blessing of Light"]) .. " "
+        .. Joined(data.RANKS["Greater Blessing of Light"]) .. " " .. tostring(data.SPELL_CLASSES["Blessing of Light"]) .. " | "
+        .. Joined(data.RANKS["Mana Tide Totem"]) .. " " .. Joined(FamilyOf(1325257)) .. " | " .. Joined(data.PASSIVE_BUFFS[20177]),
+        "none false | none nil none none nil | 16190,17354,17359,1325256 16191,17355,17360,1325257 | 1326084",
+        "Frost Blast gone; Revoke and both Blessings of Light no longer taught; Mana Tide's fourth rank, Reckoning's buff")
+    -- And build 70707's own: Blood Fury's cooldown 3 min to 2, Ice Lance's
+    -- first rank on an 8 sec cooldown (its later ranks' too, from the 30 Oct
+    -- hotfix, in the data since build 70753), the mage's Improved Fireball and Elemental Precision renamed
+    -- (passive talents, nothing to track), and Piercing Ice and Arcane Focus
+    -- out of the tree (Tools/GenerateRanks.mjs OUT_OF_TREE: their rows are
+    -- still in the data).
+    Equal(tostring(data.COOLDOWNS[20572]) .. " | " .. tostring(data.COOLDOWNS[1312002]) .. " " .. tostring(data.COOLDOWNS[400640])
+        .. " " .. tostring(data.COOLDOWNS[1240047]) .. " | " .. tostring(data.RANKS["Improved Fireball"]) .. " "
+        .. Joined(data.PASSIVES.Accelerant) .. " " .. tostring(data.PASSIVES["Elemental Precision"]) .. " "
+        .. tostring(Has(data.PASSIVES.Precision, 29438)),
+        "120 | 8 8 8 | nil 11069 nil true", "Blood Fury 2 min, Ice Lance 8 sec at every rank, the two passives under their new names")
+    -- Matching Forever's current trainers (2026-11-01): a hunter's Lacerate
+    -- (a bleed, no cooldown) beside the druid's, and Feral Charge (Bear) at
+    -- 15 sec. Rune-only spells (no one has them: Forever has no runes) are
+    -- gone by name, with their debuffs; a real name keeps its seasonal
+    -- helper IDs (Fire Blast's, Mutilate's).
+    Equal(Joined(data.RANKS.Lacerate) .. " " .. tostring(data.SPELL_CLASSES.Lacerate) .. " "
+        .. tostring(Has(data.DEBUFFS.HUNTER, "Lacerate")) .. " " .. tostring(data.COOLDOWNS[24118]) .. " | "
+        .. Joined(data.RANKS["Feral Charge (Bear)"]) .. " " .. tostring(data.COOLDOWNS[16979]) .. " "
+        .. tostring(data.SPELL_CLASSES["Feral Charge (Bear)"]),
+        "414647,24118,1328617,24119,1328616,24120,414644,1235826,1299332,1235827 DRUID HUNTER true nil | 16979 15 DRUID",
+        "the hunter's Lacerate and Feral Charge (Bear) are in the tables, beside the druid's five")
+    -- Build 70753's own: Ferocious Bite's new first rank, Primal Bite's fourth
+    -- gone, Holy Shield's fourth at 10 sec, Oath of Light a paladin's (both
+    -- with no class in the data: CLASSLESS), Poised, Shifting Power 8 sec,
+    -- Twist of Light under its new name, and Berserk and Improved Seal of
+    -- Fury gone from their trees (OUT_OF_TREE).
+    Equal(Joined(data.RANKS["Ferocious Bite"]) .. " | " .. Joined(data.RANKS["Primal Bite"]) .. " " .. tostring(data.COOLDOWNS[1238073])
+        .. " | " .. tostring(data.COOLDOWNS[1239570]) .. " " .. Joined(data.RANKS["Oath of Light"]) .. " " .. tostring(data.SPELL_CLASSES["Oath of Light"])
+        .. " | " .. tostring(data.SPELL_CLASSES.Poised) .. " " .. tostring(data.COOLDOWNS[1322605]) .. " | " .. tostring(data.RANKS["Twist of Light"])
+        .. " " .. Joined(data.RANKS["Unsealed Wrath"]) .. " | " .. tostring(data.RANKS.Berserk) .. " " .. tostring(data.COOLDOWNS[417141]) .. " "
+        .. tostring(data.RANKS["Improved Seal of Fury"]) .. " " .. tostring(data.PASSIVES["One-Handed Weapon Specialization"]),
+        "1328618,22568,22827,22828,22829,31018 | 407995,1238069,1238070 nil | 10 1328548 PALADIN | DRUID ROGUE 8 | nil 1310735 | nil nil nil nil",
+        "the druid's and paladin's changes from build 70753's data")
+    -- Blizzard's notes for launch, by ID (HOTFIX_COOLDOWNS), as the data
+    -- hasn't them yet; Lava Burst, which they remove, stays harmless.
+    local function Cooldowns(...)
+        local out = {}
+        for _, id in ipairs({ ... }) do out[#out + 1] = tostring(data.COOLDOWNS[id]) end
+        return table.concat(out, ",")
+    end
+    Equal(Cooldowns(1464, 8820, 11604, 11605, 1240193) .. " | " .. Cooldowns(17364) .. " | " .. Cooldowns(408521, 1239242, 1239243) .. " | "
+        .. Cooldowns(437009) .. " | " .. Cooldowns(1238299, 1238300, 1326047),
+        "15,15,15,15,15 | 6 | 12,12,12 | 30 | 10,10,10", "Slam 15, Stormstrike 6, Riptide 12, Totemic Call 30; Lava Burst's rows left alone")
+    Equal(tostring(data.RANKS["Living Bomb"]) .. " " .. tostring(data.SPELL_CLASSES["Living Bomb"]) .. " "
+        .. tostring(Has(data.DEBUFFS.MAGE, "Living Bomb")) .. " " .. tostring(data.RANKS.Starfall) .. " "
+        .. tostring(data.NAME_AURAS["Living Bomb"]) .. " | " .. tostring(Has(data.RANKS["Fire Blast"], 2136, 400618)) .. " "
+        .. tostring(Has(data.RANKS.Mutilate, 1310705, 399960)),
+        "nil nil false nil nil | true true", "rune-only names gone; real names keep their seasonal helper IDs")
+    -- Rune-only passives go the same way (the add box offered Dance of the
+    -- Wicked for its buff); the troll's Regeneration and the paladin's
+    -- Vengeance aren't runes and stay.
+    Equal(tostring(data.PASSIVES["Dance of the Wicked"]) .. " " .. tostring(data.PASSIVE_BUFFS[412798]) .. " "
+        .. tostring(data.AURA_ONLY[412800]) .. " " .. tostring(data.PASSIVES["Secrets of Elune"]) .. " | "
+        .. Joined(data.PASSIVES.Regeneration) .. " " .. Joined(data.PASSIVES.Vengeance),
+        "nil nil nil nil | 20555 16909,20049", "rune-only passives gone; real passives stay")
+    Equal(tostring(data.RANKS["Piercing Ice"]) .. " " .. tostring(data.SPELL_CLASSES["Piercing Ice"]) .. " "
+        .. tostring(data.PASSIVES["Piercing Ice"]) .. " " .. tostring(data.PASSIVES["Arcane Focus"]),
+        "nil nil nil nil", "Piercing Ice and Arcane Focus, gone from the mage's tree, are in no table")
     NAMES[16191], NAMES[1325257], NAMES[20177] = "Mana Tide", "Mana Tide", "Reckoning"
     Start("SHAMAN")
     Equal(Said("buff", "16191") .. " | " .. Lit("buff", 1325257) .. " | " .. tostring(Sp:AddNote("20177", "buff")) .. " | "
@@ -2221,7 +2317,8 @@ end)()
     -- (each bar's list and each form's, joins, the pulse's ticks and Long, a
     -- pinned one's name), and so do spells added by those names (merged with
     -- the new name's, each ID once). A list holding both keeps the first,
-    -- with its join. A paladin's Salvation lights for Mass Salvation too.
+    -- with its join. A paladin who still knows Salvation (since build 70707
+    -- no trainer teaches it or Mass Salvation) sees it for its own ID only.
     local function Renamed()
         return { useBars = true, notesSeen = "dev", helpSeen = true, everyone = "Old",
             custom = { ["Blessing of Salvation"] = { 25895, 1038 }, Salvation = { 1038 }, ["Read Ley Line"] = { 1259705 } },
@@ -2256,7 +2353,8 @@ end)()
     Equal(Look(mine.spellLook["Read Leyline"]) .. " " .. Look(mine.spellLook["Read Ley Line"]) .. " | "
         .. Look(other.spellLook["Read Leyline#1259705"]) .. " " .. Look(other.spellLook["Read Ley Line#1259705"]),
         "barlow/120 none | nil/90 none", "each entry's own countdown look goes with it to the new name, a pinned one's too")
-    Equal(Lit("buff", 1038) .. " | " .. Lit("buff", 25895), "g1 | g1", "a paladin's Salvation lights for Salvation and Mass Salvation")
+    Equal(Lit("buff", 1038) .. " | " .. Lit("buff", 25895), "g1 | ",
+        "a paladin's Salvation lights for its own ID; Mass Salvation, taught to no one now, no longer comes with it")
     Start("PALADIN", db)
     Equal(table.concat(db.profiles.Old.cd, ",") .. " | " .. Keys(db.custom), "Read Leyline | Read Leyline=1259705 Salvation=1038,25895",
         "loaded again: nothing left to move")
@@ -2273,9 +2371,9 @@ end)()
     _G.UnitRace = function() return "Skyborne", "Skyborne", 95 end
     local skyborne = tostring(Sp:ForMe("Read Ley Line", "cd"))
     _G.UnitRace = function() return "Human", "Human", 1 end
-    Equal(tostring(Has(Sp:Find("Blessing of Salvation").ids, 25895)) .. " | " .. skyborne .. " " .. tostring(Sp:ForMe("Read Ley Line", "cd"))
+    Equal(tostring(Has(Sp:Find("Read Ley Line").ids, 1259705, 1270842)) .. " | " .. skyborne .. " " .. tostring(Sp:ForMe("Read Ley Line", "cd"))
         .. " | " .. tostring(Sp:Leftover("Read Ley Line", "cd")) .. " " .. tostring(Sp:Leftover("Energized", "cd")),
-        "true | true false | false true", "an old name goes by the new one's group version, races and Clear")
+        "true | true false | false true", "an old name goes by the new one's IDs (and their auras), races and Clear")
     _G.UnitRace = race
     -- A profile shared from before the new names comes in under them, and so
     -- do the spells it added by name.
@@ -2287,6 +2385,86 @@ end)()
     Equal(tostring(ok) .. " " .. table.concat(shared.cd, ",") .. " " .. table.concat(shared.buff, ",") .. " | " .. Keys(shared.pulsePick)
         .. " | " .. Keys(db.custom) .. " | " .. Lit("buff", 25895), "true Read Leyline Mass Salvation | Read Leyline=true"
         .. " | Mass Salvation=25895 | g1", "a profile shared under the old names comes in under the new ones")
+    Equal(#printed, 0, "no errors")
+
+    -- Blizzard's notes for launch rename three more, and which name your game
+    -- uses depends on its build and hotfixes (70707 has the old three, 70753
+    -- only Unsealed Wrath; a new name may bring a new ID). So a saved key goes
+    -- to whichever your spellbook shows, whichever way that is, and nothing
+    -- is lost on either side.
+    local function Either(name, id)
+        return { useBars = true, notesSeen = "dev", helpSeen = true, everyone = "Mine", custom = { [name] = { id or 16166 } },
+            profiles = {
+                Mine = { cd = { name }, util = {}, buff = { name .. "#16166" }, debuff = {}, joins = {},
+                    forms = { [5] = { cd = { name } } }, pulsePick = { [name] = true, Barkskin = true }, pulseStyle = { [name] = "long" },
+                    spellLook = { [name] = { font = "barlow", size = 120 } } },
+                Other = { cd = {}, util = { name }, buff = {}, debuff = {}, joins = {}, pulsePick = { [name] = true } } } }
+    end
+    local function Everywhere()
+        local mine, other = db.profiles.Mine, db.profiles.Other
+        Sp:Fresh()
+        return table.concat(mine.cd, ",") .. " " .. table.concat(mine.forms[5].cd, ",") .. " " .. table.concat(mine.buff, ",") .. " "
+            .. table.concat(other.util, ",") .. " | " .. Keys(mine.pulsePick) .. " | " .. Keys(mine.pulseStyle) .. " | "
+            .. Look(mine.spellLook[next(mine.spellLook)]) .. " " .. tostring(next(mine.spellLook)) .. " | " .. Keys(other.pulsePick) .. " | " .. Keys(db.custom)
+    end
+    -- What the pulse's list reads for a spell of this name (Tools/TestPulse.lua has the list itself).
+    local function Ticked(name)
+        return tostring(ns.PulsePicks()[name]) .. " " .. tostring(ns.PulseStyles()[name])
+    end
+    NAMES[16166] = "Lightning Mastery"
+    Start("SHAMAN", Either("Elemental Mastery"), { { name = "Lightning Mastery", spellID = 16166, iconID = 1 } })
+    Equal(Everywhere(), "Lightning Mastery Lightning Mastery Lightning Mastery#16166 Lightning Mastery | Barkskin=true Lightning Mastery=true"
+        .. " | Lightning Mastery=long | barlow/120 Lightning Mastery | Lightning Mastery=true | Lightning Mastery=16166",
+        "the old name saved, your game on the new one: every list, each profile, ticks, Long, look and added spell follow it")
+    Equal(Ticked("Lightning Mastery"), "true long", "still ticked for the pulse, and still Long")
+    Equal(tostring(Sp:Find("Lightning Mastery").spellID) .. " " .. tostring(Sp:Find("Elemental Mastery")) .. " " .. tostring(Sp:ForMe("Lightning Mastery", "cd"))
+        .. " " .. Joined(Sp:Find("Lightning Mastery").ids), "16166 nil true 16166", "the entry goes by the new name, with its ID from the data's old name")
+    Start("SHAMAN", db, { { name = "Lightning Mastery", spellID = 16166, iconID = 1 } })
+    Equal(table.concat(db.profiles.Mine.cd, ",") .. " | " .. Ticked("Lightning Mastery"), "Lightning Mastery | true long", "loaded again: it stays")
+    NAMES[16166] = "Elemental Mastery"
+    Start("SHAMAN", Either("Lightning Mastery"), { { name = "Elemental Mastery", spellID = 16166, iconID = 1 } })
+    Equal(Everywhere(), "Elemental Mastery Elemental Mastery Elemental Mastery#16166 Elemental Mastery | Barkskin=true Elemental Mastery=true"
+        .. " | Elemental Mastery=long | barlow/120 Elemental Mastery | Elemental Mastery=true | Elemental Mastery=16166",
+        "the new name saved, your game still on the old one: all of it follows that way too")
+    Equal(Ticked("Elemental Mastery"), "true long", "still ticked for the pulse, and still Long")
+    -- A new name with a new spell ID, as Totemic Call's new form may be.
+    Start("SHAMAN", Either("Totemic Projection"), { { name = "Totemic Call", spellID = 1999999, iconID = 1 } })
+    Equal(table.concat(db.profiles.Mine.cd, ",") .. " | " .. Keys(db.profiles.Mine.pulsePick), "Totemic Call | Barkskin=true Totemic Call=true",
+        "the key goes by the name your spellbook shows, whatever the ID")
+    Start("SHAMAN", Either("Totemic Call"), { { name = "Totemic Projection", spellID = 437009, iconID = 1 } })
+    Sp:Fresh()
+    Equal(table.concat(db.profiles.Mine.cd, ",") .. " | " .. Ticked("Totemic Projection"), "Totemic Projection | true long", "and the other way")
+    -- A passive shows its name too, though it's never an entry of its own.
+    Start("PALADIN", Either("Twist of Light", 1310735), { { name = "Unsealed Wrath", spellID = 1310735, iconID = 1, isPassive = true } })
+    Sp:Fresh()
+    Equal(table.concat(db.profiles.Mine.cd, ",") .. " | " .. Keys(db.custom), "Unsealed Wrath | Unsealed Wrath=1310735", "a passive's name is followed as well")
+    Start("PALADIN", Either("Unsealed Wrath", 1310735), { { name = "Twist of Light", spellID = 1310735, iconID = 1, isPassive = true } })
+    Sp:Fresh()
+    Equal(table.concat(db.profiles.Mine.cd, ",") .. " | " .. tostring(Sp:ForMe("Twist of Light", "cd")) .. " " .. tostring(Sp:ForMe("Unsealed Wrath", "cd")),
+        "Twist of Light | false false", "and back, and on a Cooldowns bar either name is a passive with nothing to track")
+    -- Showing neither, nothing moves, and either name is still a shaman's;
+    -- showing both, they're two spells.
+    Start("SHAMAN", Either("Lightning Mastery"))
+    Equal(table.concat(db.profiles.Mine.cd, ",") .. " | " .. Keys(db.profiles.Other.pulsePick) .. " | " .. tostring(Sp:AnotherClass("Lightning Mastery")),
+        "Lightning Mastery | Lightning Mastery=true | false", "a shaman who hasn't it yet keeps the name as saved")
+    Start("PALADIN", Either("Elemental Mastery"))
+    Equal(table.concat(db.profiles.Mine.cd, ",") .. " | " .. tostring(Sp:ForMe("Elemental Mastery", "cd")) .. " " .. tostring(Sp:AnotherClass("Totemic Call")),
+        "Elemental Mastery | false true", "another class: untouched, and not shown")
+    Start("SHAMAN", Either("Elemental Mastery"), { { name = "Elemental Mastery", spellID = 16166, iconID = 1 },
+        { name = "Lightning Mastery", spellID = 1999998, iconID = 1 } })
+    Equal(table.concat(db.profiles.Mine.cd, ",") .. " " .. tostring(Sp:Find("Lightning Mastery").spellID), "Elemental Mastery 1999998", "both in your spellbook: two spells")
+    -- A profile shared under the other name comes in under yours, once known.
+    Start("SHAMAN", nil, { { name = "Lightning Mastery", spellID = 16166, iconID = 1 } })
+    Sp:Fresh()
+    ns.ImportProfile("Shared", { lists = { cd = { "Elemental Mastery" }, util = {}, buff = {}, debuff = {} }, joins = {},
+        pick = { ["Elemental Mastery"] = true }, style = {}, added = { ["Elemental Mastery"] = { 16166 } } }, false)
+    Equal(table.concat(db.profiles.Shared.cd, ",") .. " | " .. Keys(db.profiles.Shared.pulsePick) .. " | " .. Keys(db.custom),
+        "Lightning Mastery | Lightning Mastery=true | Lightning Mastery=16166", "a shared profile under the old name")
+    -- A first rank your game hasn't yet doesn't cost a spell its icon.
+    local texture = C_Spell.GetSpellTexture
+    C_Spell.GetSpellTexture = function(id) if id == 22568 then return 132127 end end
+    Equal(tostring(Sp:Icon("Ferocious Bite")), "132127", "Ferocious Bite's icon on a build without its new first rank")
+    C_Spell.GetSpellTexture = texture
     Equal(#printed, 0, "no errors")
 end)()
 

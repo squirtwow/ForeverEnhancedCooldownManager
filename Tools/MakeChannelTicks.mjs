@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const dir = process.argv[2] || 'C:/AddonDev/_Toolchain/gamedata/forever-70425';
+const dir = process.argv[2] || 'C:/AddonDev/_ForeverData/changes-2026-11-03/impact/wago-70753';
 
 function csv(file) {
   const lines = fs.readFileSync(path.join(dir, file), 'utf8').split(/\r?\n/).filter(Boolean);

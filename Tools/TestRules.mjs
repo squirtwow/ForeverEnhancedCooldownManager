@@ -178,8 +178,9 @@ test("never the game's tooltip", () => {
 
 // The game's settings (CVars) are only ever changed by a click of yours: the
 // Turn on buttons for Blizzard's Cooldown Manager and Personal Resource
-// Display (Window.lua) and the Layout page's display tick, through
-// ns.TurnOn and ns.TurnOff (Core.lua), which only ever set those two.
+// Display (Window.lua), the Layout page's display tick, and turning your bars
+// on or off (ns.SetBars, Core.lua: Blizzard's Cooldown Manager goes the other
+// way), through ns.TurnOn and ns.TurnOff (Core.lua), which only ever set those two.
 // Tools/TestBars.lua checks nothing is written as the addon loads.
 test("the game's settings change only through ns.TurnOn and ns.TurnOff, from your clicks", () => {
   const writers = /\b(SetCVar\w*|ConsoleExec|RegisterCVar|SetCVarToDefault|ResetTestCVars)\b/;
@@ -192,11 +193,15 @@ test("the game's settings change only through ns.TurnOn and ns.TurnOff, from you
   assert.ok(/InCombatLockdown\(\)/.test(on) && /InCombatLockdown\(\)/.test(off), 'never in a fight');
   const outside = core.replace(on, '').replace(off, '');
   assert.equal(count(outside, new RegExp(`${writers.source}\\s*[,(]`, 'g')), 0, 'no CVar written anywhere else in Core.lua');
-  // Who asks, and for what: the three switches, each a click of yours.
+  // Who asks, and for what: the switches, each a click of yours.
   const calls = files.flatMap(name => [...code[name].matchAll(/(?<!function )ns\.(TurnOn|TurnOff)\(([^)]*)\)/g)]
     .map(match => `${name} ${match[1]}(${match[2]})`)).sort();
-  assert.deepEqual(calls, ['LayoutPage.lua TurnOff("nameplateShowSelf")', 'LayoutPage.lua TurnOn("nameplateShowSelf")',
+  assert.deepEqual(calls, ['Core.lua TurnOff("cooldownViewerEnabled")', 'Core.lua TurnOn("cooldownViewerEnabled")',
+    'LayoutPage.lua TurnOff("nameplateShowSelf")', 'LayoutPage.lua TurnOn("nameplateShowSelf")',
     'Window.lua TurnOn("cooldownViewerEnabled")', 'Window.lua TurnOn("nameplateShowSelf")']);
+  // ns.SetBars itself is only ever called from a click, or a layout asked for by one.
+  const setters = files.flatMap(name => [...code[name].matchAll(/(?<!function )ns\.SetBars\(/g)].map(() => name)).sort();
+  assert.deepEqual(setters, ['BarPage.lua', 'Layout.lua', 'Layout.lua', 'Layout.lua', 'LayoutPage.lua', 'Window.lua']);
   const window = code['Window.lua'], layout = code['LayoutPage.lua'];
   assert.match(window, /local function TurnOnManager\(\)\r?\n\s+local on, why = ns\.TurnOn\("cooldownViewerEnabled"\)/);
   assert.match(window, /managerOn:SetScript\("OnClick", TurnOnManager\)/, "the Cooldown Manager's Turn on button");
@@ -457,7 +462,7 @@ test('your buffs are read only by Only show missing and Warn at, out of combat, 
     'nor while auras are said to be secret');
   assert.match(buffs, /local ok, aura = pcall\(get, id\)\r?\n\s+if not ok or not Open\(aura\) then\r?\n\s+unknown = true/,
     'each answer through pcall and Open()');
-  assert.match(buffs, /local readable = Readable\(\)[\s\S]*?if readable then on = OnYou\(bar\.slotIDs\[i\]\) end/, 'read only when readable');
+  assert.match(buffs, /local readable = \(watches or counting\) and Readable\(\)[\s\S]*?if readable then on = OnYou\(bar\.slotIDs\[i\]\) end/, 'read only when readable');
   assert.equal(count(buffs, /OnYou\(/g), 2, 'OnYou defined once, asked from F:Check only');
 });
 

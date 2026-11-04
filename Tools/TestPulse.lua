@@ -1873,6 +1873,11 @@ do
     Equal(P:BaseCooldown(22812) .. " " .. P:BaseCooldown(871) .. " " .. P:BaseCooldown(1856) .. " " .. P:BaseCooldown(8921) .. " "
         .. P:BaseCooldown(6603) .. " " .. P:BaseCooldown(17), "60 900 300 0 0 4",
         "from the game data: Barkskin, Shield Wall, Vanish, Power Word: Shield; Moonfire and Attack have none")
+    Equal(P:BaseCooldown(1312002) .. " " .. P:BaseCooldown(400640) .. " " .. P:BaseCooldown(1240047), "8 8 8",
+        "Ice Lance 8 sec at every rank (ranks 2 to 6 from the 30 Oct hotfix), so it's offered past rank 1")
+    Equal(P:BaseCooldown(1464) .. " " .. P:BaseCooldown(11605) .. " " .. P:BaseCooldown(17364) .. " " .. P:BaseCooldown(408521) .. " "
+        .. P:BaseCooldown(437009) .. " " .. P:BaseCooldown(1322605), "15 15 6 12 30 8",
+        "Blizzard's notes for launch: Slam, Stormstrike, Riptide, Totemic Call; Shifting Power from build 70753's data")
     Equal(P:BaseCooldown(999999), 0, "a spell the data doesn't cover, with no way to ask: none")
     _G.GetSpellBaseCooldown = function(id)
         if id == 999999 then return 45000, 1500 end
@@ -2433,13 +2438,14 @@ end
     for key in pairs(tns.DEFAULTS) do before[#before + 1] = key .. "=" .. tostring(tns.Get(key)) end
     table.sort(before)
     local BAR = "ADD SPELLS, THIS BAR'S OPTIONS"
-    local SPELL = BAR .. ", HEALTHSTONES AND POTIONS, DIM WHEN READY, DIM ON COOLDOWN, SWAP YOUR ICONS | 6"
+    local SPELL = BAR .. ", HEALTHSTONES AND POTIONS, DIM WHEN READY, DIM ON COOLDOWN, SWAP YOUR ICONS, AN ICON'S OWN SETTINGS, EXTRA BARS | 8"
     local expected = {
         cd = SPELL .. " | cd true",
         util = SPELL .. " | util true",
-        buff = BAR .. ", GLOW WHEN MISSING, ONLY WHEN MISSING, MISSING ONES GREYED, ONLY MISSING ONES, JOIN TWO INTO ONE,"
-            .. " YOUR DEBUFFS ON YOU | 8 | buff true",
-        debuff = BAR .. ", COUNT TICKS, MISSING ONES GREYED, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 6 | debuff true",
+        buff = BAR .. ", GLOW WHEN MISSING, ONLY WHEN MISSING, AN ICON'S OWN SETTINGS, EXTRA BARS, MISSING ONES GREYED,"
+            .. " ONLY MISSING ONES, JOIN TWO INTO ONE, YOUR DEBUFFS ON YOU | 10 | buff true",
+        debuff = BAR .. ", COUNT TICKS, AN ICON'S OWN SETTINGS, EXTRA BARS, MISSING ONES GREYED, JOIN TWO INTO ONE,"
+            .. " YOUR DEBUFFS ON YOU | 8 | debuff true",
         look = "THE LOOK, KEYBINDS ON ICONS, FONT AND BAR TEXTURE, READY GLOW, COLOUR SWATCH, ICON DETAILS, BLOCK DESIGN,"
             .. " COLOUR FADE | 8 | look true",
         layout = "LAYOUTS, LIVE PREVIEW, ALL BARS, GROW ARROWS | 4 | layout true",
@@ -2560,8 +2566,8 @@ end)()
             .. tostring(p[2] == tick) .. " " .. p[1] .. " " .. p[3] .. " " .. tostring(S[tick].shown) .. " " .. S[box.next.label].text,
             "SWAP YOUR ICONS | Ticked, each form gets its own icons on this bar, swapped as you change, in a fight too."
             .. " Editing then shows under the tick, to set up another form's without changing form."
-            .. " | true true TOPLEFT BOTTOMLEFT true Done",
-            "then Swap with my form: outlining its tick, the box under it, the walkthrough's last step")
+            .. " | true true TOPLEFT BOTTOMLEFT true Next",
+            "then Swap with my form: outlining its tick, the box under it, before 1.10.0's two")
     end
     box.skip:Click()
     Equal(tostring(S[box].shown) .. " " .. S[w.note].text, "false Click ? any time to see it again.", "Skip tour ends it, saying the same")
@@ -2569,9 +2575,9 @@ end)()
     w:Select("buff")
     help:Click()
     -- (1.8.1's Glow when missing and 1.9.0's Only when missing point at the
-    -- list, after the options.)
-    local parts = { bp.listPanel, bp.optionsArea, bp.listPanel, bp.listPanel, bp.options.showMissing, bp.options.onlyMissing, bp.tray,
-        bp.options.showSelf }
+    -- list, after the options; 1.10.0's two at the tray and + Another bar.)
+    local parts = { bp.listPanel, bp.optionsArea, bp.listPanel, bp.listPanel, bp.tray, bp.another:IsShown() and bp.another or bp.tray,
+        bp.options.showMissing, bp.options.onlyMissing, bp.tray, bp.options.showSelf }
     local right = 0
     for i, part in ipairs(parts) do
         local o, p = S[box.outline].points, S[box].points[1]
@@ -2582,20 +2588,20 @@ end)()
             Equal(S[box.title].text .. " | " .. S[box.text].text, "ONLY WHEN MISSING | Tick Only when missing beside a buff in this list"
                 .. " and its icon shows only while that buff is missing, so you see what to cast again.",
                 "1.9.0's Only when missing, on the list too")
-        elseif i == 5 then
+        elseif i == 7 then
             Equal(S[box.text].text, "Ticked, each buff keeps its spot, greyed while it's missing from you. Unticked, only the ones up show, in one row.",
                 "the Buffs bar's missing ones: from you")
-        elseif i == 6 then
+        elseif i == 8 then
             Equal(S[box.title].text .. " | " .. S[box.text].text, "ONLY MISSING ONES | Ticked, a buff shows only while it's not on you,"
                 .. " so you see what to cast again. Changes in a fight show once it ends.",
                 "then Only show missing, in plain words, with its in-combat limit")
-        elseif i == 8 then
+        elseif i == 10 then
             Equal(S[box.text].text, "Shows debuffs you put on yourself, like Weakened Soul or Recently Bandaged, after your buffs."
                 .. " Not with missing buffs greyed or Only show missing.", "the Buffs bar's debuffs on you: not with either")
         end
         box.next:Click()
     end
-    Equal(right, 8, "every Buffs step outlines its own part, there to see, the box hung from it")
+    Equal(right, 10, "every Buffs step outlines its own part, there to see, the box hung from it")
     -- Look: 1.9.0's four each outline their own part (the colour's swatch,
     -- Icon details, the designs, Colour fade), the box hung from it.
     w:Select("look")
@@ -2614,8 +2620,8 @@ end)()
         "on the Look page, 1.9.0's steps each outline their own part, the box hung from it, inside the page and clear of it")
     w:Select("debuff")
     help:Click()
-    -- Past Add spells, This bar's options and 1.8.1's Count ticks.
-    for _ = 1, 3 do box.next:Click() end
+    -- Past Add spells, This bar's options, 1.8.1's Count ticks and 1.10.0's two.
+    for _ = 1, 5 do box.next:Click() end
     Equal(S[box.text].text, "Ticked, each debuff keeps its spot, greyed while it's missing from your target."
         .. " Unticked, only the ones up show, in one row.", "the Debuffs bar's: from your target")
     -- Its own Your debuffs on you, at the end of the bar.
@@ -2957,12 +2963,15 @@ end)()
     Equal(type(ForeverPulseLink) .. " " .. tostring(ForeverPulseLink.owners[MANAGER] ~= nil) .. " | " .. State(lns, page),
         "table true | true true 1 | " .. ON .. " | 2", "something else under its name: a link made in its place")
 
-    -- The real thing, when it's beside this addon: its Link.lua, run as its own.
+    -- The real thing, when it's beside this addon: its Link.lua, run as its own,
+    -- after its Locale.lua (first in its .toc: the note's words, ns.L, since 1.0.5).
     local chunk = loadfile("../ForeverEnhancedCooldownPulse/Link.lua")
+    local words = loadfile("../ForeverEnhancedCooldownPulse/Locale.lua")
     if chunk then
         lns, page = Start({ pulse = true }, nil)
         local theirs = { TITLE = "Forever Enhanced Cooldown Pulse", on = true }
         function theirs.Get(key) if key == "pulse" then return theirs.on end end
+        if words then words(PULSE, theirs) end
         chunk(PULSE, theirs)
         theirs.Link:Start()
         local L = theirs.Link
@@ -2987,6 +2996,41 @@ end)()
     end
     _G.ForeverPulseLink = nil
     Equal(#printed, 0, "no errors beside Forever Enhanced Cooldown Pulse")
+end)()
+
+-- Names Blizzard's notes gave for launch: which one your game uses depends on
+-- its build and hotfixes, so a tick and Long go to whichever your spellbook
+-- shows, either way, and the spell still pulses.
+;(function()
+    local function Login(name, id, saved, asked)
+        Environment()
+        BlizzardFrames()
+        PulseGame()
+        _G.GetSpellBaseCooldown = asked
+        _G.FECMFrame, _G.FECMTour, _G.FECMNotes = nil, nil, nil
+        table.insert(book[1].items, { name = name, spellID = id, iconID = 1 })
+        local lns = LoadAll({ notesSeen = "dev", helpSeen = true, pulse = true, chars = { [character.guid] = "Mine" },
+            profiles = { Mine = { pulsePick = { [saved] = true }, pulseStyle = { [saved] = "long" } } } })
+        Tick(lns.Pulse)
+        return lns
+    end
+    local function Row(lns, name)
+        local _, watchers = lns.Pulse:Watchers()
+        for _, row in ipairs(lns.Pulse:Spells()) do
+            if row.name == name then
+                return string.format("%s %g %s %s", tostring(row.on), row.base, lns.Pulse:StyleOf(row.key), tostring(watchers[row.key] ~= nil))
+            end
+        end
+        return "not listed"
+    end
+    Equal(Row(Login("Lightning Mastery", 16166, "Elemental Mastery"), "Lightning Mastery"), "true 180 long true", "saved by the old name, the game on the new")
+    Equal(Row(Login("Elemental Mastery", 16166, "Lightning Mastery"), "Elemental Mastery"), "true 180 long true", "saved by the new name, the game on the old")
+    Equal(Row(Login("Totemic Call", 437009, "Totemic Projection"), "Totemic Call"), "true 30 long true", "the same ID under the new name")
+    Equal(Row(Login("Totemic Projection", 437009, "Totemic Call"), "Totemic Projection"), "true 30 long true", "and the other way")
+    local function Asked(id) return id == 1999999 and 30000 or 0 end
+    Equal(Row(Login("Totemic Call", 1999999, "Totemic Projection", Asked), "Totemic Call"), "true 30 long true", "a new ID: by its name, its cooldown asked of the game")
+    _G.GetSpellBaseCooldown = nil
+    Equal(#printed, 0, "no errors from the names that go either way")
 end)()
 
 Equal(#printed, 0, "no errors")

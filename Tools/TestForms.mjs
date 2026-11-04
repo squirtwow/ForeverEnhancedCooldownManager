@@ -1,7 +1,7 @@
 // Forms.lua is generated, never edited by hand: rebuilding it from the game's
-// tables (Tools/GenerateForms.mjs, build 1.60.1.70425) must give the file
+// tables (Tools/GenerateForms.mjs, build 1.60.1.70753) must give the file
 // byte for byte. Skipped when the tables aren't on this computer
-// (C:\AddonDev\_Toolchain\gamedata\forever-70425). What the file says is also
+// (C:\AddonDev\_ForeverData\changes-2026-11-03\impact\wago-70753). What the file says is also
 // checked straight from it (no tables needed): the forms, each one's list on
 // a bar that swaps with your form (Dire Bear Form's is Bear Form's) and the
 // spells that put you in each, and the rule each
@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const cache = join(root, '..', '_Toolchain', 'gamedata', 'forever-70425');
+const cache = join(root, '..', '_ForeverData', 'changes-2026-11-03', 'impact', 'wago-70753');
 const TABLES = ['SpellName', 'Spell', 'SpellMisc', 'SpellShapeshift', 'SpellShapeshiftForm', 'SpellAuraRestrictions', 'SpellEffect',
   'SkillLine', 'SkillLineAbility', 'TraitDefinition'];
 const text = readFileSync(join(root, 'Forms.lua'), 'utf8');
@@ -101,7 +101,9 @@ test('each spell\'s rule, from the game\'s own data', () => {
     8924: '0,31', // Moonfire: no form or Moonkin ("also in caster form")
     5185: '0', // Healing Touch: not in Moonkin
     1082: '1', 5221: '1', 5215: '1', 1850: '1', // Claw, Shred, Prowl, Dash: cat
+    22568: '1', 1328618: '1', // Ferocious Bite, and its new first rank (build 70753)
     6807: '5,8', 779: '5,8', 5211: '5,8', 6795: '5,8', // Maul, Swipe, Bash, Growl: bear and dire bear
+    414644: '5,8', 1328616: '5,8', 1328617: '5,8', // Lacerate, and its new first two ranks (build 70753)
     9005: '1 stealthed', 6785: '1 stealthed', // Pounce, Ravage: cat, prowling
     770: '0,1,5,8,31', // Faerie Fire: not in travel or aquatic form
     1238122: '1,5,8', // Feral Charge
@@ -119,7 +121,8 @@ test('each spell\'s rule, from the game\'s own data', () => {
     8676: '30 stealthed', 1833: '30 stealthed', 6770: '30 stealthed', 703: '30 stealthed', 921: '30 stealthed',
     1752: 'any', 5277: 'any', // Sinister Strike, Evasion
     // Priest: Shadowform 28. Shaman: Ghost Wolf 16.
-    2050: '0', 528: '0', 8092: 'any', 17: 'any', // Lesser Heal, Cure Disease; Mind Blast, Power Word: Shield
+    2050: '0', 8092: 'any', 17: 'any', // Lesser Heal; Mind Blast, Power Word: Shield
+    528: 'any', 552: 'any', // Cure Disease, Abolish Disease: in Shadowform too since build 70753 (Blizzard's notes agree)
     1240720: '0', 1240721: '0', 1316995: '0', // Penance: not with Shadowform's aura on you (SpellAuraRestrictions)
     331: '0', 403: '0', // Healing Wave, Lightning Bolt: not as a wolf
     17364: '0', 16188: '0', // Stormstrike, Nature's Swiftness: on a shaman tab's line with no class mask, not as a wolf

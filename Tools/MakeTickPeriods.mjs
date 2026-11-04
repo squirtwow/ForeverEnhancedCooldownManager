@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const dir = process.argv[2] || 'C:/AddonDev/_Toolchain/gamedata/forever-70425';
+const dir = process.argv[2] || 'C:/AddonDev/_ForeverData/changes-2026-11-03/impact/wago-70753';
 const here = path.dirname(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1');
 
 function csv(file) {

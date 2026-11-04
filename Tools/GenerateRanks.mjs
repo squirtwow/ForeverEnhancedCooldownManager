@@ -10,7 +10,7 @@
 // another ID a spell leads to, and the auras that are one buff in several
 // IDs, so the Buffs and Debuffs bars light for them, and which of those no
 // one learns as a spell, which no one sees on a cooldown bar.
-// Reads Blizzard's own game tables for build 1.60.1.70425 (wago.tools db2
+// Reads Blizzard's own game tables for build 1.60.1.70753 (wago.tools db2
 // exports of SpellName, Spell, SpellEffect, SpellMisc, SkillLineAbility,
 // ChrRaces, SpellAuraRestrictions, SpellPower, SpellCooldowns,
 // TraitDefinition, Item, ItemEffect and ItemXItemEffect).
@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70425';
+const BUILD = '1.60.1.70753';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = process.argv[2];
 assert(cache, 'Pass a cache directory');
@@ -84,7 +84,35 @@ for (const row of await table('SpellEffect')) {
     }
 }
 const teaching = row => +row.SkillLine === BEAST_TRAINING && teaches.has(+row.Spell);
-const skillRows = await table('SkillLineAbility');
+// Spells Forever's trainers no longer teach need no list since build 70753:
+// Salvation, Mass Salvation, Revoke and both Blessings of Light lost their
+// names, so the rows they still have are nameless and go nowhere below.
+// Spells.lua's GROUP pairs for Salvation and Blessing of Light went with them:
+// put them back if one is taught again. Voice of Truth and Binding Heal left
+// the trees but trainers teach them (rows with a level, and Blizzard says
+// nothing else), so they stay in the tables.
+// Talents gone from their class's tree, though the client data still gives
+// each a SkillLineAbility row and a TraitDefinition: this script reads no
+// tree (TraitNode), so it can't see that. Source: the data's trees, build
+// 70707's for Piercing Ice and Arcane Focus (Mage,
+// C:\AddonDev\_ForeverData\changes-70707\FACTS.md), build 70753's for the
+// rest, with Blizzard's 3 Nov 2026 notes for Berserk. Their rows are left out
+// here, as if the game had dropped them: no one learns these, so no table
+// offers them, and they count as no talent below. All but Berserk are
+// passives with no aura, so no bar ever showed them. Each with the ClassMask
+// its row has. The build fails once a listed row is gone or changes hands, so
+// the list goes when it isn't needed.
+const OUT_OF_TREE = new Map([
+    [11151, ['Piercing Ice', 128]], [11222, ['Arcane Focus', 0]],
+    [417141, ['Berserk', 1024]], [1314103, ['Improved Seal of Fury', 2]], [20196, ['One-Handed Weapon Specialization', 0]],
+]);
+const allSkillRows = await table('SkillLineAbility');
+for (const [id, [name, mask]] of OUT_OF_TREE) {
+    const rows = allSkillRows.filter(row => +row.Spell === id);
+    assert(names.get(id) === name && rows.length > 0 && rows.every(row => +row.ClassMask === mask),
+        `${name} (${id}): its rows changed in this build's data, so drop it from OUT_OF_TREE`);
+}
+const skillRows = allSkillRows.filter(row => !OUT_OF_TREE.has(+row.Spell));
 // Learnable class spells whose only SkillLineAbility rows carry no class
 // (ClassMask 0): Curse of Exhaustion (a talent, TraitDefinition), Forever's
 // four ranks of Curse of the Elements and Bane of Agony's rank 2 (from a
@@ -93,17 +121,21 @@ const skillRows = await table('SkillLineAbility');
 // Wrath; Forever's four ranks of Shadow Word: Death. They count as the
 // class's own. Most ClassMask-0 rows are talent ranks, hidden helpers, procs
 // and pet passives (500 names and more), so only these are let in: not
-// Lightning Shield's 26363-26370, its orbs' lightning bolts, nor the other
-// Lacerate (24118-24120, 1299332, a bleed on a hunter's skill line, not the
-// druid's), nor the Season of Discovery IDs (402792, 11723, 11724), which
-// have no row. The build fails once the game gives a listed row a class, so
-// the list goes when it isn't needed.
+// Lightning Shield's 26363-26370, its orbs' lightning bolts, nor the Season
+// of Discovery IDs (402792, 11723, 11724), which have no row. The build fails
+// once the game gives a listed row a class, so the list goes when it isn't
+// needed.
 // Then (2026-10-20, a player couldn't find Innervate before learning it):
 // every class's talent abilities with no class (AcquireMethod 0 on the
 // class's own skill lines, names not already listed), from Innervate,
 // Swiftmend and Nature's Swiftness to Aimed Shot, Arcane Power, Holy Shield,
 // Adrenaline Rush, Stormstrike, Fel Domination and Death Wish. Plus Sniper
 // Shot's rank 3 (AcquireMethod 2), so the name keeps every rank its buff had.
+// And (2026-11-01, matching Forever's current trainers) a hunter's Lacerate,
+// ranks 1 to 4 (a bleed, trained at 30 to 60), which shares its name with
+// the druid's, and Feral Charge (Bear), trained at 20, beside the talent's
+// Feral Charge (1238122): which of the two the spellbook shows isn't known.
+// And (build 70753) Holy Shield's rank 4 and the new talent Oath of Light.
 const CLASSLESS = new Map([
     [18223, 256], [440892, 256], [1311676, 256], [1311677, 256], [1311680, 256], [1014, 256], // Warlock
     [20375, 2], [20915, 2], [20918, 2], [20919, 2], [20920, 2], [1042, 2], // Paladin
@@ -121,6 +153,11 @@ const CLASSLESS = new Map([
     [16166, 64], [16188, 64], [16269, 64], [17364, 64], // Shaman
     [18093, 256], [18288, 256], [18708, 256], [18788, 256], // Warlock
     [12281, 1], [12284, 1], [12292, 1], [12323, 1], [12328, 1], [12700, 1], [12705, 1], [12809, 1], // Warrior
+    // Trainer spells (2026-11-01):
+    [16979, 1024], // Druid
+    [24118, 4], [24119, 4], [24120, 4], [1299332, 4], // Hunter
+    // Build 70753:
+    [1239570, 2], [1328548, 2], // Paladin
 ]);
 for (const id of CLASSLESS.keys()) {
     const rows = skillRows.filter(row => +row.Spell === id);
@@ -158,6 +195,29 @@ for (const [id, sub] of subtext) {
     groups.get(name).set(id, 0);
     racials++;
 }
+
+// Rune-only spells are taught only by an engraving, which Forever doesn't
+// have (Living Bomb, Starfall), so no one has them. The seasonal realms'
+// spells sit in this range of IDs; one is rune-only when its every
+// SkillLineAbility row is class-masked and taught by another spell
+// (AcquireMethod 3) and it's no talent (Tools/GenerateForms.mjs has the same
+// rule). A name goes only when all its IDs are: real names (Mutilate,
+// Penance, Fire Blast) carry a seasonal helper ID of that kind too.
+const SEASON_SPELL = id => id >= 395000 && id < 480000;
+const traitSpells = new Set((await table('TraitDefinition')).map(row => +row.SpellID)
+    .filter(id => id > 0 && !OUT_OF_TREE.has(id)));
+const skillRowsOf = new Map();
+for (const row of allSkillRows) {
+    if (!skillRowsOf.has(+row.Spell)) skillRowsOf.set(+row.Spell, []);
+    skillRowsOf.get(+row.Spell).push(row);
+}
+function runeOnly(id) {
+    const rows = skillRowsOf.get(id) || [];
+    return SEASON_SPELL(id) && rows.length > 0 && rows.every(row => +row.AcquireMethod === 3 && +row.ClassMask !== 0)
+        && !traitSpells.has(id);
+}
+const runeNames = new Set([...groups].filter(([, ranks]) => [...ranks.keys()].every(runeOnly)).map(([name]) => name));
+for (const name of runeNames) groups.delete(name);
 
 const lines = [...groups.keys()].sort().map(name => {
     const ids = [...groups.get(name).entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]).map(([id]) => id);
@@ -233,7 +293,7 @@ function rowClasses(row) {
     return classes.size === 0 || classes.size === classCount ? null : classes;
 }
 const rowsByName = new Map();
-for (const row of await table('SkillLineAbility')) {
+for (const row of skillRows) {
     const name = names.get(+row.Spell);
     if (!name || /[\\"\n]/.test(name)) continue;
     if (!rowsByName.has(name)) rowsByName.set(name, []);
@@ -277,7 +337,7 @@ for (const row of await table('SpellMisc')) {
 const PASSIVE = 0x40, HIDDEN = 0x80; // SPELL_ATTR0_PASSIVE, SPELL_ATTR0_DO_NOT_DISPLAY
 const flags = id => (misc.has(id) ? +misc.get(id).Attributes_0 >>> 0 : 0);
 const passive = id => (flags(id) & PASSIVE) !== 0;
-const learnable = new Set((await table('SkillLineAbility')).map(row => +row.Spell));
+const learnable = new Set(skillRows.map(row => +row.Spell));
 for (const [id, sub] of subtext) if (/^Racial/.test(sub)) learnable.add(id);
 // A pet's spell is learned through its Beast Training row (above), though
 // some (Cobra Reflexes) have no row of their own.
@@ -290,6 +350,12 @@ for (const id of [...learnable].sort((a, b) => a - b)) {
     if (!passive(id)) continue;
     if (!passives.has(name)) passives.set(name, new Set());
     passives.get(name).add(id);
+}
+// Rune-only passives (Dance of the Wicked, a priest's Secrets of Elune) go
+// too, by the same per-name rule as ns.RANKS above: no one has them. A
+// name ns.RANKS still holds stays.
+for (const [name, ids] of passives) {
+    if (!groups.has(name) && [...ids].every(runeOnly)) passives.delete(name);
 }
 // A passive's own resurrection goes with it. Reincarnation lets you take
 // 21169 on the death screen, a spell that brings you back (SpellEffect 94,
@@ -308,6 +374,25 @@ const cooldowns = new Map();
 for (const row of await table('SpellCooldowns')) {
     if (+row.DifficultyID !== 0) continue;
     cooldowns.set(+row.SpellID, Math.max(+row.RecoveryTime || 0, +row.CategoryRecoveryTime || 0));
+}
+// Cooldowns Blizzard's notes give (3 Nov 2026), which the client data of build
+// 70753 doesn't carry yet: Slam 15 sec, Stormstrike 6, Riptide 12 and Totemic
+// Projection (Totemic Call in the notes) 30, by ID, each with what the data
+// still says. These only reach the pulse page's list and label (ns.COOLDOWNS:
+// a wrong one is a wrong label, never a wrong pulse). The build fails once the
+// data changes one, so the list goes when it isn't needed. Lava Burst isn't
+// here: Blizzard removes it, the data still has every rank, and a rank no one
+// can learn is never in a spellbook, so its rows stay, harmless.
+const HOTFIX_COOLDOWNS = new Map([
+    ...[1464, 8820, 11604, 11605, 1240193].map(id => [id, ['Slam', 15000, 18000]]),
+    [17364, ['Stormstrike', 6000, 8000]],
+    ...[408521, 1239242, 1239243].map(id => [id, ['Riptide', 12000, 6000]]),
+    [437009, ['Totemic Projection', 30000, 60000]],
+]);
+for (const [id, [name, ms, data]] of HOTFIX_COOLDOWNS) {
+    assert(names.get(id) === name && cooldowns.get(id) === data,
+        `${name} (${id}): this build's data has another cooldown (or name), so drop it from HOTFIX_COOLDOWNS`);
+    cooldowns.set(id, ms);
 }
 const timed = new Set();
 for (const id of learnable) {
@@ -421,6 +506,13 @@ const linkLines = bar => [...auraLinks[bar].keys()].sort((a, b) => a - b)
 // other Energized). Each aura brings its other ranks (below): Prayer of
 // Mending's later ranks name only the first rank's buff. By the ID of every
 // spell a character can learn (a talent too: TraitDefinition).
+// Build 70753 gave the Skyborne's lasting buffs names of their own, so that
+// last rule no longer finds them: Attuned (Read Leyline at a leyline, was the
+// other Energized) and Charged (Skysight at a convergence, was the other
+// Elemental Blessing), an hour each. The game gives them by script and only
+// the description names them, so they're linked by ID. The build fails once
+// either changes.
+const SCRIPT_AURAS = new Map([[1259705, [1259691, 'Attuned']], [1259686, [1270893, 'Charged']]]);
 const LINK_FRIENDLY = new Set([...FRIENDLY_TARGETS, 25, 57]);
 const GROUND = 27, SUMMON = 28, TRIGGER = 64, LEARN = new Set([36, 57]);
 const reach = new Map(), triggers = new Map(), effectsOf = new Map(), auraSigns = new Map();
@@ -461,7 +553,6 @@ for (const id of [...names.keys()].sort((a, b) => a - b)) {
     rankFamilies.get(key).push(id);
 }
 const ranksOf = id => (familyKey(id) ? rankFamilies.get(familyKey(id)) : [id]);
-const traitSpells = new Set((await table('TraitDefinition')).map(row => +row.SpellID).filter(id => id > 0));
 const withoutNumeral = name => name.replace(/ (?:I|II|III|IV|V|VI|VII|VIII|IX|X)$/, '');
 const spellAuras = new Map(), aurasByName = new Map();
 for (const id of [...new Set([...learnable, ...traitSpells])].sort((a, b) => a - b)) {
@@ -488,6 +579,12 @@ for (const id of [...new Set([...learnable, ...traitSpells])].sort((a, b) => a -
             for (const other of named(id)) if (names.get(other) === names.get(buff) && shownAura(other)) found.add(other);
         }
     }
+    if (SCRIPT_AURAS.has(id)) {
+        const [aura, auraName] = SCRIPT_AURAS.get(id);
+        assert(names.get(aura) === auraName && shownAura(aura) && reach.get(aura).buff && named(id).has(aura),
+            `${auraName} (${aura}): no longer ${name}'s buff in this build's data, so drop it from SCRIPT_AURAS`);
+        found.add(aura);
+    }
     if (found.size === 0) continue;
     spellAuras.set(id, [...found].sort((a, b) => a - b));
     for (const aura of found) {
@@ -501,9 +598,11 @@ const spellAuraLines = [...spellAuras.keys()].map(id => ` [${id}]={${spellAuras.
 // The same auras by their own name, for a spell kept by name: every rank's
 // poison for an entry named Wound Poison, whose later ranks are spells of
 // other names (Wound Poison II...). Only those the name's own spells in
-// ns.RANKS aren't, or don't lead to already.
+// ns.RANKS aren't, or don't lead to already. Not a rune-only name's: no one
+// has it.
 const nameAuraLines = [];
 for (const name of [...aurasByName.keys()].sort()) {
+    if (runeNames.has(name)) continue;
     const own = [...(groups.get(name)?.keys() || [])];
     const already = new Set([...own, ...own.flatMap(id => spellAuras.get(id) || [])]);
     const extra = [...aurasByName.get(name)].filter(aura => !already.has(aura)).sort((a, b) => a - b);
@@ -622,7 +721,7 @@ for (const row of await table('SpellAuraRestrictions')) {
     for (const column of ['CasterAuraType', 'TargetAuraType']) assert.equal(+row[column], 0, `${name}: ${column} isn't sorted`);
 }
 const classMasks = new Map();
-for (const row of await table('SkillLineAbility')) classMasks.set(+row.Spell, (classMasks.get(+row.Spell) || 0) | +row.ClassMask);
+for (const row of skillRows) classMasks.set(+row.Spell, (classMasks.get(+row.Spell) || 0) | +row.ClassMask);
 for (const row of await table('SpellPower')) {
     const id = +row.SpellID;
     if (+row.PowerType !== COMBO_POINTS || !learnable.has(id)) continue;

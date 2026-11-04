@@ -10,6 +10,36 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.0",
+        sections = {
+            { "Added", {
+                "Extra bars: + Another bar adds a second Cooldowns, Utility, Buffs or Debuffs bar, each with its own spells, size and options. (experimental)",
+                "Click an icon on a bar's page for its own settings: font, size, ticks and Warn at. (experimental)",
+                "Three free fonts: Barlow Semi Condensed, Saira Semi Condensed and Fira Sans Condensed. (experimental)",
+                "Icon details > Text: show the countdown as 3m, 2m, 1m, then 59s. (experimental)",
+                "Ticked only on each bar's spell list, to see just the spells on that bar. (experimental)",
+                "Health and power text: Percent (no sign), and Incoming heals and Absorbs at the ends of your health bar. (experimental)",
+                "Move your bars by numbers: with them unlocked, the Layout page has X and Y boxes and 1 px arrows. (experimental)",
+                "Weapon enchants and rogue poisons light on your Buffs bar while they're on your weapon, with their time left.",
+            } },
+            { "Changed", {
+                "Turning on your bars turns Blizzard's Cooldown Manager off, so you don't see both. Turning your bars off brings it back.",
+                "Totems and weapon enchants (and rogue poisons) each have their own section in the spell lists.",
+                "Each font choice is one box now: click it for a list, every font in its own face.",
+                "Spell data updated for launch, with spells trainers no longer teach and rune spells off the lists.",
+                "New druid ranks follow the form rules, and Cure and Abolish Disease work in Shadowform.",
+            } },
+            { "Fixed", {
+                "A totem's icon on your Buffs bar lights for its buff.",
+                "Countdown numbers stay centred on icons with no key.",
+                "An empty extra bar no longer stretches your health and power bars.",
+                "The Buffs list's search finds passives with a buff of their own, like Plainsrunning.",
+                "Explosive Trap, Elemental Mastery, Totemic Projection, Twist of Light, Read Leyline and Skysight keep working after the game's renames.",
+                "Ice Lance can be pulsed at every rank, and the hunter's Lacerate and Feral Charge (Bear) are on the spell lists.",
+            } },
+        },
+    },
+    {
         version = "1.9.1",
         sections = {
             { "Added", {

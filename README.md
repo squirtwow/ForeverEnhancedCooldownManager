@@ -117,6 +117,14 @@ EraUI.
 - Your choice of font and bar texture on the Look page. Game font shows
   Chinese, Korean and Russian names, and is picked for you if your game is in
   one (experimental)
+- Weapon enchants, poisons and totems: enchants and rogue poisons light on your
+  Buffs bar while they're on your weapon, with their time left; totem icons
+  light for their buff
+- Extra bars: + Another bar adds a second Cooldowns, Utility, Buffs or Debuffs
+  bar, each with its own spells, size and options (experimental)
+- An icon's own settings: click an icon on a bar's page for its font, size,
+  ticks and Warn at (experimental)
+- Move your bars by numbers on the Layout page (experimental)
 
 ## Layouts
 - One click stacks your bars around your Personal Resource Display: Pyramid,

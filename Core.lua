@@ -705,6 +705,8 @@ end
 -- the new one, in each list (each form's too), its joins and the pulse's
 -- ticks and Long. A list holding both (the new name added again since)
 -- keeps the first, with that one's join. Once moved, nothing is left to move.
+-- The names that go either way move later, as the spellbook is read
+-- (ns.RenameSaved, below).
 local function NewName(key)
     return ns.Spells and ns.Spells.NewName and ns.Spells:NewName(key) or nil
 end
@@ -2850,6 +2852,16 @@ local function RenameCustom()
     end
 end
 
+-- All of that again, once your spellbook shows which of two names your game
+-- uses (Spells.lua FollowNames: the names Blizzard's notes gave for launch).
+function ns.RenameSaved()
+    if not db then return end
+    for _, profile in pairs(Profiles()) do
+        if type(profile) == "table" and type(profile.joins) == "table" then RenameSpells(profile) end
+    end
+    RenameCustom()
+end
+
 -- Forgets added spells once they're on no bar in any profile.
 function ns.PruneCustom()
     if not db then return end
@@ -2999,6 +3011,31 @@ function ns.TurnOff(cvar)
     local off = C_CVar.GetCVarBool(cvar) == false
     if off then switched = true end
     return off
+end
+
+-- Your bars turned on or off by a click of yours (General's tick, a Turn on
+-- button, a layout). You've come for these or Blizzard's, not both (Squirt's
+-- call, 3 Nov 2026), so Blizzard's Cooldown Manager goes off as your bars come
+-- on, at that moment only: someone using just its new look never turns your
+-- bars on, and bars already on at login change nothing. Turned off here, it
+-- comes back as your bars go off. What to tell you about it, or nil.
+function ns.SetBars(on)
+    ns.Set("useBars", on)
+    if on then
+        if not ns.CooldownManagerOn() then return nil end
+        if not ns.TurnOff("cooldownViewerEnabled") then
+            return "Your bars are on. Blizzard's Cooldown Manager is still on: Options > Gameplay > Advanced Options turns it off."
+        end
+        if db then db.hidManager = true end
+        return "Your bars are on and Blizzard's Cooldown Manager is off. Reload to finish (Look page, or /reload)."
+    end
+    if not (db and db.hidManager) then return nil end
+    db.hidManager = nil
+    if ns.CooldownManagerOn() then return nil end
+    if not ns.TurnOn("cooldownViewerEnabled") then
+        return "Blizzard's Cooldown Manager is still off: the Look page turns it on."
+    end
+    return "Your bars are off and Blizzard's Cooldown Manager is back on. Reload to finish (Look page, or /reload)."
 end
 
 -- Escape closes the /ccm window and What's new through the game's own list

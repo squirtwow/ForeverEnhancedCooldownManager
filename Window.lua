@@ -2251,12 +2251,13 @@ local function BuildGeneral(window, page)
     local B = ns.Bars
     T:Heading(page, "Your bars"):SetPoint("TOPLEFT", 16, -16)
     local bars = T:Check(page, "Use my bars", function(self)
-        ns.Set("useBars", self:GetChecked())
+        local message = ns.SetBars(self:GetChecked())
+        if message then window:Say(message) end
         B:Rebuild()
         window:Refresh()
     end)
     bars:SetPoint("TOPLEFT", 16, -36)
-    window:Hint(bars, "Your own Cooldowns, Utility, Buffs and Debuffs bars. Off, none of them show.")
+    window:Hint(bars, "Your own Cooldowns, Utility, Buffs and Debuffs bars, in place of Blizzard's Cooldown Manager, which goes off as they come on. Off, none of them show.")
     window.useBars = bars
     -- Beside it (a player's idea, on by default): on the Buffs and Debuffs
     -- bars, one family's spells side by side are one icon, and one added goes

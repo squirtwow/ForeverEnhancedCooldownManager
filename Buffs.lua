@@ -121,6 +121,7 @@ function F:Details(bar)
     for _, parts in ipairs(bar.groupParts or {}) do Detail(parts, BASE, parts.index and looks[parts.index]) end
     for _, holder in ipairs(bar.holders or {}) do
         if holder.slot then Detail(holder.slot, holder.size or BASE, holder.look) end
+        if holder.enchant then Detail(holder.enchant, holder.size or BASE, holder.look) end
     end
 end
 
@@ -157,10 +158,7 @@ ns.TICK_PERIODS = {
     ["Immolation Trap"] = 3,
     ["Insect Swarm"] = 2,
     ["Lacerate"] = 3,
-    ["Living Bomb"] = 3,
-    ["Living Flame"] = 1,
     ["Mind Flay"] = 1,
-    ["Mind Sear"] = 1,
     ["Moonfire"] = 3,
     ["Pounce Bleed"] = 3,
     ["Pyroblast"] = 3,
@@ -168,19 +166,14 @@ ns.TICK_PERIODS = {
     ["Rend"] = 3,
     ["Rip"] = 2,
     ["Rupture"] = 2,
-    ["Saber Slash"] = 2,
     ["Savage Rend"] = 3,
     ["Scorpid Poison"] = 2,
     ["Serpent Sting"] = 3,
     ["Shadow Word: Pain"] = 3,
-    ["Shadowflame"] = 2,
     ["Siphon Life"] = 3,
     ["Starshards"] = 1,
-    ["Sunfire"] = 3,
     ["Tendon Rip"] = 3,
-    ["Vampiric Touch"] = 3,
     ["Viper Sting"] = 2,
-    ["Void Plague"] = 3,
     ["Web"] = 1,
     ["Wrack"] = 1,
 }
@@ -204,7 +197,6 @@ ns.DEBUFF_LASTS = {
     ["Chastise"] = { 2 },
     ["Cheap Shot"] = { 4 },
     ["Chilled"] = { 1.5 },
-    ["Chimera Shot - Scorpid"] = { 10 },
     ["Concussion Blow"] = { 5 },
     ["Concussive Shot"] = { 4 },
     ["Cone of Cold"] = { 6 },
@@ -218,7 +210,6 @@ ns.DEBUFF_LASTS = {
     ["Curse of Weakness"] = { 120 },
     ["Curse of the Elements"] = { 300 },
     ["Death Coil"] = { 3 },
-    ["Demonic Howl"] = { 6 },
     ["Demoralizing Roar"] = { 30 },
     ["Demoralizing Screech"] = { 30 },
     ["Demoralizing Shout"] = { 45 },
@@ -237,13 +228,11 @@ ns.DEBUFF_LASTS = {
     ["Fire Vulnerability"] = { 30 },
     ["Fireball"] = { 4, 6, 8 },
     ["Flame Shock"] = { 12 },
-    ["Frost Blast"] = { 9 },
     ["Frost Nova"] = { 8 },
     ["Frost Shock"] = { 8 },
     ["Frostbite"] = { 5 },
     ["Frostbolt"] = { 5, 6, 7, 8, 9 },
     ["Frostfire Bolt"] = { 9 },
-    ["Frozen Orb"] = { 5, 16 },
     ["Garrote"] = { 18 },
     ["Gouge"] = { 4 },
     ["Growl"] = { 3 },
@@ -266,17 +255,12 @@ ns.DEBUFF_LASTS = {
     ["Judgement of Wisdom"] = { 40 },
     ["Judgement of the Crusader"] = { 40 },
     ["Kidney Shot"] = { 1, 2, 3, 4, 5, 6 },
-    ["Lacerate"] = { 15 },
+    ["Lacerate"] = { 15, 21 },
     ["Lava Breath"] = { 10 },
-    ["Living Bomb"] = { 12 },
-    ["Living Flame"] = { 2, 10 },
     ["Long Daze"] = { 6 },
-    ["Menace"] = { 3 },
     ["Mind Control"] = { 60 },
     ["Mind Flay"] = { 3 },
-    ["Mind Sear"] = { 6 },
     ["Mind Soothe"] = { 15 },
-    ["Mind Spike"] = { 10 },
     ["Mine!"] = { 3 },
     ["Mocking Blow"] = { 6 },
     ["Moonfire"] = { 9, 12 },
@@ -290,14 +274,12 @@ ns.DEBUFF_LASTS = {
     ["Psychic Scream"] = { 8 },
     ["Pyroblast"] = { 12 },
     ["Pyroclasm"] = { 3 },
-    ["Quick Draw"] = { 6 },
     ["Rake"] = { 9 },
     ["Rend"] = { 9, 12, 15, 18, 21 },
     ["Repentance"] = { 6 },
     ["Rip"] = { 12 },
     ["Riposte"] = { 6 },
     ["Rupture"] = { 6, 8, 10, 12, 14, 16 },
-    ["Saber Slash"] = { 12 },
     ["Sap"] = { 25, 35, 45 },
     ["Savage Rend"] = { 18 },
     ["Scare Beast"] = { 10, 15, 20 },
@@ -308,17 +290,13 @@ ns.DEBUFF_LASTS = {
     ["Shackle Undead"] = { 30, 40, 50 },
     ["Shadow Word: Pain"] = { 18 },
     ["Shadowburn"] = { 8 },
-    ["Shadowflame"] = { 8, 15 },
-    ["Shockwave"] = { 4 },
     ["Silence"] = { 5 },
     ["Siphon Life"] = { 30 },
     ["Soothe Animal"] = { 15 },
-    ["Spellfrost Bolt"] = { 9 },
     ["Starshards"] = { 6 },
     ["Stormstrike"] = { 12 },
     ["Subjugate Demon"] = { 300 },
     ["Sunder Armor"] = { 30 },
-    ["Sunfire"] = { 12 },
     ["Tame Beast"] = { 20 },
     ["Taunt"] = { 3 },
     ["Tendon Rip"] = { 9 },
@@ -326,10 +304,8 @@ ns.DEBUFF_LASTS = {
     ["Touch of Weakness"] = { 120, 600 },
     ["Turn Undead"] = { 10, 15, 20 },
     ["Vampiric Embrace"] = { 30 },
-    ["Vampiric Touch"] = { 15 },
     ["Vindication"] = { 10 },
     ["Viper Sting"] = { 8 },
-    ["Void Plague"] = { 18 },
     ["Web"] = { 4 },
     ["Wing Clip"] = { 10 },
     ["Wrack"] = { 6 },
@@ -547,9 +523,192 @@ local function AddGroup(container, key, filter, options)
     end
 end
 
+-- Weapon enchants --------------------------------------------------------------------
+-- (A player's report: a shaman's never lit.) Rockbiter Weapon, a rogue's
+-- poisons and the like sit on the weapon, not on you, so the aura container
+-- can't see them. The addon reads your two hands itself and draws the entry's
+-- own spot: lit with its time left while it's on, greyed while it's missing,
+-- and on a packed bar there only while it's on. Each spell's name with the
+-- enchants its ranks put on a weapon, from build 70753's data (SpellEffect's
+-- effect 360, and 54 for the last ID of a shaman's four and the later poisons).
+local ENCHANTS = {
+    ["Rockbiter Weapon"] = { 29, 6, 1, 503, 1663, 683, 1664, 7568 },
+    ["Flametongue Weapon"] = { 5, 4, 3, 523, 1665, 1666, 7567 },
+    ["Frostbrand Weapon"] = { 2, 12, 524, 1667, 1668, 7566 },
+    ["Windfury Weapon"] = { 283, 284, 525, 1669, 7569 },
+    ["Crippling Poison"] = { 22, 603 },
+    ["Wound Poison"] = { 703, 704, 705, 706 },
+    ["Sebacious Poison"] = { 7254 },
+    ["Numbing Poison"] = { 7255 },
+    ["Atrophic Poison"] = { 7256 },
+    ["Occult Poison I"] = { 7542 },
+    ["Occult Poison II"] = { 7651 },
+}
+-- The poisons with a name per rank: any of them counts as the family.
+for name, ids in pairs({ ["Instant Poison"] = { 323, 324, 325, 623, 624, 625 }, ["Deadly Poison"] = { 7, 8, 626, 627, 2630 },
+    ["Mind-numbing Poison"] = { 35, 23, 643 } }) do
+    for rank, numeral in ipairs({ "", " II", " III", " IV", " V", " VI" }) do
+        if ids[rank] then ENCHANTS[name .. numeral] = ids end
+    end
+end
+-- (The spell lists give these a section of their own: Spells.lua.)
+ns.WEAPON_ENCHANTS = ENCHANTS
+
+-- Inventory slot: Enum.WeaponSlot.
+local HANDS = { [16] = 0, [17] = 1 }
+local PERMANENT = 1 -- Enum.ItemEnchantType.Permanent
+-- What's on each hand as last read: false for nothing, else { id, ends (nil
+-- with no timer), total }. One the game won't say about keeps what it was, so
+-- in a fight the time left runs on from the last answer.
+local hands = {}
+
+-- The game's three ways of asking, each giving the hand's enchant and its
+-- seconds left, false for none, or nil when it won't say (a secret answer):
+-- Prep's Hands.lua found Forever's imbues may show in one and not another.
+local ENCHANT_SOURCES = {
+    { function() return type(C_PaperDollInfo) == "table" and C_PaperDollInfo.GetTemporaryEnchantmentInfo end, function(api, slot)
+        local info = api(slot)
+        if not Open(info) then return nil end
+        if info == nil then return false end
+        local id, ms, timed = info.enchantID, info.remainingTimeMs, info.hasExpirationTime
+        if not (Open(id) and Open(ms) and Open(timed)) or type(id) ~= "number" then return nil end
+        return id, timed ~= false and type(ms) == "number" and ms / 1000 or nil
+    end },
+    { function() return type(C_Item) == "table" and C_Item.GetWeaponEnchantInfo end, function(api, slot)
+        local list = api(HANDS[slot])
+        if not Open(list) or type(list) ~= "table" then return nil end
+        for _, each in pairs(list) do
+            local has, kind = each.hasEnchant, each.enchantType
+            if not (Open(has) and Open(kind)) then return nil end
+            if has == true and kind ~= PERMANENT then
+                local id, ms = each.enchantID, each.timeLeft
+                if not (Open(id) and Open(ms)) or type(id) ~= "number" then return nil end
+                return id, type(ms) == "number" and ms / 1000 or nil
+            end
+        end
+        return false
+    end },
+    { function() return GetWeaponEnchantInfo end, function(api, slot)
+        local values, at = { api() }, slot == 16 and 0 or 4
+        local has, ms, id = values[at + 1], values[at + 2], values[at + 4]
+        if not Open(has) then return nil end
+        if not has then return false end
+        if not (Open(ms) and Open(id)) or type(id) ~= "number" then return nil end
+        return id, type(ms) == "number" and ms / 1000 or nil
+    end },
+}
+
+-- A hand's enchant and seconds left from the first way that names one; false
+-- only when one said none and none held back; nil when the game won't say.
+local function ReadHand(slot)
+    local none, held = false, false
+    for _, source in ipairs(ENCHANT_SOURCES) do
+        local api = source[1]()
+        if api then
+            local ok, id, left = pcall(source[2], api, slot)
+            if ok and type(id) == "number" then return id, left end
+            if ok and id == false then none = true else held = true end
+        end
+    end
+    if none and not held then return false end
+    return nil
+end
+
+-- Whether a Buffs bar has an entry that's a weapon enchant.
+function F:HasEnchants(bar)
+    return bar ~= nil and bar.imbues ~= nil and next(bar.imbues) ~= nil
+end
+
+-- Reads both hands. (A timer read a moment later is the same one, not news.)
+function F:ReadEnchants()
+    local now = GetTime()
+    for slot in pairs(HANDS) do
+        local id, left = ReadHand(slot)
+        if id == false then
+            hands[slot] = false
+        elseif id then
+            local old, ends = hands[slot], left and now + left or nil
+            if not old or old.id ~= id or (old.ends == nil) ~= (ends == nil) or (ends and math.abs(old.ends - ends) > 2) then
+                hands[slot] = { id = id, ends = ends, total = left }
+            end
+        end
+    end
+end
+
+-- Whether one of these enchants is on a hand, and when the soonest to end
+-- ends and how long it had when read.
+local function EnchantOn(ids)
+    local now, on, ends, total = GetTime(), false, nil, nil
+    for slot in pairs(HANDS) do
+        local hand = hands[slot]
+        if hand and ids[hand.id] and (not hand.ends or hand.ends > now) and (not on or (hand.ends and (not ends or hand.ends < ends))) then
+            on, ends, total = true, hand.ends, hand.total
+        end
+    end
+    return on, ends, total
+end
+
+-- Seconds until an enchant on a hand runs out, or nil with none running.
+function F:NextEnchantEnd()
+    local now, soonest = GetTime(), nil
+    for slot in pairs(HANDS) do
+        local hand = hands[slot]
+        if hand and hand.ends and hand.ends > now and (not soonest or hand.ends < soonest) then soonest = hand.ends end
+    end
+    return soonest and soonest - now or nil
+end
+
+-- A spot's own time left, as an aura's icon draws it. Made the first time it's wanted.
+local function EnchantParts(holder)
+    if holder.enchant then return holder.enchant end
+    local cooldown = CreateFrame("Cooldown", nil, holder, "CooldownFrameTemplate")
+    cooldown:SetAllPoints(holder.icon)
+    cooldown:SetSwipeTexture(Style.FLAT)
+    cooldown:SetReverse(true)
+    Style:CooldownLook(cooldown)
+    cooldown:SetDrawBling(false)
+    local count = holder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    count:SetPoint("BOTTOMRIGHT", -1, 1)
+    holder.enchant = { cooldown = cooldown, count = count }
+    return holder.enchant
+end
+
+-- Each weapon enchant's spot lit or greyed, with its time left; a spot that
+-- was one and now holds something else goes back as it was. The addon's own
+-- textures and cooldown, so fine in a fight.
+function F:PaintEnchants(bar)
+    if not (bar and bar.holders) then return end
+    local packed = self:Packed(bar.data)
+    for i = 1, ns.BUFF_SLOTS do
+        local holder, ids = bar.holders[i], bar.imbues[i]
+        if ids then
+            local on, ends, total = EnchantOn(ids)
+            holder.icon:SetDesaturated(not on)
+            holder.icon:SetAlpha(on and 1 or .45)
+            -- (Glow when missing: over it, unlike an aura's icon, so it goes.)
+            if holder.glowHost then holder.glowHost:SetAlpha(on and 0 or 1) end
+            holder.enchantLit = on
+            local parts = EnchantParts(holder)
+            -- A packed bar's spot isn't scaled as its slot is, so its own size.
+            Fit(parts, packed and ns.IconSize(bar.data) or holder.size or BASE, holder.showTimer ~= false, holder.look)
+            if on and ends then
+                parts.cooldown:SetCooldown(ends - total, total)
+            else
+                parts.cooldown:Clear()
+            end
+        elseif holder.enchantLit ~= nil then
+            holder.enchantLit = nil
+            holder.icon:SetDesaturated(true)
+            holder.icon:SetAlpha(.45)
+            if holder.glowHost then holder.glowHost:SetAlpha(1) end
+            if holder.enchant then holder.enchant.cooldown:Clear() end
+        end
+    end
+end
+
 function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
-    bar.groupParts, bar.names, bar.up, bar.spots, bar.only = {}, {}, {}, {}, {}
+    bar.groupParts, bar.names, bar.up, bar.spots, bar.only, bar.imbues = {}, {}, {}, {}, {}, {}
     bar.tickPaces, bar.tickShows, bar.groupTicks, bar.looks = {}, {}, {}, {}
     bar.warns, bar.appliedWarns = {}, {}
     for i = 1, ns.BUFF_SLOTS do
@@ -712,15 +871,23 @@ end
 -- (Bars.lua, Again).
 function F:Check(bar)
     bar.unread = nil
-    if not (self:Watches(bar.key, bar.data) and ns.Bars:Enabled()) then
+    local watches = self:Watches(bar.key, bar.data) and ns.Bars:Enabled()
+    local enchants = self:HasEnchants(bar)
+    if not watches then
         bar.upBy = nil
-        return false
+        if not enchants then return false end
     end
-    local readable = Readable()
+    -- A packed bar with a weapon enchant centres its whole row (Lead), so it
+    -- reads which of the game's packed icons are up too.
+    local counting = enchants and self:Packed(bar.data) and ns.Bars:Enabled()
+    local readable = (watches or counting) and Readable()
     local last, now, up, changed = bar.upBy or {}, {}, bar.up, false
     for i = 1, bar.count do
         local name, on = bar.names[i], nil
-        if self:Hides(bar, i) then
+        -- (A weapon enchant is on your weapon, and answered from your hands.)
+        if bar.imbues[i] then
+            on = EnchantOn(bar.imbues[i])
+        elseif counting or (watches and self:Hides(bar, i)) then
             if readable then on = OnYou(bar.slotIDs[i]) end
             if on == nil then on, bar.unread = last[name], true end
             now[name] = on
@@ -730,7 +897,7 @@ function F:Check(bar)
         up[i] = on
     end
     for i = bar.count + 1, #up do up[i] = nil end
-    bar.upBy = now
+    bar.upBy = (watches or counting) and now or nil
     return changed
 end
 
@@ -740,14 +907,17 @@ end
 -- Mode), so the bar can be placed and sized with them all. A missing one's
 -- slot stays on, so a buff cast in a fight draws over its greyed spot.
 local function Spot(bar, i)
-    return not (F:Hides(bar, i) and bar.up[i]) or ns.Bars:Arranging()
+    if ns.Bars:Arranging() then return true end
+    -- A weapon enchant on a packed bar shows as the packed icons do: while it's on.
+    if bar.imbues[i] and F:Packed(bar.data) and not F:Hides(bar, i) then return bar.up[i] == true end
+    return not (F:Hides(bar, i) and bar.up[i])
 end
 
 -- Whether entry i is shown in a fixed slot and spot: every entry unless
--- packed; on a packed bar, the ones ticked Only when missing (the rest are
--- the game's packed icons).
+-- packed; on a packed bar, the ones ticked Only when missing and the weapon
+-- enchants (the rest are the game's packed icons).
 local function Own(bar, i, packed)
-    return not packed or bar.only[i] == true
+    return not packed or bar.only[i] == true or bar.imbues[i] ~= nil
 end
 
 -- A packed bar's spots (Only when missing) in one row, side by side: from
@@ -774,7 +944,16 @@ local function Lead(bar, spots)
         from = 0
         bar.leadPoint, bar.leadX = "LEFT", n * step
     else
-        from = (width - (n * step - spacing)) / 2
+        -- With a weapon enchant, the packed icons up beside it count, so the
+        -- whole row is centred (F:Check reads them; in a fight the row stays
+        -- where it was and a buff gained then adds to the right, until it ends).
+        local others = 0
+        if F:HasEnchants(bar) then
+            for i = 1, bar.count do
+                if not Own(bar, i, true) and bar.up[i] then others = others + 1 end
+            end
+        end
+        from = (width - ((n + others) * step - spacing)) / 2
         bar.leadPoint, bar.leadX = "LEFT", from + n * step
     end
     -- Growing left, the first one on the right, as fixed spots go.
@@ -842,8 +1021,12 @@ function F:Layout(bar, data)
     -- A packed bar's slots sit in its container, scaled with the packed
     -- icons, so their numbers are sized as those icons' are.
     local fit = packed and BASE or size
+    local weapons = ns.BAR_KIND[bar.key] == "buff"
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
         local ids, entry, picked, glow, yours, only = {}, nil, nil, false, {}, false
+        -- Weapon enchants: every one of yours in it is one (joined with a
+        -- buff, it's the buff's as before: nothing tells them apart in a fight).
+        local enchants, allEnchants = {}, weapons
         for _, name in ipairs(group) do
             local found = ns.Spells:Find(name)
             if found and found.ids and ns.Spells:ForMe(name, bar.key) then
@@ -853,6 +1036,12 @@ function F:Layout(bar, data)
                 only = only or flags[name] == true
                 yours[#yours + 1] = name
                 for _, id in ipairs(found.ids) do ids[id] = true end
+                local list = ENCHANTS[found.name]
+                if list then
+                    for _, id in ipairs(list) do enchants[id] = true end
+                else
+                    allEnchants = false
+                end
             end
         end
         -- Its tick count: the counted debuffs' pace, and for a joined icon
@@ -890,6 +1079,7 @@ function F:Layout(bar, data)
             bar.names[count] = table.concat(group, "+")
             bar.tickPaces[count], bar.tickShows[count] = pace, shows
             bar.only[count] = only or nil
+            bar.imbues[count] = allEnchants and next(enchants) and enchants or nil
             -- Warn at: the first of yours with one, unless it shows only
             -- while it's missing (it has no icon while it's up).
             local warn
@@ -904,6 +1094,7 @@ function F:Layout(bar, data)
         MissingGlow(bar.holders[i], false)
         bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i], bar.only[i] = nil, nil, nil, nil, nil
         bar.looks[i], bar.holders[i].look, bar.warns[i], bar.holders[i].ownSize = nil, nil, nil, nil
+        bar.imbues[i] = nil
     end
     for _, parts in ipairs(bar.groupParts) do
         parts.cooldown:SetHideCountdownNumbers(not data.showTimer)
@@ -913,11 +1104,13 @@ function F:Layout(bar, data)
     -- Which are on you, then the spots that show. (Packed icons line up
     -- from the bar's centre, or from the edge the bar grows away from, past
     -- any spots: F:Apply. Fixed spots are placed in rows by the bar.)
+    if self:HasEnchants(bar) then self:ReadEnchants() end
     self:Check(bar)
     self:Spots(bar)
     self:Apply(bar)
     self:UpdateTarget(bar)
     self:LowTime(bar)
+    self:PaintEnchants(bar)
 end
 
 local function Signature(ids)
@@ -1109,8 +1302,9 @@ function F:Apply(bar)
         end
     end
     for i = 1, bar.groups do
-        -- (Not one ticked Only when missing: its own slot shows it.)
-        local ids = on and packed and bar.only[i] ~= true and bar.slotIDs[i] or nil
+        -- (Not one ticked Only when missing: its own slot shows it. Nor a
+        -- weapon enchant: its own spot.)
+        local ids = on and packed and bar.only[i] ~= true and not bar.imbues[i] and bar.slotIDs[i] or nil
         local signature = ids and (Signature(ids) .. "|" .. spacing .. "|" .. Index(i)) or ""
         if bar.appliedGroups[i] ~= signature then
             bar.appliedGroups[i] = signature

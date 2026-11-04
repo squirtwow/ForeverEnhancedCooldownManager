@@ -1569,7 +1569,7 @@ do
         local done = S[FECMTour.next.label].text == "Done"
         FECMTour.next:Click()
     until done or #titles > 20
-    Equal(tostring(table.concat(titles, ", "):find("SWAP YOUR ICONS", 1, true)) .. " " .. titles[#titles], "nil DIM ON COOLDOWN",
+    Equal(tostring(table.concat(titles, ", "):find("SWAP YOUR ICONS", 1, true)) .. " " .. titles[#titles], "nil EXTRA BARS",
         "and the page's walkthrough leaves its step out")
     -- As 1.6.0 was released: later versions' steps weren't out yet.
     local version = ns.Version

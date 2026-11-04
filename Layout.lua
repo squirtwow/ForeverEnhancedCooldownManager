@@ -325,9 +325,9 @@ function L:Apply(key)
         if not ns.EXTRA_OF[bar] then ns.BarData(bar).spacing = layout.spacing end
     end
     ns.LayoutData()
-    if not ns.Bars:Enabled() then ns.Set("useBars", true) end
+    local note = not ns.Bars:Enabled() and ns.SetBars(true) or nil
     ns.Bars:Rebuild()
-    return true, preset.name .. " is set up. Tick spells for each bar, then size them to taste."
+    return true, note or (preset.name .. " is set up. Tick spells for each bar, then size them to taste.")
 end
 
 -- Puts back what the last preset or Reset changed.
@@ -345,10 +345,10 @@ function L:Undo()
     -- These can be empty, which the copy leaves out.
     layout.left, layout.right, layout.base = copy.layout.left, copy.layout.right, copy.layout.base
     layout.preset = copy.layout.preset
-    if ns.Get("useBars") ~= copy.useBars then ns.Set("useBars", copy.useBars) end
+    local note = ns.Get("useBars") ~= copy.useBars and ns.SetBars(copy.useBars) or nil
     ns.Bars:Rebuild()
     if ns.Resource then ns.Resource:Match() end
-    return true, "Put back as it was."
+    return true, note or "Put back as it was."
 end
 
 -- The layout as its preset was first set up: every bar back in, no room
@@ -520,9 +520,9 @@ function L:LineUp()
     if InCombatLockdown() then return false, "Finish combat first." end
     ns.LayoutData().on = true
     self.moved = nil
-    if not ns.Bars:Enabled() then ns.Set("useBars", true) end
+    local note = not ns.Bars:Enabled() and ns.SetBars(true) or nil
     ns.Bars:Rebuild()
-    return true, "Your bars are stacked again."
+    return true, note or "Your bars are stacked again."
 end
 
 function L:Start()

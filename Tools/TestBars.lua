@@ -799,6 +799,13 @@ function GearChanged()
     Fire("PLAYER_EQUIPMENT_CHANGED")
     for i = from + 1, #timers do timers[i]() end
 end
+-- A click that turns your bars on, without Blizzard's Cooldown Manager going
+-- off with it (checked on its own, ns.SetBars): off for the click, then back.
+function KeepManager(click)
+    C_CVar.SetCVar("cooldownViewerEnabled", "0")
+    click()
+    C_CVar.SetCVar("cooldownViewerEnabled", "1")
+end
 -- How often a window is on the game's list of windows Escape closes.
 function EscapeListed(name)
     local count = 0
@@ -2470,6 +2477,9 @@ local fort = {}
 for _, item in ipairs(ns.Spells:Suggest("fortitude")) do fort[item.name] = true end
 Equal(fort["Power Word: Fortitude"] and fort["Prayer of Fortitude"], true, "found by any part of the name")
 Equal(ns.Spells:Suggest("minor heal")[1].name, "Minor Healing Potion", "items suggested too")
+Equal(ns.Spells:Suggest("plainsrun")[1] and ns.Spells:Suggest("plainsrun")[1].name, "Plainsrunning",
+    "a passive is suggested by name too (the spellbook never lists passives; Plainsrunning's buff can go on Buffs)")
+Equal(tostring(ns.Spells:AddNote("Plainsrunning", "buff")), "nil", "and Plainsrunning can go on the Buffs bar")
 
 ns.Toggle()
 w = FECMFrame
@@ -2746,7 +2756,7 @@ Equal(S[w.versionText].text, "dev   Options > AddOns or /ccm to open", "and keep
 
 -- Your bars off: each bar page offers to turn them on.
 Equal(S[page.turnOn].shown, true, "bar page offers to turn your bars on")
-page.turnOn:Click()
+KeepManager(function() page.turnOn:Click() end)
 Equal(B:Enabled(), true, "and does")
 Equal(S[page.turnOn].shown, false, "then the offer goes")
 
@@ -3218,7 +3228,7 @@ w:Select("layout")
 unlock:Click()
 Equal(S[w.note].text, "Turn your bars on first.", "can't unlock while the bars are off")
 w:Select("general")
-w.useBars:Click()
+KeepManager(function() w.useBars:Click() end)
 w:Select("layout")
 unlock:Click()
 Equal(B:IsUnlocked(), true, "unlocked")
@@ -3882,14 +3892,17 @@ local function Holds(list, value)
 end
 local function IDs(list) return list and table.concat(list, ",") or "none" end
 -- From the game data: a name shared with an active spell lists only its
--- passive IDs (the troll's Regeneration, not the mage's); a passive's buff
+-- passive IDs (Frostbite's talent, not its freeze); a passive's buff
 -- of its own has its name and icon (Plainsrunning's, a talent's proc, not an
 -- NPC's Regeneration) and isn't hidden (not Hack and Slash's or Thick
 -- Hide's, which share their talent's name and icon). Dual Wield
--- Specialization gives none either.
+-- Specialization gives none either. The mage's Regeneration, a rune spell,
+-- is in no table now (Forever has no runes; it comes back for the checks
+-- below).
 Equal(IDs(data.PASSIVES.Regeneration) .. " " .. IDs(data.RANKS.Regeneration) .. " " .. IDs(data.PASSIVE_BUFFS[20555])
-    .. " " .. IDs(data.PASSIVES.Endurance) .. " " .. IDs(data.PASSIVE_BUFFS[20550]), "20555 401417 none 13742,20550 none",
-    "the troll's Regeneration and the tauren's Endurance are passive with no buff; the mage's Regeneration is active")
+    .. " " .. IDs(data.PASSIVES.Endurance) .. " " .. IDs(data.PASSIVE_BUFFS[20550]) .. " " .. IDs(data.PASSIVES.Frostbite)
+    .. " " .. IDs(data.RANKS.Frostbite), "20555 none none 13742,20550 none 11071 11071,12494",
+    "the troll's Regeneration and the tauren's Endurance are passive with no buff; Frostbite's freeze is active")
 Equal(IDs(data.PASSIVES.Plainsrunning) .. " " .. IDs(data.PASSIVE_BUFFS[1259918]) .. " " .. IDs(data.PASSIVE_BUFFS[12319])
     .. " " .. IDs(data.PASSIVE_BUFFS[16487]) .. " " .. IDs(data.PASSIVE_BUFFS[13715]) .. " " .. IDs(data.PASSIVE_BUFFS[23584])
     .. " " .. IDs(data.PASSIVE_BUFFS[13960]) .. " " .. IDs(data.PASSIVE_BUFFS[16929]),
@@ -3939,7 +3952,7 @@ local named = { [17794] = "Shadow Vulnerability", [1229504] = "Faction Banner", 
     [16870] = "Clearcasting", [12536] = "Clearcasting", [16246] = "Clearcasting", [17941] = "Shadow Trance",
     [14143] = "Remorseless", [6150] = "Quick Shots", [1326168] = "Dark Inspiration", [1400001] = "Moonlit Path", [1400002] = "Starlit Path",
     [1400003] = "Sunlit Path", [1400004] = "Dawnlit Path", [8076] = "Strength of Earth", [25362] = "Strength of Earth",
-    [8836] = "Grace of Air", [5677] = "Mana Spring" }
+    [8836] = "Grace of Air", [5677] = "Mana Spring", [401417] = "Regeneration" }
 for _, list in ipairs({ data.RANKS, data.PASSIVES }) do
     for name, ids in pairs(list) do
         for _, id in ipairs(ids) do named[id] = named[id] or name end
@@ -4131,6 +4144,18 @@ w:Hide()
 -- Regeneration: a mage's active spell, and a troll's passive racial. A troll
 -- warrior added its own (and a tauren's Endurance) before passives were
 -- turned away: neither shows, on any bar, and both stay in the profile.
+-- The mage's is a rune spell, gone from the data (Forever has no runes), so
+-- here each load of Ranks.lua puts it back as it was (a mage's, 401417), to
+-- keep a racial passive's name shared with a class's active spell covered.
+local realLoadfile = loadfile
+_G.loadfile = function(file, ...)
+    local chunk, problem = realLoadfile(file, ...)
+    if file ~= "Ranks.lua" or not chunk then return chunk, problem end
+    return function(name, data)
+        chunk(name, data)
+        data.RANKS.Regeneration, data.SPELL_CLASSES.Regeneration = { 401417 }, "MAGE"
+    end
+end
 local regen = { joins = { buff = {}, debuff = {} }, cd = { "Regeneration", "Endurance" }, util = {},
     buff = { "Regeneration", "Endurance" }, debuff = {} }
 local savedRegen = { useBars = true, notesSeen = "dev", profiles = { Shared = regen }, everyone = "Shared",
@@ -4202,6 +4227,7 @@ Equal(tostring(ok) .. " " .. table.concat(ForeverEnhancedCooldownManagerDB.custo
     "a full bar: nothing remembered")
 w:Hide()
 end
+_G.loadfile = realLoadfile
 
 -- Totem buffs: the game marks them passive, but they come and go on everyone
 -- near the totem. By its ID one goes on the Buffs bar, lit by itself and its
@@ -4235,6 +4261,153 @@ Equal(table.concat((B:Mine("buff")), ",") .. " " .. B:Get("buff").count .. " " .
     .. " " .. tostring((B:Get("buff").slotIDs[2] or {})[5677]) .. " " .. #asks, "Strength of Earth,Mana Spring 2 true true 0",
     "saved totem buffs show")
 w:Hide()
+
+-- A totem's buff lights its totem's icon on the Buffs bar (a player's report),
+-- and a weapon enchant sits on the weapon, so the addon reads your hands and
+-- draws its spot itself.
+;(function()
+    Start(2, "SHAMAN", { useBars = true, notesSeen = "dev", everyone = "Shared",
+        custom = { ["Strength of Earth Totem"] = { 8075 }, ["Rockbiter Weapon"] = { 8017 }, ["Searing Totem"] = { 3599 } },
+        profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = {}, util = {},
+            buff = { "Strength of Earth Totem", "Rockbiter Weapon", "Searing Totem" }, debuff = {} } } })
+    B:Changed()
+    local buff = B:Get("buff")
+    local Sorted = function(set)
+        local keys = {}
+        for id in pairs(set) do keys[#keys + 1] = id end
+        table.sort(keys)
+        return table.concat(keys, ",")
+    end
+    Equal(Sorted(buff.slotIDs[1]), "8075,8076,8160,8161,8162,8163,10441,10442,25361,25362",
+        "a totem's icon lights for its buff, every rank")
+    Equal(Sorted(buff.slotIDs[3]), "3599,6363,6364,6365,10437,10438", "a totem that gives no buff has only its own")
+    Equal(tostring(buff.imbues[1]) .. " " .. tostring(buff.imbues[2] ~= nil) .. " " .. tostring(buff.imbues[2] and buff.imbues[2][1663]),
+        "nil true true", "only the weapon enchant is one, with every rank's enchant")
+
+    -- Nothing on the weapon: a packed bar has no spot for it.
+    local onHand, left = nil, 1800000
+    _G.C_PaperDollInfo = { GetTemporaryEnchantmentInfo = function(slot)
+        if slot == 16 and onHand then return { enchantID = onHand, remainingTimeMs = left, hasExpirationTime = true } end
+        return nil
+    end }
+    local item = _G.C_Item
+    _G.C_Item = nil
+    local holder = buff.holders[2]
+    local Change = function()
+        Fire("UNIT_INVENTORY_CHANGED", "player")
+        NextFrame(B)
+    end
+    Change()
+    Equal(tostring(holder:IsShown()) .. " " .. tostring(buff.up[2]), "false false", "packed and off the weapon: no spot")
+
+    -- Rockbiter goes on: its spot shows lit, with its time left.
+    onHand = 29
+    Change()
+    Equal(tostring(holder:IsShown()) .. " " .. tostring(buff.up[2]) .. " " .. tostring(holder.enchantLit), "true true true", "on the weapon: its spot shows")
+    Equal(tostring(S[holder.icon].desaturated), "false", "lit, not greyed")
+    Equal(Last(holder.enchant.cooldown, "SetCooldown", 2), 1800, "its time left on the sweep")
+
+    -- The whole row is centred, with the packed icons up beside it counted:
+    -- a buff coming up moves the row half a step left, and going, back.
+    local alone, step = buff.leadX, ns.IconSize(buff.data) + buff.data.spacing
+    PlayerAuras[25362] = true
+    Fire("UNIT_AURA", "player")
+    NextFrame(B)
+    Equal(tostring(buff.up[1]) .. " " .. (alone - buff.leadX), "true " .. (step / 2), "centred with the totem's buff up")
+    PlayerAuras[25362] = nil
+    Fire("UNIT_AURA", "player")
+    NextFrame(B)
+    Equal(tostring(buff.up[1]) .. " " .. tostring(buff.leadX == alone), "false true", "and back as it goes")
+
+    -- Another shaman's enchant isn't this one.
+    onHand = 5
+    Change()
+    Equal(tostring(holder:IsShown()), "false", "Flametongue on the weapon doesn't light Rockbiter")
+
+    -- A secret answer in a fight keeps what was read: the time runs on.
+    onHand = 29
+    Change()
+    Equal(tostring(holder.enchantLit), "true", "back on")
+    local answer = C_PaperDollInfo.GetTemporaryEnchantmentInfo
+    C_PaperDollInfo.GetTemporaryEnchantmentInfo = function() return SECRET end
+    Change()
+    Equal(tostring(holder.enchantLit), "true", "the game won't say: still as last read")
+    C_PaperDollInfo.GetTemporaryEnchantmentInfo = answer
+
+    -- Off again: its spot goes, and the slot it held isn't left lit.
+    onHand = nil
+    Change()
+    Equal(tostring(holder:IsShown()) .. " " .. tostring(holder.enchantLit), "false false", "gone with the enchant")
+
+    -- The older call answers where the others are gone.
+    _G.C_PaperDollInfo = nil
+    local oldCall = _G.GetWeaponEnchantInfo
+    _G.GetWeaponEnchantInfo = function() return true, 600000, 0, 283, false, 0, 0, 0 end
+    Change()
+    Equal(tostring(buff.up[2]), "false", "Windfury isn't Rockbiter, by the older call too")
+    _G.GetWeaponEnchantInfo = function() return true, 600000, 0, 29, false, 0, 0, 0 end
+    Change()
+    Equal(tostring(buff.up[2]) .. " " .. tostring(holder:IsShown()), "true true", "the older call lights it")
+    _G.GetWeaponEnchantInfo = oldCall
+    _G.C_Item = item
+    Equal(#printed, 0, "no errors from weapon enchants")
+end)()
+
+-- Your bars or Blizzard's, not both: Blizzard's Cooldown Manager goes off as
+-- your bars are turned on, and back on as they're turned off if that's what
+-- turned it off. Only at that click.
+;(function()
+    local Manager = function() return C_CVar.GetCVarBool("cooldownViewerEnabled") end
+    Start(2, "WARRIOR", { notesSeen = "dev" })
+    C_CVar.SetCVar("cooldownViewerEnabled", "1")
+    Equal(tostring(B:Enabled()) .. " " .. tostring(Manager()), "false true", "bars off, Blizzard's on: nothing changed at login")
+    Equal(ns.SetBars(true), "Your bars are on and Blizzard's Cooldown Manager is off. Reload to finish (Look page, or /reload).", "it says so")
+    Equal(tostring(B:Enabled()) .. " " .. tostring(Manager()) .. " " .. tostring(ns.NeedsReload()), "true false true", "bars on, Blizzard's off, a reload asked for")
+    Equal(ns.SetBars(false), "Your bars are off and Blizzard's Cooldown Manager is back on. Reload to finish (Look page, or /reload).", "untick says so")
+    Equal(tostring(B:Enabled()) .. " " .. tostring(Manager()), "false true", "bars off, Blizzard's back")
+    -- Off by your own hand already: left off, and not turned on by you unticking.
+    C_CVar.SetCVar("cooldownViewerEnabled", "0")
+    Equal(tostring(ns.SetBars(true)) .. " " .. tostring(ns.SetBars(false)) .. " " .. tostring(Manager()), "nil nil false", "yours to keep off")
+    -- A fight: the game's settings aren't touched, and it says where to go.
+    C_CVar.SetCVar("cooldownViewerEnabled", "1")
+    local fight = _G.InCombatLockdown
+    _G.InCombatLockdown = function() return true end
+    Equal(ns.SetBars(true), "Your bars are on. Blizzard's Cooldown Manager is still on: Options > Gameplay > Advanced Options turns it off.", "in a fight it stays")
+    Equal(tostring(Manager()), "true", "still on")
+    _G.InCombatLockdown = fight
+    w:Hide()
+    -- Bars already on at login: nothing's changed behind your back.
+    Start(2, "WARRIOR", { useBars = true, notesSeen = "dev" })
+    C_CVar.SetCVar("cooldownViewerEnabled", "1")
+    B:Changed()
+    Equal(tostring(B:Enabled()) .. " " .. tostring(Manager()), "true true", "already on: left as they are")
+    w:Hide()
+end)()
+
+-- A shaman's totems and weapon enchants are sections of their own on the
+-- lists, after the spellbook's lines, each in the order it came.
+;(function()
+    Start(2, "SHAMAN", nil, {
+        { name = "Grounding Totem", spellID = 8177, iconID = 1 },
+        { name = "Lightning Shield", spellID = 324, iconID = 2 },
+        { name = "Rockbiter Weapon", spellID = 8017, iconID = 3 },
+        { name = "Searing Totem", spellID = 3599, iconID = 4 },
+        { name = "Totemic Recall", spellID = 36936, iconID = 5 },
+        { name = "Windfury Weapon", spellID = 8232, iconID = 6 },
+    })
+    local order = {}
+    for _, entry in ipairs(ns.Spells:Fresh()) do
+        if ({ ["Grounding Totem"] = 1, ["Lightning Shield"] = 1, ["Rockbiter Weapon"] = 1, ["Searing Totem"] = 1,
+            ["Totemic Recall"] = 1, ["Windfury Weapon"] = 1 })[entry.name] then
+            order[#order + 1] = entry.name .. ":" .. entry.line
+        end
+    end
+    local general = ns.Spells:Find("Lightning Shield").line
+    Equal(table.concat(order, ", "), "Lightning Shield:" .. general .. ", Totemic Recall:" .. general
+        .. ", Grounding Totem:Totems, Searing Totem:Totems, Rockbiter Weapon:Weapon enchants, Windfury Weapon:Weapon enchants",
+        "totems together, then weapon enchants, after the spellbook's own")
+    w:Hide()
+end)()
 
 -- Reincarnation is passive, but its hour's cooldown shows whether a shaman
 -- can come back, so it goes on the cooldown bars like an active spell
@@ -4372,10 +4545,11 @@ for _, name in ipairs(names) do
     end
 end
 -- Build 70425 renamed the weapon specializations: Axe to Savage, Mace to
--- Earth Fury, Sword to Ruthless.
-Equal(table.concat(passives, ","), "Beast Slaying,Big Game Hunter,Earth Fury,Elemental Insight,"
+-- Earth Fury, Sword to Ruthless. Build 70753 renamed Earth Fury to Artisan's
+-- Precision, and an orc's Command took Savage's place.
+Equal(table.concat(passives, ","), "Artisan's Precision,Beast Slaying,Big Game Hunter,Command,Elemental Insight,"
     .. "Engineering Specialization,Expansive Mind,Galestrider Riding,Gnomish,Hardiness,Horse Riding,Kodo Riding,"
-    .. "Mechanostrider Piloting,Plainsrunning,Quickness,Quickness Passive,Ram Riding,Raptor Riding,Ruthless,Savage,"
+    .. "Mechanostrider Piloting,Plainsrunning,Quickness,Quickness Passive,Ram Riding,Raptor Riding,Ruthless,"
     .. "The Human Spirit,Tiger Riding,Touch of the Grave,Undead Horsemanship,Underwater Breathing,"
     .. "Wind Blessed,Wisp Spirit,Wolf Riding", "the race-limited passives in the game data")
 Equal(table.concat(buffed, ","), "Plainsrunning", "of which only Plainsrunning gives a buff of its own")
@@ -7264,7 +7438,7 @@ end
     Equal(S[box.text].text:find("Try it: tick it.", 1, true) ~= nil, true, "asking you to try it")
     S[box].scripts.OnUpdate(box, .3)
     Equal(S[box.title].text, "SWITCH YOUR BARS ON", "waiting until you do")
-    tw.useBars:Click()
+    KeepManager(function() tw.useBars:Click() end)
     S[box].scripts.OnUpdate(box, .1)
     Equal(S[box.title].text, "SWITCH YOUR BARS ON", "looking a few times a second, not every frame")
     S[box].scripts.OnUpdate(box, .2)
@@ -7310,6 +7484,13 @@ end
     ns.Set("skin", true)
     Equal(Again():find("already has the new look", 1, true) ~= nil and tw.selected .. " " .. S[box.title].text, "look THE LOOK",
         "ticked again: as before")
+    -- Blizzard's off because your bars came on: nothing's wrong, and its Turn
+    -- on isn't what the step points at.
+    C_CVar.SetCVar("cooldownViewerEnabled", "0")
+    Equal(Again():find("Your bars have taken over from Blizzard's Cooldown Manager", 1, true) ~= nil and Outlined() == tw.lookOptions, true,
+        "bars on and Blizzard's off: the step says why, and points at the look")
+    C_CVar.SetCVar("cooldownViewerEnabled", "1")
+    Again()
     box.next:Click()
     Equal(tw.selected .. " " .. S[box.title].text, "cast CAST BAR", "the Cast bar page")
     -- Both its ticks outlined as one part, with the box and its arrow under
@@ -7453,27 +7634,29 @@ end)()
     -- your icons stays out (Tools/TestForms.lua and Tools/TestPulse.lua tour it). 1.5.0's before
     -- those: here only Ready glow, as the Cooldown pulse's page isn't loaded (Tools/TestPulse.lua
     -- tours its steps).
-    local latest, eight, six, pulse, newest = {}, {}, {}, {}, {}
+    local latest, nine, eight, six, pulse, newest = {}, {}, {}, {}, {}, {}
     for _, step in ipairs(nextSteps) do
         if step.version == "1.9.0" then latest[#latest + 1] = step end
-        if step.version == "1.9.1" then newest[#newest + 1] = step end
+        if step.version == "1.9.1" then nine[#nine + 1] = step end
+        if step.version == "1.10.0" then newest[#newest + 1] = step end
         if step.version == "1.8.1" then eight[#eight + 1] = step end
         if step.version == "1.6.0" then six[#six + 1] = step end
         if step.version == "1.5.0" then pulse[#pulse + 1] = step end
     end
-    local LATEST, EIGHT, NEWEST = Titles(latest), Titles(eight), Titles(newest)
+    local LATEST, NINE, EIGHT, NEWEST = Titles(latest), Titles(nine), Titles(eight), Titles(newest)
     local BEFORE = "Ready glow, Dim on cooldown, " .. EIGHT .. ", "
-    local TAIL = BEFORE .. LATEST .. ", " .. NEWEST
+    local LAST = LATEST .. ", " .. NINE .. ", " .. NEWEST
+    local TAIL = BEFORE .. LAST
     Equal(tostring(#ns.KnownForms()) .. " " .. LATEST .. " | " .. EIGHT .. " | " .. Titles(six) .. " | " .. Titles(pulse) .. " | "
-        .. NEWEST .. " | " .. tostring(NEXT:sub(-#TAIL) == TAIL),
+        .. NINE .. " | " .. NEWEST .. " | " .. tostring(NEXT:sub(-#TAIL) == TAIL),
         "0 Only when missing, Colour swatch, Icon details, Block design, Colour fade | One icon each, Glow when missing, Count ticks"
-        .. " | Dim on cooldown | Ready glow | Tick sound | true",
-        "1.9.1's Tick sound last (its Soul Shards are a warlock's), after 1.9.0's five, straight after 1.8.1's three,"
+        .. " | Dim on cooldown | Ready glow | Tick sound | An icon's own settings, Extra bars | true",
+        "1.10.0's two last, after 1.9.1's Tick sound (its Soul Shards are a warlock's), 1.9.0's five, straight after 1.8.1's three,"
         .. " 1.6.0's Dim on cooldown and 1.5.0's Ready glow (no form known here)")
     Equal(Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("nonsense")) .. "|" .. Titles(Tour:News("1.8.2")) .. "|"
         .. Titles(Tour:News("1.6.0")) .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News("1.4.4")),
-        NEWEST .. "|" .. NEWEST .. "|" .. LATEST .. ", " .. NEWEST .. "|" .. EIGHT .. ", " .. LATEST .. ", " .. NEWEST
-        .. "|Dim on cooldown, " .. EIGHT .. ", " .. LATEST .. ", " .. NEWEST .. "|" .. TAIL,
+        NEWEST .. "|" .. NEWEST .. "|" .. LAST .. "|" .. EIGHT .. ", " .. LAST
+        .. "|Dim on cooldown, " .. EIGHT .. ", " .. LAST .. "|" .. TAIL,
         "no version seen, or one that isn't: the latest update's, the newest steps there are; after 1.8.2 1.9.0's too;"
         .. " after 1.6.0 1.8.1's too, after 1.5.9 1.6.0's too, after 1.4.4 1.5.0's too")
     Equal(Titles(Tour:News("0.9.0")), BASICS .. ", " .. NEW .. ", " .. NEXT,
@@ -7521,7 +7704,7 @@ end)()
     local before = Titles(Tour:News("1.5.8")) .. "|" .. Titles(Tour:News(nil)) .. "|" .. Titles(Tour:News("1.4.4"))
     Running("1.6.0")
     Equal(fromSource .. "|" .. before .. "|" .. Titles(Tour:News("1.5.9")) .. "|" .. Titles(Tour:News(nil)),
-        SIXTH .. ", " .. EIGHT .. ", " .. LATEST .. ", " .. NEWEST .. "||Ready glow|Ready glow|" .. SIXTH .. "|" .. SIXTH,
+        SIXTH .. ", " .. EIGHT .. ", " .. LAST .. "||Ready glow|Ready glow|" .. SIXTH .. "|" .. SIXTH,
         "after 1.5.9: 1.6.0's steps and the later ones from the source; 1.5.9 never shows them (by hand its last, 1.5.0's);"
         .. " 1.6.0 shows its own, by hand too")
     Equal(Titles(Tour:News("1.4.4")) .. "|" .. Titles(Tour:News("0.9.0")):sub(-#SIXTH - 12), "Ready glow, " .. SIXTH .. "|Ready glow, " .. SIXTH,
@@ -7545,8 +7728,14 @@ end)()
     -- hand its own five); 1.9.1 does, after 1.9.0 and by hand.
     local before191 = Titles(Tour:News("1.9.0")) .. "|" .. Titles(Tour:News(nil))
     Running("1.9.1")
-    Equal(before191 .. "|" .. Titles(Tour:News("1.9.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. LATEST .. "|" .. NEWEST .. "|" .. NEWEST,
+    Equal(before191 .. "|" .. Titles(Tour:News("1.9.0")) .. "|" .. Titles(Tour:News(nil)), "|" .. LATEST .. "|" .. NINE .. "|" .. NINE,
         "1.9.0 never shows 1.9.1's (by hand its five); 1.9.1 after 1.9.0 shows its Tick sound, by hand too")
+    -- 1.10.0's: 1.9.1 never shows them (by hand its own); 1.10.0 does, after
+    -- 1.9.1 and by hand (a version compared as numbers: 1.10 after 1.9).
+    local before110 = Titles(Tour:News("1.9.1")) .. "|" .. Titles(Tour:News(nil))
+    Running("1.10.0")
+    Equal(before110 .. "|" .. Titles(Tour:News("1.9.1")) .. "|" .. Titles(Tour:News(nil)), "|" .. NINE .. "|" .. NEWEST .. "|" .. NEWEST,
+        "1.9.1 never shows 1.10.0's (by hand its own); 1.10.0 after 1.9.1 shows its two, by hand too")
     Running(nil)
 
     -- After an update that added steps: What's new by itself, and Got it goes
@@ -7782,7 +7971,7 @@ end)()
         "/ccm new offers it too")
     notes.tour:Click()
     Equal(S[box.count].text .. " " .. S[box.title].text, "1 of " .. #newest .. " " .. newest[1].title:upper(),
-        "the next update's steps, the newest there are (1.9.1's)")
+        "the next update's steps, the newest there are (1.10.0's)")
     tw.news:Click()
     Equal(tostring(S[notes].shown) .. " " .. tostring(S[box].shown), "true true", "What's new opened over the tour")
     CloseSpecialWindows()
@@ -9207,7 +9396,7 @@ end)()
     Over(true, bp.turnOn)
     Enter(bp.turnOn)
     Equal(Text(), "Turn your bars on.", "Turn on says what it does")
-    bp.turnOn:Click()
+    KeepManager(function() bp.turnOn:Click() end)
     Equal(tostring(S[bp.turnOn].shown) .. " " .. Text(), "false " .. ORANGE, "clicked, it goes, and so does its note")
     Over(nil, bp.turnOn)
     Leave(bp.turnOn)

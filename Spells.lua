@@ -32,7 +32,11 @@ local PROCS = {
 }
 S.PROCS = PROCS
 
--- A buff's group version counts as the same buff.
+-- A buff's group version counts as the same buff. Salvation and Blessing of
+-- Light have no pair now: since Forever's 30 Oct hotfix no trainer teaches
+-- them or their group versions, and build 70753's data has no name for any of
+-- the four, so Ranks.lua leaves them out. Nor has Blessing of Sanctuary:
+-- neither it nor its group version is in Forever's data (build 70707).
 local GROUP = {
     ["Mark of the Wild"] = "Gift of the Wild",
     ["Power Word: Fortitude"] = "Prayer of Fortitude",
@@ -42,24 +46,26 @@ local GROUP = {
     ["Blessing of Might"] = "Greater Blessing of Might",
     ["Blessing of Wisdom"] = "Greater Blessing of Wisdom",
     ["Blessing of Kings"] = "Greater Blessing of Kings",
-    ["Salvation"] = "Mass Salvation",
-    ["Blessing of Light"] = "Greater Blessing of Light",
-    ["Blessing of Sanctuary"] = "Greater Blessing of Sanctuary",
 }
 
 -- Names a later build gave a spell: one saved by its old name still counts
 -- as the new one. Build 70291 dropped "Effect" from the trap debuffs' names
--- (and Grounding Totem's buff's), and "Aura" from Frost Trap's. Build 70425
--- renamed the Skyborne's Read Ley Line and the paladin's two Salvations
--- (same spell IDs).
+-- (and Grounding Totem's buff's), and "Aura" from Frost Trap's; build 70707
+-- did the same for Explosive Trap's (its fire now shares the trap's name).
+-- Build 70425 renamed the Skyborne's Read Ley Line and the paladin's two
+-- Salvations (same spell IDs). The last three pairs go both ways (EITHER).
 local RENAMED = {
     ["Immolation Trap Effect"] = "Immolation Trap",
     ["Freezing Trap Effect"] = "Freezing Trap",
     ["Frost Trap Aura"] = "Frost Trap",
     ["Grounding Totem Effect"] = "Grounding Totem",
+    ["Explosive Trap Effect"] = "Explosive Trap",
     ["Read Ley Line"] = "Read Leyline",
     ["Blessing of Salvation"] = "Salvation",
     ["Greater Blessing of Salvation"] = "Mass Salvation",
+    ["Elemental Mastery"] = "Lightning Mastery", ["Lightning Mastery"] = "Elemental Mastery",
+    ["Totemic Projection"] = "Totemic Call", ["Totemic Call"] = "Totemic Projection",
+    ["Twist of Light"] = "Unsealed Wrath", ["Unsealed Wrath"] = "Twist of Light",
 }
 
 -- Of those, the ones whose saved keys move over to the new name as the
@@ -69,13 +75,32 @@ local RENAMED = {
 -- counting as the new ones.
 local MOVED = { ["Read Ley Line"] = true, ["Blessing of Salvation"] = true, ["Greater Blessing of Salvation"] = true }
 
+-- Names from Blizzard's notes for launch (3 Nov 2026), where which one your
+-- game uses depends on its build and hotfixes: build 70707 has the three old
+-- ones, 70753 only Unsealed Wrath, and a new name may come with a new spell
+-- ID (no data has Totemic Call's new form). So each counts as the other, and
+-- a saved key moves to whichever your own spellbook shows (FollowNames),
+-- either way, as often as that changes. Showing neither, nothing moves.
+local EITHER = {
+    ["Elemental Mastery"] = true, ["Lightning Mastery"] = true,
+    ["Totemic Projection"] = true, ["Totemic Call"] = true,
+    ["Twist of Light"] = true, ["Unsealed Wrath"] = true,
+}
+-- A saved name, for this session: the name your spellbook shows instead.
+local following = {}
+
 -- Debuff IDs the game's skill data leaves out of a spell's ranks (the ranks
 -- come from it, Ranks.lua), checked against build 70425's data: Judgement of
 -- the Crusader's first rank puts its own debuff on the target (21183, a
 -- player's report: rank 1 never lit on the Debuffs bar), and spells whose
 -- debuff is another spell they trigger: Charge's stun (and a boar's Charge),
 -- Intercept's stuns, Seal of Justice's stun, Nature's Grasp's roots, and
--- Frost and Ice Armor's chill on whoever hits you.
+-- Frost and Ice Armor's chill on whoever hits you. And a totem's buff (a
+-- player's report: they never lit): the spell you cast only summons the
+-- totem, which gives the buff as another spell, checked against build 70753's
+-- data. One rank's ID is enough: ns.AURA_FAMILIES has the buff's other ranks.
+-- (Windfury and Flametongue Totem's are in ns.SPELL_AURAS, from the same data.
+-- Totems that give you no buff, Searing Totem say, have nothing to light.)
 local EXTRA_IDS = {
     ["Judgement of the Crusader"] = { 21183 },
     ["Charge"] = { 7922, 25999 },
@@ -84,6 +109,17 @@ local EXTRA_IDS = {
     ["Nature's Grasp"] = { 19970, 19971, 19972, 19973, 19974, 19975 },
     ["Frost Armor"] = { 6136 },
     ["Ice Armor"] = { 7321 },
+    ["Strength of Earth Totem"] = { 8076 },
+    ["Stoneskin Totem"] = { 8072 },
+    ["Grace of Air Totem"] = { 8836 },
+    ["Mana Spring Totem"] = { 5677 },
+    ["Mana Tide Totem"] = { 16191 },
+    ["Healing Stream Totem"] = { 5672 },
+    ["Fire Resistance Totem"] = { 8185 },
+    ["Frost Resistance Totem"] = { 8182 },
+    ["Nature Resistance Totem"] = { 10596 },
+    ["Windwall Totem"] = { 15108 },
+    ["Grounding Totem"] = { 8178 },
 }
 
 -- A saved key's name now, for a spell that moved: a fixed rank's "@N" or a
@@ -91,7 +127,7 @@ local EXTRA_IDS = {
 function S:NewName(key)
     if type(key) ~= "string" then return nil end
     local name, after = key:match("^([^#@]+)(.*)$")
-    local now = name and MOVED[name] and RENAMED[name]
+    local now = name and (following[name] or MOVED[name] and RENAMED[name])
     return now and now .. after or nil
 end
 
@@ -106,7 +142,7 @@ function S:ByName(map, name)
     return ByName(map, name)
 end
 
-S.LINES = { procs = "Procs", items = "Items", added = "Added" }
+S.LINES = { procs = "Procs", items = "Items", added = "Added", totems = "Totems", weapons = "Weapon enchants" }
 
 -- Healthstones and potions come in ranks, and you carry whichever you have:
 -- a family is one entry for every rank of one, showing the best you carry.
@@ -166,9 +202,9 @@ local function Text(value)
     return type(value) == "string" and Open(value) and value ~= "" and value or nil
 end
 
--- Spells pinned to one ID. Two spells can share a name (the Skyborne's
--- racial gives two buffs called Energized, 1270842 for 15 seconds and
--- 1259691 for 15 minutes), and an entry kept by name watches every ID it
+-- Spells pinned to one ID. Two spells can share a name (up to build 70707
+-- the Skyborne's racial gives two buffs called Energized, 1270842 for 15
+-- seconds and 1259691 for longer), and an entry kept by name watches every ID it
 -- was given. On the Buffs and Debuffs bars, an ID whose name is already in
 -- your lists, for another spell, goes on as an entry of its own, kept as
 -- "Energized#1270842", which watches that ID alone (and the aura of its own
@@ -280,6 +316,9 @@ local function Add(entry)
     return entry
 end
 
+-- Which of EITHER's names your spellbook shows, passives too, as last read.
+local bookNames = {}
+
 local function ScanSpellbook()
     if not (C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines) then return end
     for line = 1, C_SpellBook.GetNumSpellBookSkillLines() or 0 do
@@ -293,6 +332,7 @@ local function ScanSpellbook()
                     local item = C_SpellBook.GetSpellBookItemInfo(index, BANK)
                     local name = item and Text(item.name)
                     local spellID = item and (item.spellID or item.actionID)
+                    if name and EITHER[name] then bookNames[name] = true end
                     if name and spellID and not item.isPassive then
                         local sub = Text(item.subName) or ""
                         local rank = tonumber(sub:match("%d+")) or 0
@@ -308,6 +348,25 @@ local function ScanSpellbook()
                     end
                 end
             end
+        end
+    end
+    -- Totems and weapon enchants (a rogue's poisons too) are sections of their
+    -- own on the lists, after your spellbook's lines, each in the order it came.
+    local spells, totems, weapons, enchants = {}, {}, {}, ns.WEAPON_ENCHANTS or {}
+    for _, entry in ipairs(list) do
+        local section = spells
+        if entry.name:find(" Totem$") then
+            section, entry.line = totems, S.LINES.totems
+        elseif enchants[entry.name] then
+            section, entry.line = weapons, S.LINES.weapons
+        end
+        section[#section + 1] = entry
+    end
+    local at = 0
+    for _, section in ipairs({ spells, totems, weapons }) do
+        for _, entry in ipairs(section) do
+            at = at + 1
+            list[at] = entry
         end
     end
     for _, entry in ipairs(list) do
@@ -326,6 +385,21 @@ local function ScanSpellbook()
             end
         end
     end
+end
+
+-- The name your spellbook shows of two that count as one (EITHER): keys saved
+-- under the other move over to it, in every profile (Core.lua), once each way.
+-- With both in your spellbook they're two spells, and nothing moves.
+local function FollowNames()
+    local moved = false
+    for name in pairs(bookNames) do
+        local other = RENAMED[name]
+        if not bookNames[other] and following[other] ~= name then
+            following[other], following[name] = name, nil
+            moved = true
+        end
+    end
+    if moved and ns.RenameSaved then ns.RenameSaved() end
 end
 
 local function ScanProcs()
@@ -639,7 +713,9 @@ function S:Scan()
     wipe(list)
     wipe(byKey)
     wipe(knownIDs)
+    wipe(bookNames)
     ScanSpellbook()
+    FollowNames()
     ScanProcs()
     ScanItems()
     ScanSaved()
@@ -825,7 +901,7 @@ local function Judged(key)
     local _, id = Pinned(key)
     if id then return { id } end
     local name = Base(key)
-    return ns.RANKS and ns.RANKS[name] or ns.PASSIVES and ns.PASSIVES[name]
+    return ByName(ns.RANKS, name) or ByName(ns.PASSIVES, name)
 end
 
 -- Why an entry can't be tracked on a bar because it's passive (Underwater
@@ -1003,9 +1079,13 @@ function S:Icon(key)
     local entry = byKey[key]
     if entry and entry.icon then return entry.icon end
     local _, pinned = Pinned(key)
-    local ids = pinned and { pinned } or type(key) == "string" and ns.RANKS and ns.RANKS[Base(key)]
-    local icon = ids and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(ids[1])
-    return icon or 134400
+    local ids = pinned and { pinned } or type(key) == "string" and ByName(ns.RANKS, Base(key))
+    -- The first ID your game knows: a rank from a later build may be first.
+    for _, id in ipairs(ids or {}) do
+        local icon = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
+        if icon then return icon end
+    end
+    return 134400
 end
 
 -- Trinkets, bag items, healthstones and potions, ammunition and Soul
@@ -1052,6 +1132,18 @@ function S:Suggest(text, limit)
     end
     for _, entry in ipairs(list) do Consider(entry.name, entry.icon, entry.spellID, true) end
     for name, ids in pairs(ns.RANKS or {}) do Consider(name, nil, ids[#ids], false) end
+    -- Passives with an aura of their own too (Plainsrunning's speed buff): the
+    -- spellbook passes over them, and that aura can go on the Buffs or Debuffs
+    -- bar. Where one can't go, the caller turns it away (S:AddNote,
+    -- B:WouldShow). A passive with no aura has nothing to track anywhere.
+    for name, ids in pairs(ns.PASSIVES or {}) do
+        for _, id in ipairs(ids) do
+            if (ns.PASSIVE_BUFFS and ns.PASSIVE_BUFFS[id]) or (ns.PASSIVE_DEBUFFS and ns.PASSIVE_DEBUFFS[id]) then
+                Consider(name, nil, ids[#ids], false)
+                break
+            end
+        end
+    end
     table.sort(found, function(a, b)
         if a.tier ~= b.tier then return a.tier < b.tier end
         return a.name < b.name

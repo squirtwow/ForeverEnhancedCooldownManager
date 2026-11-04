@@ -905,6 +905,7 @@ local function LayoutAuras(bar, data)
         ns.BuffBar:Create(bar)
     end
     ns.BuffBar:Layout(bar, data)
+    if ns.BuffBar:HasEnchants(bar) then B:EnchantClock() end
     if ns.BuffBar:Watches(bar.key, data) or bar.lowUnread then Again(bar) end
     -- Fixed spots go in rows like icons; packed buffs are laid out by the
     -- game in one row (after the spots of buffs ticked Only when missing,
@@ -1034,7 +1035,7 @@ end
 -- fight it all waits for the end, as every change to that bar does. Buffs
 -- the game wouldn't answer for are read again a moment later (Again).
 local function Missing(bar, all)
-    if not (bar and bar.holders and B:Enabled() and ns.BuffBar:Watches(bar.key, bar.data)) then return end
+    if not (bar and bar.holders and B:Enabled() and (ns.BuffBar:Watches(bar.key, bar.data) or ns.BuffBar:HasEnchants(bar))) then return end
     if inCombat or InCombatLockdown() then
         bar.pendingLayout = true
         return
@@ -1046,6 +1047,37 @@ local function Missing(bar, all)
     local spots = ns.BuffBar:Spots(bar)
     ns.BuffBar:Apply(bar)
     if not ns.BuffBar:Packed(bar.data) then B:Arrange(bar, spots, #spots, bar.data, bar.count) end
+end
+
+-- Your weapon enchants (Buffs.lua), read as one goes on or off, as a fight
+-- ends and as one runs out (B:EnchantClock): each Buffs bar's spots for them
+-- lit or greyed at once, in a fight too (the addon's own frames), and any that
+-- come and go with them follow as your buffs do (Missing, out of combat).
+function B:EnchantsChanged()
+    local any = false
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = ns.BAR_KIND[key] == "buff" and bars[key]
+        if bar and ns.BuffBar:HasEnchants(bar) then
+            if not any then ns.BuffBar:ReadEnchants() end
+            any = true
+            ns.BuffBar:PaintEnchants(bar)
+            Missing(bar)
+        end
+    end
+    if any then self:EnchantClock() end
+end
+
+-- Looks again just as the soonest enchant runs out: no polling. A newer clock
+-- replaces this one.
+function B:EnchantClock()
+    self:HearAuras()
+    local left = ns.BuffBar:NextEnchantEnd()
+    local clock = (self.enchantClock or 0) + 1
+    self.enchantClock = clock
+    if not left then return end
+    C_Timer.After(left + .1, function()
+        if clock == B.enchantClock then B:EnchantsChanged() end
+    end)
 end
 
 -- The same for each Buffs bar you have (Buffs 2 too), with all.
@@ -2743,6 +2775,9 @@ end
 local function OnEvent(_, event, arg)
     if event == "UNIT_AURA" then
         checking = true
+    elseif event == "UNIT_INVENTORY_CHANGED" or event == "WEAPON_ENCHANT_CHANGED" then
+        -- A weapon enchant on or off, read on the next frame however many came.
+        B.enchanting = true
     elseif event == "UNIT_FLAGS" then
         -- Your target died (or came back): a Debuffs bar's Glow when
         -- missing goes out on a corpse. FECM's own frames only.
@@ -2778,6 +2813,8 @@ local function OnEvent(_, event, arg)
         B:UpdateShown()
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
+        -- A weapon enchant the game wouldn't say about in the fight.
+        B:EnchantsChanged()
         -- Anything the aura bars had to wait for during the fight, and the
         -- buffs that came or went in it (Only show missing: read again a
         -- few times if the game doesn't answer yet).
@@ -2875,6 +2912,10 @@ end
 -- just the part that changed. Nothing is asked of the game while nothing
 -- changes; range has its own event (WatchRange).
 local function Tick()
+    if B.enchanting then
+        B.enchanting = false
+        B:EnchantsChanged()
+    end
     if checking then
         checking = false
         for _, key in ipairs(ns.BAR_KEYS) do
@@ -2913,7 +2954,7 @@ HearAuras = function()
     for _, key in ipairs(ns.BAR_KEYS) do
         if ns.BAR_KIND[key] == "buff" then
             local data = ns.BarData(key)
-            any = any or ns.BuffBar:Watches(key, data) or ns.BuffBar:LowWatch(data, key)
+            any = any or ns.BuffBar:Watches(key, data) or ns.BuffBar:LowWatch(data, key) or ns.BuffBar:HasEnchants(bars[key])
         end
     end
     local want = listening and not inCombat and any or false
@@ -2927,6 +2968,10 @@ HearAuras = function()
         for _, event in ipairs(LIFTED) do pcall(driver.UnregisterEvent, driver, event) end
         checking = false
     end
+end
+-- (For B:EnchantClock, above, as a bar first has a weapon enchant.)
+function B:HearAuras()
+    HearAuras()
 end
 
 -- Your form changing is heard only while your bars are on and a bar swaps
@@ -2986,6 +3031,9 @@ local function Switch()
         pcall(driver.RegisterEvent, driver, "SPELL_RANGE_CHECK_UPDATE")
         -- Your target dying or coming back (the Debuffs bar's glow).
         pcall(driver.RegisterUnitEvent, driver, "UNIT_FLAGS", "target")
+        -- A weapon enchant going on or off (each event the game lacks is left out).
+        pcall(driver.RegisterUnitEvent, driver, "UNIT_INVENTORY_CHANGED", "player")
+        pcall(driver.RegisterEvent, driver, "WEAPON_ENCHANT_CHANGED")
         driver:SetScript("OnUpdate", Tick)
     else
         driver:UnregisterAllEvents()
