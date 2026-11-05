@@ -838,9 +838,12 @@ local function PulseGame()
         asked[#asked + 1] = id
         return sealed
     end
-    -- Like the game: the times secret in a fight, whether it's on hold never.
+    -- Like the game: the times secret in a fight, whether it's on hold never,
+    -- nor whether it's only the global cooldown (OnGCD, by spell ID: a
+    -- global, as this file's main chunk is at Lua's 200 locals).
+    OnGCD = {}
     _G.C_Spell.GetSpellCooldown = function(id)
-        return { isEnabled = not held[id], startTime = SECRET, duration = SECRET, modRate = SECRET }
+        return { isEnabled = not held[id], isOnGCD = OnGCD[id], startTime = SECRET, duration = SECRET, modRate = SECRET }
     end
     _G.GetSpellBaseCooldown = nil
     -- A trinket with a use: Lucky Charm.
@@ -1116,6 +1119,22 @@ do
     Fire("SPELL_UPDATE_COOLDOWN")
     Tick(P)
     Equal(Last(bark, "SetCooldownFromDurationObject") == sealed, true, "once it starts: handed on")
+    -- Only the global cooldown (Barkskin sitting ready, in a fight): the game
+    -- says so plainly, so nothing is asked or handed on and the watcher keeps
+    -- what it had. Its end is no pulse.
+    clears = S[bark].clears or 0
+    S[bark].last.SetCooldownFromDurationObject = nil
+    OnGCD[22812], asked = true, {}
+    Fire("SPELL_UPDATE_COOLDOWN")
+    Tick(P)
+    table.sort(asked)
+    Equal(table.concat(asked, ",") .. " " .. ((S[bark].clears or 0) - clears) .. " "
+        .. tostring(Last(bark, "SetCooldownFromDurationObject")) .. " " .. tostring(P:Showing()), "5211,1259416 0 nil nil",
+        "only the global cooldown on Barkskin, in a fight: not asked for, not cleared, nothing handed on, no pulse")
+    OnGCD[22812] = nil
+    Fire("SPELL_UPDATE_COOLDOWN")
+    Tick(P)
+    Equal(Last(bark, "SetCooldownFromDurationObject") == sealed, true, "past the global cooldown: handed on again")
     lockdown = false
 end
 

@@ -9,7 +9,8 @@
 -- watched has a Cooldown frame of its own that's never drawn, handed the
 -- game's duration object just as your bars' icons are (Bars.lua), and the
 -- game itself says when it's done (OnCooldownDone): that's the pulse. The
--- global cooldown is left out by asking for the duration without it. An
+-- global cooldown is left out by asking for the duration without it, and
+-- passed over when the game says it's all there is (isOnGCD). An
 -- item's cooldown comes as plain numbers, as on your bars: one no longer
 -- than the global cooldown is left out, and if the game ever hides them in
 -- a fight the watcher keeps what it had. Which of your spells have a
@@ -582,6 +583,13 @@ local function Feed(watch)
             Clear(watch)
             return
         end
+        -- Only the global cooldown: nothing of its own to count, so the
+        -- watcher keeps what it had, as Blizzard's own cooldown viewer and
+        -- broadcaster pass these over. Asked for without it (below), the game
+        -- can still hand it over in a fight, and a spell sitting ready would
+        -- pulse after every global cooldown. Never secret either. One of its
+        -- own ending under a global cooldown still says so as it ends.
+        if type(info) == "table" and Open(info.isOnGCD) and info.isOnGCD == true then return end
         -- Without the global cooldown. Secret in a fight: handed on as it is.
         local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(watch.spellID, true)
         if duration then cooldown:SetCooldownFromDurationObject(duration) else Clear(watch) end
