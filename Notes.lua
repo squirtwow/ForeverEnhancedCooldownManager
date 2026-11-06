@@ -10,6 +10,21 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.2",
+        sections = {
+            { "Added", {
+                "Talent procs from every class now come up in the Buffs and Debuffs search, like Missile Barrage and Maelstrom Weapon.",
+            } },
+            { "Changed", {
+                "Spell data updated for this week's Forever patch, like Shank and Reckless Swings.",
+            } },
+            { "Fixed", {
+                "The cooldown pulse no longer goes off in a fight for a spell that's already ready, for players still seeing it after 1.10.1.",
+                "Spells you don't have yet show your own class's icon in the bar search.",
+            } },
+        },
+    },
+    {
         version = "1.10.1",
         sections = {
             { "Fixed", {
