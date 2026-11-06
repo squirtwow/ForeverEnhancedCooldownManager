@@ -421,8 +421,20 @@ local function Holder()
     return holder
 end
 
+-- A spell's watcher that showed and finished within a global cooldown only
+-- counted the global cooldown (or nothing at all): every watched spell's own
+-- is longer (P:Spells), so that's no pulse. The game shows a watcher as a
+-- cooldown starts (below), so a spell sitting ready that's handed a global
+-- cooldown in a fight anyway shows, finishes and is passed over here.
+local SHORT = 1.75
+local function Started(cooldown)
+    cooldown.started = GetTime()
+end
+
 local function Done(cooldown)
-    P:Done(cooldown.watch)
+    local watch = cooldown.watch
+    if watch and watch.spellID and cooldown.started and GetTime() - cooldown.started <= SHORT then return end
+    P:Done(watch)
 end
 
 -- A Cooldown frame that only keeps time: no sweep, edge, flash or numbers.
@@ -440,6 +452,7 @@ local function Watcher()
     cooldown:SetDrawBling(false)
     cooldown:SetHideCountdownNumbers(true)
     cooldown:SetScript("OnCooldownDone", Done)
+    cooldown:SetScript("OnShow", Started)
     return cooldown
 end
 
