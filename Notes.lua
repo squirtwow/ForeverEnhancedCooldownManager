@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.1",
+        sections = {
+            { "Fixed", {
+                "The cooldown pulse no longer goes off again and again in a fight for a spell that's already ready.",
+            } },
+        },
+    },
+    {
         version = "1.10.0",
         sections = {
             { "Added", {

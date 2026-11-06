@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.1
+
+### Fixed
+- The cooldown pulse no longer goes off again and again in a fight for a spell that's already ready.
+
 ## 1.10.0
 
 ### Added
