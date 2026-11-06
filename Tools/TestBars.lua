@@ -2480,6 +2480,22 @@ Equal(ns.Spells:Suggest("minor heal")[1].name, "Minor Healing Potion", "items su
 Equal(ns.Spells:Suggest("plainsrun")[1] and ns.Spells:Suggest("plainsrun")[1].name, "Plainsrunning",
     "a passive is suggested by name too (the spellbook never lists passives; Plainsrunning's buff can go on Buffs)")
 Equal(tostring(ns.Spells:AddNote("Plainsrunning", "buff")), "nil", "and Plainsrunning can go on the Buffs bar")
+-- A spell you don't have, from the game data, shows your class's icon for it:
+-- a rogue's Poised (1328825) and a druid's (1328829) are two spells with an
+-- icon each, and a rogue saw the druid's (Squirt, 6 Nov 2026). Another class
+-- gets the first ID's. Still added by the name's last ID, as before.
+do
+    local unitClass = UnitClass
+    local function Poised(class)
+        UnitClass = function() return class, class end
+        for _, item in ipairs(ns.Spells:Suggest("poised", 50)) do
+            if item.name == "Poised" then return tostring(item.iconID) .. " " .. tostring(item.spellID) end
+        end
+    end
+    Equal(Poised("ROGUE") .. " | " .. Poised("DRUID") .. " | " .. Poised("MAGE"), "1328825 1328829 | 1328829 1328829 | 1328825 1328829",
+        "each class sees its own Poised icon")
+    UnitClass = unitClass
+end
 
 ns.Toggle()
 w = FECMFrame

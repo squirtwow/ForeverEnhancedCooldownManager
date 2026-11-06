@@ -1114,13 +1114,28 @@ end
 -- Names to offer while typing in the add box. Your own spells, procs and items
 -- come before other classes' spells from the game data; within each, names
 -- that start with the text, then a word that does, then (from three letters
--- on) any match, each alphabetically.
+-- on) any match, each alphabetically. One you don't have yet, from the game
+-- data, shows the icon of its first ID your class has (iconID), else its
+-- first ID's: a name classes share under IDs of their own (a rogue's Poised
+-- and a druid's, a druid's Claw and a pet's) can have an icon for each
+-- (ns.ID_CLASSES), and a first rank is the one you'd learn first.
 function S:Suggest(text, limit)
     text = type(text) == "string" and text:lower():match("^%s*(.-)%s*$") or ""
     if #text < 2 then return {} end
     Ready()
     local seen, found = {}, {}
-    local function Consider(name, icon, spellID, own)
+    local _, class = UnitClass("player")
+    local byID = ns.ID_CLASSES or {}
+    local function IconID(ids)
+        if type(class) == "string" then
+            for _, id in ipairs(ids) do
+                local owners = byID[id]
+                if owners and (" " .. owners .. " "):find(" " .. class .. " ", 1, true) then return id end
+            end
+        end
+        return ids[1]
+    end
+    local function Consider(name, icon, spellID, own, iconID)
         if seen[name] then return end
         seen[name] = true
         local lower = name:lower()
@@ -1128,10 +1143,10 @@ function S:Suggest(text, limit)
         if not at then return end
         local place = at == 1 and 1 or lower:sub(at - 1, at - 1):match("[%s%p]") and 2 or 3
         if place == 3 and #text < 3 then return end
-        found[#found + 1] = { name = name, icon = icon, spellID = spellID, tier = (own and 0 or 3) + place }
+        found[#found + 1] = { name = name, icon = icon, spellID = spellID, iconID = iconID, tier = (own and 0 or 3) + place }
     end
     for _, entry in ipairs(list) do Consider(entry.name, entry.icon, entry.spellID, true) end
-    for name, ids in pairs(ns.RANKS or {}) do Consider(name, nil, ids[#ids], false) end
+    for name, ids in pairs(ns.RANKS or {}) do Consider(name, nil, ids[#ids], false, IconID(ids)) end
     -- Passives with an aura of their own too (Plainsrunning's speed buff): the
     -- spellbook passes over them, and that aura can go on the Buffs or Debuffs
     -- bar. Where one can't go, the caller turns it away (S:AddNote,
@@ -1139,7 +1154,7 @@ function S:Suggest(text, limit)
     for name, ids in pairs(ns.PASSIVES or {}) do
         for _, id in ipairs(ids) do
             if (ns.PASSIVE_BUFFS and ns.PASSIVE_BUFFS[id]) or (ns.PASSIVE_DEBUFFS and ns.PASSIVE_DEBUFFS[id]) then
-                Consider(name, nil, ids[#ids], false)
+                Consider(name, nil, ids[#ids], false, IconID(ids))
                 break
             end
         end

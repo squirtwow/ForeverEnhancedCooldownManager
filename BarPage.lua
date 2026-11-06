@@ -1483,7 +1483,7 @@ function ns.BuildBarPage(window, page, width)
                     if #others < 8 and not known[found.name] and not ns.Spells:AddNote(found.name, state.bar)
                         and B:WouldShow(state.bar, found.name) then
                         others[#others + 1] = { name = found.name, label = found.name, lookup = found.name,
-                            icon = found.icon or (found.spellID and C_Spell.GetSpellTexture(found.spellID)) }
+                            icon = found.icon or ((found.iconID or found.spellID) and C_Spell.GetSpellTexture(found.iconID or found.spellID)) }
                     end
                 end
             end

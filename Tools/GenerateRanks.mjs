@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70753';
+const BUILD = '1.60.1.70790';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = process.argv[2];
 assert(cache, 'Pass a cache directory');
@@ -88,9 +88,11 @@ const teaching = row => +row.SkillLine === BEAST_TRAINING && teaches.has(+row.Sp
 // Salvation, Mass Salvation, Revoke and both Blessings of Light lost their
 // names, so the rows they still have are nameless and go nowhere below.
 // Spells.lua's GROUP pairs for Salvation and Blessing of Light went with them:
-// put them back if one is taught again. Voice of Truth and Binding Heal left
-// the trees but trainers teach them (rows with a level, and Blizzard says
-// nothing else), so they stay in the tables.
+// put them back if one is taught again. Voice of Truth left the tree but
+// trainers teach it (rows with a level, and Blizzard says nothing else), so
+// it stays in the tables. Binding Heal did too until build 70790 dropped its
+// rows (with Lava Burst's), so both are gone from the tables: a priest who
+// still knows it keeps it on a cooldown bar, as any spell no table names.
 // Talents gone from their class's tree, though the client data still gives
 // each a SkillLineAbility row and a TraitDefinition: this script reads no
 // tree (TraitNode), so it can't see that. Source: the data's trees, build
@@ -112,7 +114,42 @@ for (const [id, [name, mask]] of OUT_OF_TREE) {
     assert(names.get(id) === name && rows.length > 0 && rows.every(row => +row.ClassMask === mask),
         `${name} (${id}): its rows changed in this build's data, so drop it from OUT_OF_TREE`);
 }
-const skillRows = allSkillRows.filter(row => !OUT_OF_TREE.has(+row.Spell));
+// Talents only a class's talent tree holds, with no SkillLineAbility row at
+// all (build 70790: 84 of them, every class, from a mage's Missile Barrage
+// and Fingers of Frost to a rogue's Boot Knife and Composure, a shaman's
+// Maelstrom Weapon and a paladin's Infusion of Light). Without a row no table
+// named them, so the Layout page's search never offered their procs. Each
+// class has one tree (SkillLineXTraitTree to its skill line, whose
+// SkillRaceClassInfo rows carry the class), and each node's entries lead to
+// a TraitDefinition's spell. Such a spell stands here as a row of that class,
+// learned from the tree, so the tables below treat it as they treat any
+// other talent: its passive, its own buff or debuff, its cooldown. A talent
+// with a row of its own (Adrenaline Rush, Poised) keeps its row and nothing
+// is added.
+const classOfLine = new Map();
+for (const row of await table('SkillRaceClassInfo')) {
+    const mask = +row.ClassMask;
+    if (mask <= 0) continue;
+    classOfLine.set(+row.SkillID, (classOfLine.get(+row.SkillID) || 0) | mask);
+}
+const classOfTree = new Map();
+for (const row of await table('SkillLineXTraitTree')) {
+    const mask = classOfLine.get(+row.SkillLineID);
+    if (mask) classOfTree.set(+row.TraitTreeID, mask);
+}
+const treeOfNode = new Map((await table('TraitNode')).map(row => [+row.ID, +row.TraitTreeID]));
+const definitionOfEntry = new Map((await table('TraitNodeEntry')).map(row => [+row.ID, +row.TraitDefinitionID]));
+const spellOfDefinition = new Map((await table('TraitDefinition')).map(row => [+row.ID, +row.SpellID]));
+const hasRow = new Set(allSkillRows.map(row => +row.Spell));
+const treeRows = new Map();
+for (const row of await table('TraitNodeXTraitNodeEntry')) {
+    const mask = classOfTree.get(treeOfNode.get(+row.TraitNodeID));
+    const id = spellOfDefinition.get(definitionOfEntry.get(+row.TraitNodeEntryID));
+    if (!mask || !(id > 0) || hasRow.has(id) || OUT_OF_TREE.has(id)) continue;
+    assert(!treeRows.has(id) || +treeRows.get(id).ClassMask === mask, `${names.get(id)} (${id}) is in two classes' trees`);
+    treeRows.set(id, { Spell: String(id), ClassMask: String(mask), SkillLine: '0', AcquireMethod: '0', RaceMasks_0: '0', RaceMasks_1: '0' });
+}
+const skillRows = allSkillRows.filter(row => !OUT_OF_TREE.has(+row.Spell)).concat([...treeRows.values()]);
 // Learnable class spells whose only SkillLineAbility rows carry no class
 // (ClassMask 0): Curse of Exhaustion (a talent, TraitDefinition), Forever's
 // four ranks of Curse of the Elements and Bane of Agony's rank 2 (from a
@@ -158,6 +195,8 @@ const CLASSLESS = new Map([
     [24118, 4], [24119, 4], [24120, 4], [1299332, 4], // Hunter
     // Build 70753:
     [1239570, 2], [1328548, 2], // Paladin
+    // Build 70790: Reckless Swings (15 sec, a buff of its own).
+    [1329555, 1], // Warrior
 ]);
 for (const id of CLASSLESS.keys()) {
     const rows = skillRows.filter(row => +row.Spell === id);
@@ -264,6 +303,22 @@ for (const row of abilities) {
 const classCount = Object.keys(CLASSES).length;
 const ownerLines = [...owners.entries()].filter(([, set]) => set.size > 0 && set.size < classCount).sort()
     .map(([name, set]) => ` [${JSON.stringify(name)}]="${[...set].sort().join(' ')}",`);
+// The class of each ID of a name two or more classes have under IDs of their
+// own (a rogue's Poised and a druid's, each with its own icon; Track
+// Humanoids), so the Layout page's search shows a spell you don't have yet
+// with your class's icon. Only IDs that belong to some of the name's classes,
+// not all of them, are listed.
+const idClasses = new Map();
+for (const row of abilities) {
+    const id = +row.Spell, name = names.get(id), set = owners.get(name);
+    if (!set || set.size < 2 || set.size >= classCount) continue;
+    if (!idClasses.has(id)) idClasses.set(id, new Set());
+    for (const [bit, token] of Object.entries(CLASSES)) if (+row.ClassMask & +bit) idClasses.get(id).add(token);
+}
+const idClassLines = [...idClasses.entries()]
+    .filter(([id, set]) => set.size > 0 && set.size < owners.get(names.get(id)).size)
+    .sort((a, b) => a[0] - b[0])
+    .map(([id, set]) => ` [${id}]="${[...set].sort().join(' ')}",`);
 
 // The races each spell belongs to, so a profile shared across races can pass
 // over another race's racials (active or passive) and the class spells only
@@ -375,25 +430,9 @@ for (const row of await table('SpellCooldowns')) {
     if (+row.DifficultyID !== 0) continue;
     cooldowns.set(+row.SpellID, Math.max(+row.RecoveryTime || 0, +row.CategoryRecoveryTime || 0));
 }
-// Cooldowns Blizzard's notes give (3 Nov 2026), which the client data of build
-// 70753 doesn't carry yet: Slam 15 sec, Stormstrike 6, Riptide 12 and Totemic
-// Projection (Totemic Call in the notes) 30, by ID, each with what the data
-// still says. These only reach the pulse page's list and label (ns.COOLDOWNS:
-// a wrong one is a wrong label, never a wrong pulse). The build fails once the
-// data changes one, so the list goes when it isn't needed. Lava Burst isn't
-// here: Blizzard removes it, the data still has every rank, and a rank no one
-// can learn is never in a spellbook, so its rows stay, harmless.
-const HOTFIX_COOLDOWNS = new Map([
-    ...[1464, 8820, 11604, 11605, 1240193].map(id => [id, ['Slam', 15000, 18000]]),
-    [17364, ['Stormstrike', 6000, 8000]],
-    ...[408521, 1239242, 1239243].map(id => [id, ['Riptide', 12000, 6000]]),
-    [437009, ['Totemic Projection', 30000, 60000]],
-]);
-for (const [id, [name, ms, data]] of HOTFIX_COOLDOWNS) {
-    assert(names.get(id) === name && cooldowns.get(id) === data,
-        `${name} (${id}): this build's data has another cooldown (or name), so drop it from HOTFIX_COOLDOWNS`);
-    cooldowns.set(id, ms);
-}
+// Build 70790's data carries Blizzard's 3 Nov cooldowns itself (Slam 15 sec,
+// Stormstrike 6, Riptide 12, Totemic Call 30), so the stopgap list that set
+// them by hand for 70753 is gone.
 const timed = new Set();
 for (const id of learnable) {
     if ((passive(id) || ownResurrection(id)) && (cooldowns.get(id) || 0) > 0) timed.add(names.get(id));
@@ -695,7 +734,9 @@ const auraOnlyLines = [...auraOnly].sort((a, b) => a - b).map(id => ` [${id}]=tr
 // Tiger's Fury and Shifting Power, your Immolate for Conflagrate, your
 // Temporal Beacon for Rewind Time). Rune abilities with no SkillLineAbility
 // row (Rampage, Deep Freeze) have no way to be learned in this data, so they
-// aren't listed.
+// aren't listed. Nor are passives, which no cooldown bar shows: build 70790's
+// priest talent Early Demise is gated at 20% health like Execute, read from
+// its tree (above), but it's a passive that only works on such a target.
 // The build fails on any other gate on a learnable spell, so a new one is
 // sorted before it ships, and unless every learnable spell of a listed name
 // is gated (a rank without the gate would be lit whenever it's usable).
@@ -713,7 +754,7 @@ for (const row of await table('SpellAuraRestrictions')) {
         const state = +row[column];
         if (!state) continue;
         assert(REACTIVE_STATES[column].has(state) || NOISY_STATES[column].has(state), `${name}: ${column} ${state} isn't sorted`);
-        if (REACTIVE_STATES[column].has(state)) reactiveIDs.add(id);
+        if (REACTIVE_STATES[column].has(state) && !passive(id)) reactiveIDs.add(id);
     }
     for (const column of ['CasterAuraSpell', 'TargetAuraSpell']) {
         assert(!+row[column] || OWN_AURAS.has(+row[column]), `${name}: ${column} ${row[column]} isn't sorted`);
@@ -741,7 +782,8 @@ const out = [
     `-- Generated by Tools/GenerateRanks.mjs from Blizzard game data for build ${BUILD}.`,
     '-- Every class spell and active racial with the spell IDs of all its ranks,',
     '-- each class\'s spells that leave a debuff on an enemy, the classes each',
-    '-- class spell belongs to, the races (race IDs) each racial or race-only',
+    '-- class spell belongs to (and, for a name classes share under IDs of',
+    '-- their own, each such ID\'s class), the races (race IDs) each racial or race-only',
     '-- spell belongs to, every passive spell a character can learn with nothing',
     '-- to track (its passive IDs), the buffs and debuffs of their own some',
     '-- passives give or are (a totem\'s buff), by the passive\'s ID, the auras',
@@ -761,6 +803,9 @@ const out = [
     '}',
     'ns.SPELL_CLASSES = {',
     ...ownerLines,
+    '}',
+    'ns.ID_CLASSES = {',
+    ...idClassLines,
     '}',
     'ns.SPELL_RACES = {',
     ...raceLines,

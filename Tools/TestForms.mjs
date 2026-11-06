@@ -1,7 +1,7 @@
 // Forms.lua is generated, never edited by hand: rebuilding it from the game's
-// tables (Tools/GenerateForms.mjs, build 1.60.1.70753) must give the file
+// tables (Tools/GenerateForms.mjs, build 1.60.1.70790) must give the file
 // byte for byte. Skipped when the tables aren't on this computer
-// (C:\AddonDev\_ForeverData\changes-2026-11-03\impact\wago-70753). What the file says is also
+// (C:\AddonDev\_ForeverData\changes-2026-11-06\wago-70790). What the file says is also
 // checked straight from it (no tables needed): the forms, each one's list on
 // a bar that swaps with your form (Dire Bear Form's is Bear Form's) and the
 // spells that put you in each, and the rule each
@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const cache = join(root, '..', '_ForeverData', 'changes-2026-11-03', 'impact', 'wago-70753');
+const cache = join(root, '..', '_ForeverData', 'changes-2026-11-06', 'wago-70790');
 const TABLES = ['SpellName', 'Spell', 'SpellMisc', 'SpellShapeshift', 'SpellShapeshiftForm', 'SpellAuraRestrictions', 'SpellEffect',
   'SkillLine', 'SkillLineAbility', 'TraitDefinition'];
 const text = readFileSync(join(root, 'Forms.lua'), 'utf8');
@@ -126,7 +126,8 @@ test('each spell\'s rule, from the game\'s own data', () => {
     1240720: '0', 1240721: '0', 1316995: '0', // Penance: not with Shadowform's aura on you (SpellAuraRestrictions)
     331: '0', 403: '0', // Healing Wave, Lightning Bolt: not as a wolf
     17364: '0', 16188: '0', // Stormstrike, Nature's Swiftness: on a shaman tab's line with no class mask, not as a wolf
-    1326047: '0', 1325256: '0', // Lava Burst and Mana Tide Totem's new fourth ranks (build 70425): not as a wolf
+    1325256: '0', // Mana Tide Totem's fourth rank (build 70425): not as a wolf
+    1326047: 'any', // Lava Burst's fourth rank: no one learns it since build 70790 dropped its trainer rows, so no rule
     // Racials: any form but a shapeshift (Cat, Bear, Travel, Ghost Wolf), or any.
     20600: '0,17,18,19,28,30,31', // Perception
     20589: '0,17,18,19,28,30,31', // Escape Artist

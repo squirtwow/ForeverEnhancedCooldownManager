@@ -2282,8 +2282,8 @@ end)()
         .. tostring(data.RANKS["Improved Seal of Fury"]) .. " " .. tostring(data.PASSIVES["One-Handed Weapon Specialization"]),
         "1328618,22568,22827,22828,22829,31018 | 407995,1238069,1238070 nil | 10 1328548 PALADIN | DRUID ROGUE 8 | nil 1310735 | nil nil nil nil",
         "the druid's and paladin's changes from build 70753's data")
-    -- Blizzard's notes for launch, by ID (HOTFIX_COOLDOWNS), as the data
-    -- hasn't them yet; Lava Burst, which they remove, stays harmless.
+    -- Blizzard's launch notes' cooldowns, in the data itself since build
+    -- 70790; Lava Burst, which they removed, gone with its trainer rows.
     local function Cooldowns(...)
         local out = {}
         for _, id in ipairs({ ... }) do out[#out + 1] = tostring(data.COOLDOWNS[id]) end
@@ -2291,11 +2291,24 @@ end)()
     end
     Equal(Cooldowns(1464, 8820, 11604, 11605, 1240193) .. " | " .. Cooldowns(17364) .. " | " .. Cooldowns(408521, 1239242, 1239243) .. " | "
         .. Cooldowns(437009) .. " | " .. Cooldowns(1238299, 1238300, 1326047),
-        "15,15,15,15,15 | 6 | 12,12,12 | 30 | 10,10,10", "Slam 15, Stormstrike 6, Riptide 12, Totemic Call 30; Lava Burst's rows left alone")
+        "15,15,15,15,15 | 6 | 12,12,12 | 30 | nil,nil,nil", "Slam 15, Stormstrike 6, Riptide 12, Totemic Call 30; Lava Burst gone")
+    -- Build 70790: talents only a class's tree holds (no SkillLineAbility row)
+    -- are read from the tree, so their procs can be found for the Buffs and
+    -- Debuffs bars, each for its own class. One with nothing of its own (Boot
+    -- Knife) is a passive with no aura. Reckless Swings (a row with no class)
+    -- is the warrior's, with its 15 sec.
+    Equal(Joined(data.PASSIVES["Missile Barrage"]) .. " " .. Joined(data.PASSIVE_BUFFS[400588]) .. " " .. tostring(data.SPELL_CLASSES["Missile Barrage"])
+        .. " | " .. Joined(data.PASSIVE_BUFFS[408498]) .. " " .. tostring(data.SPELL_CLASSES["Maelstrom Weapon"])
+        .. " | " .. Joined(data.PASSIVE_DEBUFFS[1293695]) .. " " .. tostring(data.SPELL_CLASSES["Demonic Brand"])
+        .. " | " .. Joined(data.PASSIVES["Boot Knife"]) .. " " .. tostring(data.PASSIVE_BUFFS[1329286]) .. " " .. tostring(data.SPELL_CLASSES["Boot Knife"])
+        .. " | " .. Joined(data.RANKS["Reckless Swings"]) .. " " .. tostring(data.COOLDOWNS[1329555]) .. " " .. tostring(data.SPELL_CLASSES["Reckless Swings"])
+        .. " " .. tostring(data.PASSIVES["Reckless Swings"]),
+        "400588 400589,1326083 MAGE | 408505 SHAMAN | 1293696 WARLOCK | 1329286 nil ROGUE | 1329555 15 WARRIOR nil",
+        "build 70790's tree-only talents and Reckless Swings")
     Equal(tostring(data.RANKS["Living Bomb"]) .. " " .. tostring(data.SPELL_CLASSES["Living Bomb"]) .. " "
         .. tostring(Has(data.DEBUFFS.MAGE, "Living Bomb")) .. " " .. tostring(data.RANKS.Starfall) .. " "
         .. tostring(data.NAME_AURAS["Living Bomb"]) .. " | " .. tostring(Has(data.RANKS["Fire Blast"], 2136, 400618)) .. " "
-        .. tostring(Has(data.RANKS.Mutilate, 1310705, 399960)),
+        .. tostring(Has(data.RANKS.Mutilate, 1241582, 399960)), -- Mutilate's rank 2 (build 70790 dropped 1310705-7)
         "nil nil false nil nil | true true", "rune-only names gone; real names keep their seasonal helper IDs")
     -- Rune-only passives go the same way (the add box offered Dance of the
     -- Wicked for its buff); the troll's Regeneration and the paladin's
