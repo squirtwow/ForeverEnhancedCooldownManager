@@ -280,7 +280,13 @@ local function PanelTicks(window, dialog, shade, Changed)
         Changed()
     end)
     window:Hint(active, function() return ActiveNote(shade.bar, shade.name) end)
-    return glow, only, ticks, active
+    -- Show reagent count: only for a spell that uses one, on Cooldowns or Utility.
+    local reagents = T:Check(dialog, "Show reagent count", function(self)
+        B:SetShowsReagents(shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(reagents, "How many times your reagents let you cast this, on its icon, like your Flash Powder for Vanish.")
+    return glow, only, ticks, active, reagents
 end
 
 -- Glow size, right under Glow while active and shown with it: how big the
@@ -374,8 +380,10 @@ local function PaintTicks(shade, bar, name)
     shade.ticks:SetUsable(shade.ticks:GetChecked() or not B:TickClash(bar, name))
     shade.active:SetChecked(B:GlowsActive(bar, name))
     shade.active:SetUsable(B:ActiveUsable(bar, name))
+    shade.reagents:SetChecked(B:ShowsReagents(name))
     return { aura and shade.glow or nil, kind == "buff" and shade.only or nil,
-        kind == "debuff" and B:TickPace(name) ~= nil and shade.ticks or nil, kind == "buff" and shade.active or nil }
+        kind == "debuff" and B:TickPace(name) ~= nil and shade.ticks or nil, kind == "buff" and shade.active or nil,
+        B:UsesReagent(bar, name) and shade.reagents or nil }
 end
 
 local function SpellPanel(window)
@@ -431,7 +439,7 @@ local function SpellPanel(window)
     shade.ownIcon, shade.iconSize = PanelIconSize(window, dialog, shade, Changed)
     At(shade.ownIcon, PANEL.at, 2, 2)
     At(shade.iconSize, PANEL.at + PANEL.own, 2)
-    shade.glow, shade.only, shade.ticks, shade.active = PanelTicks(window, dialog, shade, Changed)
+    shade.glow, shade.only, shade.ticks, shade.active, shade.reagents = PanelTicks(window, dialog, shade, Changed)
     shade.glowSizeLabel, shade.glowSize, shade.glowSizeUsable = PanelGlowSize(window, dialog, shade, Changed)
     shade.warnLabel, shade.warn = PanelWarn(window, dialog, shade)
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
@@ -487,8 +495,8 @@ local function SpellPanel(window)
             self.warn:SetUsable(B:WarnUsable(bar, name))
             rows = rows + 1
         end
-        for _, tick in ipairs({ self.glow, self.only, self.active, self.ticks }) do
-            local on = tick == shown[1] or tick == shown[2] or tick == shown[3] or tick == shown[4]
+        for _, tick in ipairs({ self.glow, self.only, self.active, self.ticks, self.reagents }) do
+            local on = tick == shown[1] or tick == shown[2] or tick == shown[3] or tick == shown[4] or tick == shown[5]
             tick:SetShown(on)
             if on then
                 At(tick, 16, rows, 2)

@@ -442,6 +442,7 @@ local function Environment(keepCVars)
     _G.INVSLOT_AMMO = 0
     _G.GetInventoryItemID = function(_, slot)
         if slot == 0 then return ammo end
+        if slot == 18 then return RangedWorn end -- (a global: this file's main chunk is at Lua's 200 locals)
         return slot == 13 and trinket or nil
     end
     _G.GetInventoryItemLink = function(_, slot)
@@ -462,7 +463,8 @@ local function Environment(keepCVars)
         GetItemSpell = function(id) return ({ [118] = "Healing Potion", [117] = "Food", [2698] = "Learning" })[id] end,
         -- Rough Arrow and Light Shot: projectiles (6), worn in the ammo slot.
         GetItemInfoInstant = function(id)
-            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 } })[id]
+            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 },
+                [5240] = { 2, 19 }, [2504] = { 2, 2 } })[id] -- (a wand and a bow)
                 or { 15, 0 }
             return id, nil, nil, class[1] == 6 and "INVTYPE_AMMO" or "", nil, class[1], class[2]
         end,
@@ -1309,6 +1311,46 @@ do
         "the interface hidden mid-pulse: nothing left showing or waiting")
     Equal(tostring(P:Queue(1, "after")) .. " " .. P:Showing(), "true after", "and the next pulse shows as usual")
     Finish(P)
+end
+
+-- Shooting a wand: each shot can hand a ready spell a wait of its own, so
+-- spells are handed nothing until the shooting (and its last shot) is over.
+do
+    clock, lockdown = clock + 60, true
+    RangedWorn, asked = 5240, {}
+    Fire("START_AUTOREPEAT_SPELL")
+    Fire("SPELL_UPDATE_COOLDOWN")
+    Tick(P)
+    Equal(#asked .. " " .. tostring(P:Wanding()), "0 true", "a wand shooting, in a fight: no spell asked for")
+    -- A cooldown already counting before the shooting still pulses as it ends.
+    Done(watchers.Barkskin.cooldown)
+    Equal(P:Showing(), "Barkskin", "a real cooldown ending while the wand shoots: it pulses")
+    Finish(P)
+    Fire("STOP_AUTOREPEAT_SPELL")
+    Later(#timers - 1 < 0 and 0 or #timers - 1) -- (before its last shot could be over: nothing yet)
+    Fire("SPELL_UPDATE_COOLDOWN")
+    Tick(P)
+    Equal(#asked .. " " .. tostring(P:Wanding()), "0 true", "the wand stopped, its last shot may still be out: still none asked for")
+    clock = clock + P.WAND_TAIL + .1
+    Fire("SPELL_UPDATE_COOLDOWN")
+    Tick(P)
+    Equal(tostring(#asked > 0) .. " " .. tostring(P:Wanding()), "true false", "the shooting over: each spell fed again")
+    -- A bow's auto attack runs all fight among real cooldowns: nothing paused.
+    RangedWorn, asked = 2504, {}
+    Fire("START_AUTOREPEAT_SPELL")
+    Fire("SPELL_UPDATE_COOLDOWN")
+    Tick(P)
+    Equal(tostring(#asked > 0) .. " " .. tostring(P:Wanding()), "true false", "a bow's auto attack: spells fed as usual")
+    Fire("STOP_AUTOREPEAT_SPELL")
+    -- A wand started, then a loading screen before it's heard to stop: never stuck.
+    RangedWorn = 5240
+    Fire("START_AUTOREPEAT_SPELL")
+    Equal(tostring(P:Wanding()), "true", "a wand again")
+    S[P.driver].scripts.OnEvent(P.driver, "PLAYER_ENTERING_WORLD")
+    Equal(tostring(P:Wanding()), "false", "a loading screen lets go of the shooting")
+    Tick(P)
+    RangedWorn, lockdown = nil, false
+    clock = clock + P.QUIET + .1
 end
 
 -- Several at once: one after another, never a flood --------------------------------------------

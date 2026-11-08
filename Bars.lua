@@ -375,6 +375,15 @@ end
 -- than a spell.
 local ITEM_KINDS = { item = true, slot = true, family = true, ammo = true, shards = true }
 
+-- Show reagent count (ticked in a spell's own panel): how many times your
+-- reagents let you cast it, in the spot an item's count goes. The game can
+-- keep the number secret in a fight: the last one shown then stays.
+local function ReagentCount(icon)
+    if not (icon.look and icon.look.reagents and icon.spellID) or not C_Spell.GetSpellCastCount then return end
+    local ok, count = pcall(C_Spell.GetSpellCastCount, icon.spellID)
+    if ok and Open(count) and type(count) == "number" then icon.count:SetText(count) end
+end
+
 -- Show the global cooldown (each cooldown bar's tick, off unless ticked):
 -- a second sweep on a spell's icon, made the first time it's wanted, with
 -- no numbers and no flash. It's fed the spell's cooldown with the global
@@ -487,6 +496,7 @@ local function RefreshIcon(icon, data, hasTarget, follows, part)
     if ITEM_KINDS[icon.kind] then return RefreshItem(icon, data, follows) end
     local changed = part ~= "cooldown" and SpellState(icon, hasTarget)
     if part ~= "state" or (changed and data.dimUnusable) then SpellCooldown(icon, data) end
+    ReagentCount(icon)
 end
 
 -- Range: the game says when a spell on your bars goes in or out of range of
@@ -2463,6 +2473,32 @@ function B:ClearSpellLook(name)
     if not (font or size) then return false end
     self:ApplySpellLooks()
     return true
+end
+
+-- Whether an entry on a Cooldowns or Utility bar is a spell that uses a
+-- reagent (Vanish, Blind): the game says, or it can be cast a number of times.
+function B:UsesReagent(key, name)
+    local kind, entry = ns.BAR_KIND[key], ns.Spells:Find(name)
+    if (kind ~= "cd" and kind ~= "util") or not entry or not entry.spellID or ITEM_KINDS[entry.kind] then return false end
+    local says = C_Spell.IsConsumableSpell
+    if says then
+        local ok, consumable = pcall(says, entry.spellID)
+        if ok and Open(consumable) and consumable == true then return true end
+    end
+    local count = C_Spell.GetSpellCastCount
+    if not count then return false end
+    local ok, casts = pcall(count, entry.spellID)
+    return ok and Open(casts) and type(casts) == "number" and casts > 0
+end
+
+-- Show reagent count for an entry: true when it changed.
+function B:SetShowsReagents(name, on)
+    return self:SetSpellLook(name, "reagents", on and true or nil)
+end
+
+function B:ShowsReagents(name)
+    local look = ns.SpellLook(name)
+    return look ~= nil and look.reagents == true
 end
 
 -- Every bar made laid out again with the looks as they are now (each

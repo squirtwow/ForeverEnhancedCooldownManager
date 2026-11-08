@@ -106,6 +106,9 @@ ns.DEFAULTS = {
     castBar = false, -- the addon's own cast bar under the display
     castColour = "default", -- its colour: Blizzard's gold (green channelling), or a bar colour
     castHeight = 18,
+    castTextSize = 100, -- the name and time on it, percent of the size its height gives them
+    castOwnWidth = false, -- a width of your own for it, instead of the display's
+    castWidth = 200,
     castIcon = true, -- the spell's icon, name and time left on it
     castName = true,
     castTime = true,
@@ -214,6 +217,8 @@ ns.KEYBIND_POSITIONS = { "BOTTOM", "TOPLEFT", "TOP", "TOPRIGHT" }
 ns.KEYBIND_POSITION_NAMES = { BOTTOM = "Bottom", TOPLEFT = "Top left", TOP = "Top", TOPRIGHT = "Top right" }
 -- Number settings, each within its limits: min, max, default.
 ns.CAST_HEIGHT = { 10, 32, 18 }
+ns.CAST_TEXT_SIZE = { 60, 160, 100 } -- percent of the size the Height gives the text
+ns.CAST_WIDTH = { 100, 500, 200 } -- the whole bar you see, edges and icon included
 ns.CAST_TICK_WIDTH = { 1, 6, 2 } -- screen pixels
 ns.MINIMAP_ANGLE = { 0, 359, 202 }
 ns.MINIMAP_PLACE = { -4000, 4000, 0 }
@@ -236,7 +241,7 @@ ns.PULSE_LONG_TIME = { 3, 50, 25 } -- 0.3 to 5 seconds
 ns.PULSE_SEE_THROUGH = { 0, 90, 80 }
 ns.PULSE_GROW = { 100, 160, 135 }
 ns.PULSE_PLACE = { -4000, 4000, 0 }
-local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTickWidth = ns.CAST_TICK_WIDTH, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
+local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTextSize = ns.CAST_TEXT_SIZE, castWidth = ns.CAST_WIDTH, castTickWidth = ns.CAST_TICK_WIDTH, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
     barScale = ns.BAR_SCALE, barDarkness = ns.BAR_DARKNESS, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE,
     warningSize = ns.RAID_SIZE, emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
     pulseLongSize = ns.PULSE_LONG_SIZE, pulseLongTime = ns.PULSE_LONG_TIME,
@@ -429,7 +434,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "prdPowerRight", "prdExtraAt", "prdExtraCentre", "prdExtraLeft", "prdExtraRight", "prdEnergyAt", "prdEnergyCentre",
     "prdEnergyLeft", "prdEnergyRight", "prdHealthSize", "prdPowerSize", "prdExtraSize", "prdEnergySize",
     "prdTextNumbers", "prdTextSize", "prdTextFont",
-    "castColour", "castHeight", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
+    "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
     "castLatencyColour", "castLatencyText", "swingColour",
     "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge", "edgeColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
@@ -802,8 +807,9 @@ function ns.CleanSpellLook(look)
     local font = type(look.font) == "string" and CHOICES.font[look.font] and look.font or nil
     local size, limits = look.size, ns.COUNTDOWN_SIZE
     if not (type(size) == "number" and size == math.floor(size) and size >= limits[1] and size <= limits[2]) then size = nil end
-    if not (font or size) then return nil end
-    return { font = font, size = size }
+    local reagents = look.reagents == true or nil -- Show reagent count, in its panel
+    if not (font or size or reagents) then return nil end
+    return { font = font, size = size, reagents = reagents }
 end
 
 -- A profile's own looks: only entries on one of its lists (a form's too),
@@ -1434,18 +1440,18 @@ function ns.SpellLookFor(names)
     return nil
 end
 
--- Sets one field of an entry's look ("font" or "size"; nil for the Look
--- page's again), only for an entry on one of your lists. A look left with
--- neither goes. True when it changed.
+-- Sets one field of an entry's look ("font", "size" or "reagents"; nil for
+-- the usual again), only for an entry on one of your lists. A look left with
+-- none goes. True when it changed.
 function ns.SetSpellLook(name, field, value)
-    if type(name) ~= "string" or (field ~= "font" and field ~= "size") then return false end
+    if type(name) ~= "string" or (field ~= "font" and field ~= "size" and field ~= "reagents") then return false end
     if not InLists(ns.ProfileLists(), name) then return false end
     local was = ns.SpellLook(name) or {}
-    local look = { font = was.font, size = was.size }
+    local look = { font = was.font, size = was.size, reagents = was.reagents }
     look[field] = value
     look = ns.CleanSpellLook(look)
-    if value ~= nil and not (look and look[field] == value) then return false end -- not a font or size kept
-    if (look and look.font) == was.font and (look and look.size) == was.size then return false end
+    if value ~= nil and not (look and look[field] == value) then return false end -- not one kept
+    if (look and look.font) == was.font and (look and look.size) == was.size and (look and look.reagents) == was.reagents then return false end
     local looks = SpellLooks(look ~= nil)
     if looks then
         looks[name] = look

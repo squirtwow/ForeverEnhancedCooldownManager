@@ -10,6 +10,19 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.5",
+        sections = {
+            { "Added", {
+                "Cast bar Text size: name and time, bigger or smaller.",
+                "Show reagent count: casts left on Vanish and Blind.",
+                "Cast bar Own width: set your own bar width.",
+            } },
+            { "Fixed", {
+                "Cooldown pulse: wands no longer pulse ready spells.",
+            } },
+        },
+    },
+    {
         version = "1.10.4",
         sections = {
             { "Added", {

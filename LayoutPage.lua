@@ -1025,7 +1025,8 @@ function ns.BuildLayoutPage(window, page, width, height)
         if castRoom then
             castStrip:ClearAllPoints()
             castStrip:SetPoint("TOP", display, "BOTTOM", 0, -castGap)
-            castStrip:SetSize(math.max(20, displayWidth), castHeight)
+            local castWide = ns.Get("castOwnWidth") and math.min(boxWidth, math.floor(ns.Get("castWidth") * scale)) or displayWidth
+            castStrip:SetSize(math.max(20, castWide), castHeight)
             T:Fill(castStrip, ns.CastBar:Colour())
         end
         y = y + lineBottom + gap

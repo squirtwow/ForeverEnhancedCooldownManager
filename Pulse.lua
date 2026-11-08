@@ -431,6 +431,28 @@ local function Started(cooldown)
     cooldown.started = GetTime()
 end
 
+-- Shooting a wand, each shot can hand a spell sitting ready a short wait of
+-- its own (up to the wand's speed, past SHORT), one after the next, and the
+-- spell would pulse as the wand's "cooldown" ends. So while a wand shoots,
+-- and for its slowest shot after it stops, spells aren't handed anything new:
+-- one already counting carries on and still pulses, and every one is fed
+-- again once the shooting's over, so one started meanwhile is counted then.
+-- Only a wand: a hunter's Auto Shot runs all fight, among real cooldowns.
+P.WAND_TAIL = 2.6 -- seconds: the slowest wand's shot (2.4 in the game data), and a little lag
+local RANGED_SLOT, WEAPON, WAND = 18, 2, 19 -- the slot; the item class and subclass
+local wanding, wandUntil = false, 0
+
+local function WandWorn()
+    local id = GetInventoryItemID("player", RANGED_SLOT)
+    if not (Open(id) and id and C_Item and C_Item.GetItemInfoInstant) then return false end
+    local _, _, _, _, _, class, subclass = C_Item.GetItemInfoInstant(id)
+    return Open(class) and Open(subclass) and class == WEAPON and subclass == WAND
+end
+
+function P:Wanding()
+    return wanding or GetTime() < wandUntil
+end
+
 local function Done(cooldown)
     local watch = cooldown.watch
     if watch and watch.spellID and cooldown.started and GetTime() - cooldown.started <= SHORT then return end
@@ -589,6 +611,7 @@ end
 local function Feed(watch)
     local cooldown = watch.cooldown
     if watch.spellID then
+        if P:Wanding() then return end
         -- On hold, it hasn't started: nothing to count yet. Never secret
         -- (SpellSharedDocumentation.lua), so it's asked plainly.
         local info = C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(watch.spellID)
@@ -919,9 +942,17 @@ local SCAN = { PLAYER_EQUIPMENT_CHANGED = true, PLAYER_LEVEL_UP = true, PLAYER_L
 local function OnEvent(_, event)
     if event == "PLAYER_ENTERING_WORLD" then
         quietUntil = GetTime() + P.QUIET
+        wanding, wandUntil = false, 0
         Soon("rebuild")
     elseif event == "PLAYER_REGEN_DISABLED" then
         if P:Moving() then P:StopMove(false) end
+    elseif event == "START_AUTOREPEAT_SPELL" then
+        wanding = WandWorn()
+    elseif event == "STOP_AUTOREPEAT_SPELL" then
+        if wanding then
+            wanding, wandUntil = false, GetTime() + P.WAND_TAIL
+            C_Timer.After(P.WAND_TAIL + .1, function() Soon("feed") end)
+        end
     elseif event == "BAG_UPDATE_DELAYED" then
         if PickBack() then
             ns.Spells:Stale()
@@ -947,7 +978,8 @@ function P:Start()
     self.started = true
     driver = CreateFrame("Frame")
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "SPELL_UPDATE_COOLDOWN", "BAG_UPDATE_COOLDOWN",
-        "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP", "PLAYER_LEVEL_CHANGED", "PLAYER_REGEN_DISABLED" }) do
+        "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP", "PLAYER_LEVEL_CHANGED", "PLAYER_REGEN_DISABLED",
+        "START_AUTOREPEAT_SPELL", "STOP_AUTOREPEAT_SPELL" }) do
         driver:RegisterEvent(event)
     end
     driver:SetScript("OnEvent", OnEvent)

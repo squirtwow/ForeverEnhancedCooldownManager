@@ -440,6 +440,7 @@ local function Environment(keepCVars)
     _G.INVSLOT_AMMO = 0
     _G.GetInventoryItemID = function(_, slot)
         if slot == 0 then return ammo end
+        if slot == 18 then return RangedWorn end -- (a global: this file's main chunk is at Lua's 200 locals)
         return slot == 13 and trinket or nil
     end
     _G.GetInventoryItemLink = function(_, slot)
@@ -460,7 +461,8 @@ local function Environment(keepCVars)
         GetItemSpell = function(id) return ({ [118] = "Healing Potion", [117] = "Food", [2698] = "Learning" })[id] end,
         -- Rough Arrow and Light Shot: projectiles (6), worn in the ammo slot.
         GetItemInfoInstant = function(id)
-            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 } })[id]
+            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 },
+                [5240] = { 2, 19 }, [2504] = { 2, 2 } })[id] -- (a wand and a bow)
                 or { 15, 0 }
             return id, nil, nil, class[1] == 6 and "INVTYPE_AMMO" or "", nil, class[1], class[2]
         end,
@@ -3199,6 +3201,30 @@ end)()
     Equal(tostring(panel.warn:IsVisible()) .. " " .. tostring(panel.warnLabel:IsVisible()), "false false",
         "no Warn at on Cooldowns: it's for the Buffs and Debuffs bars' auras")
     Check(panel, "Cooldowns, at the start")
+    -- Show reagent count: only on a spell that uses a reagent, and it shows
+    -- the game's number on that icon alone, gone when unticked.
+    Equal(tostring(panel.reagents:IsVisible()), "false", "no reagent tick on a spell that uses none")
+    local icon = cd.icons[1]
+    _G.C_Spell.IsConsumableSpell = function() return true end
+    _G.C_Spell.GetSpellCastCount = function() return 20 end
+    panel:Refresh()
+    Equal(tostring(panel.reagents:IsVisible()) .. " " .. S[panel.reagents.text].text .. " " .. tostring(panel.reagents:GetChecked()) .. " " .. tostring(S[icon.count].text),
+        "true Show reagent count false ", "a spell that uses one: the tick, off, and no number yet")
+    Check(panel, "Cooldowns, with the reagent tick")
+    panel.reagents:Click()
+    Equal(tostring(B:ShowsReagents("Moonfire")) .. " " .. tostring(S[icon.count].text), "true 20", "ticked: the number on its icon")
+    local kept = ns.SpellLook("Moonfire")
+    Equal(tostring(kept and kept.reagents) .. " " .. tostring(kept and kept.font) .. " " .. tostring(kept and kept.size), "true nil nil", "kept with the spell's own look")
+    panel.defaults:Click()
+    Equal(tostring(B:ShowsReagents("Moonfire")), "true", "Defaults leaves the tick, as it does the others")
+    _G.C_Spell.GetSpellCastCount = function() error("no") end
+    B:RefreshAll()
+    Equal(tostring(S[icon.count].text), "20", "a failed read keeps the last number")
+    _G.C_Spell.GetSpellCastCount = function() return 20 end
+    panel.reagents:Click()
+    Equal(tostring(B:ShowsReagents("Moonfire")) .. " " .. tostring(ns.SpellLook("Moonfire")) .. " [" .. tostring(S[icon.count].text) .. "]", "false nil []", "unticked: gone, nothing kept")
+    _G.C_Spell.IsConsumableSpell, _G.C_Spell.GetSpellCastCount = nil, nil
+    panel:Refresh()
     -- Each choice says what it does; the new ones quietly experimental.
     panel.font:Click()
     local notes = { Note(panel.font), Note(panel.font.buttons[1]), Note(panel.font.buttons[7]), Note(panel.own), Note(panel.size),

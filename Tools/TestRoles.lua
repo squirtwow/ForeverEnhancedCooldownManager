@@ -444,6 +444,7 @@ local function Environment(keepCVars)
     _G.INVSLOT_AMMO = 0
     _G.GetInventoryItemID = function(_, slot)
         if slot == 0 then return ammo end
+        if slot == 18 then return RangedWorn end -- (a global: this file's main chunk is at Lua's 200 locals)
         return slot == 13 and trinket or nil
     end
     _G.GetInventoryItemLink = function(_, slot)
@@ -464,7 +465,8 @@ local function Environment(keepCVars)
         GetItemSpell = function(id) return ({ [118] = "Healing Potion", [117] = "Food", [2698] = "Learning" })[id] end,
         -- Rough Arrow and Light Shot: projectiles (6), worn in the ammo slot.
         GetItemInfoInstant = function(id)
-            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 } })[id]
+            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 },
+                [5240] = { 2, 19 }, [2504] = { 2, 2 } })[id] -- (a wand and a bow)
                 or { 15, 0 }
             return id, nil, nil, class[1] == 6 and "INVTYPE_AMMO" or "", nil, class[1], class[2]
         end,

@@ -126,6 +126,19 @@ function ns.BuildCastBarPage(window, page, width)
     ticks:SetWidth(math.max(shown:GetWidth(), swings:GetWidth()))
     page.ticks = ticks
 
+    -- A width of their own, beside the swing timer's tick: its slider beside it, only while ticked.
+    local ownWidth = Tick("Own width", "castOwnWidth", -26,
+        "Off, your cast bar and swing timer are as wide as your resource display. On, pick their width, to line them up with your rows. (experimental)")
+    ownWidth:ClearAllPoints()
+    ownWidth:SetPoint("TOPLEFT", 300, -26)
+    local barWidth = T:Slider(options, "", ns.CAST_WIDTH, 1, inner - 300 - 96, function(value)
+        ns.Set("castWidth", value)
+        Changed()
+    end, 1)
+    barWidth:SetPoint("TOPLEFT", 396, -26)
+    window:Hint(barWidth, "How wide your cast bar and swing timer are, icon included. They stay centred under your resource display. (experimental)")
+    page.ownWidth, page.barWidth = ownWidth, barWidth
+
     -- A colour for one of them: its swatch opens the colours, and the
     -- chosen one clicked again goes back to its own (shown: the colour in use).
     local function Colours(caption, key, y, note, about, shown)
@@ -323,6 +336,20 @@ function ns.BuildCastBarPage(window, page, width)
         window:Hint(button, "The time on the bar: seconds left, or seconds left / the whole cast.")
     end
     page.timeFormat = timeFormat
+    -- How big the name and time are, beside Name, as Time left's choice is.
+    local textSize = T:Slider(options, "Text size", ns.CAST_TEXT_SIZE, 10, 180, function(value)
+        ns.Set("castTextSize", value)
+        Changed()
+    end, 80)
+    textSize.value:SetWidth(36)
+    local setTextSize = textSize.Set
+    function textSize:Set(value)
+        setTextSize(self, value)
+        self.value:SetText(value .. "%")
+    end
+    textSize:SetPoint("TOPLEFT", 100, -168)
+    window:Hint(textSize, "How big the name and time are on your cast bar and swing timer. 100% is the size the Height gives them.")
+    page.textSize = textSize
     -- The height and the three ticks under it as one part, for the walkthrough.
     local parts = CreateFrame("Frame", nil, options)
     parts:SetPoint("TOPLEFT", 0, -114)
@@ -356,6 +383,9 @@ function ns.BuildCastBarPage(window, page, width)
         end
         shown:SetChecked(casts)
         swings:SetChecked(swinging)
+        ownWidth:SetChecked(ns.Get("castOwnWidth"))
+        barWidth:SetShown(ns.Get("castOwnWidth") and true or false)
+        barWidth:Set(ns.Get("castWidth"))
         icon:SetChecked(ns.Get("castIcon"))
         name:SetChecked(ns.Get("castName"))
         timer:SetChecked(ns.Get("castTime"))
@@ -363,6 +393,7 @@ function ns.BuildCastBarPage(window, page, width)
         marks:SetChecked(ns.Get("castTicks"))
         sound.name:SetText(ns.PULSE_SOUND_NAMES[ns.Get("castTickSound")] or ns.PULSE_SOUND_NAMES.none)
         height:Set(ns.Get("castHeight"))
+        textSize:Set(ns.Get("castTextSize"))
         Paint(colour, chosen, "castColour", "Blizzard's gold")
         Paint(swingColour, swingChosen, "swingColour", "Silver")
         C:Look(sample, false)

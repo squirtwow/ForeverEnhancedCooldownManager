@@ -434,6 +434,7 @@ local function Environment(keepCVars)
     _G.INVSLOT_AMMO = 0
     _G.GetInventoryItemID = function(_, slot)
         if slot == 0 then return ammo end
+        if slot == 18 then return RangedWorn end -- (a global: this file's main chunk is at Lua's 200 locals)
         return slot == 13 and trinket or nil
     end
     _G.GetInventoryItemLink = function(_, slot)
@@ -454,7 +455,8 @@ local function Environment(keepCVars)
         GetItemSpell = function(id) return ({ [118] = "Healing Potion", [117] = "Food", [2698] = "Learning" })[id] end,
         -- Rough Arrow and Light Shot: projectiles (6), worn in the ammo slot.
         GetItemInfoInstant = function(id)
-            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 } })[id]
+            local class = ({ [118] = { 0, 1 }, [117] = { 0, 5 }, [2698] = { 9, 0 }, [2512] = { 6, 2 }, [2516] = { 6, 3 },
+                [5240] = { 2, 19 }, [2504] = { 2, 2 } })[id] -- (a wand and a bow)
                 or { 15, 0 }
             return id, nil, nil, class[1] == 6 and "INVTYPE_AMMO" or "", nil, class[1], class[2]
         end,
@@ -7037,6 +7039,12 @@ local cp = w.pages.cast
 Equal(S[cp].shown and S[cp.status].text, "Under your Personal Resource Display. Blizzard's cast bar is hidden.", "its own page")
 Equal(S[cp.sample.bar.name].text .. " " .. tostring(S[cp.sample.icon].shown) .. " " .. S[cp.sample].height, "Hearthstone false 24",
     "the preview follows your choices")
+-- Set my own width: off to begin with, its slider only while it's on.
+Equal(tostring(ns.Get("castOwnWidth")) .. " " .. tostring(S[cp.barWidth].shown), "false false", "own width starts off, no slider")
+cp.ownWidth:Click()
+Equal(tostring(ns.Get("castOwnWidth")) .. " " .. tostring(S[cp.barWidth].shown), "true true", "ticked: its slider shows")
+cp.ownWidth:Click()
+Equal(tostring(ns.Get("castOwnWidth")) .. " " .. tostring(S[cp.barWidth].shown), "false false", "unticked: gone again")
 S[cp.sample].scripts.OnUpdate(cp.sample, 1)
 Equal(string.format("%g", Last(cp.sample.bar, "SetValue", 1)), "1", "and fills as you watch")
 cp.swatches[3]:Click()
@@ -7081,6 +7089,34 @@ saved.castHeight = 99
 Environment(true)
 ns = Load(saved)
 Equal(ns.Get("castHeight"), 18, "one out of range is ignored")
+
+-- Text size: 100% is what the height gives, kept over a reload, within its limits.
+;(function()
+    Equal(ns.Get("castTextSize"), 100, "Text size starts at the usual size")
+    ns.Set("castBar", true)
+    ns.CastBar:Apply()
+    local frame = ns.CastBar.row
+    local function Fonts()
+        ns.CastBar:Look(frame, false)
+        return Last(frame.bar.name, "SetFontObject") .. " " .. Last(frame.bar.ms, "SetFontObject")
+    end
+    ns.Set("castHeight", 20)
+    Equal(Fonts(), "FECMFont11 FECMFont8", "100%: what the height gives, as before")
+    ns.Set("castTextSize", 160)
+    Equal(Fonts(), "FECMFont18 FECMFont13", "160%: bigger, the name and time and the ms")
+    ns.Set("castTextSize", 60)
+    Equal(Fonts(), "FECMFont8 FECMFont8", "60%: smaller, never under 8")
+    ns.Set("castHeight", 18)
+    ns.Set("castTextSize", 130)
+    local kept = ForeverEnhancedCooldownManagerDB
+    Environment(true)
+    ns = Load(kept)
+    Equal(ns.Get("castTextSize"), 130, "kept over a reload")
+    kept.castTextSize = 400
+    Environment(true)
+    ns = Load(kept)
+    Equal(ns.Get("castTextSize"), 100, "one out of range is ignored")
+end)()
 
 -- The swing timer in the cast bar's spot ---------------------------------------------------------
 
@@ -7508,6 +7544,22 @@ end)()
     end
     for _, part in ipairs({ prd, prd.HealthBarsContainer, prd.PowerBar }) do rawset(part, "GetEffectiveScale", nil) end
     Equal(#printed, 0, "no errors lining it up")
+
+    -- A width of your own: the whole bar you see, centred; off, the display's again.
+    ns.Set("castOwnWidth", true)
+    ns.Set("castWidth", 150)
+    C:Apply()
+    Equal(Seen(cb), "425.00 575.00", "own width: exactly that wide, centred under the display")
+    ns.Set("castWidth", 320)
+    C:Apply()
+    Equal(Seen(cb), "340.00 660.00", "wider than the display too")
+    ns.Set("castOwnWidth", false)
+    C:Apply()
+    Equal(Seen(cb), "399.00 601.00", "off: as wide as the display again")
+    local kept = ForeverEnhancedCooldownManagerDB
+    kept.castWidth = 9999
+    Environment(true)
+    Equal(Load(kept).Get("castWidth"), 200, "a width out of range is ignored")
 
     -- Without the restyle: its icon and bar span the display's bars exactly,
     -- its own edges just outside them, where the restyle's would be.

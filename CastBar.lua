@@ -228,15 +228,17 @@ local function Fit(frame)
     local shadow, border = ns.Get("iconShadow"), ns.Get("iconBorder")
     local dark, thick, fade = ns.Get("barDarkness"), ns.Get("thickEdges"), Style:Fades()
     local whole, ms = ns.Get("castTimeFormat") == "total", ns.Get("castLatency") and ns.Get("castLatencyText")
+    local textSize = ns.Get("castTextSize")
     local fit = frame.fit
     if fit.height == height and fit.design == design and fit.texture == texture and fit.icon == withIcon
         and fit.time == withTime and fit.name == withName and fit.shadow == shadow and fit.border == border
-        and fit.dark == dark and fit.thick == thick and fit.whole == whole and fit.ms == ms and fit.fade == fade then
+        and fit.dark == dark and fit.thick == thick and fit.whole == whole and fit.ms == ms and fit.fade == fade
+        and fit.textSize == textSize then
         return false
     end
     fit.height, fit.design, fit.texture, fit.icon, fit.time = height, design, texture, withIcon, withTime
     fit.name, fit.shadow, fit.border, fit.dark, fit.thick = withName, shadow, border, dark, thick
-    fit.whole, fit.ms, fit.fade = whole, ms, fade
+    fit.whole, fit.ms, fit.fade, fit.textSize = whole, ms, fade, textSize
     local bar = frame.bar
     frame:SetHeight(height)
     frame.icon:SetSize(height, height)
@@ -255,12 +257,14 @@ local function Fit(frame)
     end
     bar.background:SetColorTexture(Style:TrackColour())
     Style:ShowSheen(bar.sheen, design == "glass")
-    local font = Style:Font(math.max(9, height * .55))
+    -- The text goes by the height, then Text size (100: just the height).
+    local scale = textSize / 100
+    local font = Style:Font(math.max(9, height * .55) * scale)
     bar.name:SetFontObject(font)
     bar.time:SetFontObject(font)
     -- The ms at the right end, smaller, and the time just left of it: the
     -- name keeps clear of both.
-    bar.ms:SetFontObject(Style:Font(math.max(8, height * .4)))
+    bar.ms:SetFontObject(Style:Font(math.max(8, height * .4) * scale))
     bar.time:ClearAllPoints()
     if ms then bar.time:SetPoint("RIGHT", bar.ms, "LEFT", -4, 0) else bar.time:SetPoint("RIGHT", -4, 0) end
     local room = (withTime and (whole and 70 or 40) or 4) + (ms and 34 or 0)
@@ -894,6 +898,8 @@ function C:Under(display)
     -- bars, like the combo points'.
     local width = display.width
     if (display.edge or 0) > 0 then width = width - 2 * EDGE end
+    -- A width of your own: the whole bar you see, still centred on the display.
+    if ns.Get("castOwnWidth") then width = ns.Get("castWidth") - 2 * EDGE end
     if row then
         row:ClearAllPoints()
         row:SetPoint("TOP", UIParent, "CENTER", display.x, bottom - pad)

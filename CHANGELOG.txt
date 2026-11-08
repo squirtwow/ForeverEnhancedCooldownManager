@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.10.5
+
+### Added
+- Cast bar Text size: name and time, bigger or smaller.
+- Show reagent count: casts left on Vanish and Blind.
+- Cast bar Own width: set your own bar width.
+
+### Fixed
+- Cooldown pulse: wands no longer pulse ready spells.
+
 ## 1.10.4
 
 ### Added
