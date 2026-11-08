@@ -319,6 +319,52 @@ end
 -- Which of EITHER's names your spellbook shows, passives too, as last read.
 local bookNames = {}
 
+-- A warlock's Firestone and Spellstone go on a weapon from the bag, so no
+-- spell in the spellbook is named for them. Each is an entry of its own in
+-- the Weapon enchants section once you know any rank of the spell that
+-- makes it, lit by any of its stones (Buffs.lua). From build 70790's data:
+-- each rank of the maker, the spell its stone casts (in the same order) and
+-- the stones' icon, which the maker shows too. Only for the Buffs bar: it has
+-- no cooldown, and puts no aura on anyone.
+local STONES = {
+    { name = "Firestone", makers = { 6366, 17951, 17952, 17953 }, ids = { 758, 17945, 17947, 17949 }, icon = 134085 },
+    { name = "Spellstone", makers = { 2362, 17727, 17728 }, ids = { 1237152, 1237156, 1237159 }, icon = 134131 },
+}
+
+local function AddStones()
+    for _, stone in ipairs(STONES) do
+        local best
+        for rank, id in ipairs(stone.makers) do
+            if knownIDs[id] then best = rank end
+        end
+        if best then
+            local known = {}
+            for i, id in ipairs(stone.ids) do known[i] = id end
+            Add({ key = stone.name, name = stone.name, kind = "enchant", line = S.LINES.weapons, known = known,
+                byRank = {}, rank = 0, spellID = stone.ids[best], icon = stone.icon, rankText = "" })
+        end
+    end
+end
+
+-- Main hand enchant and Off hand enchant, for every class, first in the
+-- Weapon enchants section: each lit by whatever is on that hand for a time,
+-- an oil or a sharpening stone too, and showing which (Buffs.lua). Only for
+-- the Buffs bar, as a stone is. Kept on a bar as "hand:main" and "hand:off"
+-- (ProfileShare.lua knows them); each rests on its slot's own picture.
+local HANDS = {
+    { key = "hand:main", name = "Main hand enchant", slot = 16, icon = "Interface\\Paperdoll\\UI-PaperDoll-Slot-MainHand" },
+    { key = "hand:off", name = "Off hand enchant", slot = 17, icon = "Interface\\Paperdoll\\UI-PaperDoll-Slot-SecondaryHand" },
+}
+S.HAND_KEYS = {}
+for _, hand in ipairs(HANDS) do S.HAND_KEYS[hand.key] = true end
+
+local function AddHands()
+    for _, hand in ipairs(HANDS) do
+        Add({ key = hand.key, name = hand.name, kind = "enchant", line = S.LINES.weapons, hand = hand.slot, known = {},
+            byRank = {}, rank = 0, icon = hand.icon, rankText = "(experimental)" })
+    end
+end
+
 local function ScanSpellbook()
     if not (C_SpellBook and C_SpellBook.GetNumSpellBookSkillLines) then return end
     for line = 1, C_SpellBook.GetNumSpellBookSkillLines() or 0 do
@@ -350,12 +396,17 @@ local function ScanSpellbook()
             end
         end
     end
-    -- Totems and weapon enchants (a rogue's poisons too) are sections of their
-    -- own on the lists, after your spellbook's lines, each in the order it came.
-    local spells, totems, weapons, enchants = {}, {}, {}, ns.WEAPON_ENCHANTS or {}
+    AddStones()
+    AddHands()
+    -- Totems and weapon enchants (a rogue's poisons and a warlock's stones
+    -- too) are sections of their own on the lists, after your spellbook's
+    -- lines, each in the order it came (the two hands first).
+    local spells, totems, hands, weapons, enchants = {}, {}, {}, {}, ns.WEAPON_ENCHANTS or {}
     for _, entry in ipairs(list) do
         local section = spells
-        if entry.name:find(" Totem$") then
+        if entry.hand then
+            section = hands
+        elseif entry.name:find(" Totem$") then
             section, entry.line = totems, S.LINES.totems
         elseif enchants[entry.name] then
             section, entry.line = weapons, S.LINES.weapons
@@ -363,7 +414,7 @@ local function ScanSpellbook()
         section[#section + 1] = entry
     end
     local at = 0
-    for _, section in ipairs({ spells, totems, weapons }) do
+    for _, section in ipairs({ spells, totems, hands, weapons }) do
         for _, entry in ipairs(section) do
             at = at + 1
             list[at] = entry
@@ -684,8 +735,10 @@ local function ScanSaved()
                     ids = BuffIDs(nil, { id }), spellID = id, icon = C_Spell.GetSpellTexture(id), rankText = "",
                     added = { id }, pinned = id })
             elseif custom[saved] then
+                -- A scroll's imbue (Imbue Flame) is the Buffs bar's alone, as a stone is.
                 local ids = BuffIDs(saved, custom[saved])
-                Add({ key = saved, name = saved, kind = "spell", line = S.LINES.added, ids = ids,
+                Add({ key = saved, name = saved, kind = ns.IMBUE_SPELLS and ns.IMBUE_SPELLS[saved] and "enchant" or "spell",
+                    line = S.LINES.added, ids = ids,
                     spellID = Tracked(saved, custom[saved]), icon = C_Spell.GetSpellTexture(ids[1]), rankText = "",
                     added = custom[saved] })
             end
@@ -1147,6 +1200,8 @@ function S:Suggest(text, limit)
     end
     for _, entry in ipairs(list) do Consider(entry.name, entry.icon, entry.spellID, true) end
     for name, ids in pairs(ns.RANKS or {}) do Consider(name, nil, ids[#ids], false, IconID(ids)) end
+    -- The scrolls' imbues (Imbue Flame), for the Buffs bar (B:WouldShow).
+    for name, id in pairs(ns.IMBUE_SPELLS or {}) do Consider(name, nil, id, false) end
     -- Passives with an aura of their own too (Plainsrunning's speed buff): the
     -- spellbook passes over them, and that aura can go on the Buffs or Debuffs
     -- bar. Where one can't go, the caller turns it away (S:AddNote,
@@ -1190,6 +1245,11 @@ function S:Resolve(text)
     end
     for name, ids in pairs(ns.RANKS or {}) do
         if name:lower() == lower then return name, { HighestKnown(ids) or Highest(ids) } end
+    end
+    -- An imbue a scroll puts on (Imbue Flame): a spell the game won't find by
+    -- a name you don't know (Buffs.lua).
+    for name, id in pairs(ns.IMBUE_SPELLS or {}) do
+        if name:lower() == lower then return name, { id } end
     end
     local info = C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(text)
     local name = info and Text(info.name)

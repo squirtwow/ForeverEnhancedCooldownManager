@@ -217,11 +217,14 @@ local families
 -- A bar entry's key as the bars keep them (Spells.lua): a spell's name,
 -- "Name@N" for one of its ranks, "Name#ID" for a spell pinned to one ID,
 -- "item:<id>", "slot:13" or "slot:14" (the trinkets), "ammo", "shards" (Soul
--- Shards), or a healthstone or potion family. Nil for anything else.
+-- Shards), "hand:main" or "hand:off" (a hand's weapon enchant), or a
+-- healthstone or potion family. Nil for anything else. (A version before
+-- the hands keeps those two as names it doesn't know: shown for no one.)
 local function Entry(value)
     local key = Word(value)
     if not key then return nil end
     if key:find("#", 1, true) then return ns.Spells:Pinned(key) and key or nil end
+    if key:find("^hand:") then return ns.Spells.HAND_KEYS and ns.Spells.HAND_KEYS[key] and key or nil end
     if key:find("^item:") then
         local id = key:match("^item:([1-9]%d?%d?%d?%d?%d?%d?%d?%d?%d?)$")
         return id and ID(tonumber(id)) and key or nil
@@ -236,6 +239,16 @@ local function Entry(value)
     end
     if key:find("@", 1, true) and not key:find("^[^@]+@%d%d?$") then return nil end
     return key
+end
+
+-- The same for an entry on a bar's list (key: that bar; nil for a form's
+-- list, which is a cooldown bar's): a hand's weapon enchant only on a Buffs
+-- bar, as Bars.lua's B:Fits keeps it, so an edited string can't put one
+-- where it would be a spell icon with no spell. Nil for anything else.
+local function BarEntry(value, key)
+    local entry = Entry(value)
+    if entry and entry:find("^hand:") and not (key and ns.BAR_KIND[key] == "buff") then return nil end
+    return entry
 end
 
 local function Within(value, limits)
@@ -270,7 +283,7 @@ local BAR_CHECKS = {
     dimOpacity = function(v) return Within(v, ns.BAR_LIMITS.dimOpacity) end,
     outOfCombat = function(v) return ns.OUT_OF_COMBAT_NAMES[v] ~= nil end,
     showMissing = Bool, onlyMissing = Bool, greyedNoTarget = Bool, showNames = Bool, showTimer = Bool, showAuras = Bool,
-    selfDebuffs = Bool,
+    showGCD = Bool, selfDebuffs = Bool,
     grow = function(v) return ns.GROW_NAMES[v] ~= nil end,
     wrap = function(v) return ns.WRAP_NAMES[v] ~= nil end,
     point = function(v) return ns.BAR_POINTS[v] == true end,
@@ -287,7 +300,7 @@ P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], spacing = ns.BAR_LIMITS.spacing[3], perRow = ns.BAR_LIMITS.perRow[3],
     whenReady = "show", onCooldown = "show", dimUnusable = false, dimOpacity = ns.BAR_LIMITS.dimOpacity[3],
     outOfCombat = "show", showMissing = false, onlyMissing = false, greyedNoTarget = false, showNames = false, showTimer = true,
-    showAuras = false, selfDebuffs = false, grow = "centre", wrap = "down",
+    showAuras = false, showGCD = false, selfDebuffs = false, grow = "centre", wrap = "down",
     tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false, tickCustom = "" }
 -- The layout's own settings; its rows and the bars taken out are lists.
 local LAYOUT_CHECKS = {
@@ -443,7 +456,7 @@ local function Clean(data)
         if ns.EXTRA_OF[key] or shared.extras[key] then
             local list, seen, spells = {}, {}, not ns.AURA_BARS[key]
             for _, value in ipairs(Table(lists[key])) do
-                local entry = Entry(value)
+                local entry = BarEntry(value, key)
                 if entry and not seen[entry] and not (spells and cooldown[entry]) and #list < ns.BAR_MAX_SPELLS then
                     list[#list + 1] = entry
                     seen[entry], listed[entry] = true, true
@@ -472,7 +485,7 @@ local function Clean(data)
                 if ns.CanSwap(key) and type(own[key]) == "table" then
                     local list = {}
                     for _, value in ipairs(own[key]) do
-                        local entry = Entry(value)
+                        local entry = BarEntry(value)
                         if entry and not cooldown[entry] and #list < ns.BAR_MAX_SPELLS then
                             list[#list + 1] = entry
                             cooldown[entry], listed[entry] = true, true

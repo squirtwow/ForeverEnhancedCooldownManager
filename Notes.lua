@@ -10,6 +10,24 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.3",
+        sections = {
+            { "Added", {
+                "Firestone, Spellstone and Imbue scrolls on the Buffs bar.",
+                "Main and off hand enchant icons, with a glow when empty.",
+                "Optional global cooldown swipe.",
+            } },
+            { "Changed", {
+                "Drag a poison or stone from your bags onto the Buffs bar.",
+            } },
+            { "Fixed", {
+                "Wound Poison II-IV and Crippling Poison II now show.",
+                "Debuffs bars light only for your own debuffs.",
+                "Second bars have a < back to the first.",
+            } },
+        },
+    },
+    {
         version = "1.10.2",
         sections = {
             { "Added", {

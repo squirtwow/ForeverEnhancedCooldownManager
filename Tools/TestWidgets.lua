@@ -659,13 +659,22 @@ local function Environment(keepCVars)
             -- a refresh: each switched-on group takes the auras it matches, up
             -- to its most, with icons from its pool, making a batch more when
             -- the pool runs dry (Blizzard_AuraContainerGroups.lua
-            -- RefreshAuraGroup). Auras are { id =, harmful =, mine = }. Any
-            -- call into the addon's own files while it runs is counted.
+            -- RefreshAuraGroup). Auras are { id =, harmful =, mine =, other = }
+            -- (other: another player's). The filter string's PLAYER keeps only
+            -- yours; isFromPlayerOrPlayerPet means any player's. Any call into
+            -- the addon's own files while it runs is counted.
             local function Matches(group, aura)
-                if (group.filter == "HARMFUL") ~= (aura.harmful == true) then return false end
+                local tokens = {}
+                for token in tostring(group.filter):gmatch("[^|]+") do
+                    assert(token == "HELPFUL" or token == "HARMFUL" or token == "PLAYER", "a filter the game knows: " .. token)
+                    tokens[token] = true
+                end
+                if (tokens.HARMFUL == true) ~= (aura.harmful == true) then return false end
+                if tokens.PLAYER and aura.mine ~= true then return false end
                 local filters = group.filters or {}
                 if filters.includeSpellIDs and not filters.includeSpellIDs[aura.id] then return false end
-                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= (aura.mine == true) then return false end
+                local player = aura.mine == true or aura.other == true
+                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
             S[f].Update = function(auras)

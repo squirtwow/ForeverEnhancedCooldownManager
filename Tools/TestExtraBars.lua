@@ -662,13 +662,22 @@ local function Environment(keepCVars)
             -- a refresh: each switched-on group takes the auras it matches, up
             -- to its most, with icons from its pool, making a batch more when
             -- the pool runs dry (Blizzard_AuraContainerGroups.lua
-            -- RefreshAuraGroup). Auras are { id =, harmful =, mine = }. Any
-            -- call into the addon's own files while it runs is counted.
+            -- RefreshAuraGroup). Auras are { id =, harmful =, mine =, other = }
+            -- (other: another player's). The filter string's PLAYER keeps only
+            -- yours; isFromPlayerOrPlayerPet means any player's. Any call into
+            -- the addon's own files while it runs is counted.
             local function Matches(group, aura)
-                if (group.filter == "HARMFUL") ~= (aura.harmful == true) then return false end
+                local tokens = {}
+                for token in tostring(group.filter):gmatch("[^|]+") do
+                    assert(token == "HELPFUL" or token == "HARMFUL" or token == "PLAYER", "a filter the game knows: " .. token)
+                    tokens[token] = true
+                end
+                if (tokens.HARMFUL == true) ~= (aura.harmful == true) then return false end
+                if tokens.PLAYER and aura.mine ~= true then return false end
                 local filters = group.filters or {}
                 if filters.includeSpellIDs and not filters.includeSpellIDs[aura.id] then return false end
-                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= (aura.mine == true) then return false end
+                local player = aura.mine == true or aura.other == true
+                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
             S[f].Update = function(auras)
@@ -1342,8 +1351,17 @@ end)()
     Equal(table.concat({ w.selected, S[w.note].text, S[page.count].text, tostring(w.nav.debuff.fill:IsShown()),
         tostring(w.nav.cd.fill:IsShown()), tostring(another:IsShown()), S[another.label].text, H.Note(another) }, " | "),
         "debuff2 | Debuffs 2 added. Tick spells for it in the list below. | Empty | true | false | true | Remove bar | Remove Debuffs 2"
-        .. " from this profile, with its spells. It asks first. Debuffs in the list goes back to that bar. (experimental)",
-        "clicked: Debuffs 2's page, empty, the Debuffs item lit (the way back), and Remove bar")
+        .. " from this profile, with its spells. It asks first. The < before the title goes back to Debuffs. (experimental)",
+        "clicked: Debuffs 2's page, empty, the Debuffs item lit (a way back), and Remove bar")
+    -- A "<" before the title goes back to Debuffs: shown only on a second
+    -- bar's page, with the title after it there.
+    local back = page.back
+    Equal(table.concat({ tostring(back:IsShown()), S[back.label].text, H.Note(back) }, " | "),
+        "true | < | Back to Debuffs.", "Debuffs 2's page: a < saying where it goes")
+    back:Click()
+    Equal(w.selected .. " " .. tostring(back:IsShown()), "debuff false", "the < goes back to Debuffs, and isn't on Debuffs' page")
+    w:Select("debuff2")
+    Equal(w.selected .. " " .. tostring(back:IsShown()), "debuff2 true", "on Debuffs 2 again: the < again")
     -- Its options are a Debuffs bar's.
     Equal(tostring(page.options.keepGreyed:IsShown()) .. " " .. tostring(page.options.onlyMissing:IsShown()) .. " "
         .. tostring(page.options.swapForm:IsShown()) .. " " .. tostring(page.showItems:IsShown()),

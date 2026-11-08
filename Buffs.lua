@@ -37,7 +37,8 @@ local function Open(value)
 end
 
 -- What the container is told about a slot or group: its spell IDs, and on
--- the Debuffs bar, only auras you cast.
+-- the Debuffs bar, only a player's (the bar's "HARMFUL|PLAYER" filter then
+-- keeps only yours: this flag alone lets any player's through).
 local function Filters(bar, ids)
     return { includeSpellIDs = ids, isFromPlayerOrPlayerPet = ns.AURA_BARS[bar.key].mine or nil }
 end
@@ -531,36 +532,184 @@ end
 -- and on a packed bar there only while it's on. Each spell's name with the
 -- enchants its ranks put on a weapon, from build 70753's data (SpellEffect's
 -- effect 360, and 54 for the last ID of a shaman's four and the later poisons).
+-- A warlock's Firestone and Spellstone (every stone's), from build 70790's
+-- (effect 360).
 local ENCHANTS = {
     ["Rockbiter Weapon"] = { 29, 6, 1, 503, 1663, 683, 1664, 7568 },
     ["Flametongue Weapon"] = { 5, 4, 3, 523, 1665, 1666, 7567 },
     ["Frostbrand Weapon"] = { 2, 12, 524, 1667, 1668, 7566 },
     ["Windfury Weapon"] = { 283, 284, 525, 1669, 7569 },
-    ["Crippling Poison"] = { 22, 603 },
-    ["Wound Poison"] = { 703, 704, 705, 706 },
     ["Sebacious Poison"] = { 7254 },
     ["Numbing Poison"] = { 7255 },
     ["Atrophic Poison"] = { 7256 },
     ["Occult Poison I"] = { 7542 },
     ["Occult Poison II"] = { 7651 },
+    ["Firestone"] = { 1803, 1823, 1824, 1825 },
+    ["Spellstone"] = { 8059, 8060, 8061 },
 }
--- The poisons with a name per rank: any of them counts as the family.
+-- The poisons with a name per rank: any of them counts as the family. (The
+-- spells that make Wound Poison II to IV and Crippling Poison II have a
+-- numeral, 13228-13230 and 3421 in build 70790; what each puts on, and the
+-- spell its item casts, go by the plain name.)
 for name, ids in pairs({ ["Instant Poison"] = { 323, 324, 325, 623, 624, 625 }, ["Deadly Poison"] = { 7, 8, 626, 627, 2630 },
-    ["Mind-numbing Poison"] = { 35, 23, 643 } }) do
+    ["Mind-numbing Poison"] = { 35, 23, 643 }, ["Wound Poison"] = { 703, 704, 705, 706 }, ["Crippling Poison"] = { 22, 603 } }) do
     for rank, numeral in ipairs({ "", " II", " III", " IV", " V", " VI" }) do
         if ids[rank] then ENCHANTS[name .. numeral] = ids end
     end
 end
+-- The imbues Forever's scrolls put on (Scroll of Imbue Flame...), from build
+-- 70790's (effect 360): each one's spell and the enchant it puts on. The
+-- scroll casts the spell, so no list of yours has it: its name is found here
+-- (Spells.lua), and it's the Buffs bar's alone, like a warlock's stones. Not
+-- the test imbue (8696) nor an NPC's Instant Toxin (42).
+local IMBUES = {
+    ["Imbue Accuracy"] = { 1302306, 8711 },
+    ["Imbue Baleflame"] = { 1302219, 8706 },
+    ["Imbue Balefrost"] = { 1302305, 8714 },
+    ["Imbue Chillknife"] = { 1296225, 8698 },
+    ["Imbue Flame"] = { 1302304, 8713 },
+    ["Imbue Frost"] = { 1302283, 8709 },
+    ["Imbue Greater Flame"] = { 1302311, 8716 },
+    ["Imbue Greater Frost"] = { 1302312, 8717 },
+    ["Imbue Iceknife"] = { 1302284, 8710 },
+    ["Imbue Lesser Flame"] = { 1295720, 8700 },
+    ["Imbue Manablade"] = { 1302308, 8715 },
+    ["Imbue Precision"] = { 1302310, 8718 },
+    ["Imbue Quickening"] = { 1302307, 8712 },
+    ["Imbue Spark"] = { 1302227, 8707 },
+    ["Imbue Striking"] = { 1302217, 8708 },
+}
+ns.IMBUE_SPELLS = {}
+for name, imbue in pairs(IMBUES) do
+    ns.IMBUE_SPELLS[name] = imbue[1]
+    ENCHANTS[name] = { imbue[2] }
+end
 -- (The spell lists give these a section of their own: Spells.lua.)
 ns.WEAPON_ENCHANTS = ENCHANTS
+
+-- Main hand enchant and Off hand enchant (Spells.lua: entry.hand, the slot):
+-- lit while anything at all is on that hand for a time (an oil, a stone, a
+-- poison, an imbue), showing which: its name and icon here, or for one not
+-- here the weapon's own icon (as the game's own buff button shows it) and
+-- "Weapon enchant". A hand with no weapon in it (nothing there, a shield, a
+-- held-in-off-hand item) has nothing missing: no glow, and no spot where
+-- spots come and go. Every temporary weapon enchant a player can get, by its
+-- enchant ID: the name and icon of the item that puts it on (a scroll by its
+-- imbue's name), else the spell's. Printed by node Tools/MakeHandEnchants.mjs
+-- from build 70790's data.
+ns.HAND_ENCHANTS = {
+    [1] = { "Rockbiter Weapon", 136086 },
+    [2] = { "Frostbrand Weapon", 135847 },
+    [3] = { "Flametongue Weapon", 135814 },
+    [4] = { "Flametongue Weapon", 135814 },
+    [5] = { "Flametongue Weapon", 135814 },
+    [6] = { "Rockbiter Weapon", 136086 },
+    [7] = { "Deadly Poison", 132290 },
+    [8] = { "Deadly Poison II", 132290 },
+    [12] = { "Frostbrand Weapon", 135847 },
+    [13] = { "Coarse Sharpening Stone", 135249 },
+    [14] = { "Heavy Sharpening Stone", 135250 },
+    [19] = { "Rough Weightstone", 135255 },
+    [20] = { "Coarse Weightstone", 135256 },
+    [21] = { "Heavy Weightstone", 135257 },
+    [22] = { "Crippling Poison", 132274 },
+    [23] = { "Mind-numbing Poison II", 136066 },
+    [25] = { "Shadow Oil", 134803 },
+    [26] = { "Frost Oil", 134800 },
+    [29] = { "Rockbiter Weapon", 136086 },
+    [35] = { "Mind-numbing Poison", 136066 },
+    [40] = { "Rough Sharpening Stone", 135248 },
+    [263] = { "Shiny Bauble", 134335 },
+    [264] = { "Nightcrawlers", 134324 },
+    [265] = { "Bright Baubles", 134139 },
+    [266] = { "Aquadynamic Fish Attractor", 133982 },
+    [283] = { "Windfury Weapon", 136018 },
+    [284] = { "Windfury Weapon", 136018 },
+    [323] = { "Instant Poison", 132273 },
+    [324] = { "Instant Poison II", 132273 },
+    [325] = { "Instant Poison III", 132273 },
+    [483] = { "Solid Sharpening Stone", 135251 },
+    [484] = { "Solid Weightstone", 135258 },
+    [503] = { "Rockbiter Weapon", 136086 },
+    [523] = { "Flametongue Weapon", 135814 },
+    [524] = { "Frostbrand Weapon", 135847 },
+    [525] = { "Windfury Weapon", 136018 },
+    [603] = { "Crippling Poison II", 132274 },
+    [623] = { "Instant Poison IV", 132273 },
+    [624] = { "Instant Poison V", 132273 },
+    [625] = { "Instant Poison VI", 132273 },
+    [626] = { "Deadly Poison III", 132290 },
+    [627] = { "Deadly Poison IV", 132290 },
+    [643] = { "Mind-numbing Poison III", 136066 },
+    [683] = { "Rockbiter Weapon", 136086 },
+    [703] = { "Wound Poison", 134197 },
+    [704] = { "Wound Poison II", 134197 },
+    [705] = { "Wound Poison III", 134197 },
+    [706] = { "Wound Poison IV", 134197 },
+    [1643] = { "Dense Sharpening Stone", 135252 },
+    [1663] = { "Rockbiter Weapon", 136086 },
+    [1664] = { "Rockbiter Weapon", 136086 },
+    [1665] = { "Flametongue Weapon", 135814 },
+    [1666] = { "Flametongue Weapon", 135814 },
+    [1667] = { "Frostbrand Weapon", 135847 },
+    [1668] = { "Frostbrand Weapon", 135847 },
+    [1669] = { "Windfury Weapon", 136018 },
+    [1703] = { "Dense Weightstone", 135259 },
+    [1803] = { "Lesser Firestone", 134085 },
+    [1823] = { "Firestone", 134085 },
+    [1824] = { "Greater Firestone", 134085 },
+    [1825] = { "Major Firestone", 134085 },
+    [2506] = { "Elemental Sharpening Stone", 135228 },
+    [2623] = { "Minor Wizard Oil", 134711 },
+    [2624] = { "Minor Mana Oil", 134878 },
+    [2625] = { "Lesser Mana Oil", 134879 },
+    [2626] = { "Lesser Wizard Oil", 134725 },
+    [2627] = { "Wizard Oil", 134726 },
+    [2628] = { "Brilliant Wizard Oil", 134727 },
+    [2629] = { "Brilliant Mana Oil", 134722 },
+    [2630] = { "Deadly Poison V", 132290 },
+    [2684] = { "Consecrated Sharpening Stone", 135249 },
+    [2685] = { "Blessed Wizard Oil", 134806 },
+    [7098] = { "Blackfathom Sharpening Stone", 134417 },
+    [7254] = { "Sebacious Poison", 132108 },
+    [7255] = { "Numbing Poison", 132098 },
+    [7256] = { "Atrophic Poison", 132100 },
+    [7542] = { "Occult Poison I", 135935 },
+    [7566] = { "Frostbrand Weapon", 135847 },
+    [7567] = { "Flametongue Weapon", 135814 },
+    [7568] = { "Rockbiter Weapon", 136086 },
+    [7569] = { "Windfury Weapon", 136018 },
+    [7602] = { "Conductive Shield Coating", 134722 },
+    [7644] = { "Magnificent Trollshine", 134876 },
+    [7651] = { "Occult Poison II", 135935 },
+    [8059] = { "Spellstone", 134131 },
+    [8060] = { "Greater Spellstone", 134131 },
+    [8061] = { "Major Spellstone", 134131 },
+    [8698] = { "Imbue Chillknife", 4549168 },
+    [8700] = { "Imbue Lesser Flame", 4549170 },
+    [8706] = { "Imbue Baleflame", 4549170 },
+    [8707] = { "Imbue Spark", 4549170 },
+    [8708] = { "Imbue Striking", 4549172 },
+    [8709] = { "Imbue Frost", 4549168 },
+    [8710] = { "Imbue Iceknife", 4549168 },
+    [8711] = { "Imbue Accuracy", 4549172 },
+    [8712] = { "Imbue Quickening", 4549172 },
+    [8713] = { "Imbue Flame", 4549170 },
+    [8714] = { "Imbue Balefrost", 4549168 },
+    [8715] = { "Imbue Manablade", 4549172 },
+    [8716] = { "Imbue Greater Flame", 4549170 },
+    [8717] = { "Imbue Greater Frost", 4549168 },
+    [8718] = { "Imbue Precision", 4549172 },
+}
 
 -- Inventory slot: Enum.WeaponSlot.
 local HANDS = { [16] = 0, [17] = 1 }
 local PERMANENT = 1 -- Enum.ItemEnchantType.Permanent
 -- What's on each hand as last read: false for nothing, else { id, ends (nil
 -- with no timer), total }. One the game won't say about keeps what it was, so
--- in a fight the time left runs on from the last answer.
-local hands = {}
+-- in a fight the time left runs on from the last answer. And whether each
+-- holds a weapon (Armed), kept the same way; never read counts as one.
+local hands, armed = {}, {}
 
 -- The game's three ways of asking, each giving the hand's enchant and its
 -- seconds left, false for none, or nil when it won't say (a secret answer):
@@ -614,6 +763,21 @@ local function ReadHand(slot)
     return nil
 end
 
+-- Whether a hand holds a weapon, which something can go on: true or false,
+-- or nil while the game won't say. Nothing there, a shield or a
+-- held-in-off-hand item isn't one (a fishing pole is).
+local function Armed(slot)
+    if type(GetInventoryItemID) ~= "function" then return nil end
+    local id = GetInventoryItemID("player", slot)
+    if not Open(id) then return nil end
+    if id == nil then return false end
+    local info = C_Item and C_Item.GetItemInfoInstant
+    if type(info) ~= "function" then return nil end
+    local ok, _, _, _, _, _, class = pcall(info, id)
+    if not (ok and Open(class)) or type(class) ~= "number" then return nil end
+    return class == (Enum and Enum.ItemClass and Enum.ItemClass.Weapon or 2)
+end
+
 -- Whether a Buffs bar has an entry that's a weapon enchant.
 function F:HasEnchants(bar)
     return bar ~= nil and bar.imbues ~= nil and next(bar.imbues) ~= nil
@@ -632,20 +796,63 @@ function F:ReadEnchants()
                 hands[slot] = { id = id, ends = ends, total = left }
             end
         end
+        local weapon = Armed(slot)
+        if weapon ~= nil then armed[slot] = weapon end
     end
 end
 
--- Whether one of these enchants is on a hand, and when the soonest to end
--- ends and how long it had when read.
+-- Whether one of these enchants is on a hand (any at all on a hand of its
+-- own: ids.hands, a hand entry's), and when the soonest to end ends, how
+-- long it had when read, which it is and on which hand. bare: an entry of
+-- hands alone (ids.handsOnly) with no weapon in any of them, so nothing's
+-- missing.
 local function EnchantOn(ids)
-    local now, on, ends, total = GetTime(), false, nil, nil
+    local now, on, ends, total, id, at = GetTime(), false, nil, nil, nil, nil
+    local bare = ids.handsOnly == true
     for slot in pairs(HANDS) do
-        local hand = hands[slot]
-        if hand and ids[hand.id] and (not hand.ends or hand.ends > now) and (not on or (hand.ends and (not ends or hand.ends < ends))) then
-            on, ends, total = true, hand.ends, hand.total
+        local hand, own = hands[slot], ids.hands ~= nil and ids.hands[slot] == true
+        if hand and (own or ids[hand.id]) and (not hand.ends or hand.ends > now) and (not on or (hand.ends and (not ends or hand.ends < ends))) then
+            on, ends, total, id, at = true, hand.ends, hand.total, hand.id, slot
+        end
+        if own and armed[slot] ~= false then bare = false end
+    end
+    return on, ends, total, id, at, bare and not on
+end
+
+-- A hand entry's spot shows what's on that hand: the enchant's icon and
+-- name, or its own while nothing is (as laid out: holder.restIcon and
+-- restName). Each only set as it changes. The addon's own texture and text,
+-- so fine in a fight.
+local UNKNOWN_ICON = 134400 -- the question mark, if the weapon's own icon can't be had
+local function Which(holder, id, slot)
+    local icon, name = holder.restIcon, holder.restName
+    if id then
+        local known = ns.HAND_ENCHANTS[id]
+        if known then
+            name, icon = known[1], known[2]
+        else
+            -- (Its texture may be secret: only tested once Open says it isn't.)
+            local texture
+            if type(GetInventoryItemTexture) == "function" then texture = GetInventoryItemTexture("player", slot) end
+            name, icon = "Weapon enchant", Open(texture) and texture or UNKNOWN_ICON
         end
     end
-    return on, ends, total
+    if holder.whichIcon ~= icon then
+        holder.whichIcon = icon
+        holder.icon:SetTexture(icon)
+    end
+    if holder.whichName ~= name then
+        holder.whichName = name
+        holder.label:SetText(name)
+    end
+end
+
+-- For /ccm debug: what a weapon enchant entry last read on your hands.
+function F:EnchantReport(bar, i)
+    local ids = bar and bar.imbues and bar.imbues[i]
+    if not ids then return "" end
+    local on, _, _, id, _, bare = EnchantOn(ids)
+    return " | weapon enchant " .. (on and ("on, " .. tostring(id)) or bare and "none, no weapon" or "missing")
 end
 
 -- Seconds until an enchant on a hand runs out, or nil with none running.
@@ -682,15 +889,20 @@ function F:PaintEnchants(bar)
     for i = 1, ns.BUFF_SLOTS do
         local holder, ids = bar.holders[i], bar.imbues[i]
         if ids then
-            local on, ends, total = EnchantOn(ids)
+            local on, ends, total, id, slot, bare = EnchantOn(ids)
             holder.icon:SetDesaturated(not on)
             holder.icon:SetAlpha(on and 1 or .45)
-            -- (Glow when missing: over it, unlike an aura's icon, so it goes.)
-            if holder.glowHost then holder.glowHost:SetAlpha(on and 0 or 1) end
+            -- (Glow when missing: over it, unlike an aura's icon, so it goes;
+            -- and never on a hand with no weapon, where nothing's missing.)
+            if holder.glowHost then holder.glowHost:SetAlpha((on or bare) and 0 or 1) end
             holder.enchantLit = on
+            if ids.hands then Which(holder, on and id, slot) end
             local parts = EnchantParts(holder)
             -- A packed bar's spot isn't scaled as its slot is, so its own size.
             Fit(parts, packed and ns.IconSize(bar.data) or holder.size or BASE, holder.showTimer ~= false, holder.look)
+            -- Warn at, on a hand entry: its countdown red from its seconds
+            -- left, as an aura's is. (Not yet on a named enchant's: parked.)
+            Style:WarnText(parts.cooldown, ids.hands and bar.warns[i] or nil)
             if on and ends then
                 parts.cooldown:SetCooldown(ends - total, total)
             else
@@ -701,7 +913,10 @@ function F:PaintEnchants(bar)
             holder.icon:SetDesaturated(true)
             holder.icon:SetAlpha(.45)
             if holder.glowHost then holder.glowHost:SetAlpha(1) end
-            if holder.enchant then holder.enchant.cooldown:Clear() end
+            if holder.enchant then
+                holder.enchant.cooldown:Clear()
+                Style:WarnText(holder.enchant.cooldown, nil)
+            end
         end
     end
 end
@@ -709,7 +924,7 @@ end
 function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
     bar.groupParts, bar.names, bar.up, bar.spots, bar.only, bar.imbues = {}, {}, {}, {}, {}, {}
-    bar.tickPaces, bar.tickShows, bar.groupTicks, bar.looks = {}, {}, {}, {}
+    bar.tickPaces, bar.tickShows, bar.groupTicks, bar.looks, bar.bare = {}, {}, {}, {}, {}
     bar.warns, bar.appliedWarns = {}, {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
@@ -884,9 +1099,13 @@ function F:Check(bar)
     local last, now, up, changed = bar.upBy or {}, {}, bar.up, false
     for i = 1, bar.count do
         local name, on = bar.names[i], nil
-        -- (A weapon enchant is on your weapon, and answered from your hands.)
+        -- (A weapon enchant is on your weapon, and answered from your hands;
+        -- a hand with no weapon in it has nothing missing: bar.bare.)
         if bar.imbues[i] then
-            on = EnchantOn(bar.imbues[i])
+            local lit, _, _, _, _, bare = EnchantOn(bar.imbues[i])
+            on = lit
+            if (bar.bare[i] == true) ~= bare then changed = true end
+            bar.bare[i] = bare or nil
         elseif counting or (watches and self:Hides(bar, i)) then
             if readable then on = OnYou(bar.slotIDs[i]) end
             if on == nil then on, bar.unread = last[name], true end
@@ -908,6 +1127,8 @@ end
 -- slot stays on, so a buff cast in a fight draws over its greyed spot.
 local function Spot(bar, i)
     if ns.Bars:Arranging() then return true end
+    -- A hand with no weapon in it, shown only while missing: it isn't.
+    if bar.bare and bar.bare[i] and F:Hides(bar, i) then return false end
     -- A weapon enchant on a packed bar shows as the packed icons do: while it's on.
     if bar.imbues[i] and F:Packed(bar.data) and not F:Hides(bar, i) then return bar.up[i] == true end
     return not (F:Hides(bar, i) and bar.up[i])
@@ -1026,7 +1247,8 @@ function F:Layout(bar, data)
         local ids, entry, picked, glow, yours, only = {}, nil, nil, false, {}, false
         -- Weapon enchants: every one of yours in it is one (joined with a
         -- buff, it's the buff's as before: nothing tells them apart in a fight).
-        local enchants, allEnchants = {}, weapons
+        -- A hand entry is any enchant on its hand (enchants.hands).
+        local enchants, allEnchants, named = {}, weapons, false
         for _, name in ipairs(group) do
             local found = ns.Spells:Find(name)
             if found and found.ids and ns.Spells:ForMe(name, bar.key) then
@@ -1037,20 +1259,27 @@ function F:Layout(bar, data)
                 yours[#yours + 1] = name
                 for _, id in ipairs(found.ids) do ids[id] = true end
                 local list = ENCHANTS[found.name]
-                if list then
+                if found.hand and weapons then
+                    enchants.hands = enchants.hands or {}
+                    enchants.hands[found.hand] = true
+                elseif list then
+                    named = true
                     for _, id in ipairs(list) do enchants[id] = true end
                 else
                     allEnchants = false
                 end
             end
         end
+        -- (Hands alone: one with no weapon in it has nothing missing.)
+        if enchants.hands and not named then enchants.handsOnly = true end
         -- Its tick count: the counted debuffs' pace, and for a joined icon
         -- with others at another pace, the lengths it shows on (B:IconTicks).
         local pace, shows = ns.Bars:IconTicks(yours, counts)
         -- A joined icon shows its picked entry (on the bar's page), faded,
         -- while none is up; else its first of yours.
         entry = picked or entry
-        if entry and next(ids) and count < ns.BUFF_SLOTS then
+        -- (A hand entry has no spells of its own: its hand is what it watches.)
+        if entry and (next(ids) or enchants.hands) and count < ns.BUFF_SLOTS then
             count = count + 1
             local holder = bar.holders[count]
             -- Its own size (settings per spell; a joined icon: the first of
@@ -1069,9 +1298,12 @@ function F:Layout(bar, data)
             holder.size, holder.showTimer, holder.look = fits, data.showTimer, look
             bar.looks[count] = look
             if holder.slot then Fit(holder.slot, fits, data.showTimer, look) end
+            -- (What a hand entry shows while nothing is on it: F:PaintEnchants.)
+            local text = #group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name
             holder.icon:SetTexture(entry.icon)
             holder.label:SetWidth(own + spacing)
-            holder.label:SetText(#group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name)
+            holder.label:SetText(text)
+            holder.restIcon, holder.restName, holder.whichIcon, holder.whichName = entry.icon, text, entry.icon, text
             -- (A packed bar offers no names: its icons have no spot for one.)
             holder.label:SetShown(data.showNames and not packed)
             MissingGlow(holder, glow, own)
@@ -1080,6 +1312,7 @@ function F:Layout(bar, data)
             bar.tickPaces[count], bar.tickShows[count] = pace, shows
             bar.only[count] = only or nil
             bar.imbues[count] = allEnchants and next(enchants) and enchants or nil
+            bar.bare[count] = nil -- (read below: F:Check)
             -- Warn at: the first of yours with one, unless it shows only
             -- while it's missing (it has no icon while it's up).
             local warn
@@ -1094,7 +1327,7 @@ function F:Layout(bar, data)
         MissingGlow(bar.holders[i], false)
         bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i], bar.only[i] = nil, nil, nil, nil, nil
         bar.looks[i], bar.holders[i].look, bar.warns[i], bar.holders[i].ownSize = nil, nil, nil, nil
-        bar.imbues[i] = nil
+        bar.imbues[i], bar.bare[i] = nil, nil
     end
     for _, parts in ipairs(bar.groupParts) do
         parts.cooldown:SetHideCountdownNumbers(not data.showTimer)
@@ -1213,7 +1446,7 @@ function F:ApplySelf(bar, packed, spacing, scale)
         container:SetScale(scale)
     end
     if on and not bar.selfGroup then
-        AddGroup(container, "self", "HARMFUL", { initializeFrame = F.Guard(GroupLook(bar)), maxFrameCount = SELF_MAX,
+        AddGroup(container, "self", "HARMFUL|PLAYER", { initializeFrame = F.Guard(GroupLook(bar)), maxFrameCount = SELF_MAX,
             candidateFilters = { isFromPlayerOrPlayerPet = true }, layout = layout })
         bar.selfGroup = true
     elseif bar.selfGroup then
@@ -1253,8 +1486,8 @@ function F:Apply(bar)
         -- when missing.
         local ids = on and Own(bar, i, packed) and bar.slotIDs[i] or nil
         -- Only show missing or Only when missing: a buff on you has no spot,
-        -- and its slot is off.
-        if ids and not Spot(bar, i) then ids = nil end
+        -- and its slot is off. So is a hand entry's: it has no spells.
+        if ids and (next(ids) == nil or not Spot(bar, i)) then ids = nil end
         local signature = Signature(ids)
         if bar.applied[i] ~= signature then
             bar.applied[i] = signature
@@ -1274,6 +1507,7 @@ function F:Apply(bar)
         for i = 1, ns.BUFF_SLOTS do
             local ids = on and not packed and bar.warns[i] and bar.holders[i].mark and not self:Hides(bar, i)
                 and bar.slotIDs[i] or nil
+            if ids and next(ids) == nil then ids = nil end
             local signature = Signature(ids)
             if bar.appliedWarns[i] ~= signature then
                 bar.appliedWarns[i] = signature
@@ -1523,17 +1757,27 @@ function F:LowTime(bar, fighting)
     local watch = not fighting and self:LowWatch(bar.data, bar.key) and ns.Bars:Enabled()
     local readable = watch and Readable()
     local soonest, unread = nil, false
+    -- Whether left (seconds) is under warn's; else when it will be, the soonest kept.
+    local function Under(left, warn)
+        if left and left <= warn then return true end
+        if left and (not soonest or left - warn < soonest) then soonest = left - warn end
+        return false
+    end
     for i = 1, ns.BUFF_SLOTS do
         local holder, warn, lit = bar.holders[i], bar.warns[i], false
         if watch and warn and i <= (bar.count or 0) and holder:IsShown() then
-            if readable then
+            local imbue = bar.imbues and bar.imbues[i]
+            if imbue and imbue.hands then
+                -- A hand entry's time left is your hands', read as they change.
+                local on, ends = EnchantOn(imbue)
+                lit = Under(on and ends and ends - GetTime() or nil, warn)
+            elseif imbue then
+                -- (A named weapon enchant has no aura to read: no glow, as before.)
+                lit = false
+            elseif readable then
                 local left, unknown = TimeLeft(bar.slotIDs[i])
                 if unknown then unread = true end
-                if left and left <= warn then
-                    lit = true
-                elseif left and (not soonest or left - warn < soonest) then
-                    soonest = left - warn
-                end
+                lit = Under(left, warn)
             else
                 unread = true
             end

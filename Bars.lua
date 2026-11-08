@@ -363,18 +363,59 @@ end
 -- than a spell.
 local ITEM_KINDS = { item = true, slot = true, family = true, ammo = true, shards = true }
 
+-- Show the global cooldown (each cooldown bar's tick, off unless ticked):
+-- a second sweep on a spell's icon, made the first time it's wanted, with
+-- no numbers and no flash. It's fed the spell's cooldown with the global
+-- cooldown counted (the game's own duration object, never read here), and
+-- is see-through while the spell's own cooldown runs (active: whether it
+-- does, secret in a fight, handed to the game as it is), so it only ever
+-- shows on an icon that isn't cooling down: a longer cooldown of its own
+-- keeps showing as before. A spell the global cooldown doesn't touch shows
+-- none, as the game says. Nothing waits for it to end: it simply stops.
+local function Global(icon, active)
+    local gcd = icon.gcd
+    if not gcd then
+        gcd = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
+        gcd:SetAllPoints(icon.texture)
+        gcd:SetSwipeTexture(Style.FLAT)
+        Style:CooldownLook(gcd) -- the same swipe as the icon's own (Icon details)
+        gcd:SetDrawBling(false)
+        gcd:SetHideCountdownNumbers(true)
+        icon.gcd = gcd
+    end
+    icon.gcdShown = true
+    local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(icon.spellID, false)
+    if not duration then return gcd:Clear() end
+    gcd:SetCooldownFromDurationObject(duration)
+    if gcd.SetAlphaFromBoolean then
+        gcd:SetAlphaFromBoolean(active, 0, 1)
+    else
+        -- (A client without it: shown only while the answer can be read.)
+        gcd:SetAlpha(Open(active) and not active and 1 or 0)
+    end
+end
+
+-- The global cooldown's sweep off an icon: the tick unticked, or its spot
+-- now holding an item. Once, not on every refresh after.
+local function NoGlobal(icon)
+    icon.gcdShown = nil
+    icon.gcd:Clear()
+end
+
 -- A spell's cooldown: on the sweep, grey while it cools down, and in full,
 -- dimmed or hidden while it cools down and while it's ready, as chosen.
 -- Redone as cooldowns start or end. The global cooldown is left out (as for
 -- the grey), so a cast never dims or hides the rest for a moment; a spell
--- with charges cools down, as the game says, only with none left.
+-- with charges cools down, as the game says, only with none left. With
+-- Show the global cooldown ticked, it's on a sweep of its own (Global).
 local function SpellCooldown(icon, data)
     local id = icon.spellID
     local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(id, true)
+    local active = false
     if duration then
         icon.cooldown:SetCooldownFromDurationObject(duration)
         -- Secret in combat: passed to the game as it is, never tested here.
-        local active = duration:IsActive()
+        active = duration:IsActive()
         icon.texture:SetDesaturated(active)
         -- The same either way is set as it is; otherwise the game picks.
         local cooling, ready = Alphas(data, icon.cantCast)
@@ -389,6 +430,11 @@ local function SpellCooldown(icon, data)
         icon.cooldown:Clear()
         icon.texture:SetDesaturated(false)
         Alpha(icon, 1)
+    end
+    if data.showGCD then
+        Global(icon, active)
+    elseif icon.gcdShown then
+        NoGlobal(icon)
     end
 end
 
@@ -975,7 +1021,8 @@ local function Layout(bar)
     bar.list = spells
     for _, name in ipairs(spells) do
         local entry = ns.Spells:Find(name)
-        if entry and ns.Spells:ForMe(name, bar.key) and not Absent(name) then
+        -- (A hand's weapon enchant has no spell: the Buffs bar's alone, B:Fits.)
+        if entry and not entry.hand and ns.Spells:ForMe(name, bar.key) and not Absent(name) then
             count = count + 1
             local icon = bar.icons[count] or NewIcon(bar)
             bar.icons[count] = icon
@@ -992,6 +1039,8 @@ local function Layout(bar)
             icon.count:SetFontObject(Style:Count(own))
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
             icon.kind, icon.itemID, icon.slot, icon.current = entry.kind, entry.itemID, entry.slot, entry.current
+            -- A spot that showed a spell's global cooldown and now holds an item.
+            if icon.gcdShown and ITEM_KINDS[entry.kind] then NoGlobal(icon) end
             WatchRange(icon, on and not ITEM_KINDS[entry.kind] and entry.spellID or nil)
             KeyLook(icon, own)
             ShowKey(icon)
@@ -1062,6 +1111,8 @@ function B:EnchantsChanged()
             any = true
             ns.BuffBar:PaintEnchants(bar)
             Missing(bar)
+            -- (Warn at: a warned one's low-time glow, out of a fight.)
+            ns.BuffBar:LowTime(bar, inCombat)
         end
     end
     if any then self:EnchantClock() end
@@ -1106,8 +1157,8 @@ local function ReportEntry(bar, i, say)
         only = (ns.BuffBar:OnlyMissing(bar.data) and "" or " | only when missing")
             .. " | on you " .. tostring(bar.up ~= nil and bar.up[i] == true)
     end
-    return ("  %d. %s | spells %s%s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only,
-        ns.BuffBar:WarnReport(bar, i))
+    return ("  %d. %s | spells %s%s%s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only,
+        ns.BuffBar:WarnReport(bar, i), ns.BuffBar:EnchantReport(bar, i))
 end
 
 -- For /ccm debug (Debug.lua): each of your bars and the icons on it as they
@@ -1161,8 +1212,9 @@ function B:Report(add, say)
                         say(GetShapeshiftFormID and GetShapeshiftFormID()), say(IsStealthed and IsStealthed()),
                         ns.FormName(ns.ShownForm(key)), ns.ShownForm(key) ~= ns.FormNow() and " (picked on its page)" or ""))
                 end
-                add(("  when ready %s, on cooldown %s, dim when you can't cast it %s, dimmed icons %s%%"):format(
-                    tostring(data.whenReady), tostring(data.onCooldown), tostring(data.dimUnusable), tostring(data.dimOpacity)))
+                add(("  when ready %s, on cooldown %s, dim when you can't cast it %s, dimmed icons %s%%%s"):format(
+                    tostring(data.whenReady), tostring(data.onCooldown), tostring(data.dimUnusable), tostring(data.dimOpacity),
+                    data.showGCD and ", global cooldown shown" or ""))
             elseif ns.BAR_KIND[key] == "debuff" then
                 -- Its greyed spots: ticked, kept with no target, and up now
                 -- (a player asking why they go without one).
@@ -1255,6 +1307,7 @@ function B:ApplyIconDetails()
         local size = bar.data and ns.IconSize(bar.data)
         for _, icon in ipairs(bar.icons or {}) do
             Style:CooldownLook(icon.cooldown)
+            if icon.gcd then Style:CooldownLook(icon.gcd) end -- its global cooldown's sweep too, once made
             local own = icon.size or size
             if own then
                 icon.cooldown:SetCountdownFont(Style:Countdown(own, icon.look))
@@ -1805,6 +1858,10 @@ function B:Fits(key, entry, byID)
     if entry.kind == "proc" and ns.BAR_KIND[key] ~= "buff" then
         return false, "Procs only go on the Buffs bar."
     end
+    -- (A warlock's Firestone or Spellstone, or a scroll's imbue once added: Spells.lua.)
+    if entry.kind == "enchant" and ns.BAR_KIND[key] ~= "buff" then
+        return false, entry.name .. " only goes on the Buffs bar, where it lights while it's on your weapon."
+    end
     local passive = not byID and ns.Spells:PassiveNote(entry.key, key)
     if passive then return false, passive end
     return true
@@ -1837,6 +1894,11 @@ local function Vet(key, text)
     local entry = ns.Spells:Find(found)
     local fits, why = B:Fits(key, entry, given ~= nil)
     if not fits then return false, why end
+    -- A scroll's imbue not added yet (Imbue Flame): the Buffs bar's alone, as
+    -- once added (B:Fits), and not offered on the other bars' pages.
+    if not entry and ns.IMBUE_SPELLS and ns.IMBUE_SPELLS[found] and ns.BAR_KIND[key] ~= "buff" then
+        return false, found .. " only goes on the Buffs bar, where it lights while it's on your weapon.", true
+    end
     local passive = ns.Spells:AddNote(text, key)
     if passive then return false, passive end
     local plan = { name = found, shown = entry and entry.name or shown or found }
@@ -1946,8 +2008,47 @@ local function VetItem(key, itemID)
     return true, plan
 end
 
+-- An item that puts a weapon enchant on (a poison, a Firestone, a Scroll of
+-- Imbue Flame) can't go on the Buffs bar, but what it puts on can: the
+-- spell it casts, by its name where your lists have it (a rogue's Instant
+-- Poison, a warlock's Firestone), else by its ID (a scroll's imbue, found by
+-- its name: Spells.lua). Any rank of it on the bar already is what it is
+-- told it is (Instant Poison VI there, for an Instant Poison V), as that one
+-- lights for every rank's (Buffs.lua). With none on, and no entry of the
+-- spell's own name in your lists, the highest rank of it they do have
+-- (Crippling Poison II, for an item that casts Crippling Poison). Nil for
+-- any other item or bar, or while the game won't say.
+local RANK_NUMERALS = { II = 2, III = 3, IV = 4, V = 5, VI = 6 }
+local function EnchantSpell(key, itemID)
+    local api = C_Item and C_Item.GetItemSpell
+    if ns.BAR_KIND[key] ~= "buff" or not api then return nil end
+    local ok, name, spellID = pcall(api, itemID)
+    if not (ok and Open(name) and type(name) == "string") then return nil end
+    local enchants = ns.WEAPON_ENCHANTS
+    local family = enchants and enchants[name]
+    if not family then return nil end
+    local data = ns.BarData(key)
+    for _, onBar in ipairs(data and data.spells or {}) do
+        if rawequal(enchants[onBar], family) then return onBar end
+    end
+    if ns.Spells:Find(name) then return name end
+    local best, top = nil, 0
+    for _, entry in ipairs(ns.Spells:Fresh()) do
+        if rawequal(enchants[entry.name], family) then
+            local rank = RANK_NUMERALS[entry.name:match(" (%u+)$") or ""] or 1
+            if rank > top then best, top = entry.key, rank end
+        end
+    end
+    if best then return best end
+    if not (Open(spellID) and type(spellID) == "number") then return name end
+    return tostring(spellID)
+end
+
 -- What B:AddItem would do, changing nothing, as B:CanAdd does for spells.
+-- An item that puts a weapon enchant on is what it puts on (EnchantSpell).
 function B:CanAddItem(key, itemID)
+    local spell = EnchantSpell(key, itemID)
+    if spell then return self:CanAdd(key, spell) end
     local ok, plan = VetItem(key, itemID)
     if not ok then return false, plan end
     return true, Preview(key, plan)
@@ -1956,8 +2057,11 @@ end
 -- An item with a cooldown: an equipped trinket follows its slot. Ammunition
 -- of any kind is your ammo, which counts whatever ammo you have equipped (a
 -- class that never uses ammo is told so), and any rank of a healthstone or
--- potion is its family, which shows the best one you carry.
+-- potion is its family, which shows the best one you carry. On the Buffs
+-- bar, a poison, stone or scroll puts on what it casts (EnchantSpell).
 function B:AddItem(key, itemID)
+    local spell = EnchantSpell(key, itemID)
+    if spell then return self:Add(key, spell) end
     local ok, plan = VetItem(key, itemID)
     if not ok then return false, plan end
     if not self:Assign(plan.name, key) then return false, Full(key) end

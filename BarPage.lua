@@ -10,9 +10,12 @@ local ICON, GAP = 32, 12 -- icons in the tray; the gap fits the join button
 -- options the spell list under them still shows two rows and more.
 local TIGHT = 8
 local ROW, HEADER_ROW = 22, 20 -- spell list rows
--- The options' height: the Buffs and Debuffs bars', and two rows more on the
--- Cooldowns and Utility bars, for On cooldown's tick and Dimmed icons.
-local OPTIONS, OPTIONS_TALL = 134, 178
+-- The options' height: the Buffs and Debuffs bars', two rows more on a
+-- Debuffs bar counting ticks, and on the Cooldowns and Utility bars two rows
+-- more for On cooldown's tick and Dimmed icons, then Show the global
+-- cooldown's tick under them, which ends at its foot, so the spell list
+-- under a full bar still shows two rows.
+local OPTIONS, OPTIONS_TALL, OPTIONS_COOLDOWN = 134, 178, 189
 local EMPTY = {
     cd = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook or bags.",
     util = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook or bags.",
@@ -279,7 +282,11 @@ local function WarnNote(bar, name, seconds)
     end
     if seconds == 0 then return "No warning: its countdown stays as it is." end
     local text = "Its countdown turns red with " .. WarnLength(seconds) .. " left"
-    if ns.BuffBar:Fixed(ns.BarData(bar)) then
+    -- A hand entry's spot is the addon's own: no red edge (that's an aura's).
+    local entry = ns.Spells:Find(name)
+    if entry and entry.hand then
+        if buff and ns.BuffBar:Fixed(ns.BarData(bar)) then text = text .. ". Out of combat its icon glows too" end
+    elseif ns.BuffBar:Fixed(ns.BarData(bar)) then
         text = text .. ", with a red edge round its icon" .. (buff and ". Out of combat its icon glows too" or "")
     else
         text = text .. ". Tick Show missing " .. (buff and "buffs" or "debuffs") .. " greyed for a red edge round its icon too"
@@ -464,6 +471,14 @@ function ns.BuildBarPage(window, page, width)
     -- Title row -------------------------------------------------------------------
     local title = T:Heading(page, "")
     title:SetPoint("TOPLEFT", 16, -16)
+    -- On a second bar's page (Buffs 2), a "<" before the title goes back to
+    -- its first bar; the title moves along after it (Refresh).
+    local back = T:Square(page, "<")
+    back:SetPoint("TOPLEFT", 14, -13)
+    back:SetScript("OnClick", function() window:Select(ns.BAR_KIND[state.bar]) end)
+    window:Hint(back, function() return "Back to " .. ns.BAR_NAMES[ns.BAR_KIND[state.bar]] .. "." end)
+    back:Hide()
+    page.back = back
     local count = T:Text(page, "GameFontHighlightSmall", T.MUTED)
     count:SetPoint("LEFT", title, "RIGHT", 10, 0)
     page.count = count
@@ -532,7 +547,8 @@ function ns.BuildBarPage(window, page, width)
     -- three damage over time spells), left of Clear: on one of the four
     -- bars' pages, "+ Another bar" adds its kind's second bar (Core.lua), or
     -- once there, goes to its page; on that page, Remove bar (it asks
-    -- first). Its kind's item in the list, lit there, goes back.
+    -- first). The "<" before its title goes back, as does its kind's item
+    -- in the list, lit there.
     local another = T:Button(page, "", 96, 20)
     another:SetScript("OnClick", function()
         local key = state.bar
@@ -559,7 +575,7 @@ function ns.BuildBarPage(window, page, width)
         local extra = ns.EXTRA_OF[key]
         if not extra then
             return "Remove " .. ns.BAR_NAMES[key] .. " from this profile, with its spells. It asks first. "
-                .. ns.BAR_NAMES[ns.BAR_KIND[key]] .. " in the list goes back to that bar. (experimental)"
+                .. "The < before the title goes back to " .. ns.BAR_NAMES[ns.BAR_KIND[key]] .. ". (experimental)"
         end
         if ns.HasBar(extra) then return "The " .. ns.BAR_NAMES[extra] .. " page: your second " .. ns.BAR_NAMES[key] .. " bar." end
         local can, why = ns.CanAddBar(key)
@@ -798,11 +814,12 @@ function ns.BuildBarPage(window, page, width)
     -- Options ------------------------------------------------------------------------
     -- Two columns: the sliders with how the icons show under them on the
     -- left, Out of combat, the ticks and which way rows grow on the right.
-    -- The Cooldowns and Utility bars' pages are two rows taller, for On
-    -- cooldown's tick and how dim (OPTIONS_TALL, set on refresh).
+    -- The Cooldowns and Utility bars' pages are taller, for On cooldown's
+    -- tick, how dim and Show the global cooldown (OPTIONS_COOLDOWN, set on
+    -- refresh).
     local options = CreateFrame("Frame", nil, page)
     options:SetPoint("TOPLEFT", tray, "BOTTOMLEFT", 0, -12)
-    options:SetSize(inner, OPTIONS_TALL)
+    options:SetSize(inner, OPTIONS_COOLDOWN)
     page.optionsArea = options
     -- Room before each slider's track for the longest label, Icons per row.
     local sliderLabel = 108
@@ -1065,6 +1082,11 @@ function ns.BuildBarPage(window, page, width)
     cooldownPart:SetPoint("TOPLEFT", 0, -107)
     cooldownPart:SetSize(280, 151 - 107 + 20)
     onCooldown.part = cooldownPart
+    -- And under that, the cooldown bars only: the global cooldown's swipe on
+    -- the icons after each cast, each bar its own, off unless ticked.
+    local showGCD = Option("Show the global cooldown (experimental)", "showGCD", -173,
+        "After each cast, this bar's icons show the global cooldown's swipe, like your action bars."
+            .. " An icon cooling down keeps showing its own cooldown.", 0)
     -- Out of combat: show, fade or hide. The footer explains when bars come back.
     local outOfCombat = Pills("Out of combat", 320, 0, 156, ns.OUT_OF_COMBAT, ns.OUT_OF_COMBAT_NAMES, "outOfCombat",
         "Out of combat. Bars come back in full in combat, with an enemy targeted, while unlocked, and in Edit Mode.")
@@ -1128,7 +1150,7 @@ function ns.BuildBarPage(window, page, width)
         return false
     end
     page.options = { whenReady = whenReady, onCooldown = onCooldown, dimUnusable = dimUnusable, dimOpacity = dimOpacity,
-        showMissing = showMissing, keepGreyed = keepGreyed,
+        showGCD = showGCD, showMissing = showMissing, keepGreyed = keepGreyed,
         onlyMissing = onlyMissing, showNames = showNames, showTimer = showTimer, showAuras = showAuras, swapForm = swapForm,
         editing = editing,
         showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap,
@@ -1247,6 +1269,8 @@ function ns.BuildBarPage(window, page, width)
             local family = (entry and entry.kind == "family"
                 and " One icon for the best one you carry, switching as your bags change." or "")
                 .. (entry and entry.kind == "shards" and " It counts how many you carry." or "")
+                .. (entry and entry.hand and " It lights while that hand has an oil, stone, poison or imbue on, and shows which."
+                    .. UNTESTED or "")
                 .. (row.spell and B:CarryNote(row.spell) or "")
             local on = not ns.AURA_BARS[state.bar] and row.spell and B:Find(row.spell)
             if on and on ~= state.bar then return "Move " .. name .. " here from " .. ns.BAR_NAMES[on] .. "." .. family end
@@ -1393,11 +1417,13 @@ function ns.BuildBarPage(window, page, width)
 
     -- What this bar can hold: procs have no cooldown of their own and are
     -- buffs on you, items put no aura on anyone, and a fixed rank adds
-    -- nothing to an aura bar, which already counts every rank.
+    -- nothing to an aura bar, which already counts every rank. A warlock's
+    -- stones only light on your weapon, so only on the Buffs bar.
     -- (With Ticked only, an item on the bar is listed with Show items off.)
     local function Fits(entry, onlyTicked)
         local item, kind = ns.Spells:IsItem(entry), ns.BAR_KIND[state.bar]
         if kind == "buff" then return not item and entry.kind ~= "rank" end
+        if entry.kind == "enchant" then return false end
         if kind == "debuff" then return not item and entry.kind ~= "rank" and entry.kind ~= "proc" end
         if item then return ns.Get("listItems") or onlyTicked end
         return entry.kind ~= "proc"
@@ -1566,6 +1592,10 @@ function ns.BuildBarPage(window, page, width)
         local spells = B:Mine(key)
         local name = ns.BAR_NAMES[key]
         title:SetText(name:upper())
+        local second = ns.EXTRA_OF[key] == nil
+        back:SetShown(second)
+        title:ClearAllPoints()
+        if second then title:SetPoint("LEFT", back, "RIGHT", 6, 0) else title:SetPoint("TOPLEFT", 16, -16) end
         local on = B:Enabled()
         local taken = on and ns.Layout ~= nil and ns.Layout:IsHidden(key)
         off:SetShown(not on)
@@ -1609,9 +1639,9 @@ function ns.BuildBarPage(window, page, width)
         end
         grow:SetSelected(data.grow)
         wrap:SetSelected(data.wrap)
-        -- When ready, On cooldown, its tick and Dimmed icons: the cooldown
-        -- bars only, two rows taller for them.
-        for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity }) do
+        -- When ready, On cooldown, its tick, Dimmed icons and Show the global
+        -- cooldown: the cooldown bars only, taller for them.
+        for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity, showGCD }) do
             part:SetShown(not aura)
         end
         -- The tick count's two rows, while a Debuffs bar counts any.
@@ -1623,11 +1653,12 @@ function ns.BuildBarPage(window, page, width)
         tickFrom:SetChecked(data.tickFrom == 1)
         tickEdge:SetChecked(data.tickEdge == true)
         tickSize:Set(data.tickSize)
-        options:SetHeight(aura and not counting and OPTIONS or OPTIONS_TALL)
+        options:SetHeight(not aura and OPTIONS_COOLDOWN or counting and OPTIONS_TALL or OPTIONS)
         onCooldown:SetSelected(data.onCooldown)
         dimUnusable:SetChecked(data.dimUnusable)
         dimOpacity:Set(data.dimOpacity)
         dimOpacity:SetUsable(Dims(data))
+        showGCD:SetChecked(data.showGCD)
         showMissing:SetShown(aura ~= nil)
         showMissing.text:SetText("Show missing " .. word .. "s greyed")
         showMissing:SetWidth(18 + (showMissing.text:GetStringWidth() or 0)) -- the label is its click area

@@ -462,9 +462,11 @@ ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs", debuff = "D
 ns.BAR_KIND = { cd = "cd", util = "util", buff = "buff", debuff = "debuff", cd2 = "cd", util2 = "util", buff2 = "buff",
     debuff2 = "debuff" }
 -- The bars fed by Blizzard's secure aura container, and what each watches.
+-- Debuffs: only yours ("PLAYER": you, your pet or vehicle), so another
+-- player's same debuff on your target never lights your icon.
 ns.AURA_BARS = {
     buff = { unit = "player", filter = "HELPFUL", word = "buff" },
-    debuff = { unit = "target", filter = "HARMFUL", mine = true, word = "debuff" },
+    debuff = { unit = "target", filter = "HARMFUL|PLAYER", mine = true, word = "debuff" },
 }
 ns.AURA_BARS.buff2, ns.AURA_BARS.debuff2 = ns.AURA_BARS.buff, ns.AURA_BARS.debuff
 -- Swap with my form: the Cooldowns and Utility bars only.
@@ -496,8 +498,8 @@ ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- A bar's settings a shared profile carries (its spells are in the profile,
 -- and so is Swap with my form, beside the lists it swaps between).
 ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
-    "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "selfDebuffs", "grow", "wrap", "point", "x",
-    "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
+    "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "showGCD", "selfDebuffs", "grow", "wrap", "point",
+    "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -2629,6 +2631,7 @@ function ns.BarData(key)
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
+    bar.showGCD = bar.showGCD == true -- the global cooldown's sweep on cooldown icons after each cast, off unless ticked
     bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
     -- The Debuffs bar's tick count: top left, its automatic size, white,
     -- from 1, unless you choose. Custom keeps its colour beside it, and

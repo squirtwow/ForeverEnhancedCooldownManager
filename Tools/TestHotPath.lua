@@ -663,13 +663,22 @@ local function Environment(keepCVars)
             -- a refresh: each switched-on group takes the auras it matches, up
             -- to its most, with icons from its pool, making a batch more when
             -- the pool runs dry (Blizzard_AuraContainerGroups.lua
-            -- RefreshAuraGroup). Auras are { id =, harmful =, mine = }. Any
-            -- call into the addon's own files while it runs is counted.
+            -- RefreshAuraGroup). Auras are { id =, harmful =, mine =, other = }
+            -- (other: another player's). The filter string's PLAYER keeps only
+            -- yours; isFromPlayerOrPlayerPet means any player's. Any call into
+            -- the addon's own files while it runs is counted.
             local function Matches(group, aura)
-                if (group.filter == "HARMFUL") ~= (aura.harmful == true) then return false end
+                local tokens = {}
+                for token in tostring(group.filter):gmatch("[^|]+") do
+                    assert(token == "HELPFUL" or token == "HARMFUL" or token == "PLAYER", "a filter the game knows: " .. token)
+                    tokens[token] = true
+                end
+                if (tokens.HARMFUL == true) ~= (aura.harmful == true) then return false end
+                if tokens.PLAYER and aura.mine ~= true then return false end
                 local filters = group.filters or {}
                 if filters.includeSpellIDs and not filters.includeSpellIDs[aura.id] then return false end
-                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= (aura.mine == true) then return false end
+                local player = aura.mine == true or aura.other == true
+                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
             S[f].Update = function(auras)
@@ -1141,6 +1150,142 @@ do
     Fire("PLAYER_REGEN_ENABLED")
     NextFrame(ns)
     _G.C_SpellActivationOverlay = nil
+    Equal(#printed, 0, "no errors")
+end
+
+-- Show the global cooldown: a sweep of its own, fed only as cooldowns change ------------------------
+-- Off (the default) nothing more is made or asked. Ticked on a bar, each of
+-- its spell icons gets a second sweep, made once, with no numbers and no
+-- flash, in the icon's own swipe. It's fed the spell's cooldown with the
+-- global cooldown counted as the cooldowns are fed (a cast, a cooldown
+-- ending), never as colours or range change, and is see-through while the
+-- spell's own cooldown runs: by the game's own answer, handed on unread in
+-- a fight. Each bar its own; unticked, each sweep is cleared once and never
+-- fed again; a spot that turns into an item loses its sweep.
+
+do
+    local ns = Start({ notesSeen = "dev", useBars = true })
+    local B = ns.Bars
+    -- The game's cooldown with the global one counted, which only the sweep
+    -- asks for (the mock game's own, which the bars always ask for, is
+    -- without it), and the spells it was asked for.
+    local counted = { IsActive = function() return Typed("boolean", true) end }
+    local without, asked = C_Spell.GetSpellCooldownDuration, {}
+    C_Spell.GetSpellCooldownDuration = function(id, ignoreGCD)
+        if ignoreGCD == false then
+            asked[#asked + 1] = id
+            return counted
+        end
+        return without(id, ignoreGCD)
+    end
+    for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+    B:Assign("Thorns", "util")
+    local bar, util = B:Get("cd"), B:Get("util")
+    local moon = bar.icons[1]
+    Equal(tostring(ns.BarData("cd").showGCD) .. " " .. tostring(ns.BarData("util").showGCD) .. " " .. tostring(rawget(moon, "gcd"))
+        .. " " .. #asked, "false false nil 0", "off at first, on each bar: no sweep made, nothing asked with the global cooldown")
+    local game = Measure(function()
+        Fire("SPELL_UPDATE_COOLDOWN")
+        NextFrame(ns)
+    end)
+    Equal(Counts(game, "GetSpellCooldownDuration", "SetCooldownFromDurationObject", "SetAlphaFromBoolean", "CreateFrame") .. " " .. #asked,
+        "4 4 0 0 0", "off, a cast: each spell's own cooldown fed, as before, and nothing more")
+
+    -- Ticked on Cooldowns: a sweep of its own on each spell icon there, fed at once.
+    game = Measure(function() B:SetOption("cd", "showGCD", true) end)
+    local gcd = rawget(moon, "gcd")
+    local s = S[gcd]
+    Equal(tostring(gcd ~= nil) .. " " .. s.kind .. " " .. s.template .. " " .. tostring(s.parent == moon) .. " "
+        .. tostring(Last(gcd, "SetAllPoints") == moon.texture) .. " " .. tostring(Last(gcd, "SetHideCountdownNumbers")) .. " "
+        .. tostring(Last(gcd, "SetDrawBling")) .. " " .. tostring(Last(gcd, "SetSwipeTexture") == Last(moon.cooldown, "SetSwipeTexture"))
+        .. " " .. Counts(game, "CreateFrame"),
+        "true Cooldown CooldownFrameTemplate true true true false true 3",
+        "ticked: a sweep of its own on each of the three spell icons, over the icon's art, no numbers, no flash, the icon's swipe")
+    Equal(tostring(Last(gcd, "SetCooldownFromDurationObject") == counted) .. " " .. s.alphaIf .. " " .. s.alpha .. " | "
+        .. table.concat(asked, " ") .. " | " .. tostring(rawget(util.icons[1], "gcd")),
+        "true 0 1 1 | 8924 5176 7384 | nil",
+        "fed the cooldown with the global one counted, shown while the spell's own isn't running; Utility's, unticked, has none")
+
+    -- A cast: the sweeps fed with the cooldowns, made no more.
+    asked = {}
+    game = Measure(function()
+        Fire("SPELL_UPDATE_COOLDOWN")
+        NextFrame(ns)
+    end)
+    Note("SPELL_UPDATE_COOLDOWN, Show the global cooldown ticked", game)
+    Equal(Counts(game, "GetSpellCooldownDuration", "SetCooldownFromDurationObject", "SetAlphaFromBoolean", "CreateFrame") .. " " .. #asked,
+        "7 7 3 0 3", "ticked, a cast: each spell's own cooldown and, on Cooldowns, its sweep fed; nothing made")
+    asked = {}
+    game = Measure(function()
+        Fire("SPELL_UPDATE_USABLE")
+        NextFrame(ns)
+    end)
+    Equal(Counts(game, "GetSpellCooldownDuration", "SetCooldownFromDurationObject", "SetAlphaFromBoolean") .. " " .. #asked, "0 0 0 0",
+        "usable, range or a glow: the sweeps aren't fed")
+
+    -- The spell's own cooldown running: see-through, so it keeps showing as
+    -- before; done (in the global cooldown, say), the sweep shows again.
+    active = true
+    Fire("SPELL_UPDATE_COOLDOWN")
+    NextFrame(ns)
+    Equal(s.alpha .. " " .. tostring(S[moon.texture].desaturated) .. " " .. tostring(Last(moon.cooldown, "SetHideCountdownNumbers")),
+        "0 true false", "its own cooldown running: the sweep see-through; the icon greyed and counting down as ever")
+    active = false
+    S[moon.cooldown].scripts.OnCooldownDone(moon.cooldown)
+    NextFrame(ns)
+    Equal(s.alpha .. " " .. tostring(S[moon.texture].desaturated), "1 false", "its own cooldown done: the sweep shows again")
+
+    -- In a fight: the game's answers handed on unread.
+    lockdown = true
+    Fire("PLAYER_REGEN_DISABLED")
+    active = SECRET
+    Fire("SPELL_UPDATE_COOLDOWN")
+    NextFrame(ns)
+    Equal(tostring(s.alphaFrom) .. " " .. s.alphaIf .. " " .. tostring(Last(gcd, "SetCooldownFromDurationObject") == counted),
+        "secret 0 1 true", "in a fight: whether its own cooldown runs handed to the game as it is, the sweep fed as ever")
+    active = false
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    NextFrame(ns)
+
+    -- Icon details: the sweeps in the swipe picked, with the icons'.
+    ns.Set("swipeColour", "white")
+    ns.Style:ApplyDetails()
+    local mine, its = S[gcd].last.SetSwipeColor, S[moon.cooldown].last.SetSwipeColor
+    Equal(table.concat({ mine[1], mine[2], mine[3], mine[4] }, " ") .. " | " .. its[1] .. " " .. its[2] .. " " .. its[3],
+        table.concat({ its[1], its[2], its[3], its[4] }, " ") .. " | 1 1 1", "Icon details changed: each sweep in the same swipe as its icon")
+    ns.Set("swipeColour", "black")
+    ns.Style:ApplyDetails()
+
+    -- /ccm debug says so, for the bar ticked.
+    local report = ns.DebugReport()
+    Equal(select(2, report:gsub("dimmed icons 40%%, global cooldown shown\n", "")), 1, "the debug report says so, for Cooldowns only")
+
+    -- A spot that turns into an item: its sweep cleared, and not fed.
+    itemCount[118] = 1
+    B:TakeOff("cd", "Overpower")
+    B:Assign("family:healing", "cd")
+    local spot = bar.icons[3]
+    asked = {}
+    Fire("SPELL_UPDATE_COOLDOWN")
+    NextFrame(ns)
+    Equal(spot.kind .. " " .. tostring(spot.gcdShown) .. " " .. tostring(S[spot.gcd].last.Clear ~= nil) .. " " .. table.concat(asked, " "),
+        "family nil true 8924 5176", "a spot that turns into a potion: its sweep cleared, and only the spells' fed")
+    B:TakeOff("cd", "family:healing")
+    B:Assign("Overpower", "cd")
+
+    -- Unticked: each sweep cleared once, then never fed or cleared again.
+    s.last.Clear = nil
+    B:SetOption("cd", "showGCD", false)
+    Equal(tostring(moon.gcdShown) .. " " .. tostring(s.last.Clear ~= nil), "nil true", "unticked: each sweep cleared")
+    s.last.Clear, asked = nil, {}
+    game = Measure(function()
+        Fire("SPELL_UPDATE_COOLDOWN")
+        NextFrame(ns)
+    end)
+    Equal(Counts(game, "GetSpellCooldownDuration", "SetAlphaFromBoolean") .. " " .. #asked .. " " .. tostring(s.last.Clear),
+        "4 0 0 nil", "and after: only the spells' own cooldowns fed, as before it was ticked")
+    C_Spell.GetSpellCooldownDuration = without
     Equal(#printed, 0, "no errors")
 end
 

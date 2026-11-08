@@ -660,13 +660,22 @@ local function Environment(keepCVars)
             -- a refresh: each switched-on group takes the auras it matches, up
             -- to its most, with icons from its pool, making a batch more when
             -- the pool runs dry (Blizzard_AuraContainerGroups.lua
-            -- RefreshAuraGroup). Auras are { id =, harmful =, mine = }. Any
-            -- call into the addon's own files while it runs is counted.
+            -- RefreshAuraGroup). Auras are { id =, harmful =, mine =, other = }
+            -- (other: another player's). The filter string's PLAYER keeps only
+            -- yours; isFromPlayerOrPlayerPet means any player's. Any call into
+            -- the addon's own files while it runs is counted.
             local function Matches(group, aura)
-                if (group.filter == "HARMFUL") ~= (aura.harmful == true) then return false end
+                local tokens = {}
+                for token in tostring(group.filter):gmatch("[^|]+") do
+                    assert(token == "HELPFUL" or token == "HARMFUL" or token == "PLAYER", "a filter the game knows: " .. token)
+                    tokens[token] = true
+                end
+                if (tokens.HARMFUL == true) ~= (aura.harmful == true) then return false end
+                if tokens.PLAYER and aura.mine ~= true then return false end
                 local filters = group.filters or {}
                 if filters.includeSpellIDs and not filters.includeSpellIDs[aura.id] then return false end
-                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= (aura.mine == true) then return false end
+                local player = aura.mine == true or aura.other == true
+                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
             S[f].Update = function(auras)
@@ -1024,6 +1033,8 @@ function H.Sane(ns, shared)
             if spells then cooldown[v] = true end
             if v:find("^item:") and not v:find("^item:[1-9]%d*$") then return "an item key " .. v end
             if v:find("^slot:") and v ~= "slot:13" and v ~= "slot:14" then return "a slot key " .. v end
+            if v:find("^hand:") and v ~= "hand:main" and v ~= "hand:off" then return "a hand key " .. v end
+            if v:find("^hand:") and ns.BAR_KIND[key] ~= "buff" then return "a hand off the Buffs bar: " .. key end
             -- A spell pinned to one ID: a name, # and a whole ID, nothing else.
             local pinned = v:match("^[^#@]+#([1-9]%d*)$")
             if v:find("#", 1, true) and not (pinned and ID(tonumber(pinned))) then return "a pinned key " .. v end
@@ -1041,6 +1052,7 @@ function H.Sane(ns, shared)
             if (key ~= "cd" and key ~= "util") or type(list) ~= "table" or #list > 40 then return "a form's list " .. tostring(key) end
             for k, v in pairs(list) do
                 if type(k) ~= "number" or not Word(v) or inForm[v] then return "an entry on a form's " .. key end
+                if v:find("^hand:") then return "a hand on a form's " .. key end
                 inForm[v], on[v] = true, true
             end
         end
@@ -1259,9 +1271,13 @@ do
         if not found then fields[#fields + 1] = field .. " not shared" end
     end
     Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
-        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,tickFrom,tickEdge,"
-        .. "tickCustom",
+        .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,showGCD,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,"
+        .. "tickFrom,tickEdge,tickCustom",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
+    -- Show the global cooldown: a plain true or false, false left out.
+    local gcdChecks = {}
+    for _, value in ipairs({ true, false, "true", 1 }) do gcdChecks[#gcdChecks + 1] = tostring(barChecks.showGCD(value)) end
+    Equal(table.concat(gcdChecks, " "), "true true false false", "Show the global cooldown is true or false")
     -- On cooldown takes When ready's three choices and nothing else; its
     -- tick is a plain true or false.
     local checks = {}
@@ -1933,6 +1949,43 @@ do
         k = {} } }))
     Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.dimOpacity) .. " "
         .. tostring(bad.setup.bars.util.dimOpacity), "|2 nil nil", "anything but a number from 10 to 90: left out, and counted")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Show the global cooldown in strings ----------------------------------------------------------------
+-- Each cooldown bar's tick goes with the look and layout like its other
+-- settings, only when ticked (off is the default). A string made before it
+-- reads as off; anything but true or false is left out.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    -- Ticked, its sweep asks for the cooldown with the global one counted
+    -- (the mock game's answer is the same either way).
+    local own = C_Spell.GetSpellCooldownDuration
+    C_Spell.GetSpellCooldownDuration = function(id) return own(id, true) end
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "util")
+    B:SetOption("util", "showGCD", true)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. tostring(shared.setup.bars.util.showGCD) .. " "
+        .. tostring(shared.setup.bars.cd.showGCD), "|0 true nil", "Utility's tick goes in the string; Cooldowns', off, is left out")
+    B:SetOption("util", "showGCD", false)
+    local ok = P.Import("Ticked", shared, true)
+    Equal(tostring(ok) .. " " .. tostring(ns.BarData("util").showGCD) .. " " .. tostring(ns.BarData("cd").showGCD), "true true false",
+        "imported with its look: ticked on Utility, off on Cooldowns")
+    local function Lists() return { cd = { "Moonfire" }, util = { "Wrath" }, buff = {}, debuff = {} } end
+    -- Made by 1.10.2: nothing about it.
+    local old = P.Read(H.String({ a = "1.10.2", l = Lists(), g = { s = {}, b = { cd = { whenReady = "dim" } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. tostring(old.setup.bars.cd.showGCD), "|0 nil",
+        "a string from before it reads as it did, with no Show the global cooldown")
+    P.Import("Old", old, true)
+    Equal(tostring(ns.BarData("cd").showGCD) .. " " .. tostring(ns.BarData("util").showGCD), "false false", "imported: off")
+    local bad = P.Read(H.String({ l = Lists(), g = { s = {}, b = { cd = { showGCD = "yes" }, util = { showGCD = 1 } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.showGCD) .. " " .. tostring(bad.setup.bars.util.showGCD),
+        "|2 nil nil", "anything but true or false: left out, and counted")
     Equal(#printed, 0, "no errors")
 end
 
@@ -2784,6 +2837,48 @@ do
         "a string from before them: its own design, and the fade off")
     local odd = P.Read(H.String({ l = Lists(), g = { s = { barStyle = "blocky", colourFade = "yes" }, b = {}, l = {} } }))
     Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look), "|2 | {}", "odd values: left out, and counted")
+end
+
+-- Main hand enchant and Off hand enchant, shared ---------------------------------------------------
+-- Their keys ("hand:main", "hand:off") go in a string like any entry's, with
+-- their Only when missing and Warn at, and come back on another account,
+-- for every class. Any other "hand:" key is left out and counted. (A version
+-- before them keeps the two as names it doesn't know, shown for no one:
+-- Tools/TestBars.lua.)
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    for _, entry in ipairs({ "hand:main", "hand:off", "Thorns" }) do table.insert(ns.ActiveList("buff"), entry) end
+    B:Changed()
+    B:SetOnlyWhenMissing("buff", "hand:off", true)
+    B:SetWarnAt("buff", "hand:main", 600)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(table.concat(shared.lists.buff, ",") .. " | " .. H.Text(shared.only) .. " | " .. H.Text(shared.warns) .. " | "
+        .. shared.skipped .. " | " .. H.Sane(ns, shared) .. "|", 'hand:main,hand:off,Thorns | {["buff"]={["hand:off"]=true}} | '
+        .. '{["buff"]={["hand:main"]=600}} | 0 | |', "both hands in the string, with Only when missing and Warn at")
+    local odd = P.Read(H.String({ l = { cd = {}, util = {}, buff = { "hand:main", "hand:ranged", "hand:", "hand:MAIN", "hand:off" },
+        debuff = {} } }))
+    Equal(table.concat(odd.lists.buff, ",") .. " | " .. odd.skipped .. " | " .. H.Sane(ns, odd) .. "|", "hand:main,hand:off | 3 | |",
+        "any other hand key left out, and counted")
+    -- An edited string with a hand on a cooldown bar, Debuffs or a form's
+    -- list: left out there (a spell icon with no spell), and counted.
+    local wrong = P.Read(H.String({ l = { cd = { "hand:main", "Moonfire" }, util = { "hand:off" }, buff = { "hand:off" },
+        debuff = { "hand:main" } }, f = { [5] = { cd = { "hand:main", "Maul" }, util = { "hand:off" } } } }))
+    Equal(table.concat(wrong.lists.cd, ",") .. " | " .. table.concat(wrong.lists.util, ",") .. " | " .. table.concat(wrong.lists.buff, ",")
+        .. " | " .. table.concat(wrong.lists.debuff, ",") .. " | " .. table.concat(wrong.forms[5] and wrong.forms[5].cd or {}, ",")
+        .. " | " .. tostring(wrong.forms[5] and #wrong.forms[5].util) .. " | " .. wrong.skipped .. " | " .. H.Sane(ns, wrong) .. "|",
+        "Moonfire |  | hand:off |  | Maul | 0 | 5 | |", "a hand on Cooldowns, Utility, Debuffs or a form's list: left out, and counted")
+    -- Another account, a warlock: the same entries, on his Buffs bar.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    _G.UnitClass = function() return "Warlock", "WARLOCK" end
+    local ok, done = H.Trap(ns2.ProfileShare.Import, "Hands", ns2.ProfileShare.Read(text), false)
+    Equal(tostring(ok and done) .. " | " .. table.concat(ns2.BarData("buff").spells, ",") .. " | " .. table.concat((ns2.Bars:Mine("buff")), ",")
+        .. " | " .. tostring(ns2.Bars:OnlyWhenMissing("buff", "hand:off")) .. " " .. tostring(ns2.Bars:WarnAt("buff", "hand:main")),
+        "true | hand:main,hand:off,Thorns | hand:main,hand:off,Thorns | true 600", "imported on a warlock: both hands his too, as they were")
+    Equal(ns2.ProfileShare.Export(), text, "and shared back as the very same string")
 end
 
 print = _G.print

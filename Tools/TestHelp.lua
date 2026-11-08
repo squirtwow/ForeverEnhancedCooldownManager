@@ -660,13 +660,22 @@ local function Environment(keepCVars)
             -- a refresh: each switched-on group takes the auras it matches, up
             -- to its most, with icons from its pool, making a batch more when
             -- the pool runs dry (Blizzard_AuraContainerGroups.lua
-            -- RefreshAuraGroup). Auras are { id =, harmful =, mine = }. Any
-            -- call into the addon's own files while it runs is counted.
+            -- RefreshAuraGroup). Auras are { id =, harmful =, mine =, other = }
+            -- (other: another player's). The filter string's PLAYER keeps only
+            -- yours; isFromPlayerOrPlayerPet means any player's. Any call into
+            -- the addon's own files while it runs is counted.
             local function Matches(group, aura)
-                if (group.filter == "HARMFUL") ~= (aura.harmful == true) then return false end
+                local tokens = {}
+                for token in tostring(group.filter):gmatch("[^|]+") do
+                    assert(token == "HELPFUL" or token == "HARMFUL" or token == "PLAYER", "a filter the game knows: " .. token)
+                    tokens[token] = true
+                end
+                if (tokens.HARMFUL == true) ~= (aura.harmful == true) then return false end
+                if tokens.PLAYER and aura.mine ~= true then return false end
                 local filters = group.filters or {}
                 if filters.includeSpellIDs and not filters.includeSpellIDs[aura.id] then return false end
-                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= (aura.mine == true) then return false end
+                local player = aura.mine == true or aura.other == true
+                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
             S[f].Update = function(auras)
@@ -3250,6 +3259,16 @@ end)()
     Equal(tostring(S[panel.warn].alpha) .. " | " .. Note(panel.warn.buttons[8]), "1 | Its countdown turns red with 10 minutes left, with"
         .. " a red edge round its icon. Out of combat its icon glows too. (experimental)", "unticked, with missing buffs greyed: the"
         .. " edge, and out of combat a glow (your own buffs)")
+    -- A hand's weapon enchant: its spot is the addon's own, so no red edge.
+    B:SetAura("buff", "hand:main", true)
+    w:Refresh()
+    bp.icons[2]:Click()
+    Equal(S[panel.title].text .. " " .. S[panel.quiet].text .. " | " .. Note(panel.warn.buttons[8]), "MAIN HAND ENCHANT on Buffs | Its"
+        .. " countdown turns red with 10 minutes left. Out of combat its icon glows too. (experimental)",
+        "Main hand enchant: the countdown and the glow, no edge")
+    bp.icons[1]:Click()
+    B:SetAura("buff", "hand:main", false)
+    w:Refresh()
     B:SetOption("buff", "showMissing", false)
     panel.only:Click()
     -- Taken off its bar from the tray: the panel goes with it.

@@ -654,13 +654,22 @@ local function Environment(keepCVars)
             -- a refresh: each switched-on group takes the auras it matches, up
             -- to its most, with icons from its pool, making a batch more when
             -- the pool runs dry (Blizzard_AuraContainerGroups.lua
-            -- RefreshAuraGroup). Auras are { id =, harmful =, mine = }. Any
-            -- call into the addon's own files while it runs is counted.
+            -- RefreshAuraGroup). Auras are { id =, harmful =, mine =, other = }
+            -- (other: another player's). The filter string's PLAYER keeps only
+            -- yours; isFromPlayerOrPlayerPet means any player's. Any call into
+            -- the addon's own files while it runs is counted.
             local function Matches(group, aura)
-                if (group.filter == "HARMFUL") ~= (aura.harmful == true) then return false end
+                local tokens = {}
+                for token in tostring(group.filter):gmatch("[^|]+") do
+                    assert(token == "HELPFUL" or token == "HARMFUL" or token == "PLAYER", "a filter the game knows: " .. token)
+                    tokens[token] = true
+                end
+                if (tokens.HARMFUL == true) ~= (aura.harmful == true) then return false end
+                if tokens.PLAYER and aura.mine ~= true then return false end
                 local filters = group.filters or {}
                 if filters.includeSpellIDs and not filters.includeSpellIDs[aura.id] then return false end
-                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= (aura.mine == true) then return false end
+                local player = aura.mine == true or aura.other == true
+                if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
             S[f].Update = function(auras)
@@ -818,8 +827,8 @@ end
 -- it isn't read; it's read the first time something looks in it.
 Equal(#ns.Spells:List(), 0, "bars off: your spellbook and bags aren't read at login")
 local list = ns.Spells:Fresh()
-Equal(#list, 11, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower, two druid procs, then the healthstone and"
-    .. " potion families; passive and future spells left out")
+Equal(#list, 13, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower, the two hands' weapon enchants, two druid procs,"
+    .. " then the healthstone and potion families; passive and future spells left out")
 local moonfire = ns.Spells:Find("Moonfire")
 Equal(moonfire.spellID, 8924, "Moonfire uses the highest rank")
 Equal(moonfire.rankText, "Rank 2", "shows that rank")
@@ -833,7 +842,8 @@ Equal(ns.Spells:Resolve("blood fury"), "Blood Fury", "any race's racial can be a
 local cc = ns.Spells:Find("Clearcasting")
 Equal(cc and cc.kind == "proc" and cc.line, "Procs", "class procs listed under Procs")
 Equal(cc.ids[1], 16870, "with their spell IDs")
-Equal(list[8].name .. " " .. list[9].line, "Nature's Grace Items", "procs come after your spells, before your items")
+Equal(list[7].name .. " " .. list[8].line .. " " .. list[10].name .. " " .. list[11].line, "Main hand enchant Weapon enchants"
+    .. " Nature's Grace Items", "procs come after your spells and the hands' weapon enchants, before your items")
 
 -- Off by default ------------------------------------------------------------------------
 
@@ -1295,8 +1305,8 @@ do
     -- Anything unexpected in the saved settings is put right at load.
     Environment()
     ns = Load({ useBars = true, bars = { cd = { size = 9999, spells = { "A", 7, "", "B" }, x = "nope", y = 3, hideReady = "maybe" },
-        util = { whenReady = "fade", onCooldown = "fade", dimUnusable = "yes", dimOpacity = "dim" },
-        debuff = { onCooldown = 2, dimUnusable = 1, dimOpacity = 0 / 0 }, buff = { dimOpacity = 300 }, evil = { size = 3 } } })
+        util = { whenReady = "fade", onCooldown = "fade", dimUnusable = "yes", dimOpacity = "dim", showGCD = "yes" },
+        debuff = { onCooldown = 2, dimUnusable = 1, dimOpacity = 0 / 0, showGCD = 1 }, buff = { dimOpacity = 300 }, evil = { size = 3 } } })
     local data = ns.BarData("cd")
     Equal(data.dimOpacity .. " " .. ns.BarData("util").dimOpacity .. " " .. ns.BarData("debuff").dimOpacity .. " "
         .. ns.BarData("buff").dimOpacity, "40 40 40 90", "Dimmed icons: missing or not a number, 40% as before; too much, 90%")
@@ -1308,13 +1318,17 @@ do
         .. tostring(ns.BarData("util").dimUnusable) .. " | " .. ns.BarData("debuff").onCooldown .. " "
         .. tostring(ns.BarData("debuff").dimUnusable), "show false | show false | show false",
         "On cooldown and Dim when you can't cast it: missing or bad, in full and off, as before they were there")
+    Equal(tostring(data.showGCD) .. " " .. tostring(ns.BarData("util").showGCD) .. " " .. tostring(ns.BarData("debuff").showGCD),
+        "false false false", "Show the global cooldown: missing or bad, off, as before it was there")
     Equal(ns.BarData("evil"), nil, "unknown bars ignored")
     -- Chosen, they're kept over a reload.
     Environment()
-    ns = Load({ useBars = true, bars = { cd = { onCooldown = "hide", dimUnusable = true, dimOpacity = 65 },
+    ns = Load({ useBars = true, bars = { cd = { onCooldown = "hide", dimUnusable = true, dimOpacity = 65, showGCD = true },
         util = { onCooldown = "dim", dimOpacity = 5 }, buff = { dimOpacity = 42.4 } } })
     Equal(ns.BarData("cd").onCooldown .. " " .. tostring(ns.BarData("cd").dimUnusable) .. " " .. ns.BarData("util").onCooldown .. " "
         .. tostring(ns.BarData("util").dimUnusable), "hide true dim false", "each bar's own choices kept")
+    Equal(tostring(ns.BarData("cd").showGCD) .. " " .. tostring(ns.BarData("util").showGCD), "true false",
+        "and each bar's Show the global cooldown")
     Equal(ns.BarData("cd").dimOpacity .. " " .. ns.BarData("util").dimOpacity .. " " .. ns.BarData("buff").dimOpacity, "65 10 42",
         "each bar's Dimmed icons kept, too little raised to 10%, a fraction rounded")
 
@@ -1551,10 +1565,10 @@ B = ns.Bars
 local debuffs = B:Get("debuff")
 local dbox = containers[2]
 Equal(S[dbox].unit, "target", "the Debuffs bar watches your target")
-Equal(S[dbox].slots.b1.filter, "HARMFUL", "for harmful auras")
+Equal(S[dbox].slots.b1.filter, "HARMFUL|PLAYER", "for your harmful auras")
 Equal(B:SetAura("debuff", "Moonfire", true), true, "Moonfire ticked onto Debuffs")
 local dg1 = S[dbox].groups.g1
-Equal(dg1.filter, "HARMFUL", "its icon looks at debuffs")
+Equal(dg1.filter, "HARMFUL|PLAYER", "its icon looks at your debuffs")
 Equal(dg1.filters.isFromPlayerOrPlayerPet, true, "only the ones you cast")
 Equal(dg1.filters.includeSpellIDs[8921] and dg1.filters.includeSpellIDs[8924], true, "any rank of Moonfire")
 Equal(S[containers[1]].groups.g1, nil, "the Buffs bar is left alone")
@@ -2891,7 +2905,7 @@ do
         .. S[tick.text].text .. " " .. tostring(tick:GetChecked()) .. " " .. tat[1] .. " " .. tat[2] .. " " .. tat[3],
         "true On cooldown | Show Dim Hide | show TOPLEFT 100 -107 | Dim when you can't cast it false TOPLEFT 0 -129",
         "On cooldown under When ready, at the bar's choice (Show), and its tick under it, off")
-    Equal(S[page.optionsArea].height, 178, "the options two rows taller for them")
+    Equal(S[page.optionsArea].height, 189, "the options taller for them, and for Show the global cooldown under them")
     -- On cooldown, its tick and Dimmed icons as one part, for the page's walkthrough.
     local cpart = S[cooling.part]
     Equal(table.concat(cpart.points[1], " ", 1, 3) .. " " .. cpart.width .. "x" .. cpart.height, "TOPLEFT 0 -107 280x64",
@@ -3008,6 +3022,37 @@ do
     tick:Click()
     Equal(there .. " " .. tostring(dim.usable), "true true false", "On cooldown's Dim or the tick make it usable; neither, greyed")
     B:SetOption("cd", "dimOpacity", 40)
+    -- Show the global cooldown, under Dimmed icons: off unless ticked, each
+    -- bar its own, marked experimental. Ticked, that bar's spell icons get
+    -- the sweep; unticked, it's cleared. (Its own function: this chunk is at
+    -- Lua's 200 locals. The mock game's cooldown with the global one
+    -- counted is the same answer as without.)
+    ;(function()
+        local gcdTick, without = page.options.showGCD, C_Spell.GetSpellCooldownDuration
+        C_Spell.GetSpellCooldownDuration = function(id) return without(id, true) end
+        local at = S[gcdTick].points[1]
+        Equal(tostring(S[gcdTick].shown) .. " " .. S[gcdTick.text].text .. " " .. tostring(gcdTick:GetChecked()) .. " "
+            .. table.concat(at, " ", 1, 3) .. " " .. tostring(ns.BarData("cd").showGCD),
+            "true Show the global cooldown (experimental) false TOPLEFT 0 -173 false",
+            "Show the global cooldown under Dimmed icons, off, marked the quiet way")
+        S[gcdTick].scripts.OnEnter(gcdTick)
+        Equal(S[w.note].text, "After each cast, this bar's icons show the global cooldown's swipe, like your action bars."
+            .. " An icon cooling down keeps showing its own cooldown.", "its note says what it does")
+        S[gcdTick].scripts.OnLeave(gcdTick)
+        gcdTick:Click()
+        local first = B:Get("cd").icons[1]
+        Equal(tostring(ns.BarData("cd").showGCD) .. " " .. tostring(gcdTick:GetChecked()) .. " " .. tostring(rawget(first, "gcd") ~= nil)
+            .. " " .. tostring(first.gcdShown) .. " " .. tostring(ns.BarData("util").showGCD), "true true true true false",
+            "ticked: Cooldowns' icons get the sweep; Utility's own stays off")
+        w:Select("util")
+        local util = tostring(gcdTick:GetChecked())
+        w:Select("cd")
+        Equal(util .. " " .. tostring(gcdTick:GetChecked()), "false true", "Utility's page shows Utility's own, and Cooldowns' its own again")
+        gcdTick:Click()
+        Equal(tostring(ns.BarData("cd").showGCD) .. " " .. tostring(gcdTick:GetChecked()) .. " " .. tostring(first.gcdShown), "false false nil",
+            "unticked: off, and the sweeps cleared")
+        C_Spell.GetSpellCooldownDuration = without
+    end)()
     w:Select("buff")
     Equal(S[page.options.showMissing].shown and not S[ready].shown and not S[ready.label].shown, true,
         "the Buffs bar offers missing buffs greyed there instead")
@@ -3015,6 +3060,7 @@ do
     Equal(tostring(S[cooling].shown or S[cooling.label].shown or S[tick].shown or S[dim].shown) .. " " .. S[page.optionsArea].height
         .. " " .. table.concat(mat, " ", 1, 3), "false 134 TOPLEFT 0 -85",
         "but no On cooldown, its tick or Dimmed icons, nor their rows: missing buffs greyed in When ready's spot, under the sliders")
+    Equal(tostring(S[page.options.showGCD].shown), "false", "nor Show the global cooldown: the Buffs bar shows auras, not casts")
 end
 Equal(page.options.showTimer:GetChecked(), true, "each bar keeps its own countdown choice")
 Equal(page.size.current, 36, "and its own size")
@@ -4422,6 +4468,694 @@ end)()
     Equal(table.concat(order, ", "), "Lightning Shield:" .. general .. ", Totemic Recall:" .. general
         .. ", Grounding Totem:Totems, Searing Totem:Totems, Rockbiter Weapon:Weapon enchants, Windfury Weapon:Weapon enchants",
         "totems together, then weapon enchants, after the spellbook's own")
+    w:Hide()
+end)()
+
+-- Forever's weapon enchants from build 70790's data: the warlock's stones
+-- and the scrolls' imbues, each imbue with its own spell (found by name:
+-- Spells.lua). The poisons whose maker has a numeral (Wound Poison II) count
+-- as the family too, though what it puts on goes by the plain name.
+;(function()
+    local enchants = ns.WEAPON_ENCHANTS
+    local function IDs(name) return enchants[name] and table.concat(enchants[name], ",") or "none" end
+    Equal(IDs("Firestone") .. " | " .. IDs("Spellstone") .. " | " .. IDs("Imbue Flame") .. " | " .. IDs("Imbue Chillknife")
+        .. " | " .. IDs("Imbue Striking") .. " | " .. IDs("Wound Poison") .. " | " .. IDs("Wound Poison IV") .. " | "
+        .. IDs("Crippling Poison II") .. " | " .. IDs("Tyler Test Imbue") .. " | " .. IDs("Instant Toxin"),
+        "1803,1823,1824,1825 | 8059,8060,8061 | 8713 | 8698 | 8708 | 703,704,705,706 | 703,704,705,706 | 22,603 | none | none",
+        "every stone's enchant, each imbue's, every rank's poison; no test imbue, no NPC's")
+    Equal(tostring(rawequal(enchants["Wound Poison"], enchants["Wound Poison III"])) .. " "
+        .. tostring(rawequal(enchants["Crippling Poison"], enchants["Crippling Poison II"])) .. " " .. IDs("Wound Poison V"),
+        "true true none", "one family per poison, and no rank past its last")
+    local imbues, spells = 0, 0
+    for name in pairs(enchants) do
+        if name:find("^Imbue ") then imbues = imbues + 1 end
+    end
+    for name in pairs(ns.IMBUE_SPELLS) do
+        if enchants[name] then spells = spells + 1 end
+    end
+    Equal(imbues .. " " .. spells .. " " .. ns.IMBUE_SPELLS["Imbue Flame"] .. " " .. ns.IMBUE_SPELLS["Imbue Lesser Flame"] .. " "
+        .. ns.IMBUE_SPELLS["Imbue Chillknife"] .. " " .. tostring(ns.IMBUE_SPELLS["Tyler Test Imbue"]),
+        "15 15 1302304 1295720 1296225 nil", "all 15 imbues, each with its spell")
+end)()
+
+-- A warlock's Firestone and Spellstone go on the weapon from the bag: each
+-- is an entry in the Weapon enchants section once any rank of the spell
+-- that makes it is known, for the Buffs bar only, lit by any of its stones.
+;(function()
+    Start(2, "WARLOCK", nil, {
+        { name = "Create Firestone", subName = "Rank 2", spellID = 17951, iconID = 134085 },
+        { name = "Shadow Bolt", subName = "Rank 1", spellID = 686, iconID = 7 },
+    })
+    local function Order()
+        local order = {}
+        for _, entry in ipairs(ns.Spells:Fresh()) do
+            if ({ ["Create Firestone"] = 1, ["Create Spellstone"] = 1, ["Shadow Bolt"] = 1, Firestone = 1, Spellstone = 1 })[entry.name] then
+                order[#order + 1] = entry.name .. ":" .. entry.line
+            end
+        end
+        return table.concat(order, ", ")
+    end
+    local general = ns.Spells:Find("Shadow Bolt").line
+    Equal(Order(), "Create Firestone:" .. general .. ", Shadow Bolt:" .. general .. ", Firestone:Weapon enchants",
+        "Firestone under Weapon enchants with a rank of Create Firestone known; no Spellstone without its spell")
+    local stone = ns.Spells:Find("Firestone")
+    Equal(stone.kind .. " " .. stone.icon .. " " .. stone.spellID .. " " .. table.concat(stone.ids, ",") .. " " .. #stone.lower,
+        "enchant 134085 17945 758,17945,17947,17949 0", "the stones' icon, the known rank's stone, every stone's spell, no ranks")
+    Equal(tostring(ns.Spells:ForMe("Firestone", "buff")) .. " " .. tostring(ns.Spells:KnowsID(758)), "true false",
+        "yours, though the stone's spell isn't in your spellbook")
+    -- Only on the Buffs bar: not listed, nor taken, on a cooldown bar or Debuffs.
+    w:Select("cd")
+    Equal(tostring(Row("Firestone") ~= nil), "false", "not listed on Cooldowns")
+    local ok, said = B:Add("cd", "Firestone")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Firestone only goes on the Buffs bar, where it lights while it's on your weapon.",
+        "nor taken there")
+    w:Select("debuff")
+    Equal(tostring(Row("Firestone") ~= nil) .. " " .. tostring((B:Add("debuff", "Firestone"))), "false false", "nor on Debuffs")
+    w:Select("buff")
+    local row = Row("Firestone")
+    Equal(tostring(row ~= nil), "true", "listed on Buffs")
+    row.check:Click()
+    Equal(List("buff") .. " " .. tostring(ns.CustomSpells().Firestone), "Firestone nil", "ticked onto Buffs, by its name alone")
+    w:Hide()
+    B:Changed()
+    local buff = B:Get("buff")
+    Equal(tostring(buff.imbues[1] and buff.imbues[1][1803]) .. " " .. tostring(buff.imbues[1] and buff.imbues[1][1825])
+        .. " " .. tostring(buff.imbues[1] and buff.imbues[1][8059]), "true true nil", "lit by any Firestone, not a Spellstone")
+    local onHand
+    _G.C_PaperDollInfo = { GetTemporaryEnchantmentInfo = function(slot)
+        if slot == 16 and onHand then return { enchantID = onHand, remainingTimeMs = 3600000, hasExpirationTime = true } end
+        return nil
+    end }
+    local function Change()
+        Fire("UNIT_INVENTORY_CHANGED", "player")
+        NextFrame(B)
+    end
+    onHand = 1824
+    Change()
+    local holder = buff.holders[1]
+    Equal(tostring(holder:IsShown()) .. " " .. tostring(buff.up[1]) .. " " .. tostring(holder.enchantLit), "true true true",
+        "a Greater Firestone on the weapon lights it")
+    Equal(Last(holder.enchant.cooldown, "SetCooldown", 2), 3600, "with its time left")
+    onHand = 8059
+    Change()
+    Equal(tostring(holder:IsShown()) .. " " .. tostring(holder.enchantLit), "false false", "a Spellstone on it doesn't")
+    _G.C_PaperDollInfo = nil
+    Equal(#printed, 0, "no errors")
+
+    -- Create Spellstone known too: Spellstone after Firestone, at its own rank.
+    Start(2, "WARLOCK", nil, {
+        { name = "Create Firestone", subName = "Rank 1", spellID = 6366, iconID = 134085 },
+        { name = "Create Spellstone", subName = "Rank 3", spellID = 17728, iconID = 134131 },
+        { name = "Shadow Bolt", subName = "Rank 1", spellID = 686, iconID = 7 },
+    })
+    Equal(Order(), "Create Firestone:" .. general .. ", Create Spellstone:" .. general .. ", Shadow Bolt:" .. general
+        .. ", Firestone:Weapon enchants, Spellstone:Weapon enchants", "both stones, each once its maker is known")
+    stone = ns.Spells:Find("Spellstone")
+    Equal(stone.icon .. " " .. stone.spellID .. " " .. ns.Spells:Find("Firestone").spellID, "134131 1237159 758",
+        "each at the rank of its maker you know")
+    w:Hide()
+
+    -- Another class on the profile passes over the stone, which stays for the warlock.
+    Start(2, "ROGUE", { useBars = true, notesSeen = "dev", everyone = "Shared",
+        profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = {}, util = {}, buff = { "Firestone" }, debuff = {} } } })
+    B:Changed()
+    Equal(tostring(ns.Spells:Find("Firestone")) .. " " .. table.concat((B:Mine("buff")), ",") .. "|" .. List("buff"), "nil |Firestone",
+        "a rogue has no Firestone; it stays in the profile")
+    w:Hide()
+end)()
+
+-- A scroll's imbue goes on the Buffs bar by its name, searched or typed in
+-- any case (the game only finds names you know, so the addon knows these),
+-- or by its ID, and lights by its own enchant beside a rogue's poison. It's
+-- the Buffs bar's alone, like a stone: not offered nor taken on Cooldowns or
+-- Debuffs, by name or ID, nor moved there once on.
+;(function()
+    Start(2, "ROGUE", nil, {
+        { name = "Instant Poison", spellID = 8681, iconID = 132273 },
+        { name = "Sinister Strike", subName = "Rank 1", spellID = 1752, iconID = 8 },
+    })
+    named[1302304], named[1302307] = "Imbue Flame", "Imbue Quickening"
+    local offered = 0
+    for _, item in ipairs(ns.Spells:Suggest("imbue", 50)) do
+        if item.name:find("^Imbue ") then offered = offered + 1 end
+    end
+    local first = ns.Spells:Suggest("imbue fl")[1]
+    Equal(offered .. " " .. tostring(first and first.name) .. " " .. tostring(first and first.spellID), "15 Imbue Flame 1302304",
+        "every imbue suggested by name, with its spell")
+    local name, ids = ns.Spells:Resolve("imbue FLAME")
+    Equal(tostring(name) .. " " .. table.concat(ids or {}, ","), "Imbue Flame 1302304", "typed in any case, found by its spell")
+    w:Select("cd")
+    Search("imbue")
+    Equal(tostring(Other("Imbue Flame") ~= nil) .. " " .. tostring(B:WouldShow("cd", "Imbue Flame")), "false false",
+        "not offered on Cooldowns")
+    Search("")
+    local ok, said = B:Add("cd", "Imbue Flame")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Imbue Flame only goes on the Buffs bar, where it lights while it's on your weapon.",
+        "nor taken there by name")
+    Equal(tostring((B:Add("cd", "1302304"))) .. " " .. tostring((B:Add("debuff", "Imbue Flame"))) .. " "
+        .. tostring(List("cd"):find("Imbue") ~= nil or List("debuff"):find("Imbue") ~= nil), "false false false",
+        "nor by its ID, nor on Debuffs")
+    w:Select("buff")
+    Search("imbue")
+    local other = Other("Imbue Flame")
+    Equal(tostring(other ~= nil), "true", "offered on Buffs")
+    other.check:Click()
+    Equal(List("buff") .. " | " .. table.concat(ns.CustomSpells()["Imbue Flame"] or {}, ",") .. " | " .. S[w.note].text,
+        "Imbue Flame | 1302304 | Added Imbue Flame to Buffs.", "ticked: on Buffs, remembered by its spell")
+    Search("")
+    ok, said = B:Add("buff", "1302307")
+    Equal(tostring(ok) .. " " .. tostring(said) .. " | " .. List("buff"), "true Added Imbue Quickening to Buffs. | Imbue Flame,Imbue Quickening",
+        "or by its ID")
+    local added = ns.Spells:Find("Imbue Flame")
+    Equal(added.kind .. " " .. added.line, "enchant Added", "listed under Added, the Buffs bar's alone")
+    w:Select("cd")
+    Equal(tostring(Row("Imbue Flame") ~= nil), "false", "so not listed on Cooldowns once added")
+    ok, said = B:Transfer("buff", "cd", "Imbue Flame")
+    Equal(tostring(ok) .. " " .. tostring(said) .. " | " .. List("buff"),
+        "false Imbue Flame only goes on the Buffs bar, where it lights while it's on your weapon. | Imbue Flame,Imbue Quickening",
+        "nor moved there")
+    w:Select("buff")
+    Equal(B:Add("buff", "Instant Poison"), true, "a rogue's poison beside them")
+    w:Hide()
+    B:Changed()
+    local buff = B:Get("buff")
+    Equal(tostring(buff.imbues[1] and buff.imbues[1][8713]) .. " " .. tostring(buff.imbues[2] and buff.imbues[2][8712]) .. " "
+        .. tostring(buff.imbues[3] and buff.imbues[3][325]), "true true true", "each lit by its own enchant")
+    local onHand
+    _G.C_PaperDollInfo = { GetTemporaryEnchantmentInfo = function(slot)
+        if slot == 17 and onHand then return { enchantID = onHand, remainingTimeMs = 1800000, hasExpirationTime = true } end
+        return nil
+    end }
+    onHand = 8713
+    Fire("UNIT_INVENTORY_CHANGED", "player")
+    NextFrame(B)
+    Equal(tostring(buff.holders[1].enchantLit) .. " " .. tostring(buff.holders[2].enchantLit) .. " " .. tostring(buff.holders[3].enchantLit),
+        "true false false", "Imbue Flame on the off hand lights its own icon only")
+    onHand = 325
+    Fire("UNIT_INVENTORY_CHANGED", "player")
+    NextFrame(B)
+    Equal(tostring(buff.holders[1].enchantLit) .. " " .. tostring(buff.holders[3].enchantLit), "false true", "and Instant Poison III the poison")
+    _G.C_PaperDollInfo = nil
+    named[1302304], named[1302307] = nil, nil
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- An item that puts a weapon enchant on (a poison, a stone, a scroll), held
+-- over or dropped on the Buffs bar, goes on as what it casts: the entry of
+-- that name in your lists (a rogue's Instant Poison, a warlock's Firestone),
+-- else that spell by its ID (a Scroll of Imbue Flame's). Any rank of it on
+-- the bar already is what it's told it is, so no second icon: Instant Poison
+-- VI there, for an Instant Poison V. Any other item still can't go there,
+-- and the cooldown bars take a poison as the item it is.
+;(function()
+    Start(2, "ROGUE", nil, {
+        { name = "Instant Poison", spellID = 8681, iconID = 132273 },
+        { name = "Instant Poison V", spellID = 11342, iconID = 132273 },
+        { name = "Instant Poison VI", spellID = 11343, iconID = 132273 },
+        { name = "Sinister Strike", subName = "Rank 1", spellID = 1752, iconID = 8 },
+    })
+    named[1302304] = "Imbue Flame"
+    -- Build 70790's items: each one's spell (ItemXItemEffect, ItemEffect, SpellName).
+    local itemSpell = C_Item.GetItemSpell
+    C_Item.GetItemSpell = function(id)
+        if id == 6947 then return "Instant Poison", 8679 end
+        if id == 8927 then return "Instant Poison V", 11339 end
+        if id == 277497 then return "Imbue Flame", 1302304 end
+        return itemSpell(id)
+    end
+    Equal(ns.Spells:Find("Instant Poison").line .. " | " .. ns.Spells:Find("Instant Poison VI").line,
+        "Weapon enchants | Weapon enchants", "the rogue's poisons are weapon enchants")
+    w:Select("buff")
+    Equal(select(2, B:CanAddItem("buff", 6947)), "Drop to add Instant Poison to Buffs.", "held over Buffs: it says what dropping does")
+    cursor = { "item", 6947 }
+    Equal(Drop(page.tray) .. " | " .. List("buff") .. " | " .. tostring(cursor) .. " | " .. tostring(ns.CustomSpells()["Instant Poison"]),
+        "Added Instant Poison to Buffs. | Instant Poison | nil | nil", "the poison dropped on Buffs puts your Instant Poison there")
+    cursor = { "item", 6947 }
+    Equal(Drop(page.tray) .. " | " .. List("buff"), "Instant Poison is already on Buffs. | Instant Poison", "once only")
+    -- A lower rank's poison over a higher rank already on: that one, which lights for every rank's.
+    B:TakeOff("buff", "Instant Poison")
+    Equal(B:Add("buff", "Instant Poison VI"), true, "Instant Poison VI on Buffs instead")
+    cursor = { "item", 8927 }
+    Equal(select(2, B:CanAddItem("buff", 8927)) .. " | " .. Drop(page.tray) .. " | " .. List("buff") .. " | " .. tostring(cursor),
+        "Instant Poison VI is already on Buffs. | Instant Poison VI is already on Buffs. | Instant Poison VI | nil",
+        "an Instant Poison V held over it, then dropped: already on, no second icon")
+    cursor = { "item", 6947 }
+    Equal(Drop(page.tray) .. " | " .. List("buff"), "Instant Poison VI is already on Buffs. | Instant Poison VI",
+        "nor for rank 1's")
+    cursor = { "item", 277497 }
+    Equal(Drop(page.tray) .. " | " .. List("buff") .. " | " .. table.concat(ns.CustomSpells()["Imbue Flame"] or {}, ","),
+        "Added Imbue Flame to Buffs. | Instant Poison VI,Imbue Flame | 1302304", "a Scroll of Imbue Flame puts its imbue on, by its spell")
+    cursor = { "item", 277497 }
+    Equal(Drop(page.tray) .. " | " .. List("buff"), "Imbue Flame is already on Buffs. | Instant Poison VI,Imbue Flame", "once only too")
+    cursor = { "item", 118 }
+    Equal(Drop(page.tray) .. " | " .. List("buff") .. " | " .. tostring(cursor ~= nil),
+        "Items can't go on the Buffs bar. | Instant Poison VI,Imbue Flame | true", "a potion still can't, and stays held")
+    cursor = nil
+    Equal(tostring((B:CanAddItem("debuff", 6947))) .. " " .. tostring((B:CanAddItem("cd", 277497))) .. " "
+        .. tostring((B:AddItem("cd", 6947))) .. " " .. tostring(List("cd"):find("Poison") ~= nil), "false false false false",
+        "not on Debuffs, and the cooldown bars take the item itself (which has none to show)")
+    w:Hide()
+    B:Changed()
+    local buff = B:Get("buff")
+    Equal(tostring(buff.imbues[1] and buff.imbues[1][325]) .. " " .. tostring(buff.imbues[1] and buff.imbues[1][624]) .. " "
+        .. tostring(buff.imbues[2] and buff.imbues[2][8713]), "true true true",
+        "each lit by its own enchant: any Instant Poison's, the imbue's")
+    local onHand
+    _G.C_PaperDollInfo = { GetTemporaryEnchantmentInfo = function(slot)
+        if slot == 17 and onHand then return { enchantID = onHand, remainingTimeMs = 1800000, hasExpirationTime = true } end
+        return nil
+    end }
+    onHand = 624
+    Fire("UNIT_INVENTORY_CHANGED", "player")
+    NextFrame(B)
+    Equal(tostring(buff.holders[1].enchantLit) .. " " .. tostring(buff.holders[2].enchantLit), "true false",
+        "Instant Poison V on the off hand lights Instant Poison VI, not the imbue")
+    onHand = 8713
+    Fire("UNIT_INVENTORY_CHANGED", "player")
+    NextFrame(B)
+    Equal(tostring(buff.holders[1].enchantLit) .. " " .. tostring(buff.holders[2].enchantLit), "false true", "and the imbue its own")
+    _G.C_PaperDollInfo = nil
+    named[1302304] = nil
+    C_Item.GetItemSpell = itemSpell
+    Equal(#printed, 0, "no errors")
+
+    -- A warlock's Lesser Firestone from the bag: his Firestone entry, by its name alone.
+    -- His Spellstone (item 5522 casts "Spellstone", 1237152 in build 70790) the same.
+    Start(2, "WARLOCK", nil, {
+        { name = "Create Firestone", subName = "Rank 1", spellID = 6366, iconID = 134085 },
+        { name = "Create Spellstone", subName = "Rank 1", spellID = 2362, iconID = 134131 },
+        { name = "Shadow Bolt", subName = "Rank 1", spellID = 686, iconID = 7 },
+    })
+    itemSpell = C_Item.GetItemSpell
+    C_Item.GetItemSpell = function(id)
+        if id == 1254 then return "Firestone", 758 end
+        if id == 5522 then return "Spellstone", 1237152 end
+        return itemSpell(id)
+    end
+    w:Select("buff")
+    cursor = { "item", 1254 }
+    Equal(Drop(page.tray) .. " | " .. List("buff") .. " | " .. tostring(ns.CustomSpells().Firestone),
+        "Added Firestone to Buffs. | Firestone | nil", "a Lesser Firestone dropped on Buffs puts his Firestone there")
+    cursor = { "item", 1254 }
+    Equal(tostring((B:CanAddItem("cd", 1254))) .. " " .. tostring(List("cd"):find("Firestone") ~= nil), "false false",
+        "not on Cooldowns")
+    cursor = { "item", 5522 }
+    Equal(Drop(page.tray) .. " | " .. List("buff") .. " | " .. tostring(ns.CustomSpells().Spellstone),
+        "Added Spellstone to Buffs. | Firestone,Spellstone | nil", "a Spellstone dropped on Buffs puts his Spellstone there")
+    cursor = { "item", 5522 }
+    Drop(page.tray)
+    Equal(List("buff"), "Firestone,Spellstone", "once only")
+    cursor = nil
+    w:Hide()
+    C_Item.GetItemSpell = itemSpell
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The poisons whose maker has a numeral (Wound Poison II, Crippling Poison
+-- II: spells 13228 and 3421) are weapon enchants like the rest: listed there,
+-- ticked onto Buffs, and lit by what they put on (which goes by the plain
+-- name). Each poison's item casts the plain name's spell, so one dropped on
+-- the bar is the entry of that family already on it.
+;(function()
+    Start(2, "ROGUE", nil, {
+        { name = "Wound Poison II", spellID = 13228, iconID = 132274 },
+        { name = "Crippling Poison II", spellID = 3421, iconID = 132274 },
+        { name = "Sinister Strike", subName = "Rank 1", spellID = 1752, iconID = 8 },
+    })
+    Equal(ns.Spells:Find("Wound Poison II").line .. " | " .. ns.Spells:Find("Crippling Poison II").line,
+        "Weapon enchants | Weapon enchants", "both under Weapon enchants")
+    w:Select("buff")
+    Row("Wound Poison II").check:Click()
+    Row("Crippling Poison II").check:Click()
+    Equal(List("buff"), "Wound Poison II,Crippling Poison II", "both ticked onto Buffs")
+    local itemSpell = C_Item.GetItemSpell
+    C_Item.GetItemSpell = function(id)
+        if id == 10920 then return "Wound Poison", 13225 end
+        if id == 3776 then return "Crippling Poison", 11202 end
+        return itemSpell(id)
+    end
+    cursor = { "item", 10920 }
+    local wound = Drop(page.tray)
+    cursor = { "item", 3776 }
+    Equal(wound .. " | " .. Drop(page.tray) .. " | " .. List("buff"),
+        "Wound Poison II is already on Buffs. | Crippling Poison II is already on Buffs. | Wound Poison II,Crippling Poison II",
+        "their items dropped on the bar: already on")
+    cursor = nil
+    C_Item.GetItemSpell = itemSpell
+    w:Hide()
+    B:Changed()
+    local buff = B:Get("buff")
+    Equal(tostring(buff.imbues[1] and buff.imbues[1][704]) .. " " .. tostring(buff.imbues[2] and buff.imbues[2][603]) .. " "
+        .. tostring(buff.imbues[1] and buff.imbues[1][603]), "true true nil", "each lit by its own family's enchants")
+    local onHand = {}
+    _G.C_PaperDollInfo = { GetTemporaryEnchantmentInfo = function(slot)
+        if onHand[slot] then return { enchantID = onHand[slot], remainingTimeMs = 1800000, hasExpirationTime = true } end
+        return nil
+    end }
+    local function Change()
+        Fire("UNIT_INVENTORY_CHANGED", "player")
+        NextFrame(B)
+    end
+    Change()
+    Equal(tostring(buff.holders[1].enchantLit) .. " " .. tostring(buff.holders[2].enchantLit), "false false", "neither on: neither lit")
+    onHand[16] = 704
+    Change()
+    Equal(tostring(buff.holders[1].enchantLit) .. " " .. tostring(buff.holders[2].enchantLit), "true false",
+        "Wound Poison II on the main hand lights Wound Poison II")
+    onHand[17] = 603
+    Change()
+    Equal(tostring(buff.holders[1].enchantLit) .. " " .. tostring(buff.holders[2].enchantLit), "true true",
+        "and Crippling Poison II on the off hand lights Crippling Poison II")
+    _G.C_PaperDollInfo = nil
+    Equal(#printed, 0, "no errors")
+
+    -- Only the numbered one in his lists, and none of it on the bar: the
+    -- item (which casts the plain name) puts that one on, not one of its own.
+    Start(2, "ROGUE", nil, {
+        { name = "Crippling Poison II", spellID = 3421, iconID = 132274 },
+        { name = "Sinister Strike", subName = "Rank 1", spellID = 1752, iconID = 8 },
+    })
+    itemSpell = C_Item.GetItemSpell
+    C_Item.GetItemSpell = function(id)
+        if id == 3776 then return "Crippling Poison", 11202 end
+        return itemSpell(id)
+    end
+    w:Select("buff")
+    cursor = { "item", 3776 }
+    Equal(select(2, B:CanAddItem("buff", 3776)) .. " | " .. Drop(page.tray) .. " | " .. List("buff") .. " | "
+        .. tostring(ns.CustomSpells()["Crippling Poison"]) .. " " .. tostring(ns.Spells:Find("Crippling Poison")),
+        "Drop to add Crippling Poison II to Buffs. | Added Crippling Poison II to Buffs. | Crippling Poison II | nil nil",
+        "a Crippling Poison dropped with only Crippling Poison II listed: that one goes on, nothing added of its own")
+    cursor = nil
+    C_Item.GetItemSpell = itemSpell
+    w:Hide()
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Main hand enchant and Off hand enchant: an entry for each hand, for every
+-- class, first under Weapon enchants and only for the Buffs bar, marked
+-- experimental. Each lights while anything at all is on its hand for a time
+-- (an oil, a stone, a poison, one the addon doesn't know), with its time
+-- left, and shows which: that enchant's icon and name (the weapon's own
+-- icon and "Weapon enchant" for one it doesn't know), its own while none
+-- is. A hand with no weapon in it (nothing, a shield) has nothing missing:
+-- no glow, and no spot with Only show missing or Only when missing. Beside
+-- a poison's own entry, each lights on its own.
+;(function()
+    for _, class in ipairs({ "ROGUE", "WARLOCK", "WARRIOR", "PRIEST", "SHAMAN" }) do
+        Start(2, class)
+        local main, off = ns.Spells:Find("hand:main"), ns.Spells:Find("hand:off")
+        Equal(tostring(main and main.name) .. " | " .. tostring(off and off.name) .. " | " .. tostring(main and main.line) .. " "
+            .. tostring(off and off.line) .. " | " .. tostring(main and main.kind) .. " " .. tostring(off and off.kind) .. " | "
+            .. tostring(main and main.hand) .. " " .. tostring(off and off.hand) .. " | " .. tostring(main and main.icon) .. " | "
+            .. tostring(off and off.icon) .. " | " .. tostring(ns.Spells:ForMe("hand:main", "buff")) .. " "
+            .. tostring(ns.Spells:ForMe("hand:off", "buff")),
+            "Main hand enchant | Off hand enchant | Weapon enchants Weapon enchants | enchant enchant | 16 17 | "
+            .. "Interface\\Paperdoll\\UI-PaperDoll-Slot-MainHand | Interface\\Paperdoll\\UI-PaperDoll-Slot-SecondaryHand | true true",
+            class .. ": both hands listed under Weapon enchants, each resting on its slot's picture")
+        w:Hide()
+    end
+
+    -- A rogue: first in the section, before his poisons; the Buffs bar's alone.
+    Start(2, "ROGUE", nil, {
+        { name = "Instant Poison", spellID = 8681, iconID = 132273 },
+        { name = "Sinister Strike", subName = "Rank 1", spellID = 1752, iconID = 8 },
+    })
+    local order = {}
+    for _, entry in ipairs(ns.Spells:Fresh()) do
+        if entry.line == "Weapon enchants" then order[#order + 1] = entry.name end
+    end
+    Equal(table.concat(order, ", "), "Main hand enchant, Off hand enchant, Instant Poison", "the two hands first, then his poison")
+    w:Select("cd")
+    Equal(tostring(Row("hand:main") ~= nil) .. " " .. tostring(Row("hand:off") ~= nil), "false false", "not listed on Cooldowns")
+    local ok, said = B:Add("cd", "Main hand enchant")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Main hand enchant only goes on the Buffs bar, where it lights while it's on your weapon.",
+        "nor taken there, by its name")
+    Equal(tostring((B:Add("util", "Off hand enchant"))) .. " " .. tostring(List("cd") .. List("util")), "false ", "nor on Utility")
+    w:Select("debuff")
+    Equal(tostring(Row("hand:main") ~= nil) .. " " .. tostring((B:Add("debuff", "Main hand enchant"))) .. " " .. List("debuff"),
+        "false false ", "nor on Debuffs")
+    w:Select("buff")
+    local row = Row("hand:main")
+    Equal(tostring(row ~= nil) .. " | " .. tostring(row and S[row.rank].text) .. " | " .. tostring(row and row.check.hint(row.check)),
+        "true | (experimental) | Put Main hand enchant on Buffs. It lights while that hand has an oil, stone, poison or imbue on,"
+        .. " and shows which. (experimental)", "listed on Buffs, quietly marked experimental, saying what it does")
+    row.check:Click()
+    Row("hand:off").check:Click()
+    Equal(List("buff") .. " | " .. tostring(ns.CustomSpells()["Main hand enchant"]), "hand:main,hand:off | nil",
+        "both ticked onto Buffs, kept by their keys, nothing remembered")
+    Equal(tostring(B:Add("buff", "Instant Poison")) .. " " .. List("buff"), "true hand:main,hand:off,Instant Poison", "his poison beside them")
+    ok, said = B:Transfer("buff", "cd", "hand:main")
+    Equal(tostring(ok) .. " " .. tostring(said), "false Main hand enchant only goes on the Buffs bar, where it lights while it's on your weapon.",
+        "nor moved to Cooldowns once on")
+
+    -- Two daggers held; what's on each hand as the game says (SECRET: it won't).
+    local onHand, ends, held = {}, {}, { [16] = 2092, [17] = 2092 }
+    local inventory, instant = _G.GetInventoryItemID, C_Item.GetItemInfoInstant
+    _G.GetInventoryItemID = function(unit, slot)
+        if slot == 16 or slot == 17 then return held[slot] end
+        return inventory(unit, slot)
+    end
+    -- A dagger and a fishing pole are weapons (class 2); a shield (2129) and an off-hand book (5109) are armour (4).
+    C_Item.GetItemInfoInstant = function(id)
+        local class = ({ [2092] = 2, [6256] = 2, [2129] = 4, [5109] = 4 })[id]
+        if class then return id, nil, nil, "", nil, class, 0 end
+        return instant(id)
+    end
+    _G.C_PaperDollInfo = { GetTemporaryEnchantmentInfo = function(slot)
+        local id = onHand[slot]
+        if rawequal(id, SECRET) then return SECRET end
+        if id then return { enchantID = id, remainingTimeMs = ((ends[slot] or clock + 1800) - clock) * 1000, hasExpirationTime = true } end
+        return nil
+    end }
+    local function Change()
+        Fire("UNIT_INVENTORY_CHANGED", "player")
+        NextFrame(B)
+    end
+    w:Hide()
+    B:SetOption("buff", "showMissing", true)
+    B:SetGlowMissing("buff", "hand:main", true)
+    B:SetGlowMissing("buff", "hand:off", true)
+    Change()
+    local buff = B:Get("buff")
+    local main, off, poison = buff.holders[1], buff.holders[2], buff.holders[3]
+    local slots = S[buff.container].slots
+    Equal(tostring(buff.imbues[1] and buff.imbues[1].hands[16]) .. " " .. tostring(buff.imbues[1] and buff.imbues[1].handsOnly) .. " "
+        .. tostring(buff.imbues[2] and buff.imbues[2].hands[17]) .. " " .. tostring(buff.imbues[1] and buff.imbues[1].hands[17]) .. " "
+        .. tostring(next(buff.slotIDs[1])) .. " " .. tostring(slots.b1.enabled) .. " " .. tostring(slots.b2.enabled) .. " "
+        .. tostring(slots.b3.enabled), "true true true nil nil false false true",
+        "each its own hand's, with no spells: its aura slot stays off (the poison's is on)")
+    local function Glows(holder)
+        local host = holder.glowHost
+        return tostring(host ~= nil and host.glow ~= nil and S[host.glow].shown == true and S[host].alpha ~= 0)
+    end
+    local function Shows(holder)
+        return table.concat({ tostring(holder:IsShown()), tostring(holder.enchantLit), tostring(S[holder.icon].desaturated),
+            tostring(S[holder.icon].texture), tostring(S[holder.label].text), Glows(holder) }, " ")
+    end
+    Equal(Shows(main) .. " | " .. Shows(off), "true false true Interface\\Paperdoll\\UI-PaperDoll-Slot-MainHand Main hand enchant true"
+        .. " | true false true Interface\\Paperdoll\\UI-PaperDoll-Slot-SecondaryHand Off hand enchant true",
+        "nothing on either dagger: both greyed on their own pictures, glowing (Glow when missing)")
+
+    -- Instant Poison II on the main hand: it lights with that poison's icon,
+    -- name and time left, and so does the poison's own entry.
+    onHand[16] = 324
+    Change()
+    Equal(Shows(main) .. " | " .. ("%d"):format(Last(main.enchant.cooldown, "SetCooldown", 2) or -1) .. " | " .. Shows(off) .. " | "
+        .. tostring(poison.enchantLit), "true true false 132273 Instant Poison II false | 1800 | true false true"
+        .. " Interface\\Paperdoll\\UI-PaperDoll-Slot-SecondaryHand Off hand enchant true | true",
+        "Instant Poison II on: the main hand lit as it, with its time left; the off hand still missing; the poison's entry lit too")
+    -- A wizard oil on the off hand, then one the addon doesn't know: the weapon's own icon.
+    onHand[17] = 2623
+    Change()
+    Equal(Shows(off), "true true false 134711 Minor Wizard Oil false", "a Minor Wizard Oil on the off hand lights it, as the oil")
+    onHand[17] = 9999
+    Change()
+    Equal(Shows(off) .. " | " .. tostring(poison.enchantLit), "true true false 777 Weapon enchant false | true",
+        "one it doesn't know still lights it, with the weapon's own icon")
+    -- The weapon's icon a secret (in a fight): the question mark instead.
+    local texture = _G.GetInventoryItemTexture
+    _G.GetInventoryItemTexture = function(unit, slot)
+        if slot == 17 then return SECRET end
+        return texture(unit, slot)
+    end
+    onHand[17] = 9998
+    Change()
+    Equal(Shows(off), "true true false 134400 Weapon enchant false", "the weapon's icon a secret: lit with the question mark")
+    _G.GetInventoryItemTexture = texture
+    -- A Firestone, a Spellstone, a sharpening stone, Rockbiter and Instant Poison, each by its own.
+    local seen = {}
+    for _, id in ipairs({ 1803, 8059, 40, 29, 323 }) do
+        onHand[17] = id
+        Change()
+        seen[#seen + 1] = S[off.icon].texture .. " " .. S[off.label].text
+    end
+    Equal(table.concat(seen, ", "), "134085 Lesser Firestone, 134131 Spellstone, 135248 Rough Sharpening Stone, 136086 Rockbiter Weapon,"
+        .. " 132273 Instant Poison", "each enchant by its own icon and name")
+    -- Off again: back to its own picture and name, greyed and glowing.
+    onHand[17] = nil
+    Change()
+    Equal(Shows(off), "true false true Interface\\Paperdoll\\UI-PaperDoll-Slot-SecondaryHand Off hand enchant true",
+        "off again: its own picture, greyed, glowing")
+
+    -- A shield in the off hand, or nothing there: nothing missing, so no glow
+    -- (greyed in its spot, as the bar keeps spots).
+    held[17] = 2129
+    Change()
+    Equal(Shows(off) .. " | " .. tostring(buff.bare[2]) .. " " .. tostring(buff.bare[1]) .. " | " .. ns.BuffBar:EnchantReport(buff, 2),
+        "true false true Interface\\Paperdoll\\UI-PaperDoll-Slot-SecondaryHand Off hand enchant false | true nil"
+        .. " |  | weapon enchant none, no weapon", "a shield in the off hand: no glow, nothing missing")
+    held[17] = 5109
+    Change()
+    Equal(Glows(off) .. " " .. tostring(buff.bare[2]), "false true", "nor with a book held in the off hand")
+    held[17] = nil
+    Change()
+    Equal(Glows(off) .. " " .. tostring(buff.bare[2]) .. " " .. Glows(main), "false true false", "nor with nothing there")
+    -- The game won't say what's held: as last read.
+    held[17] = SECRET
+    Change()
+    Equal(Glows(off) .. " " .. tostring(buff.bare[2]), "false true", "the game won't say what's held: still nothing there")
+    -- A weapon in it again: missing, glowing.
+    held[17] = 6256
+    Change()
+    Equal(Glows(off) .. " " .. tostring(buff.bare[2]), "true nil", "a fishing pole in it (a weapon): missing again, glowing")
+    -- The main hand empty: the same; the poison's entry is still missing.
+    onHand[16], held[16] = nil, nil
+    Change()
+    Equal(Glows(main) .. " " .. tostring(buff.bare[1]) .. " " .. tostring(poison.enchantLit), "false true false",
+        "nothing in the main hand: no glow there either")
+    held[16] = 2092
+
+    -- A secret answer in a fight keeps what was read: lit as it was.
+    onHand[16] = 2628
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit), "Brilliant Wizard Oil true", "a Brilliant Wizard Oil on")
+    onHand[16] = SECRET
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. S[main.icon].texture, "Brilliant Wizard Oil true 134727",
+        "the game won't say: still as last read")
+    -- In a fight: what's on follows at once (the addon's own frames), with
+    -- nothing asked of the aura container.
+    local calls = containerCallsInCombat
+    lockdown = true
+    Fire("PLAYER_REGEN_DISABLED")
+    onHand[16] = 2629
+    Change()
+    local fought = S[main.label].text .. " " .. S[main.icon].texture .. " " .. tostring(main.enchantLit) .. " " .. Glows(main)
+    onHand[16] = nil
+    Change()
+    fought = fought .. " | " .. S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. Glows(main) .. " | "
+        .. (containerCallsInCombat - calls)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fought, "Brilliant Mana Oil 134722 true false | Main hand enchant false true | 0",
+        "in a fight: a new oil shows at once, and its end too, glowing; the container untouched")
+
+    -- Warn at: the countdown red from its seconds; out of a fight its spot
+    -- glows from them, the moment found from the hand's time left.
+    local was = clock
+    onHand[16], ends[16] = 2628, clock + 1800
+    Change()
+    local from = #timers
+    B:SetWarnAt("buff", "hand:main", 600)
+    local function Low() return tostring(main.lowHost ~= nil and main.lowHost.glow ~= nil and main.lowHost.glow:IsShown()) end
+    Equal(tostring(ns.Style:Warned(main.enchant.cooldown)) .. " " .. Low(), "600 false",
+        "warned at 10 minutes: its countdown red from then; 30 minutes left, not lit")
+    clock = clock + 1250
+    Later(from)
+    Equal(Low(), "true", "under 10 minutes: its spot glows")
+    onHand[16], ends[16] = nil, nil
+    Change()
+    Equal(Low() .. " " .. tostring(main.enchantLit), "false false", "gone: no low-time glow")
+    B:SetWarnAt("buff", "hand:main", 0)
+    Equal(tostring(ns.Style:Warned(main.enchant.cooldown)), "nil", "no warning: its countdown as it was")
+    clock = was
+    -- Not (yet) on a named enchant's own entry, Instant Poison: its countdown
+    -- and spot as before, the time left under its warning or not.
+    onHand[16], ends[16] = 323, clock + 1800
+    Change()
+    from = #timers
+    B:SetWarnAt("buff", "Instant Poison", 600)
+    local function PoisonLow() return tostring(poison.lowHost ~= nil and poison.lowHost.glow ~= nil and poison.lowHost.glow:IsShown()) end
+    local before = tostring(ns.Style:Warned(poison.enchant.cooldown)) .. " " .. PoisonLow()
+    clock = clock + 1250
+    Later(from)
+    Equal(before .. " | " .. PoisonLow() .. " " .. tostring(poison.enchantLit), "nil false | false true",
+        "Warn at on Instant Poison's own entry: no red countdown, no glow, with 30 minutes or 9 left")
+    B:SetWarnAt("buff", "Instant Poison", 0)
+    onHand[16], ends[16] = nil, nil
+    Change()
+    clock = was
+
+    -- Only show missing: a hand with something on, or with no weapon, has no spot.
+    held[17] = nil
+    onHand[16] = 323
+    B:SetOption("buff", "onlyMissing", true)
+    Change()
+    Equal(tostring(main:IsShown()) .. " " .. tostring(off:IsShown()) .. " " .. tostring(poison:IsShown()), "false false false",
+        "Only show missing: the lit main hand, the empty off hand and the lit poison all off the bar")
+    held[17] = 2092
+    Change()
+    Equal(tostring(off:IsShown()) .. " " .. Glows(off), "true true", "a dagger in the off hand: missing, so it shows, glowing")
+    -- Only when missing, ticked for the off hand alone on a packed bar.
+    B:SetOption("buff", "onlyMissing", false)
+    B:SetOption("buff", "showMissing", false)
+    B:SetOnlyWhenMissing("buff", "hand:off", true)
+    Change()
+    Equal(tostring(main:IsShown()) .. " " .. tostring(off:IsShown()), "true true", "packed: the lit main hand shows; the missing off hand too")
+    held[17] = 2129
+    Change()
+    Equal(tostring(off:IsShown()), "false", "a shield: nothing missing, no spot")
+    onHand[17] = 7602
+    Change()
+    Equal(tostring(off:IsShown()) .. " " .. tostring(off.enchantLit), "false true", "a shield's coating on: lit, so not missing either")
+    B:SetOnlyWhenMissing("buff", "hand:off", false)
+    Change()
+    Equal(tostring(off:IsShown()) .. " " .. S[off.label].text, "true Conductive Shield Coating", "packed, unticked: shown while it's on")
+    onHand[16] = nil
+    Change()
+    Equal(tostring(main:IsShown()), "false", "packed: the main hand with nothing on has no spot")
+    Equal(#printed, 0, "no errors")
+
+    -- A joined pair (both hands as one icon) lights for either.
+    B:SetOption("buff", "showMissing", true)
+    ns.Joins("buff")["hand:off"] = true
+    B:Changed()
+    buff = B:Get("buff")
+    Equal(tostring(buff.imbues[1] and buff.imbues[1].hands[16]) .. " " .. tostring(buff.imbues[1] and buff.imbues[1].hands[17]) .. " "
+        .. tostring(buff.holders[1].enchantLit) .. " " .. tostring(S[buff.holders[1].label].text),
+        "true true true Conductive Shield Coating", "joined: one icon for both hands, lit by the off hand's")
+    ns.Joins("buff")["hand:off"] = nil
+    B:Changed()
+    _G.C_PaperDollInfo = nil
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
+-- An older version keeps a key it doesn't know (as one before the hands
+-- keeps "hand:main") on the bar for whoever knows it, showing nothing.
+;(function()
+    Start(2, "ROGUE", { useBars = true, notesSeen = "dev", everyone = "Shared",
+        profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = {}, util = {}, buff = { "hand:main", "hand:ranged" }, debuff = {} } } })
+    B:Changed()
+    Equal(table.concat((B:Mine("buff")), ",") .. " | " .. List("buff") .. " | " .. B:Get("buff").count, "hand:main | hand:main,hand:ranged | 1",
+        "a key this version doesn't know stays in the profile and shows nothing")
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
+-- A hand's key on a cooldown bar (only an edited profile could put it
+-- there): no icon for it, which would be a spell icon with no spell.
+;(function()
+    Start(2, "ROGUE", { useBars = true, notesSeen = "dev", everyone = "Shared",
+        profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = { "hand:main", "Sinister Strike" }, util = { "hand:off" },
+            buff = {}, debuff = {} } } }, { { name = "Sinister Strike", subName = "Rank 1", spellID = 1752, iconID = 8 } })
+    B:Changed()
+    NextFrame(B)
+    local cd = B:Get("cd")
+    Equal(cd.count .. " " .. tostring(cd.icons[1] and cd.icons[1].name) .. " " .. B:Get("util").count, "1 Sinister Strike 0",
+        "a hand on Cooldowns or Utility: no icon there")
+    Equal(#printed, 0, "no errors")
     w:Hide()
 end)()
 
@@ -10173,7 +10907,7 @@ end)()
     local made = cd.auraContainers
     Equal(made and (S[made.p].unit .. " " .. S[made.t].unit), "player target", "ticked: one container for you, one for your target")
     local p1, t1 = S[made.p].slots.p1, S[made.t].slots.t1
-    Equal(p1.filter .. " " .. t1.filter, "HELPFUL HARMFUL", "a buff on you, a debuff on your target")
+    Equal(p1.filter .. " " .. t1.filter, "HELPFUL HARMFUL|PLAYER", "a buff on you, your debuff on your target")
     Equal(tostring(t1.enabled) .. " " .. tostring(t1.filters.includeSpellIDs[8921] and t1.filters.includeSpellIDs[8924])
         .. " " .. tostring(t1.filters.isFromPlayerOrPlayerPet), "true true true", "every rank of Moonfire, only yours")
     Equal(t1.supplied.SetIcon ~= nil and t1.supplied.SetDurationCooldown ~= nil and t1.supplied.SetApplicationCount ~= nil, true,
@@ -10217,7 +10951,7 @@ end)()
     B:SetOption("buff", "selfDebuffs", true)
     local own = groups.self
     Equal(own and (own.filter .. " " .. tostring(own.enabled) .. " " .. tostring(own.filters.isFromPlayerOrPlayerPet)
-        .. " " .. tostring(own.filters.includeSpellIDs)), "HARMFUL true true nil", "ticked: your debuffs on you, by who cast them, no spell IDs")
+        .. " " .. tostring(own.filters.includeSpellIDs)), "HARMFUL|PLAYER true true nil", "ticked: your debuffs on you, by who cast them, no spell IDs")
     Equal(own.layout.layoutIndex > groups.g1.layout.layoutIndex, true, "after your buffs")
     B:SetOption("buff", "grow", "left")
     Equal(groups.self.layout.layoutIndex < groups.g1.layout.layoutIndex, true, "growing left: before them, at the far end")
@@ -10322,6 +11056,15 @@ end)()
         "the groups show what they match")
     Equal(Count("late") .. " " .. Count("addonCalls") .. " " .. (Count("made") - made), "0 0 0",
         "no icon made, and none of the addon's code run, while the containers update")
+    -- Only yours: another player's Moonfire on your target, or a debuff
+    -- another player put on you, lights nothing; yours (or your pet's) does.
+    local moonfire = S[B:Get("debuff").container].groups.g1
+    local others = { { id = 8921, harmful = true, other = true }, { id = 90001, harmful = true, other = true } }
+    for _, container in ipairs(containers) do S[container].Update(others) end
+    Equal(#moonfire.active .. " " .. #groups.self.active, "0 0", "another player's same debuff lights nothing")
+    local yours = { { id = 8921, harmful = true, mine = true }, { id = 90001, harmful = true, mine = true } }
+    for _, container in ipairs(containers) do S[container].Update(yours) end
+    Equal(#moonfire.active .. " " .. #groups.self.active, "1 2", "yours (or your pet's) lights: Moonfire on Debuffs, both in your debuffs on you")
 
     -- A game making fewer icons up front: a group is held to the ones made.
     Environment()

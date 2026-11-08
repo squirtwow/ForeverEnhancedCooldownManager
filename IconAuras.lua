@@ -14,8 +14,9 @@ ns.IconAuras = A
 
 local Style = ns.Style
 local EDGE = { 1, .82, 0 } -- the gold of an aura that's up
--- An aura on you, and your own debuff on your target.
-local SIDES = { { key = "p", unit = "player", filter = "HELPFUL" }, { key = "t", unit = "target", filter = "HARMFUL" } }
+-- An aura on you, and your own debuff on your target ("PLAYER": yours, not
+-- another player's same debuff).
+local SIDES = { { key = "p", unit = "player", filter = "HELPFUL" }, { key = "t", unit = "target", filter = "HARMFUL|PLAYER" } }
 -- Out of sight, for a slot whose spell isn't on the bar just now.
 local AWAY = -10000
 
