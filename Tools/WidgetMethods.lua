@@ -32,6 +32,7 @@ return {
         Scale = "GetOrigin GetScale GetScaleFrom GetScaleTo SetOrigin SetScale SetScaleFrom SetScaleTo",
         Translation = "GetOffset SetOffset",
         Rotation = "GetDegrees GetOrigin GetRadians SetDegrees SetOrigin SetRadians",
+        FlipBook = "GetFlipBookColumns GetFlipBookFrameHeight GetFlipBookFrameWidth GetFlipBookFrames GetFlipBookRows SetFlipBookColumns SetFlipBookFrameHeight SetFlipBookFrameWidth SetFlipBookFrames SetFlipBookRows",
     },
     -- Each kind of widget: the APIs it has.
     kinds = {
@@ -55,6 +56,7 @@ return {
         Scale = "FrameScriptObject Object Animation Scale",
         Translation = "FrameScriptObject Object Animation Translation",
         Rotation = "FrameScriptObject Object Animation Rotation",
+        FlipBook = "FrameScriptObject Object Animation FlipBook",
     },
     -- What each template adds: its public mixins' methods.
     templates = {

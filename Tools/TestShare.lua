@@ -161,6 +161,7 @@ end
 -- Moved into another frame: it follows that one's showing and hiding now.
 function Proto:SetParent(parent)
     local s = S[self]
+    assert(not s.handed, "a region an aura icon's animation animates moved")
     s.last.SetParent = table.pack(parent)
     local old = s.parent and S[s.parent]
     if old and old.kids then
@@ -219,7 +220,34 @@ function Proto:GetEffectiveScale() return 1 end
 function Proto:SetBackdropBorderColor(r, g, b, a) S[self].border = { r, g, b, a } end
 function Proto:SetTextColor(r, g, b) S[self].colour = { r, g, b } end
 function Proto:SetShadowColor(r, g, b, a) S[self].shadow = a end
-function Proto:SetAlpha(a) S[self].alpha = a end
+-- (Like the game: a region an animation handed to an aura icon animates
+-- keeps its alpha the game's.)
+function Proto:SetAlpha(a)
+    assert(not S[self].handed, "the alpha of a region an aura icon's animation animates")
+    S[self].alpha = a
+end
+-- Animations, as the game makes them: a group on a frame or texture (it's
+-- that one's, not a frame inside it, so it isn't shown or hidden with it),
+-- and the animations in it, each on the group's own frame or texture unless
+-- given a target. Each group counts its plays.
+function Proto:CreateAnimationGroup()
+    local group = New("AnimationGroup")
+    S[group].parent, S[group].anims, S[group].plays = self, {}, 0
+    return group
+end
+function Proto:CreateAnimation(kind)
+    assert(not S[self].handed, "an animation added to a group handed to an aura icon")
+    local anim = New(kind)
+    S[anim].parent = self
+    table.insert(S[self].anims, anim)
+    return anim
+end
+function Proto:GetAnimations() return table.unpack(S[self].anims) end
+function Proto:SetTarget(target) S[self].target = target end
+function Proto:GetTarget() local s = S[self]; return s.target or S[s.parent].parent end
+function Proto:Play() local s = S[self]; s.plays, s.playing = (s.plays or 0) + 1, true end
+function Proto:Stop() S[self].playing = false end
+function Proto:IsPlaying() return S[self].playing == true end
 function Proto:GetCenter() return S[self].cx, S[self].cy end
 function Proto:GetFrameLevel() return 1 end
 function Proto:GetStringWidth() return 40 end
@@ -379,8 +407,9 @@ local function Environment(keepCVars)
     frames, printed, cooldownCalls = {}, {}, {}
     usable, noMana, range, active, target = {}, {}, {}, false, false
     lockdown, containers, containerCallsInCombat = false, {}, 0
-    -- Blizzard's aura container code run inside the addon's (below).
-    ContainerRuns = {}
+    -- Blizzard's aura container code run inside the addon's (below), and
+    -- whether its icons take shown animations (all of them, unless a test says).
+    ContainerRuns, ShownAnimations = {}, nil
     bindings, cvarOn, reloads, timers = {}, true, 0, {}
     _G.C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
     actionSlots, keyOf, macroSpells, macroItems, actionReads, actionPage, bonusIndex = {}, {}, {}, {}, 0, 1, nil
@@ -573,9 +602,43 @@ local function Environment(keepCVars)
                 rawset(button, "SetDurationText", function(_, object, options)
                     supplied.SetDurationText, supplied.durationTextOptions = object, options
                 end)
+                -- Like the game: an animation group handed to the icon plays
+                -- as the icon comes into sight and stops as it goes
+                -- (ApplyVisibility, Blizzard_CustomAuraButton.lua). The group
+                -- and each animation's target must sit inside the icon; after
+                -- that the group takes no more animations and its targets'
+                -- alpha is the game's (AuraContainerUtil.InitializeInboundAnimationGroup).
+                -- ShownAnimations: "refuse", a game turning one down; "none",
+                -- a game without them. (Kept apart from what its look supplied.)
+                local shown = {}
+                S[button].shownAnimations = shown
+                if ShownAnimations == "none" then
+                    rawset(button, "AddAuraShownAnimation", false)
+                else
+                    rawset(button, "AddAuraShownAnimation", function(_, group)
+                        if ShownAnimations == "refuse" then error("bad object in function call") end
+                        local function Inside(region)
+                            local at = S[region] and S[region].parent
+                            while at do
+                                if at == button then return true end
+                                at = S[at] and S[at].parent
+                            end
+                            return false
+                        end
+                        assert(S[group] and S[group].kind == "AnimationGroup" and Inside(group), "an animation group inside the icon")
+                        local anims = { group:GetAnimations() }
+                        for _, anim in ipairs(anims) do assert(Inside(anim:GetTarget()), "an animation on a region inside the icon") end
+                        S[group].handed = true
+                        for _, anim in ipairs(anims) do S[anim:GetTarget()].handed = true end
+                        table.insert(shown, group)
+                    end)
+                end
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
+                -- (Then out of sight until it shows an aura, as the game's
+                -- first display update leaves it.)
+                button:Hide()
                 return button
             end
             rawset(f, "AddAuraSlot", function(_, key, filter, options)
@@ -678,6 +741,17 @@ local function Environment(keepCVars)
                 if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
+            -- Each icon in use comes into sight and the rest go, as the
+            -- game shows and hides them (running OnShow and OnHide inside
+            -- them), playing an icon's shown animations as it comes into
+            -- sight and stopping them as it goes.
+            local function Sight(button, on)
+                local was = S[button].shown
+                button:SetShown(on)
+                for _, group in ipairs(S[button].shownAnimations) do
+                    if on and not was then group:Play() elseif not on then group:Stop() end
+                end
+            end
             S[f].Update = function(auras)
                 S[f].updating = true
                 debug.sethook(function()
@@ -696,6 +770,20 @@ local function Environment(keepCVars)
                                 group.active[#group.active + 1] = table.remove(group.pool)
                             end
                         end
+                        local using = {}
+                        for _, button in ipairs(group.active) do using[button] = true end
+                        for _, button in ipairs(group.frames) do Sight(button, using[button] == true) end
+                    end
+                    -- A slot's one icon shows the first aura it matches, if any.
+                    for _, slot in pairs(slots) do
+                        local lit = false
+                        for _, aura in ipairs(slot.enabled and auras or {}) do
+                            if Matches(slot, aura) then
+                                lit = true
+                                break
+                            end
+                        end
+                        Sight(slot.button, lit)
                     end
                 end)
                 debug.sethook()

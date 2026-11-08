@@ -81,6 +81,21 @@ local function OnlyNote(bar)
         .. " from addons in a fight, so changes then show once it ends."
 end
 
+-- Glow while active, in a buff's own panel: what it does, or why it can't.
+local function ActiveNote(bar, name)
+    local B = ns.Bars
+    if name and not B:ActiveUsable(bar, name) then
+        if ns.BarData(bar).onlyMissing then
+            return "Not with Only show missing: a buff has no icon while it's on you, so nothing to glow."
+        end
+        if not B:WarnUsable(bar, name) then
+            return "Not for a buff shown Only when missing: it has no icon while it's on you, so nothing to glow."
+        end
+        return "Not for a weapon enchant: only a buff's icon can glow while it's up."
+    end
+    return "Its icon glows while the buff is on you, like a proc, so you can't miss it. Best for short procs."
+end
+
 local function TicksNote(bar, name, label)
     local B = ns.Bars
     local pace = name and B:TickPace(name) or 0
@@ -258,7 +273,40 @@ local function PanelTicks(window, dialog, shade, Changed)
         Changed()
     end)
     window:Hint(ticks, function() return TicksNote(shade.bar, shade.name, shade.label) end)
-    return glow, only, ticks
+    -- Glow while active: only here, as the list row has no room for it
+    -- (seen working in game, 8 Nov 2026, so not marked experimental).
+    local active = T:Check(dialog, "Glow while active", function(self)
+        B:SetGlowActive(shade.bar, shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(active, function() return ActiveNote(shade.bar, shade.name) end)
+    return glow, only, ticks, active
+end
+
+-- Glow size, right under Glow while active and shown with it: how big the
+-- glow is, a percent of its usual size. The profile's, for every buff that
+-- glows, not this one's alone; greyed while this one's tick is off or greyed.
+local function PanelGlowSize(window, dialog, shade, Changed)
+    local B = ns.Bars
+    local function Usable() return B:ActiveUsable(shade.bar, shade.name) and B:GlowsActive(shade.bar, shade.name) end
+    local label = T:Text(dialog, "GameFontHighlight")
+    label:SetText("Glow size")
+    local size = T:Slider(dialog, "", ns.GLOW_ACTIVE_SIZE, 10, PANEL.width - 16 - PANEL.at, function(value)
+        if Usable() then B:SetGlowActiveSize(value) end
+        Changed() -- (greyed, it shows the kept size again)
+    end, 0)
+    size.value:SetWidth(36)
+    local set = size.Set
+    function size:Set(value)
+        set(self, value)
+        self.value:SetText(value .. "%")
+    end
+    window:Hint(size, function()
+        if not B:ActiveUsable(shade.bar, shade.name) then return ActiveNote(shade.bar, shade.name) end
+        if not B:GlowsActive(shade.bar, shade.name) then return "Tick Glow while active first: this sizes its glow." end
+        return "How big the glow is round every buff that glows while it's up, not just this one: 100% is its usual size."
+    end)
+    return label, size, Usable
 end
 
 -- Warn at N seconds left (a player's idea: Siphon Life with 3 seconds left,
@@ -312,8 +360,9 @@ local function PanelWarn(window, dialog, shade)
 end
 
 -- Which of its own ticks the entry has on its bar: Glow when missing on the
--- Buffs and Debuffs bars, Only when missing on Buffs, Count ticks on Debuffs
--- for one that ticks. Each shown and set as its row in the list is.
+-- Buffs and Debuffs bars, Only when missing and Glow while active on Buffs,
+-- Count ticks on Debuffs for one that ticks. Each shown and set as its row
+-- in the list is (Glow while active has no row there).
 local function PaintTicks(shade, bar, name)
     local B = ns.Bars
     local aura, kind = ns.AURA_BARS[bar] ~= nil, ns.BAR_KIND[bar] -- (an extra bar goes by its kind)
@@ -323,8 +372,10 @@ local function PaintTicks(shade, bar, name)
     shade.only:SetUsable(not ns.BarData(bar).onlyMissing)
     shade.ticks:SetChecked(B:CountsTicks(bar, name))
     shade.ticks:SetUsable(shade.ticks:GetChecked() or not B:TickClash(bar, name))
+    shade.active:SetChecked(B:GlowsActive(bar, name))
+    shade.active:SetUsable(B:ActiveUsable(bar, name))
     return { aura and shade.glow or nil, kind == "buff" and shade.only or nil,
-        kind == "debuff" and B:TickPace(name) ~= nil and shade.ticks or nil }
+        kind == "debuff" and B:TickPace(name) ~= nil and shade.ticks or nil, kind == "buff" and shade.active or nil }
 end
 
 local function SpellPanel(window)
@@ -380,7 +431,8 @@ local function SpellPanel(window)
     shade.ownIcon, shade.iconSize = PanelIconSize(window, dialog, shade, Changed)
     At(shade.ownIcon, PANEL.at, 2, 2)
     At(shade.iconSize, PANEL.at + PANEL.own, 2)
-    shade.glow, shade.only, shade.ticks = PanelTicks(window, dialog, shade, Changed)
+    shade.glow, shade.only, shade.ticks, shade.active = PanelTicks(window, dialog, shade, Changed)
+    shade.glowSizeLabel, shade.glowSize, shade.glowSizeUsable = PanelGlowSize(window, dialog, shade, Changed)
     shade.warnLabel, shade.warn = PanelWarn(window, dialog, shade)
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     note:SetWidth(PANEL.width - 32)
@@ -435,12 +487,24 @@ local function SpellPanel(window)
             self.warn:SetUsable(B:WarnUsable(bar, name))
             rows = rows + 1
         end
-        for _, tick in ipairs({ self.glow, self.only, self.ticks }) do
-            local on = tick == shown[1] or tick == shown[2] or tick == shown[3]
+        for _, tick in ipairs({ self.glow, self.only, self.active, self.ticks }) do
+            local on = tick == shown[1] or tick == shown[2] or tick == shown[3] or tick == shown[4]
             tick:SetShown(on)
             if on then
                 At(tick, 16, rows, 2)
                 rows = rows + 1
+            end
+            -- Glow size in the row under Glow while active, shown with it.
+            if tick == self.active then
+                self.glowSizeLabel:SetShown(on)
+                self.glowSize:SetShown(on)
+                if on then
+                    At(self.glowSizeLabel, 16, rows, 4)
+                    At(self.glowSize, PANEL.at, rows)
+                    self.glowSize:Set(ns.GlowActiveSize())
+                    self.glowSize:SetUsable(self.glowSizeUsable())
+                    rows = rows + 1
+                end
             end
         end
         note:SetText(PANEL_NOTE .. (aura and PANEL_AURAS or "") .. (ns.BarData(bar).showTimer and "" or PANEL_OFF))

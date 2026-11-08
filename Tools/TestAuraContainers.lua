@@ -159,6 +159,7 @@ end
 -- Moved into another frame: it follows that one's showing and hiding now.
 function Proto:SetParent(parent)
     local s = S[self]
+    assert(not s.handed, "a region an aura icon's animation animates moved")
     s.last.SetParent = table.pack(parent)
     local old = s.parent and S[s.parent]
     if old and old.kids then
@@ -217,7 +218,34 @@ function Proto:GetEffectiveScale() return 1 end
 function Proto:SetBackdropBorderColor(r, g, b, a) S[self].border = { r, g, b, a } end
 function Proto:SetTextColor(r, g, b) S[self].colour = { r, g, b } end
 function Proto:SetShadowColor(r, g, b, a) S[self].shadow = a end
-function Proto:SetAlpha(a) S[self].alpha = a end
+-- (Like the game: a region an animation handed to an aura icon animates
+-- keeps its alpha the game's.)
+function Proto:SetAlpha(a)
+    assert(not S[self].handed, "the alpha of a region an aura icon's animation animates")
+    S[self].alpha = a
+end
+-- Animations, as the game makes them: a group on a frame or texture (it's
+-- that one's, not a frame inside it, so it isn't shown or hidden with it),
+-- and the animations in it, each on the group's own frame or texture unless
+-- given a target. Each group counts its plays.
+function Proto:CreateAnimationGroup()
+    local group = New("AnimationGroup")
+    S[group].parent, S[group].anims, S[group].plays = self, {}, 0
+    return group
+end
+function Proto:CreateAnimation(kind)
+    assert(not S[self].handed, "an animation added to a group handed to an aura icon")
+    local anim = New(kind)
+    S[anim].parent = self
+    table.insert(S[self].anims, anim)
+    return anim
+end
+function Proto:GetAnimations() return table.unpack(S[self].anims) end
+function Proto:SetTarget(target) S[self].target = target end
+function Proto:GetTarget() local s = S[self]; return s.target or S[s.parent].parent end
+function Proto:Play() local s = S[self]; s.plays, s.playing = (s.plays or 0) + 1, true end
+function Proto:Stop() S[self].playing = false end
+function Proto:IsPlaying() return S[self].playing == true end
 function Proto:GetCenter() return S[self].cx, S[self].cy end
 function Proto:GetFrameLevel() return 1 end
 function Proto:GetStringWidth() return 40 end
@@ -377,8 +405,9 @@ local function Environment(keepCVars)
     frames, printed, cooldownCalls = {}, {}, {}
     usable, noMana, range, active, target = {}, {}, {}, false, false
     lockdown, containers, containerCallsInCombat = false, {}, 0
-    -- Blizzard's aura container code run inside the addon's (below).
-    ContainerRuns = {}
+    -- Blizzard's aura container code run inside the addon's (below), and
+    -- whether its icons take shown animations (all of them, unless a test says).
+    ContainerRuns, ShownAnimations = {}, nil
     bindings, cvarOn, reloads, timers = {}, true, 0, {}
     _G.C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
     actionSlots, keyOf, macroSpells, macroItems, actionReads, actionPage, bonusIndex = {}, {}, {}, {}, 0, 1, nil
@@ -571,9 +600,43 @@ local function Environment(keepCVars)
                 rawset(button, "SetDurationText", function(_, object, options)
                     supplied.SetDurationText, supplied.durationTextOptions = object, options
                 end)
+                -- Like the game: an animation group handed to the icon plays
+                -- as the icon comes into sight and stops as it goes
+                -- (ApplyVisibility, Blizzard_CustomAuraButton.lua). The group
+                -- and each animation's target must sit inside the icon; after
+                -- that the group takes no more animations and its targets'
+                -- alpha is the game's (AuraContainerUtil.InitializeInboundAnimationGroup).
+                -- ShownAnimations: "refuse", a game turning one down; "none",
+                -- a game without them. (Kept apart from what its look supplied.)
+                local shown = {}
+                S[button].shownAnimations = shown
+                if ShownAnimations == "none" then
+                    rawset(button, "AddAuraShownAnimation", false)
+                else
+                    rawset(button, "AddAuraShownAnimation", function(_, group)
+                        if ShownAnimations == "refuse" then error("bad object in function call") end
+                        local function Inside(region)
+                            local at = S[region] and S[region].parent
+                            while at do
+                                if at == button then return true end
+                                at = S[at] and S[at].parent
+                            end
+                            return false
+                        end
+                        assert(S[group] and S[group].kind == "AnimationGroup" and Inside(group), "an animation group inside the icon")
+                        local anims = { group:GetAnimations() }
+                        for _, anim in ipairs(anims) do assert(Inside(anim:GetTarget()), "an animation on a region inside the icon") end
+                        S[group].handed = true
+                        for _, anim in ipairs(anims) do S[anim:GetTarget()].handed = true end
+                        table.insert(shown, group)
+                    end)
+                end
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
+                -- (Then out of sight until it shows an aura, as the game's
+                -- first display update leaves it.)
+                button:Hide()
                 return button
             end
             rawset(f, "AddAuraSlot", function(_, key, filter, options)
@@ -676,6 +739,17 @@ local function Environment(keepCVars)
                 if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
+            -- Each icon in use comes into sight and the rest go, as the
+            -- game shows and hides them (running OnShow and OnHide inside
+            -- them), playing an icon's shown animations as it comes into
+            -- sight and stopping them as it goes.
+            local function Sight(button, on)
+                local was = S[button].shown
+                button:SetShown(on)
+                for _, group in ipairs(S[button].shownAnimations) do
+                    if on and not was then group:Play() elseif not on then group:Stop() end
+                end
+            end
             S[f].Update = function(auras)
                 S[f].updating = true
                 debug.sethook(function()
@@ -694,6 +768,20 @@ local function Environment(keepCVars)
                                 group.active[#group.active + 1] = table.remove(group.pool)
                             end
                         end
+                        local using = {}
+                        for _, button in ipairs(group.active) do using[button] = true end
+                        for _, button in ipairs(group.frames) do Sight(button, using[button] == true) end
+                    end
+                    -- A slot's one icon shows the first aura it matches, if any.
+                    for _, slot in pairs(slots) do
+                        local lit = false
+                        for _, aura in ipairs(slot.enabled and auras or {}) do
+                            if Matches(slot, aura) then
+                                lit = true
+                                break
+                            end
+                        end
+                        Sight(slot.button, lit)
                     end
                 end)
                 debug.sethook()
@@ -4295,6 +4383,458 @@ end)()
     _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty, _G.C_Timer, clock =
         before[1], before[2], before[3], before[4], before[5]
     Equal(#printed, 0, "no errors")
+end)()
+
+-- Glow while active: a buff's icon glows while it's up ---------------------------------------------
+-- Ticked buff by buff in its own panel on a Buffs page (Buffs 2 too), off by
+-- default. Every Buffs bar icon (each fixed slot's and each packed group's,
+-- not the edge slots' nor your debuffs on you, and none on the Debuffs bar)
+-- gets a hidden frame inside the game's icon as it's made, with no scripts:
+-- the Look page's gold edge, and a proc loop on the addon's own see-through
+-- texture handed to the game once, which the game plays as the icon shows.
+-- Where the game won't take it, the edge alone. Out of a fight the addon
+-- shows the frame for the ticked entries (a joined icon for any of its
+-- buffs); the game then shows it with its icon, only while the buff is up,
+-- in a fight too, without running the addon's code. Never with Only show
+-- missing or Only when missing (no icon while it's up), nor on a weapon
+-- enchant's own spot. Kept per profile: over a reload and in a copy; gone
+-- with its entry and with a removed extra bar.
+
+;(function()
+    Fresh()
+    -- A game with number rules, so the bars have their edge slots too.
+    local before = { _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+        return { AddBreakpoint = function() end, ClearBreakpoints = function() end }
+    end }
+    _G.Enum.NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 }
+    _G.Enum.DurationTextBindingProperty = { RemainingDuration = 0, ElapsedDuration = 2, TotalDuration = 4 }
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    for _, name in ipairs({ "Thorns", "Clearcasting", "Nature's Grace" }) do B:SetAura("buff", name, true) end
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetOption("buff", "selfDebuffs", true)
+    local bar = B:Get("buff")
+    local box = S[bar.container]
+    local function Across(frame) return ("%.1f"):format(S[frame].width) end
+    -- The entries whose glow frames are shown, by the icons they're in:
+    -- b (a fixed slot's) and g (a packed group's).
+    local function Glowing()
+        local out, seen = {}, {}
+        for i = 1, ns.BUFF_SLOTS do
+            local active = bar.holders[i].slot and bar.holders[i].slot.active
+            if active and S[active.frame].shown then out[#out + 1] = "b" .. i end
+        end
+        for _, parts in ipairs(bar.groupParts) do
+            if parts.active and S[parts.active.frame].shown and not seen[parts.index] then
+                seen[parts.index] = true
+                out[#out + 1] = "g" .. tostring(parts.index)
+            end
+        end
+        table.sort(out)
+        return table.concat(out, " ")
+    end
+    -- The glow inside an icon (a slot's or group's button), and whether it's
+    -- drawn: it, its icon and the container all shown.
+    local function In(button)
+        for _, parts in ipairs(bar.groupParts) do
+            if parts.active and S[parts.active.frame].parent == button then return parts.active end
+        end
+        for i = 1, ns.BUFF_SLOTS do
+            local active = bar.holders[i].slot and bar.holders[i].slot.active
+            if active and S[active.frame].parent == button then return active end
+        end
+    end
+    local function Drawn(button)
+        local frame = In(button).frame
+        while frame and frame ~= bar.container do
+            if not S[frame].shown then return false end
+            frame = S[frame].parent
+        end
+        return true
+    end
+    -- How many animations an icon was handed, and its first.
+    local function Handed(button) return #S[button].shownAnimations end
+    local function Loop(button) return S[button].shownAnimations[1] end
+
+    -- Made with every icon, hidden, with no scripts; the loop handed to the
+    -- game once per icon. None in the edge slots, your debuffs on you, or
+    -- on the Debuffs bar.
+    local counts, bad = { b = 0, w = 0, g = 0, self = 0 }, {}
+    for key, slot in pairs(box.slots) do
+        local kind = key:sub(1, 1)
+        counts[kind] = counts[kind] + Handed(slot.button)
+    end
+    for key, group in pairs(box.groups) do
+        for _, button in ipairs(group.frames) do
+            local kind = key == "self" and "self" or "g"
+            counts[kind] = counts[kind] + Handed(button)
+        end
+    end
+    local debuffs = 0
+    for _, slot in pairs(S[B:Get("debuff").container].slots) do debuffs = debuffs + Handed(slot.button) end
+    for _, group in pairs(S[B:Get("debuff").container].groups) do
+        for _, button in ipairs(group.frames) do debuffs = debuffs + Handed(button) end
+    end
+    local active = bar.holders[1].slot.active
+    local group = Loop(box.slots.b1.button)
+    local art = S[group].parent
+    local anims = { group:GetAnimations() }
+    for _, frame in ipairs({ active.frame, active.loop, group }) do
+        if next(S[frame].scripts) then bad[#bad + 1] = "a script" end
+    end
+    Equal(table.concat({ counts.b, counts.w, tostring(box.slots.w1 ~= nil), counts.g, counts.self, debuffs, tostring(S[active.frame].shown),
+        tostring(S[active.loop].shown), tostring(S[active.loop].parent == active.frame), tostring(S[active.frame].parent == box.slots.b1.button),
+        #bad }, " "), "16 0 true 30 0 0 false true true true 0",
+        "made with each fixed slot's and packed group's icon, hidden, no scripts, the loop handed over once each; none on edge slots,"
+        .. " your debuffs on you or the Debuffs bar")
+    Equal(table.concat({ tostring(Last(art, "SetAtlas")), tostring(S[art].alpha), tostring(Last(group, "SetLooping")), #anims,
+        S[anims[1]].kind, tostring(Last(anims[1], "SetFromAlpha")) .. "-" .. tostring(Last(anims[1], "SetToAlpha")), S[anims[2]].kind,
+        tostring(Last(anims[2], "SetFlipBookRows")) .. "x" .. tostring(Last(anims[2], "SetFlipBookColumns")) .. "/"
+        .. tostring(Last(anims[2], "SetFlipBookFrames")), tostring(Last(anims[2], "SetDuration")), tostring(S[art].handed) }, " "),
+        "UI-HUD-ActionBar-Proc-Loop-Flipbook 0 REPEAT 2 Alpha 1-1 FlipBook 6x5/30 1 true",
+        "the loop: the game's proc loop art on the addon's own texture, see-through until the game plays it, round and round")
+
+    -- Off by default: none shown. Not on the Debuffs bar, nor for a spell
+    -- not on the bar.
+    Equal(Glowing() .. "|" .. tostring(B:GlowsActive("buff", "Clearcasting")) .. " " .. tostring(B:SetGlowActive("debuff", "Moonfire", true))
+        .. " " .. tostring(B:SetGlowActive("buff", "Wrath", true)) .. " " .. tostring(B:SetGlowActive("cd", "Moonfire", true)) .. " "
+        .. tostring(B:ActiveUsable("debuff", "Moonfire")), "|false false false false false",
+        "off at first; not on the Debuffs bar, nor a spell off the Buffs bar")
+
+    -- Clearcasting ticked, packed: its icons' glow shown, only its.
+    Equal(tostring(B:SetGlowActive("buff", "Clearcasting", true)) .. " " .. tostring(ns.GlowActive("buff").Clearcasting) .. " "
+        .. tostring(B:GlowsActive("buff", "Clearcasting")) .. " " .. tostring(B:ActiveUsable("buff", "Clearcasting")) .. " | " .. Glowing(),
+        "true true true true | b2 g2", "Clearcasting ticked: kept in the profile, its icons' glow shown, no other's")
+    -- The game shows its icon while it's up: the glow with it, the loop
+    -- played as it comes into sight; Thorns' icon has none. It goes as the
+    -- buff does. Nothing made, and none of the addon's code run, meanwhile.
+    local clear, thorns = box.groups.g2, box.groups.g1
+    box.Update({ { id = 16870 }, { id = 467 } })
+    local up = clear.active[1]
+    local shown = S[up].shown
+    local played = S[Loop(up)].plays .. " " .. tostring(S[Loop(up)].playing)
+    local fine = tostring(Drawn(up)) .. " " .. tostring(Drawn(thorns.active[1]))
+    box.Update({ { id = 467 } })
+    Equal(table.concat({ tostring(shown), fine, played, tostring(S[up].shown), tostring(Drawn(up)),
+        tostring(S[Loop(up)].playing), box.addonCalls, box.late }, " "), "true true false 1 true false false false 0 0",
+        "up: drawn with its icon, the loop playing; Thorns' not; gone with the buff, the loop stopped; none of the addon's code run")
+    box.Update({ { id = 16870 } })
+    Equal(S[Loop(up)].plays .. " " .. tostring(Drawn(up)) .. " " .. box.addonCalls, "2 true 0", "back: played again, drawn")
+
+    -- Joined: lit for any of its buffs ticked.
+    B:SetJoined("buff", 2, true)
+    local joined = Glowing()
+    B:SetJoined("buff", 2, false)
+    Equal(joined .. " | " .. Glowing(), "b1 g1 | b2 g2", "Clearcasting joined to Thorns: their one icon glows; apart again: its own")
+
+    -- With missing ones greyed: its fixed slot's icon, sized round its spot.
+    B:SetOption("buff", "showMissing", true)
+    local slot = box.slots.b2.button
+    box.Update({ { id = 16870 } })
+    local holder = bar.holders[2]
+    local fixed = Glowing() .. " " .. tostring(Drawn(slot)) .. " " .. Across(holder.slot.active.loop)
+    local size = ns.BarData("buff").size
+    B:SetOption("buff", "size", 45)
+    box.Update({ { id = 16870 } })
+    Equal(fixed .. " | " .. Across(holder.slot.active.loop) .. " " .. box.addonCalls, "b2 g2 true 50.4 | 63.0 0",
+        "missing ones greyed: its slot's icon glows while it's up, the loop sized round its spot (36, then 45)")
+    B:SetOption("buff", "showMissing", false)
+    local packed = Across(In(up).loop)
+    B:SetOption("buff", "size", size)
+    Equal(packed, "50.4", "packed at 45: drawn at 36 and scaled, so the loop round 36")
+
+    -- The Look page's Ready glow: the loop with Proc glow, the edge alone with Gold edge.
+    ns.Set("readyGlow", "edge")
+    B:ApplyGlow()
+    local edge = tostring(S[In(up).frame].shown) .. " " .. tostring(S[In(up).loop].shown)
+    ns.Set("readyGlow", "proc")
+    B:ApplyGlow()
+    Equal(edge .. " | " .. tostring(S[In(up).frame].shown) .. " " .. tostring(S[In(up).loop].shown), "true false | true true",
+        "Gold edge: the edge alone; Proc glow: the loop too")
+
+    -- In a fight: a tick, untick or style change waits for it to end; the
+    -- game shows and hides the icons as ever, none of the addon's code run.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local calls = containerCallsInCombat
+    local ticked = tostring(B:SetGlowActive("buff", "Thorns", true))
+    ns.Set("readyGlow", "edge")
+    B:ApplyGlow()
+    local fight = Glowing() .. " " .. tostring(S[In(up).loop].shown)
+    box.Update({ { id = 467 } })
+    box.Update({ { id = 16870 }, { id = 467 } })
+    local inFight = tostring(Drawn(up)) .. " " .. tostring(Drawn(thorns.active[1])) .. " " .. box.addonCalls .. " " .. (containerCallsInCombat - calls)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(ticked .. " " .. fight .. " | " .. inFight .. " | " .. Glowing() .. " " .. tostring(S[In(up).loop].shown), "true b2 g2 true | true false 0 0"
+        .. " | b1 b2 g1 g2 false", "in a fight: Thorns ticked and the style changed wait; Clearcasting's still shows with its icon, no code"
+        .. " run; as it ends, Thorns glows too, edge only")
+    ns.Set("readyGlow", "proc")
+    B:ApplyGlow()
+    B:SetGlowActive("buff", "Thorns", false)
+    Equal(Glowing() .. " " .. tostring(B:GlowsActive("buff", "Thorns")) .. " " .. tostring(ns.GlowActive("buff").Thorns),
+        "b2 g2 false nil", "unticked: Thorns' glow hidden, none kept")
+
+    -- Only show missing, or Only when missing (on it or a buff joined to
+    -- it): no icon while it's up, so greyed and never lit, the tick kept.
+    B:SetOption("buff", "onlyMissing", true)
+    local only = tostring(B:ActiveUsable("buff", "Clearcasting")) .. " " .. Glowing() .. " " .. tostring(B:GlowsActive("buff", "Clearcasting"))
+    B:SetOption("buff", "onlyMissing", false)
+    B:SetOnlyWhenMissing("buff", "Clearcasting", true)
+    local when = tostring(B:ActiveUsable("buff", "Clearcasting")) .. " " .. Glowing()
+    B:SetOnlyWhenMissing("buff", "Clearcasting", false)
+    B:SetOnlyWhenMissing("buff", "Thorns", true)
+    B:SetJoined("buff", 2, true)
+    local beside = tostring(B:ActiveUsable("buff", "Clearcasting")) .. " " .. Glowing()
+    B:SetJoined("buff", 2, false)
+    B:SetOnlyWhenMissing("buff", "Thorns", false)
+    Equal(only .. " | " .. when .. " | " .. beside .. " | " .. Glowing(), "false  true | false  | false  | b2 g2",
+        "Only show missing, Only when missing, or joined to one: greyed and never lit, still ticked; back as they go")
+    -- A weapon enchant's spot is the addon's own: greyed, never lit.
+    B:SetAura("buff", "hand:main", true)
+    local hand = tostring(B:SetGlowActive("buff", "hand:main", true)) .. " " .. tostring(B:ActiveUsable("buff", "hand:main")) .. " " .. Glowing()
+    -- Joined with another character's buff (a paladin's Seal of Light, no
+    -- icon here): still the enchant's own spot here, so still greyed.
+    local spells = ns.BarData("buff").spells
+    spells[#spells + 1] = "Seal of Light"
+    ns.Joins("buff")["Seal of Light"] = true
+    B:Changed()
+    Equal(tostring(ns.Spells:ForMe("Seal of Light", "buff")) .. " " .. tostring(B:ActiveUsable("buff", "hand:main")) .. " "
+        .. tostring(B:ActiveUsable("buff", "Seal of Light")) .. " " .. Glowing(), "false false false b2 g2",
+        "a hand joined with another character's buff: greyed as its icon is judged, never lit")
+    B:SetAura("buff", "Seal of Light", false)
+    B:SetAura("buff", "hand:main", false)
+    Equal(hand .. " " .. tostring(ns.GlowActive("buff")["hand:main"]), "true false b2 g2 nil",
+        "a hand's weapon enchant: kept but greyed, never lit; off the bar, forgotten")
+
+    -- /ccm debug says it.
+    Equal(tostring(ns.DebugReport():match("2%. Clearcasting[^\n]*")), "2. Clearcasting | spells 16870 | glow while active: edge and loop",
+        "/ccm debug: its glow, and that the game took the loop")
+
+    -- Kept in a copy of the profile, on its own there; over a reload, with
+    -- the repair; gone with its entry.
+    local own = ns.ProfileName()
+    ns.CopyProfile("Raid")
+    local copied = tostring(B:GlowsActive("buff", "Clearcasting")) .. " " .. Glowing()
+    B:SetGlowActive("buff", "Clearcasting", false)
+    local db = ForeverEnhancedCooldownManagerDB
+    Equal(copied .. " " .. tostring(db.profiles[own].glowActive.buff.Clearcasting) .. " " .. tostring(db.profiles.Raid.glowActive.buff.Clearcasting),
+        "true b2 g2 true nil", "a copy keeps the tick, each profile its own after")
+    ns.UseProfile(own)
+    local store = db.profiles[own].glowActive
+    store.buff.Wrath, store.buff.Thorns, store.debuff, store.cd = true, "yes", { Moonfire = true }, { Clearcasting = true }
+    Fresh()
+    ns = Load(db)
+    B = ns.Bars
+    bar = B:Get("buff")
+    box = S[bar.container]
+    store = db.profiles[own].glowActive
+    Equal(table.concat({ tostring(B:GlowsActive("buff", "Clearcasting")), Glowing(), tostring(store.buff.Wrath), tostring(store.buff.Thorns),
+        tostring(store.debuff), tostring(store.cd), Handed(box.slots.b2.button) }, " "), "true b2 g2 nil nil nil nil 1",
+        "after a reload: still ticked and shown, made with the new icons; a name off the bar, anything but true and other bars dropped")
+    B:SetAura("buff", "Clearcasting", false)
+    B:SetAura("buff", "Clearcasting", true)
+    Equal(tostring(B:GlowsActive("buff", "Clearcasting")) .. " " .. Glowing(), "false ", "taken off and put back: no longer ticked")
+
+    -- Buffs 2: its own ticks and icons; gone with the bar.
+    B:AddBar("buff")
+    B:SetAura("buff2", "Walk on Air", true)
+    local second = B:Get("buff2")
+    local made = tostring(second.holders[1].slot.active ~= nil)
+    local set = tostring(B:SetGlowActive("buff2", "Walk on Air", true))
+    local lit = tostring(S[second.holders[1].slot.active.frame].shown) .. " " .. tostring(B:GlowsActive("buff", "Walk on Air"))
+    B:RemoveBar("buff2")
+    Equal(made .. " " .. set .. " " .. lit .. " " .. tostring(ns.ProfileLists().glowActive.buff2), "true true true false nil",
+        "Buffs 2: made, ticked and shown on its own; removed: its ticks gone")
+    Equal(box.late .. " " .. box.addonCalls .. " " .. #printed, "0 0 0", "nothing made or run mid-update; no errors")
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = before[1], before[2], before[3]
+end)()
+
+-- Glow while active's Glow size: how big its glow is -----------------------------------------------
+-- One for the profile, for every buff that glows (a slider in each buff's
+-- own panel, under the tick): 50% to 150%, 100% by default, which draws
+-- exactly the glow it always had and keeps nothing. It grows or shrinks the
+-- loop's spread past the icon and the edge's width (never under 1), on
+-- every glow at once out of a fight; one changed in a fight waits for it
+-- to end, with no container calls. Kept in the profile, in a copy too, put
+-- back by a profile switch, and repaired over a reload.
+
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    for _, name in ipairs({ "Thorns", "Clearcasting" }) do B:SetAura("buff", name, true) end
+    B:SetGlowActive("buff", "Clearcasting", true)
+    local bar, box
+    -- Entry i's packed icon's glow, and its fixed slot's.
+    local function Group(i)
+        for _, parts in ipairs(bar.groupParts) do
+            if parts.index == i and parts.active then return parts.active end
+        end
+    end
+    local function Slot(i) return bar.holders[i].slot.active end
+    -- A glow's loop across, then its edge's four sides.
+    local function Size(active)
+        local s = active.strips
+        return ("%.1f %s/%s/%s/%s"):format(S[active.loop].width, tostring(S[s[1]].height), tostring(S[s[2]].height),
+            tostring(S[s[3]].width), tostring(S[s[4]].width))
+    end
+    local function Again()
+        bar = B:Get("buff")
+        box = S[bar.container]
+    end
+    Again()
+    local glow = Group(2)
+
+    -- By default: 100%, none kept; the loop exactly 1.4 times the icon and
+    -- the edge 2 wide, as before; drawn again at 100%, nothing is set.
+    local usual = table.concat({ ns.GlowActiveSize(), tostring(ns.ProfileLists().glowActiveSize), tostring(S[glow.loop].width == 36 * 1.4),
+        Size(glow), tostring(S[glow.frame].shown) }, " ")
+    S[glow.strips[1]].last.SetHeight, S[glow.strips[3]].last.SetWidth, S[glow.loop].last.SetSize = nil, nil, nil
+    B:ApplyGlow()
+    Equal(usual .. " | " .. tostring(Last(glow.strips[1], "SetHeight")) .. " " .. tostring(Last(glow.strips[3], "SetWidth")) .. " "
+        .. tostring(Last(glow.loop, "SetSize")), "100 nil true 50.4 2/2/2/2 true | nil nil nil",
+        "100% by default, none kept: the loop round the icon and the edge as they always were, nothing set again")
+
+    -- Each size: the loop's spread past the icon and the edge's width with
+    -- it, never under 1; the lit glow at once, kept in the profile.
+    local sizes = {}
+    for _, percent in ipairs({ 50, 70, 80, 120, 130, 150 }) do
+        B:SetGlowActiveSize(percent)
+        sizes[#sizes + 1] = percent .. ": " .. Size(glow) .. " " .. tostring(ns.ProfileLists().glowActiveSize)
+    end
+    Equal(table.concat(sizes, " | "), "50: 43.2 1/1/1/1 50 | 70: 46.1 1/1/1/1 70 | 80: 47.5 2/2/2/2 80 | 120: 53.3 2/2/2/2 120"
+        .. " | 130: 54.7 3/3/3/3 130 | 150: 57.6 3/3/3/3 150", "50% to 150%: the spread past the icon and the edge's width, at once, kept")
+    -- Thorns, ticked now, glows at that size too; and a slot's glow round its
+    -- own spot (missing buffs greyed, at 45).
+    B:SetGlowActive("buff", "Thorns", true)
+    local thorns = Size(Group(1))
+    B:SetOption("buff", "showMissing", true)
+    B:SetOption("buff", "size", 45)
+    Again()
+    Equal(thorns .. " | " .. Size(Slot(2)) .. " " .. tostring(S[Slot(2).frame].shown), "57.6 3/3/3/3 | 72.0 3/3/3/3 true",
+        "another buff ticked glows at 150% too; a fixed slot's round its spot (45)")
+    B:SetOption("buff", "showMissing", false)
+    B:SetOption("buff", "size", 36)
+    B:SetGlowActive("buff", "Thorns", false)
+    Again()
+    glow = Group(2)
+    -- Gold edge (Ready glow): no loop, the edge still sized.
+    ns.Set("readyGlow", "edge")
+    B:SetGlowActiveSize(50)
+    local edge = tostring(S[glow.loop].shown) .. " " .. Size(glow)
+    ns.Set("readyGlow", "proc")
+    B:ApplyGlow()
+    Equal(edge .. " | " .. tostring(S[glow.loop].shown), "false 43.2 1/1/1/1 | true", "Gold edge: the edge alone, 1 wide at 50%")
+    -- A small packed icon (20, its container scaled down): the edge kept 1
+    -- wide on screen at 50%, and at 100% the usual 2.
+    B:SetOption("buff", "size", 20)
+    Again()
+    glow = Group(2)
+    local small = ("%.3f %.3f"):format(box.scale, S[glow.strips[1]].height * box.scale)
+    B:SetGlowActiveSize(100)
+    small = small .. " | " .. Size(glow)
+    B:SetGlowActiveSize(50)
+    B:SetOption("buff", "size", 36)
+    Again()
+    glow = Group(2)
+    Equal(small .. " | " .. Size(glow), "0.556 1.000 | 50.4 2/2/2/2 | 43.2 1/1/1/1",
+        "a small packed icon at 50%: the edge 1 wide on screen; at 100% the usual 2; back at 36, 1 again")
+    -- Back at 100%: exactly as before, none kept.
+    B:SetGlowActiveSize(100)
+    Equal(tostring(S[glow.loop].width == 36 * 1.4) .. " " .. Size(glow) .. " " .. tostring(ns.ProfileLists().glowActiveSize),
+        "true 50.4 2/2/2/2 nil", "100% again: the usual size exactly, none kept")
+    -- Anything else can't be kept: the usual size.
+    local odd = {}
+    for _, value in ipairs({ 40, 160, 75.5, "big" }) do
+        B:SetGlowActiveSize(value)
+        odd[#odd + 1] = ns.GlowActiveSize() .. " " .. tostring(ns.ProfileLists().glowActiveSize)
+    end
+    Equal(table.concat(odd, ", ") .. " | " .. Size(glow), "100 nil, 100 nil, 100 nil, 100 nil | 50.4 2/2/2/2",
+        "out of range, not whole or not a number: the usual size, none kept")
+
+    -- In a fight: kept, but the glows wait for it to end, with no container
+    -- calls; the game shows and hides the icons as ever.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local calls = containerCallsInCombat
+    S[glow.loop].last.SetSize = nil
+    B:SetGlowActiveSize(150)
+    box.Update({ { id = 16870 } })
+    box.Update({})
+    local fight = table.concat({ ns.GlowActiveSize(), Size(glow), tostring(Last(glow.loop, "SetSize")), tostring(bar.pending),
+        containerCallsInCombat - calls, box.addonCalls }, " ")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight .. " | " .. Size(glow), "150 50.4 2/2/2/2 nil true 0 0 | 57.6 3/3/3/3",
+        "in a fight: kept, the glow left as it was, no container calls; as it ends, at 150%")
+
+    -- /ccm debug says the size, when it isn't the usual one.
+    Equal(tostring(ns.DebugReport():match("2%. Clearcasting[^\n]*")), "2. Clearcasting | spells 16870 | glow while active: edge and loop, size 150%",
+        "/ccm debug: the glow's size")
+
+    -- A copy of the profile keeps it, each its own after; switching back
+    -- puts the profile's own size on the glows.
+    local own = ns.ProfileName()
+    ns.CopyProfile("Raid")
+    Again()
+    local copied = ns.GlowActiveSize() .. " " .. Size(Group(2))
+    B:SetGlowActiveSize(70)
+    local raid = Size(Group(2))
+    ns.UseProfile(own)
+    Again()
+    local db = ForeverEnhancedCooldownManagerDB
+    Equal(copied .. " | " .. raid .. " | " .. ns.GlowActiveSize() .. " " .. Size(Group(2)) .. " | " .. tostring(db.profiles[own].glowActiveSize)
+        .. " " .. tostring(db.profiles.Raid.glowActiveSize), "150 57.6 3/3/3/3 | 46.1 1/1/1/1 | 150 57.6 3/3/3/3 | 150 70",
+        "a copy keeps it, each profile its own after; switched back, the glow at its own size")
+
+    -- Over a reload: kept, the glows made at it; anything that can't be
+    -- kept, in any profile, dropped (the usual size).
+    db.profiles.Raid.glowActiveSize = 400
+    db.profiles.Low, db.profiles.Odd, db.profiles.Word, db.profiles.Usual = { glowActiveSize = 49 }, { glowActiveSize = 75.5 },
+        { glowActiveSize = "big" }, { glowActiveSize = 100 }
+    Fresh()
+    ns = Load(db)
+    B = ns.Bars
+    Again()
+    local kept = {}
+    for _, name in ipairs({ "Raid", "Low", "Odd", "Word", "Usual" }) do kept[#kept + 1] = tostring(db.profiles[name].glowActiveSize) end
+    Equal(ns.GlowActiveSize() .. " " .. Size(Group(2)) .. " " .. tostring(S[Group(2).frame].shown) .. " | " .. table.concat(kept, " "),
+        "150 57.6 3/3/3/3 true | nil nil nil nil nil", "after a reload: 150% kept and drawn; 400, 49, 75.5, a word and 100 dropped")
+    db.profiles[own].glowActiveSize = 160
+    Fresh()
+    ns = Load(db)
+    B = ns.Bars
+    Again()
+    Equal(ns.GlowActiveSize() .. " " .. tostring(db.profiles[own].glowActiveSize) .. " " .. tostring(S[Group(2).loop].width == 36 * 1.4)
+        .. " " .. Size(Group(2)), "100 nil true 50.4 2/2/2/2", "repaired over a reload: the usual size exactly")
+    Equal(box.late .. " " .. box.addonCalls .. " " .. #printed, "0 0 0", "nothing made or run mid-update; no errors")
+end)()
+
+-- Glow while active where the game won't take the loop: the edge alone ------------------------------
+;(function()
+    for _, mode in ipairs({ "none", "refuse" }) do
+        Fresh()
+        ShownAnimations = mode
+        local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+        local B = ns.Bars
+        B:SetAura("buff", "Thorns", true)
+        B:SetGlowActive("buff", "Thorns", true)
+        local bar = B:Get("buff")
+        local box = S[bar.container]
+        local active = bar.holders[1].slot.active
+        local group
+        for _, parts in ipairs(bar.groupParts) do
+            if parts.index == 1 then group = parts.active end
+        end
+        box.Update({ { id = 467 } })
+        Equal(table.concat({ tostring(active.loop), tostring(group.loop), #S[box.slots.b1.button].shownAnimations,
+            tostring(S[group.frame].shown), tostring(S[box.groups.g1.active[1]].shown), box.addonCalls,
+            tostring(ns.DebugReport():match("1%. Thorns[^\n]*"):match("glow while active: .*$")), #printed }, " "),
+            "nil nil 0 true true 0 glow while active: edge only, the game took no loop 0",
+            "a game " .. (mode == "none" and "without shown animations" or "turning the loop down") .. ": the edge alone, shown with its icon")
+    end
 end)()
 
 Equal(SecretMisuse[1], nil, "no secret misused anywhere")

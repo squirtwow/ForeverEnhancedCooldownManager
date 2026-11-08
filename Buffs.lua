@@ -372,12 +372,68 @@ local function TickCount(button, top)
     return ok and ticks or nil
 end
 
+-- Glow while active ------------------------------------------------------------------
+-- A ticked buff's icon glows while it's up, like a proc. The addon can't tell
+-- in a fight whether a buff is up, and needn't: the glow is a frame inside
+-- the game's own icon, made hidden with the icon, so it's only drawn while
+-- the game shows that icon. The addon shows or hides it out of a fight only
+-- (F:Actives). It has no scripts, so the container never runs the addon's
+-- code as it shows and hides its icons. It's the Look page's gold edge and,
+-- in the Proc glow style, a looping proc animation on the addon's own
+-- texture too, handed to the game to play while the icon shows. The texture
+-- starts see-through, so if the game won't take or play it, the edge shows alone.
+-- Glow size (the profile's) makes both smaller or bigger: the loop's spread
+-- past the icon, and the edge's width.
+local ACTIVE_ATLAS = "UI-HUD-ActionBar-Proc-Loop-Flipbook"
+local ACTIVE_SPREAD = 1.4 -- the loop spreads this far past the icon, as the game's proc glow does
+
+-- The glow for a Buffs bar icon, hidden: { frame, strips (the edge's sides),
+-- loop (nil when the game didn't take it) }, or nil if it can't be made.
+local function ActiveGlow(button, top)
+    local made, frame, strips = pcall(function()
+        local edge, sides = ns.NewEdge(button)
+        edge:SetFrameLevel(top:GetFrameLevel() + 1)
+        return edge, sides
+    end)
+    if not made then return nil end
+    local active = { frame = frame, strips = strips, width = ns.EDGE_WIDTH }
+    local loop = CreateFrame("Frame", nil, frame)
+    loop:SetPoint("CENTER")
+    loop:SetSize(BASE * ACTIVE_SPREAD, BASE * ACTIVE_SPREAD)
+    local taken = pcall(function()
+        local art = loop:CreateTexture(nil, "ARTWORK")
+        art:SetAllPoints()
+        art:SetAtlas(ACTIVE_ATLAS)
+        art:SetAlpha(0)
+        -- As the game's own proc loop: seen while it plays, over and over.
+        local spin = art:CreateAnimationGroup()
+        spin:SetLooping("REPEAT")
+        local seen = spin:CreateAnimation("Alpha")
+        seen:SetFromAlpha(1)
+        seen:SetToAlpha(1)
+        seen:SetDuration(.001)
+        seen:SetOrder(1)
+        local flip = spin:CreateAnimation("FlipBook")
+        flip:SetFlipBookRows(6)
+        flip:SetFlipBookColumns(5)
+        flip:SetFlipBookFrames(30)
+        flip:SetDuration(1)
+        flip:SetOrder(2)
+        local hand = button.AddAuraShownAnimation
+        if type(hand) ~= "function" then error("the game takes no animation") end
+        hand(button, spin)
+    end)
+    if taken then active.loop = loop else loop:Hide() end
+    return active
+end
+
 -- Runs once per icon, before the client restricts it in combat. Everything
 -- supplied to the icon must be a descendant of its button. A packed icon
 -- carries its own border and shadow; a fixed one's holder has them. A
--- Debuffs bar entry's icon can count ticks too (counts). look: its entry's
--- own countdown font and size (settings per spell), or nil.
-local function Look(button, size, showTimer, decorate, counts, look)
+-- Debuffs bar entry's icon can count ticks too (counts), and a Buffs bar
+-- entry's can glow while it's up (active). look: its entry's own countdown
+-- font and size (settings per spell), or nil.
+local function Look(button, size, showTimer, decorate, counts, look, active)
     button:EnableMouse(false)
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -399,6 +455,7 @@ local function Look(button, size, showTimer, decorate, counts, look)
     button:SetApplicationCount(count)
     local parts = { cooldown = cooldown, count = count }
     if counts then parts.ticks = TickCount(button, top) end
+    if active then parts.active = ActiveGlow(button, top) end
     if decorate then
         -- Made now: the container's icons only take art as they're made.
         parts.decor = Style:Decor(button, button, 0, true)
@@ -440,17 +497,18 @@ end
 local function SlotLook(holder, key)
     return function(button)
         button:SetAllPoints(holder)
-        holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, ns.BAR_KIND[key] == "debuff", holder.look)
+        holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, ns.BAR_KIND[key] == "debuff", holder.look,
+            ns.BAR_KIND[key] == "buff")
     end
 end
 
--- A packed entry's group (index: its place) keeps its icons' tick counts
--- and its entry's own look; the group of your debuffs on you has neither.
+-- A packed entry's group (index: its place) keeps its icons' tick counts or
+-- glows and its entry's own look; the group of your debuffs on you has none.
 local function GroupLook(bar, index)
     return function(button)
         button:SetSize(BASE, BASE)
         local parts = Look(button, BASE, bar.data.showTimer, true, ns.BAR_KIND[bar.key] == "debuff" and index ~= nil,
-            index and bar.looks and bar.looks[index] or nil)
+            index and bar.looks and bar.looks[index] or nil, ns.BAR_KIND[bar.key] == "buff" and index ~= nil)
         parts.index = index
         bar.groupParts[#bar.groupParts + 1] = parts
         if parts.ticks then
@@ -925,7 +983,7 @@ function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
     bar.groupParts, bar.names, bar.up, bar.spots, bar.only, bar.imbues = {}, {}, {}, {}, {}, {}
     bar.tickPaces, bar.tickShows, bar.groupTicks, bar.looks, bar.bare = {}, {}, {}, {}, {}
-    bar.warns, bar.appliedWarns = {}, {}
+    bar.warns, bar.appliedWarns, bar.actives = {}, {}, {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -1239,12 +1297,15 @@ function F:Layout(bar, data)
     -- Only when missing: the Buffs bar's, and not with Only show missing.
     local flags = self:Flagged(bar.key, data) and ns.OnlyWhenMissing(bar.key) or {}
     local warns = ns.WarnAt(bar.key)
+    -- Glow while active: a Buffs bar's own.
+    local actives = ns.BAR_KIND[bar.key] == "buff" and ns.GlowActive(bar.key) or {}
     -- A packed bar's slots sit in its container, scaled with the packed
     -- icons, so their numbers are sized as those icons' are.
     local fit = packed and BASE or size
     local weapons = ns.BAR_KIND[bar.key] == "buff"
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
         local ids, entry, picked, glow, yours, only = {}, nil, nil, false, {}, false
+        local active = false -- (any of yours in it ticked Glow while active)
         -- Weapon enchants: every one of yours in it is one (joined with a
         -- buff, it's the buff's as before: nothing tells them apart in a fight).
         -- A hand entry is any enchant on its hand (enchants.hands).
@@ -1256,6 +1317,7 @@ function F:Layout(bar, data)
                 if picks[name] and not picked then picked = found end -- the first picked, as B:Picked
                 glow = glow or glows[name] == true
                 only = only or flags[name] == true
+                active = active or actives[name] == true
                 yours[#yours + 1] = name
                 for _, id in ipairs(found.ids) do ids[id] = true end
                 local list = ENCHANTS[found.name]
@@ -1313,6 +1375,9 @@ function F:Layout(bar, data)
             bar.only[count] = only or nil
             bar.imbues[count] = allEnchants and next(enchants) and enchants or nil
             bar.bare[count] = nil -- (read below: F:Check)
+            -- Glow while active: not on an icon shown only while it's missing
+            -- (none while it's up), nor a weapon enchant's own spot.
+            bar.actives[count] = active and not (only or self:OnlyMissing(data) or bar.imbues[count]) or nil
             -- Warn at: the first of yours with one, unless it shows only
             -- while it's missing (it has no icon while it's up).
             local warn
@@ -1327,7 +1392,7 @@ function F:Layout(bar, data)
         MissingGlow(bar.holders[i], false)
         bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i], bar.only[i] = nil, nil, nil, nil, nil
         bar.looks[i], bar.holders[i].look, bar.warns[i], bar.holders[i].ownSize = nil, nil, nil, nil
-        bar.imbues[i], bar.bare[i] = nil, nil
+        bar.imbues[i], bar.bare[i], bar.actives[i] = nil, nil, nil
     end
     for _, parts in ipairs(bar.groupParts) do
         parts.cooldown:SetHideCountdownNumbers(not data.showTimer)
@@ -1559,6 +1624,7 @@ function F:Apply(bar)
     end
     self:Ticks(bar)
     self:Warns(bar)
+    self:Actives(bar)
 end
 
 -- Count ticks: each Debuffs bar icon's count set going at its entry's pace,
@@ -1685,6 +1751,83 @@ function F:Warns(bar)
     for _, parts in ipairs(bar.groupParts) do
         if parts.index then Style:WarnText(parts.cooldown, bar.warns[parts.index]) end
     end
+end
+
+-- Glow while active: each icon's glow shown for its entry or hidden (fixed
+-- slot i and packed group i are entry i's: bar.actives, F:Layout), the loop
+-- with it in the Proc glow style, sized round the icon (a packed icon is
+-- drawn at BASE, then scaled), as big as Glow size says (spread: the loop's,
+-- as a share of the icon; width: the edge's). Out of a fight only, as the
+-- icons are the game's: one changed in a fight waits for it to end
+-- (F:Apply). Each is only set as it changes.
+local function Lit(active, on, size, looping, spread, width)
+    if not active then return end
+    if active.on ~= on then
+        active.on = on
+        active.frame:SetShown(on)
+    end
+    if active.strips and active.width ~= width then
+        active.width = width
+        ns.EdgeWidth(active.strips, width)
+    end
+    local loop = active.loop
+    if not loop then return end
+    if active.looping ~= looping then
+        active.looping = looping
+        loop:SetShown(looping)
+    end
+    local across = size * spread
+    if active.spread ~= across then
+        active.spread = across
+        loop:SetSize(across, across)
+    end
+end
+
+-- Glow size (a percent of the usual size): how far the loop spreads, as a
+-- share of the icon (only its part past the icon grows or shrinks), and the
+-- edge's width, never under 1. At 100% both as they always were.
+local function ActiveSize(percent)
+    return 1 + (ACTIVE_SPREAD - 1) * percent / 100, math.max(1, math.floor(ns.EDGE_WIDTH * percent / 100 + .5))
+end
+
+function F:Actives(bar)
+    if not (bar and bar.holders and bar.actives) then return end
+    if InCombatLockdown() then
+        bar.pending = true
+        return
+    end
+    local looping = ns.Get("readyGlow") ~= "edge"
+    local spread, width = ActiveSize(ns.GlowActiveSize())
+    for i = 1, ns.BUFF_SLOTS do
+        local holder = bar.holders[i]
+        if holder.slot then Lit(holder.slot.active, bar.actives[i] == true, holder.size or BASE, looping, spread, width) end
+    end
+    -- A packed icon's edge is scaled with its container: kept at least 1
+    -- wide on screen, as a fixed slot's is, but never past the usual width.
+    local packedWidth = math.max(width, math.min(ns.EDGE_WIDTH, 1 / (bar.appliedScale or 1)))
+    for _, parts in ipairs(bar.groupParts) do
+        Lit(parts.active, parts.index ~= nil and bar.actives[parts.index] == true, BASE, looping, spread, packedWidth)
+    end
+end
+
+-- For /ccm debug: whether entry i glows while it's up, and whether the game
+-- took the loop (else the edge alone).
+function F:ActiveReport(bar, i)
+    if not (bar and bar.actives and bar.actives[i]) then return "" end
+    local made, looped = false, false
+    local function See(active)
+        if active then made, looped = true, looped or active.loop ~= nil end
+    end
+    local slot = bar.holders[i].slot
+    See(slot and slot.active)
+    for _, parts in ipairs(bar.groupParts) do
+        if parts.index == i then See(parts.active) end
+    end
+    local how = not made and "no icon yet" or not looped and "edge only, the game took no loop"
+        or ns.Get("readyGlow") == "edge" and "edge (Ready glow)" or "edge and loop"
+    -- And its Glow size, when it isn't the usual one.
+    local percent = ns.GlowActiveSize()
+    return " | glow while active: " .. how .. (percent ~= ns.GLOW_ACTIVE_SIZE[3] and (", size " .. percent .. "%") or "")
 end
 
 -- Out of a fight, a warned buff's spot glows (the Look page's ready glow)

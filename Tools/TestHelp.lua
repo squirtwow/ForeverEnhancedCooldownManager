@@ -161,6 +161,7 @@ end
 -- Moved into another frame: it follows that one's showing and hiding now.
 function Proto:SetParent(parent)
     local s = S[self]
+    assert(not s.handed, "a region an aura icon's animation animates moved")
     s.last.SetParent = table.pack(parent)
     local old = s.parent and S[s.parent]
     if old and old.kids then
@@ -219,7 +220,34 @@ function Proto:GetEffectiveScale() return 1 end
 function Proto:SetBackdropBorderColor(r, g, b, a) S[self].border = { r, g, b, a } end
 function Proto:SetTextColor(r, g, b) S[self].colour = { r, g, b } end
 function Proto:SetShadowColor(r, g, b, a) S[self].shadow = a end
-function Proto:SetAlpha(a) S[self].alpha = a end
+-- (Like the game: a region an animation handed to an aura icon animates
+-- keeps its alpha the game's.)
+function Proto:SetAlpha(a)
+    assert(not S[self].handed, "the alpha of a region an aura icon's animation animates")
+    S[self].alpha = a
+end
+-- Animations, as the game makes them: a group on a frame or texture (it's
+-- that one's, not a frame inside it, so it isn't shown or hidden with it),
+-- and the animations in it, each on the group's own frame or texture unless
+-- given a target. Each group counts its plays.
+function Proto:CreateAnimationGroup()
+    local group = New("AnimationGroup")
+    S[group].parent, S[group].anims, S[group].plays = self, {}, 0
+    return group
+end
+function Proto:CreateAnimation(kind)
+    assert(not S[self].handed, "an animation added to a group handed to an aura icon")
+    local anim = New(kind)
+    S[anim].parent = self
+    table.insert(S[self].anims, anim)
+    return anim
+end
+function Proto:GetAnimations() return table.unpack(S[self].anims) end
+function Proto:SetTarget(target) S[self].target = target end
+function Proto:GetTarget() local s = S[self]; return s.target or S[s.parent].parent end
+function Proto:Play() local s = S[self]; s.plays, s.playing = (s.plays or 0) + 1, true end
+function Proto:Stop() S[self].playing = false end
+function Proto:IsPlaying() return S[self].playing == true end
 function Proto:GetCenter() return S[self].cx, S[self].cy end
 function Proto:GetFrameLevel() return 1 end
 function Proto:GetStringWidth() return 40 end
@@ -379,8 +407,9 @@ local function Environment(keepCVars)
     frames, printed, cooldownCalls = {}, {}, {}
     usable, noMana, range, active, target = {}, {}, {}, false, false
     lockdown, containers, containerCallsInCombat = false, {}, 0
-    -- Blizzard's aura container code run inside the addon's (below).
-    ContainerRuns = {}
+    -- Blizzard's aura container code run inside the addon's (below), and
+    -- whether its icons take shown animations (all of them, unless a test says).
+    ContainerRuns, ShownAnimations = {}, nil
     bindings, cvarOn, reloads, timers = {}, true, 0, {}
     _G.C_Timer = { After = function(_, fn) timers[#timers + 1] = fn end }
     actionSlots, keyOf, macroSpells, macroItems, actionReads, actionPage, bonusIndex = {}, {}, {}, {}, 0, 1, nil
@@ -573,9 +602,43 @@ local function Environment(keepCVars)
                 rawset(button, "SetDurationText", function(_, object, options)
                     supplied.SetDurationText, supplied.durationTextOptions = object, options
                 end)
+                -- Like the game: an animation group handed to the icon plays
+                -- as the icon comes into sight and stops as it goes
+                -- (ApplyVisibility, Blizzard_CustomAuraButton.lua). The group
+                -- and each animation's target must sit inside the icon; after
+                -- that the group takes no more animations and its targets'
+                -- alpha is the game's (AuraContainerUtil.InitializeInboundAnimationGroup).
+                -- ShownAnimations: "refuse", a game turning one down; "none",
+                -- a game without them. (Kept apart from what its look supplied.)
+                local shown = {}
+                S[button].shownAnimations = shown
+                if ShownAnimations == "none" then
+                    rawset(button, "AddAuraShownAnimation", false)
+                else
+                    rawset(button, "AddAuraShownAnimation", function(_, group)
+                        if ShownAnimations == "refuse" then error("bad object in function call") end
+                        local function Inside(region)
+                            local at = S[region] and S[region].parent
+                            while at do
+                                if at == button then return true end
+                                at = S[at] and S[at].parent
+                            end
+                            return false
+                        end
+                        assert(S[group] and S[group].kind == "AnimationGroup" and Inside(group), "an animation group inside the icon")
+                        local anims = { group:GetAnimations() }
+                        for _, anim in ipairs(anims) do assert(Inside(anim:GetTarget()), "an animation on a region inside the icon") end
+                        S[group].handed = true
+                        for _, anim in ipairs(anims) do S[anim:GetTarget()].handed = true end
+                        table.insert(shown, group)
+                    end)
+                end
                 S[f].made = S[f].made + 1
                 if S[f].updating then S[f].late = S[f].late + 1 end
                 if options.initializeFrame then options.initializeFrame(button) end
+                -- (Then out of sight until it shows an aura, as the game's
+                -- first display update leaves it.)
+                button:Hide()
                 return button
             end
             rawset(f, "AddAuraSlot", function(_, key, filter, options)
@@ -678,6 +741,17 @@ local function Environment(keepCVars)
                 if filters.isFromPlayerOrPlayerPet ~= nil and filters.isFromPlayerOrPlayerPet ~= player then return false end
                 return true
             end
+            -- Each icon in use comes into sight and the rest go, as the
+            -- game shows and hides them (running OnShow and OnHide inside
+            -- them), playing an icon's shown animations as it comes into
+            -- sight and stopping them as it goes.
+            local function Sight(button, on)
+                local was = S[button].shown
+                button:SetShown(on)
+                for _, group in ipairs(S[button].shownAnimations) do
+                    if on and not was then group:Play() elseif not on then group:Stop() end
+                end
+            end
             S[f].Update = function(auras)
                 S[f].updating = true
                 debug.sethook(function()
@@ -696,6 +770,20 @@ local function Environment(keepCVars)
                                 group.active[#group.active + 1] = table.remove(group.pool)
                             end
                         end
+                        local using = {}
+                        for _, button in ipairs(group.active) do using[button] = true end
+                        for _, button in ipairs(group.frames) do Sight(button, using[button] == true) end
+                    end
+                    -- A slot's one icon shows the first aura it matches, if any.
+                    for _, slot in pairs(slots) do
+                        local lit = false
+                        for _, aura in ipairs(slot.enabled and auras or {}) do
+                            if Matches(slot, aura) then
+                                lit = true
+                                break
+                            end
+                        end
+                        Sight(slot.button, lit)
                     end
                 end)
                 debug.sethook()
@@ -3103,6 +3191,8 @@ end)()
         tostring(panel.glow:IsVisible()), tostring(panel.only:IsVisible()), tostring(panel.ticks:IsVisible()), tostring(S[panel.defaults].alpha) }, " "),
         "true 28 MOONFIRE on Cooldowns look Look page false 100% false false false false 0.45",
         "opened over the window, clear of the footer: the Look page's font and size, no ticks on Cooldowns, Defaults greyed")
+    Equal(tostring(panel.active:IsVisible()) .. " " .. tostring(panel.glowSize:IsVisible()) .. " " .. tostring(panel.glowSizeLabel:IsVisible()),
+        "false false false", "no Glow while active on Cooldowns, nor its Glow size")
     Equal(Font(preview.cooldown) .. " " .. S[preview].width .. " " .. tostring(Last(preview.cooldown, "SetCooldown", 2)) .. " "
         .. tostring(S[preview.cooldown].scripts.OnCooldownDone ~= nil) .. " " .. tostring(S[preview.art].texture == ns.Spells:Icon("Moonfire")),
         "FECMFont18 36 75 true true", "the preview: its icon at the bar's size, its countdown going round and round")
@@ -3199,6 +3289,8 @@ end)()
         .. " Manager. The Buffs and Debuffs bars change once you're out of combat.",
         "its own ticks as on its row: Glow when missing greyed until missing debuffs show greyed, Count ticks with its pace")
     Check(panel, "Debuffs, two ticks")
+    Equal(tostring(panel.active:IsVisible()) .. " " .. tostring(panel.glowSize:IsVisible()), "false false",
+        "no Glow while active on the Debuffs page, nor its Glow size: they're for buffs")
     panel.ticks:Click()
     Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. tostring(panel.ticks:GetChecked()) .. " " .. tostring(RowOf("Moonfire").ticks:GetChecked()),
         "true true true", "Count ticks from the panel: on the bar, and on its row in the list")
@@ -3253,6 +3345,65 @@ end)()
     Equal(tostring(S[panel.warn].alpha) .. " " .. tostring(Last(panel.warn.buttons[2], "SetEnabled")) .. " | " .. Note(panel.warn.buttons[2]),
         "0.35 false | Not for a buff shown Only when missing: it has no icon while it's on you, so nothing to warn on.",
         "Only when missing: Warn at greyed, and says why")
+    -- Glow while active under them (no row of its own in the list; seen
+    -- working in game, so no longer marked experimental): greyed while
+    -- Thorns shows only while it's missing, saying why; then usable, saying
+    -- what it does, and kept as ticked. With Only show missing greyed again,
+    -- the tick kept.
+    Equal(table.concat({ tostring(panel.active:IsVisible()), S[panel.active.text].text, tostring(panel.active:GetChecked()),
+        tostring(panel.active.usable) }, " ") .. " | " .. Note(panel.active),
+        "true Glow while active false false | Not for a buff shown Only when missing: it has no icon while it's on you,"
+        .. " so nothing to glow.", "Glow while active on the Buffs page, greyed with Only when missing, saying why, not marked experimental")
+    -- Glow size in the row right under it, shown with it: the label at the
+    -- left, the slider from the choices' column, at 100% (the usual size),
+    -- greyed while the tick is greyed, saying the tick's reason.
+    local function Row(region) return S[region].points[1][2] .. "," .. S[region].points[1][3] end
+    local tickY = S[panel.active].points[1][3]
+    Equal(table.concat({ tostring(panel.glowSize:IsVisible()), tostring(panel.glowSizeLabel:IsVisible()), S[panel.glowSizeLabel].text,
+        S[panel.glowSize.value].text, tostring(panel.glowSize.usable), tostring(S[panel.glowSize].alpha), Row(panel.glowSizeLabel),
+        Row(panel.glowSize) }, " ") .. " | " .. Note(panel.glowSize), "true true Glow size 100% false 0.35 16," .. (tickY - 2 - 26)
+        .. " 96," .. (tickY + 2 - 26) .. " | Not for a buff shown Only when missing: it has no icon while it's on you, so nothing to glow.",
+        "Glow size right under Glow while active, at 100%, greyed with the tick, saying why")
+    panel.only:Click()
+    local usable = tostring(panel.active.usable) .. " " .. Note(panel.active)
+    local unticked = tostring(panel.glowSize.usable) .. " | " .. Note(panel.glowSize)
+    -- Greyed, a size picked anyway (the slider can't be dragged then) is
+    -- never kept, and the slider shows the kept one again.
+    panel.glowSize:Choose(70)
+    unticked = unticked .. " | " .. ns.GlowActiveSize() .. " " .. S[panel.glowSize.value].text
+    panel.active:Click()
+    Equal(usable .. " | " .. tostring(B:GlowsActive("buff", "Thorns")) .. " " .. tostring(panel.active:GetChecked()), "true Its icon glows"
+        .. " while the buff is on you, like a proc, so you can't miss it. Best for short procs. | true true",
+        "Only when missing unticked: usable, saying what it does; ticked, kept for Thorns")
+    Equal(unticked .. " | " .. tostring(panel.glowSize.usable) .. " | " .. Note(panel.glowSize), "false | Tick Glow while active first:"
+        .. " this sizes its glow. | 100 100% | true | How big the glow is round every buff that glows while it's up, not just this one:"
+        .. " 100% is its usual size.", "Glow size: greyed until the tick is ticked (nothing kept meanwhile), then usable,"
+        .. " saying it's every glowing buff's (seen in game, no experimental)")
+    Check(panel, "Buffs, three ticks")
+    -- Picked: kept in the profile for every glowing buff, shown at once; the
+    -- panel still fits at either end.
+    panel.glowSize:Choose(50)
+    local small = ns.GlowActiveSize() .. " " .. tostring(ns.ProfileLists().glowActiveSize) .. " " .. S[panel.glowSize.value].text
+    Check(panel, "Buffs, Glow size 50%")
+    panel.glowSize:Choose(150)
+    Equal(small .. " | " .. ns.GlowActiveSize() .. " " .. S[panel.glowSize.value].text .. " " .. tostring(S[panel].shown), "50 50 50% | 150 150% true",
+        "Glow size 50%, then 150%: kept in the profile, the panel still open")
+    Check(panel, "Buffs, Glow size 150%")
+    B:SetOption("buff", "onlyMissing", true)
+    w:Refresh()
+    local greyed = tostring(panel.active.usable) .. " " .. tostring(panel.active:GetChecked()) .. " | " .. Note(panel.active)
+        .. " | " .. tostring(panel.glowSize.usable) .. " " .. S[panel.glowSize.value].text
+    Check(panel, "Buffs, Only show missing")
+    B:SetOption("buff", "onlyMissing", false)
+    w:Refresh()
+    Equal(greyed, "false true | Not with Only show missing: a buff has no icon while it's on you, so nothing to glow. | false 150%",
+        "Only show missing: greyed, saying why, the tick kept; Glow size greyed with it, kept")
+    panel.active:Click()
+    Equal(tostring(B:GlowsActive("buff", "Thorns")) .. " " .. tostring(panel.glowSize.usable) .. " " .. S[panel.glowSize.value].text,
+        "false false 150%", "unticked from the panel: Glow size greyed, still the profile's")
+    B:SetGlowActiveSize(100)
+    Equal(tostring(ns.ProfileLists().glowActiveSize), "nil", "back at 100%: none kept")
+    panel.only:Click()
     panel.only:Click()
     B:SetOption("buff", "showMissing", true)
     w:Refresh()
@@ -3266,10 +3417,25 @@ end)()
     Equal(S[panel.title].text .. " " .. S[panel.quiet].text .. " | " .. Note(panel.warn.buttons[8]), "MAIN HAND ENCHANT on Buffs | Its"
         .. " countdown turns red with 10 minutes left. Out of combat its icon glows too. (experimental)",
         "Main hand enchant: the countdown and the glow, no edge")
+    Equal(tostring(panel.active.usable) .. " | " .. Note(panel.active), "false | Not for a weapon enchant: only a buff's icon can glow"
+        .. " while it's up.", "Main hand enchant: Glow while active greyed, saying why")
     bp.icons[1]:Click()
     B:SetAura("buff", "hand:main", false)
     w:Refresh()
     B:SetOption("buff", "showMissing", false)
+    -- Buffs 2 has it too.
+    B:AddBar("buff")
+    B:SetAura("buff2", "Clearcasting", true)
+    w:Select("buff2")
+    bp.icons[1]:Click()
+    local second = S[panel.title].text .. " " .. S[panel.quiet].text .. " " .. tostring(panel.active:IsVisible()) .. " "
+        .. tostring(panel.active.usable) .. " " .. tostring(panel.glowSize:IsVisible())
+    Check(panel, "Buffs 2")
+    panel.done:Click()
+    B:RemoveBar("buff2")
+    w:Select("buff")
+    bp.icons[1]:Click()
+    Equal(second, "CLEARCASTING on Buffs 2 true true true", "Glow while active and its Glow size on the Buffs 2 page too")
     panel.only:Click()
     -- Taken off its bar from the tray: the panel goes with it.
     bp.icons[1].remove:Click()

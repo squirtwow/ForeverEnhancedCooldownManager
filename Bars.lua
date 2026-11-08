@@ -117,18 +117,29 @@ local GLOW = 2
 local GLOW_SIDES = { { "TOPLEFT", "TOPRIGHT", true }, { "BOTTOMLEFT", "BOTTOMRIGHT", true },
     { "TOPLEFT", "BOTTOMLEFT" }, { "TOPRIGHT", "BOTTOMRIGHT" } }
 
+-- The edge's frame, and its four sides in GLOW_SIDES' order.
 local function NewEdge(top)
     local glow = CreateFrame("Frame", nil, top)
     glow:SetAllPoints()
-    for _, side in ipairs(GLOW_SIDES) do
+    local strips = {}
+    for i, side in ipairs(GLOW_SIDES) do
         local strip = glow:CreateTexture(nil, "BORDER")
         strip:SetColorTexture(1, .82, 0, 1)
         strip:SetPoint(side[1])
         strip:SetPoint(side[2])
         if side[3] then strip:SetHeight(GLOW) else strip:SetWidth(GLOW) end
+        strips[i] = strip
     end
     glow:Hide()
-    return glow
+    return glow, strips
+end
+
+-- An edge's sides made width wide in place of GLOW (Glow while active's
+-- Glow size, Buffs.lua).
+local function EdgeWidth(strips, width)
+    for i, side in ipairs(GLOW_SIDES) do
+        if side[3] then strips[i]:SetHeight(width) else strips[i]:SetWidth(width) end
+    end
 end
 
 -- Blizzard's proc glow, or nil if the game can't make it.
@@ -209,8 +220,9 @@ local function UseGlow(icon)
     if lit then SetGlow(icon, true) end
 end
 -- Shared with the Buffs bar's missing buffs (Buffs.lua), on any frame with a
--- top for the glow and a glows table.
-ns.UseGlow, ns.SetGlow = UseGlow, SetGlow
+-- top for the glow and a glows table. The gold edge too, for its buffs that
+-- glow while they're up, and how wide its sides are.
+ns.UseGlow, ns.SetGlow, ns.NewEdge, ns.EdgeWidth, ns.EDGE_WIDTH = UseGlow, SetGlow, NewEdge, EdgeWidth, GLOW
 
 local function NewIcon(bar)
     local icon = CreateFrame("Frame", nil, bar)
@@ -1157,8 +1169,8 @@ local function ReportEntry(bar, i, say)
         only = (ns.BuffBar:OnlyMissing(bar.data) and "" or " | only when missing")
             .. " | on you " .. tostring(bar.up ~= nil and bar.up[i] == true)
     end
-    return ("  %d. %s | spells %s%s%s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only,
-        ns.BuffBar:WarnReport(bar, i), ns.BuffBar:EnchantReport(bar, i))
+    return ("  %d. %s | spells %s%s%s%s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only,
+        ns.BuffBar:WarnReport(bar, i), ns.BuffBar:EnchantReport(bar, i), ns.BuffBar:ActiveReport(bar, i))
 end
 
 -- For /ccm debug (Debug.lua): each of your bars and the icons on it as they
@@ -1254,6 +1266,8 @@ function B:ApplyGlow()
         for _, holder in ipairs(bar.holders or {}) do
             if holder.glowHost then UseGlow(holder.glowHost) end
         end
+        -- And its buffs that glow while they're up (once out of a fight).
+        if bar.holders then ns.BuffBar:Actives(bar) end
     end
 end
 
@@ -1727,9 +1741,9 @@ end
 
 -- An aura bar's entry gone from its list (not just moved along it): its own
 -- choices go with it (the icon shown faded, Glow when missing, Count ticks,
--- Only when missing, Warn at), so putting it back starts afresh, as after a
--- reload (Core.lua Lists). Any bar's: its own countdown look too (settings
--- per spell), once none of your lists has it.
+-- Only when missing, Glow while active, Warn at), so putting it back starts
+-- afresh, as after a reload (Core.lua Lists). Any bar's: its own countdown
+-- look too (settings per spell), once none of your lists has it.
 local function Forget(key, name)
     if name then
         ns.ForgetSpellLook(name)
@@ -1738,7 +1752,7 @@ local function Forget(key, name)
     end
     if not (ns.AURA_BARS[key] and name) then return name end
     ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
-    if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name] = nil end
+    if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name], ns.GlowActive(key)[name] = nil, nil end
     ns.SetWarnAt(key, name, nil)
     return name
 end
@@ -2381,6 +2395,52 @@ function B:WarnUsable(key, name)
         if self:OnlyWhenMissing(key, ns.BarData(key).spells[i]) then return false end
     end
     return true
+end
+
+-- Glow while active: a buff on a Buffs bar (Buffs 2 too) whose icon glows
+-- while it's up, like a proc, so it's hard to miss. The glow sits inside the
+-- game's own icon for it, so it shows with that icon, in a fight too
+-- (Buffs.lua F:Actives); a change shows once out of a fight.
+function B:SetGlowActive(key, name, on)
+    if ns.BAR_KIND[key] ~= "buff" or not IndexOf(key, name) then return false end
+    ns.GlowActive(key)[name] = on and true or nil
+    self:Changed()
+    return true
+end
+
+function B:GlowsActive(key, name)
+    return ns.BAR_KIND[key] == "buff" and ns.GlowActive(key)[name] == true
+end
+
+-- Glow size: how big those glows are on every Buffs bar, a percent of their
+-- usual size (the profile's, not a spell's). The glows lit now change at
+-- once, or once a fight ends (Buffs.lua F:Actives).
+function B:SetGlowActiveSize(percent)
+    ns.SetGlowActiveSize(percent)
+    for _, bar in pairs(bars) do
+        if bar.holders then ns.BuffBar:Actives(bar) end
+    end
+end
+
+-- Whether it can show: as Warn at, only with an icon while the buff is up
+-- (not with Only show missing, nor Only when missing), and not on an icon of
+-- weapon enchants alone, whose spot is the addon's own, not the game's.
+-- Judged as Buffs.lua F:Layout does, by your own in the icon; with none of
+-- yours in it (another character's), by them all.
+function B:ActiveUsable(key, name)
+    if ns.BAR_KIND[key] ~= "buff" or not self:WarnUsable(key, name) then return false end
+    local data = ns.BarData(key)
+    local first, last = Group(key, IndexOf(key, name))
+    local yours, all = nil, false
+    for i = first, last do
+        local spell = data.spells[i]
+        local found = ns.Spells:Find(spell)
+        local buff = not (found and (found.hand or ns.WEAPON_ENCHANTS[found.name]))
+        all = all or buff
+        if found and found.ids and ns.Spells:ForMe(spell, key) then yours = yours or buff end
+    end
+    if yours == nil then return all end
+    return yours
 end
 
 -- Settings per spell (a player's idea: a font and size per icon): an

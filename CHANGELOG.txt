@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.4
+
+### Added
+- Glow while active: buffs can glow while they're up, any size.
+
 ## 1.10.3
 
 ### Added

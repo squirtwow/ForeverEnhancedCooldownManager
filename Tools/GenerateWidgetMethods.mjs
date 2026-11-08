@@ -46,7 +46,7 @@ const APIS = {
   ScrollFrame: 'SimpleScrollFrameAPI', Slider: 'SimpleSliderAPI', StatusBar: 'SimpleStatusBarAPI',
   Cooldown: 'FrameAPICooldown', AnimationGroup: 'SimpleAnimGroupAPI', Animation: 'SimpleAnimAPI',
   Alpha: 'SimpleAnimAlphaAPI', Scale: 'SimpleAnimScaleAPI', Translation: 'SimpleAnimTranslationAPI',
-  Rotation: 'SimpleAnimRotationAPI',
+  Rotation: 'SimpleAnimRotationAPI', FlipBook: 'SimpleAnimFlipBookAPI',
 };
 const BASE = ['FrameScriptObject', 'Object'];
 const SCRIPT_REGION = [...BASE, 'ScriptRegion', 'ScriptRegionResizing', 'AnimatableObject'];
@@ -75,6 +75,7 @@ const KINDS = {
   Scale: [...ANIMATION, 'Scale'],
   Translation: [...ANIMATION, 'Translation'],
   Rotation: [...ANIMATION, 'Rotation'],
+  FlipBook: [...ANIMATION, 'FlipBook'],
 };
 
 // Every Lua table in Blizzard's addons, mixins among them: its functions and

@@ -477,6 +477,9 @@ end
 -- An icon's own size (settings per spell), as a share of its bar's icon
 -- size: min, max, default.
 ns.ICON_SIZE = { 50, 150, 100 }
+-- Glow while active's Glow size, as a share of the glow's usual size: min,
+-- max, default (the profile's own, for all its glowing buffs).
+ns.GLOW_ACTIVE_SIZE = { 50, 150, 100 }
 -- min, max, default. dimOpacity: how much of a dimmed icon shows, in percent
 -- (When ready's and On cooldown's Dim, and Dim when you can't cast it); 40
 -- is how dim they always were.
@@ -840,6 +843,14 @@ function ns.SizeValue(value)
     return type(value) == "number" and value == math.floor(value) and value >= limits[1] and value <= limits[2]
 end
 
+-- Glow while active's Glow size as kept: a whole percent within its limits,
+-- other than the usual size (a profile at 100% keeps none).
+local function GlowSizeValue(value)
+    local limits = ns.GLOW_ACTIVE_SIZE
+    return type(value) == "number" and value == math.floor(value) and value >= limits[1] and value <= limits[2]
+        and value ~= limits[3]
+end
+
 -- Whether a name is on any of a bar's lists in a profile: its own, or for
 -- the Cooldowns or Utility bar a form's.
 local function OnBarLists(store, key, name)
@@ -887,14 +898,14 @@ local function Lists(profile)
         end
     end
     -- The picked icon for a joined group while none is up, the buffs that
-    -- glow while they're missing, the debuffs that count their ticks and
-    -- the buffs shown only while they're missing (a Buffs bar's own):
-    -- only names on that aura bar's list.
-    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing" }) do
+    -- glow while they're missing, the debuffs that count their ticks, the
+    -- buffs shown only while they're missing and the buffs that glow while
+    -- they're up (both a Buffs bar's own): only names on that aura bar's list.
+    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive" }) do
         if type(profile[field]) ~= "table" then profile[field] = {} end
         for key, set in pairs(profile[field]) do
             if not (ns.AURA_BARS[key] and Present(profile, key)) or type(set) ~= "table"
-                or (field == "onlyWhenMissing" and ns.BAR_KIND[key] ~= "buff") then
+                or ((field == "onlyWhenMissing" or field == "glowActive") and ns.BAR_KIND[key] ~= "buff") then
                 profile[field][key] = nil
             else
                 local listed = {}
@@ -938,6 +949,7 @@ local function Lists(profile)
     RepairLooks(profile)
     RepairWarns(profile)
     RepairSizes(profile)
+    if not GlowSizeValue(profile.glowActiveSize) then profile.glowActiveSize = nil end
     RenameSpells(profile)
     -- Positions per profile: its spots and sizes, repaired as they're used.
     if profile.place ~= nil and type(profile.place) ~= "table" then profile.place = nil end
@@ -1370,6 +1382,24 @@ function ns.OnlyWhenMissing(key)
     return Choices("onlyWhenMissing", key)
 end
 
+-- This character's buffs on a Buffs bar whose icons glow while they're up
+-- (Glow while active), by name, true each.
+function ns.GlowActive(key)
+    return Choices("glowActive", key)
+end
+
+-- And how big their glows are (Glow size): a percent of the usual size, for
+-- every Buffs bar at once. Set to the usual size (or anything that can't be
+-- kept), none is kept.
+function ns.GlowActiveSize()
+    local value = ns.ProfileLists().glowActiveSize
+    return GlowSizeValue(value) and value or ns.GLOW_ACTIVE_SIZE[3]
+end
+
+function ns.SetGlowActiveSize(percent)
+    ns.ProfileLists().glowActiveSize = GlowSizeValue(percent) and percent or nil
+end
+
 -- This character's own looks by entry (settings per spell), made only when
 -- one is set (make).
 local function SpellLooks(make)
@@ -1596,7 +1626,7 @@ function ns.RemoveBar(key)
     extras[key] = nil
     store.extraBars = next(extras) ~= nil and extras or nil
     store[key] = nil
-    for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "warnAt", "iconSize" }) do
+    for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "warnAt", "iconSize" }) do
         local sets = store[field]
         if type(sets) == "table" then sets[key] = nil end
     end
@@ -1830,9 +1860,9 @@ local function Duplicate(from)
         for name in pairs(joins) do profile.joins[key][name] = true end
     end
     -- And which entry each joined icon shows, faded, while none is up, which
-    -- buffs glow while they're missing, which debuffs count their ticks and
-    -- which buffs show only while they're missing.
-    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing" }) do
+    -- buffs glow while they're missing, which debuffs count their ticks,
+    -- which buffs show only while they're missing and which glow while up.
+    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive" }) do
         profile[field] = {}
         for key, set in pairs(type(from[field]) == "table" and from[field] or {}) do
             profile[field][key] = {}
@@ -1848,6 +1878,8 @@ local function Duplicate(from)
         profile.spellLook = {}
         for name, look in pairs(from.spellLook) do profile.spellLook[name] = ns.CleanSpellLook(look) end
     end
+    -- And how big its buffs' glows while they're up are (Glow size).
+    profile.glowActiveSize = GlowSizeValue(from.glowActiveSize) and from.glowActiveSize or nil
     -- And each warned entry's seconds (Warn at N seconds left), and each
     -- icon's own size (Lists checks them).
     for _, field in ipairs({ "warnAt", "iconSize" }) do

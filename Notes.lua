@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.4",
+        sections = {
+            { "Added", {
+                "Glow while active: buffs can glow while they're up, any size.",
+            } },
+        },
+    },
+    {
         version = "1.10.3",
         sections = {
             { "Added", {
