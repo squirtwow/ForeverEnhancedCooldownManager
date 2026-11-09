@@ -10,6 +10,15 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.7",
+        sections = {
+            { "Added", {
+                "Cast bar: drag it anywhere on your screen.",
+                "Cast bar: option to sit where Blizzard's cast bar normally is.",
+            } },
+        },
+    },
+    {
         version = "1.10.6",
         sections = {
             { "Added", {

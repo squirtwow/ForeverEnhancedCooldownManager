@@ -146,6 +146,26 @@ function ns.BuildCastBarPage(window, page, width)
     above:SetPoint("TOPLEFT", 300, -54)
     page.above = above
 
+    -- Off the display altogether: the blue box drags it, under Above.
+    local free = T:Check(options, "Drag it anywhere", function(self)
+        C:SetFree(self:GetChecked())
+        Changed()
+    end)
+    free:SetPoint("TOPLEFT", 300, -82)
+    window:Hint(free, "Your cast bar and swing timer leave the resource display. Drag the blue box while this page is open or your bars are unlocked. (experimental)")
+    page.free = free
+
+    -- Or just where Blizzard's own cast bar is, beside it: one or the other.
+    local atNative = T:Check(options, "At Blizzard's spot", function(self)
+        C:SetNative(self:GetChecked())
+        Changed()
+    end)
+    atNative:SetPoint("TOPLEFT", 450, -82)
+    window:Hint(atNative, "Your cast bar and swing timer sit where Blizzard's own cast bar is, as Edit Mode places it.")
+    page.atNative = atNative
+    page:HookScript("OnShow", function() C:PageOpen(true) end)
+    page:HookScript("OnHide", function() C:PageOpen(false) end)
+
     -- A colour for one of them: its swatch opens the colours, and the
     -- chosen one clicked again goes back to its own (shown: the colour in use).
     local function Colours(caption, key, y, note, about, shown)
@@ -381,7 +401,17 @@ function ns.BuildCastBarPage(window, page, width)
         local casts, swinging = ns.Get("castBar"), ns.Get("swingTimer")
         local over = ns.Get("castAbove") and true or false
         local where = over and "above" or "under"
-        if casts and swinging then
+        local dragged = ns.Get("castFree") and true or false
+        local atSpot = ns.Get("castNative") and true or false
+        if atSpot and (casts or swinging) then
+            status:SetText(casts and "Where Blizzard's cast bar is, which stays hidden." or "Swing timer where Blizzard's cast bar is.")
+        elseif dragged and casts and swinging then
+            status:SetText("Cast bar and swing timer where you dragged them. Blizzard's cast bar is hidden.")
+        elseif dragged and casts then
+            status:SetText("Where you dragged it. Blizzard's cast bar is hidden.")
+        elseif dragged and swinging then
+            status:SetText("Swing timer where you dragged it. Casts show on Blizzard's cast bar.")
+        elseif casts and swinging then
             status:SetText("Cast bar and swing timer " .. where .. " your resource display. Blizzard's cast bar is hidden.")
         elseif casts then
             status:SetText((over and "Above" or "Under") .. " your Personal Resource Display. Blizzard's cast bar is hidden.")
@@ -390,11 +420,14 @@ function ns.BuildCastBarPage(window, page, width)
         else
             status:SetText("Off. Your rows close up, and other cast bar addons work as before.")
         end
-        about:SetText((over and "It sits right above your resource display, and in a layout the rows above go over it. "
+        about:SetText(dragged and "It stays where you drag it, and your rows close up as if it weren't there."
+            or (over and "It sits right above your resource display, and in a layout the rows above go over it. "
             or "It sits right under your resource display, and in a layout the rows go under it. ") .. KEEPS_ROOM)
         shown:SetChecked(casts)
         swings:SetChecked(swinging)
         above:SetChecked(over)
+        free:SetChecked(dragged)
+        atNative:SetChecked(atSpot)
         ownWidth:SetChecked(ns.Get("castOwnWidth"))
         barWidth:SetShown(ns.Get("castOwnWidth") and true or false)
         barWidth:Set(ns.Get("castWidth"))

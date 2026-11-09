@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.7
+
+### Added
+- Cast bar: drag it anywhere on your screen.
+- Cast bar: option to sit where Blizzard's cast bar normally is.
+
 ## 1.10.6
 
 ### Added

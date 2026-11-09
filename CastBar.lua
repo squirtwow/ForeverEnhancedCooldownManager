@@ -662,6 +662,8 @@ local function Begin(channel, fresh)
         return
     end
     Native(false)
+    -- Edit Mode may have moved Blizzard's bar since the last cast.
+    if fresh and ns.Get("castNative") then C:Place() end
     local start, finish = startMS / 1000, endMS / 1000
     cast, fading = { channel = channel, id = id, start = start, finish = finish, total = math.max(.001, finish - start) }, nil
     -- A delay keeps the batch's count; only a new cast asks the game again.
@@ -877,8 +879,9 @@ end
 -- Its place ----------------------------------------------------------------------------
 
 -- How much room it takes under the display while the cast bar or the swing
--- timer is on.
+-- timer is on. None once it's been set free to drag anywhere.
 function C:Room()
+    if ns.Get("castFree") or ns.Get("castNative") then return nil end
     if ns.Get("castBar") or ns.Get("swingTimer") then return ns.Get("castHeight") end
     return nil
 end
@@ -891,6 +894,30 @@ function C:RoomAbove(display)
     return height + (display.height > 0 and PAD or 0)
 end
 
+-- Where Blizzard's own cast bar is, from the middle of the screen. Only read,
+-- never moved, so Edit Mode still places it. If the game can't say, where it
+-- was last read, or the dragged spot before that.
+local nativeX, nativeY
+
+local function ReadNative(frame)
+    local x, y = frame:GetCenter()
+    local scale = frame:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    if not (Open(x) and Open(y) and Open(scale) and x and y) then return nil end
+    local cx, cy = UIParent:GetCenter()
+    return x * scale - cx, y * scale - cy
+end
+
+local function NativeSpot()
+    local frame = _G.PlayerCastingBarFrame
+    if frame then
+        local ok, x, y = pcall(ReadNative, frame)
+        if ok and x and y then
+            nativeX, nativeY = math.floor(x + .5), math.floor(y + .5)
+        end
+    end
+    return nativeX or ns.Get("castX"), nativeY or ns.Get("castY")
+end
+
 -- Puts the bar under the display (and its combo points), or over it if that's
 -- chosen, as wide as it, and gives back where the next row starts: under the
 -- bar, or under the display while the bar is off or over it. With the display
@@ -898,7 +925,8 @@ end
 function C:Under(display)
     local bottom = display.y - display.height / 2
     local height = self:Room()
-    if not height then return bottom end
+    local free, native = ns.Get("castFree"), ns.Get("castNative")
+    if not (height or free or native) then return bottom end
     local pad = display.height > 0 and PAD or 0
     -- The bar's own edges, round its icon too, go on the restyle's, so the
     -- whole bar is exactly as wide as the display you see, at any Size and
@@ -910,22 +938,108 @@ function C:Under(display)
     -- A width of your own: the whole bar you see, still centred on the display.
     if ns.Get("castOwnWidth") then width = ns.Get("castWidth") - 2 * EDGE end
     local above = ns.Get("castAbove")
-    if row then
+    -- Being dragged, it's left to the mouse till it's let go.
+    if row and not row.dragging then
         row:ClearAllPoints()
-        if above then
+        if native then
+            local x, y = NativeSpot()
+            row:SetPoint("CENTER", UIParent, "CENTER", x, y)
+        elseif free then
+            row:SetPoint("CENTER", UIParent, "CENTER", ns.Get("castX"), ns.Get("castY"))
+        elseif above then
             row:SetPoint("BOTTOM", UIParent, "CENTER", display.x, display.y + display.height / 2 + pad)
         else
             row:SetPoint("TOP", UIParent, "CENTER", display.x, bottom - pad)
         end
         row:SetWidth(width >= 40 and width or ALONE.width)
     end
-    if above then return bottom end
+    if above or free or native then return bottom end
     return bottom - pad - height
 end
 
 -- Without a layout: under the display on its own, or where it would be.
 function C:Place()
     self:Under(ns.Layout and ns.Layout:Display() or ALONE)
+end
+
+-- Dragging it anywhere (Cast bar page, off by default) ---------------------------------
+
+local mover -- the box to drag it by, made the first time it's needed
+local pageOpen = false -- the Cast bar page is showing
+
+-- Keeps where the bar's middle is now, from the middle of the screen.
+local function KeepSpot()
+    local x, y = row:GetCenter()
+    local cx, cy = UIParent:GetCenter()
+    if not (x and y and cx and cy) then return end
+    ns.Set("castX", math.floor(x - cx + .5))
+    ns.Set("castY", math.floor(y - cy + .5))
+end
+
+-- Lets go of the bar being dragged, where it is now.
+local function LetGo()
+    if not (row and row.dragging) then return end
+    row.dragging = nil
+    row:StopMovingOrSizing()
+    if row.SetUserPlaced then row:SetUserPlaced(false) end
+    KeepSpot()
+    C:Place()
+end
+
+-- A frame of its own beside the bar, not on it: the bar stays see-through
+-- between casts.
+local function MakeMover()
+    mover = CreateFrame("Frame", nil, UIParent)
+    mover:SetPoint("TOPLEFT", row, "TOPLEFT", -4, 4)
+    mover:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 4, -4)
+    mover:SetFrameLevel(row:GetFrameLevel() + 20)
+    mover:EnableMouse(true)
+    mover:RegisterForDrag("LeftButton")
+    mover.fill = mover:CreateTexture(nil, "BACKGROUND")
+    mover.fill:SetAllPoints()
+    mover.fill:SetColorTexture(.25, .55, 1, .45)
+    mover.label = mover:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    mover.label:SetPoint("CENTER")
+    mover.label:SetText("Cast bar")
+    mover:SetScript("OnDragStart", function()
+        row.dragging = true
+        row:SetMovable(true)
+        row:SetClampedToScreen(true)
+        row:StartMoving()
+    end)
+    mover:SetScript("OnDragStop", LetGo)
+    -- Hidden mid-drag, it never hears the mouse let go.
+    mover:SetScript("OnHide", LetGo)
+    mover:Hide()
+    C.mover = mover
+end
+
+-- The box shows while it's set free and either the Cast bar page is open or
+-- the bars are unlocked. Nothing is made for anyone who never ticks it.
+function C:ShowMover()
+    local show = row ~= nil and row:IsShown() and ns.Get("castFree") == true and not ns.Get("castNative")
+        and (pageOpen or (ns.Bars ~= nil and ns.Bars:IsUnlocked()))
+    if not show and not mover then return end
+    if not mover then MakeMover() end
+    mover:SetShown(show and true or false)
+end
+
+function C:PageOpen(open)
+    pageOpen = open
+    self:ShowMover()
+end
+
+-- Ticking it starts from where the bar is now, so nothing jumps.
+function C:SetFree(on)
+    if on and row then KeepSpot() end
+    ns.Set("castFree", on and true or false)
+    if on then ns.Set("castNative", false) end
+end
+
+-- At Blizzard's own cast bar's spot, or dragged: one or the other.
+function C:SetNative(on)
+    ns.Set("castNative", on and true or false)
+    if on then ns.Set("castFree", false) end
 end
 
 -- After a choice changes: shown or not (Blizzard's bar back while the cast
@@ -942,6 +1056,7 @@ function C:Apply()
     -- A channel's marks, and the latency zone, as just chosen.
     if cast and cast.ticks then PlaceMarks() end
     ShowLag()
+    self:ShowMover()
 end
 
 function C:Start()

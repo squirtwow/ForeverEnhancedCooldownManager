@@ -1459,6 +1459,8 @@ function B:SetUnlocked(value)
     self:RefreshAll()
     -- Unlocked, empty bars show too, so a layout makes room for them.
     if ns.Layout then ns.Layout:Stack() end
+    -- A cast bar set free drags with them.
+    if ns.CastBar then ns.CastBar:ShowMover() end
 end
 
 -- Every icon on the Cooldowns and Utility bars: in full, or one part of each

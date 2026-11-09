@@ -110,6 +110,10 @@ ns.DEFAULTS = {
     castOwnWidth = false, -- a width of your own for it, instead of the display's
     castWidth = 200,
     castAbove = false, -- over the display instead of under it
+    castFree = false, -- dragged anywhere, instead of hanging off the display
+    castNative = false, -- where Blizzard's own cast bar is, instead of hanging off the display
+    castX = 0, -- where it was dragged to, its middle from the middle of the screen
+    castY = -150,
     castIcon = true, -- the spell's icon, name and time left on it
     castName = true,
     castTime = true,
@@ -220,6 +224,7 @@ ns.KEYBIND_POSITION_NAMES = { BOTTOM = "Bottom", TOPLEFT = "Top left", TOP = "To
 ns.CAST_HEIGHT = { 10, 32, 18 }
 ns.CAST_TEXT_SIZE = { 60, 160, 100 } -- percent of the size the Height gives the text
 ns.CAST_WIDTH = { 100, 500, 200 } -- the whole bar you see, edges and icon included
+ns.CAST_SPOT = { -5000, 5000 } -- how far from the middle of the screen it can be dragged
 ns.CAST_TICK_WIDTH = { 1, 6, 2 } -- screen pixels
 ns.MINIMAP_ANGLE = { 0, 359, 202 }
 ns.MINIMAP_PLACE = { -4000, 4000, 0 }
@@ -242,7 +247,7 @@ ns.PULSE_LONG_TIME = { 3, 50, 25 } -- 0.3 to 5 seconds
 ns.PULSE_SEE_THROUGH = { 0, 90, 80 }
 ns.PULSE_GROW = { 100, 160, 135 }
 ns.PULSE_PLACE = { -4000, 4000, 0 }
-local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTextSize = ns.CAST_TEXT_SIZE, castWidth = ns.CAST_WIDTH, castTickWidth = ns.CAST_TICK_WIDTH, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
+local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTextSize = ns.CAST_TEXT_SIZE, castWidth = ns.CAST_WIDTH, castX = ns.CAST_SPOT, castY = ns.CAST_SPOT,castTickWidth = ns.CAST_TICK_WIDTH, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
     barScale = ns.BAR_SCALE, barDarkness = ns.BAR_DARKNESS, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE,
     warningSize = ns.RAID_SIZE, emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
     pulseLongSize = ns.PULSE_LONG_SIZE, pulseLongTime = ns.PULSE_LONG_TIME,
@@ -435,7 +440,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "prdPowerRight", "prdExtraAt", "prdExtraCentre", "prdExtraLeft", "prdExtraRight", "prdEnergyAt", "prdEnergyCentre",
     "prdEnergyLeft", "prdEnergyRight", "prdHealthSize", "prdPowerSize", "prdExtraSize", "prdEnergySize",
     "prdTextNumbers", "prdTextSize", "prdTextFont",
-    "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castAbove", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
+    "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castAbove", "castFree", "castNative", "castX", "castY", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
     "castLatencyColour", "castLatencyText", "swingColour",
     "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge", "edgeColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",

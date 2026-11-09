@@ -7588,6 +7588,106 @@ end)()
         Equal(S[strip].points[1][1] .. " " .. S[strip].points[1][3], "TOP BOTTOM", "and the Layout page draws it under again")
         w:Hide()
     end
+
+    -- Dragged anywhere: off to begin with and nothing made for it; ticked, it
+    -- starts where it is, the rows close up, and it stays where it's dropped,
+    -- with the display gone too. Unticked, everything's back.
+    do
+        local function Y(frame) return S[frame].points[1][5] end
+        local layout = ns.LayoutData()
+        local down = B:Get(layout.below[1])
+        local under, downY = At(cb), Y(down)
+        Equal(tostring(ns.Get("castFree")) .. " " .. tostring(C.mover), "false nil", "dragging it starts off, with no box made")
+        S[cb].cx, S[cb].cy = UIParent:GetCenter()
+        S[cb].cx, S[cb].cy = S[cb].cx + 12, S[cb].cy - 90
+        SlashCmdList.FECM("")
+        local w = FECMFrame
+        w:Select("cast")
+        local cp = w.pages.cast
+        cp.free:Click()
+        Equal(ns.Get("castFree"), true, "ticked on the Cast bar page")
+        Equal(At(cb), "CENTER 12 -90", "starts where it was, so nothing jumps")
+        Equal(Y(down) - downY, 22, "the row below closes up: it takes no room now")
+        Equal(S[C.mover].shown, true, "the box shows while the page is open")
+        Equal(S[cp.status].text, "Swing timer where you dragged it. Casts show on Blizzard's cast bar.", "the page says where it is")
+        S[C.mover].scripts.OnDragStart()
+        Equal(cb.dragging, true, "the box drags the bar")
+        L:Stack()
+        Equal(At(cb), "CENTER 12 -90", "a layout while it's held leaves it to the mouse")
+        S[cb].cx, S[cb].cy = S[cb].cx - 300, S[cb].cy + 40
+        S[C.mover].scripts.OnDragStop()
+        Equal(tostring(cb.dragging) .. " " .. ns.Get("castX") .. " " .. ns.Get("castY") .. " " .. At(cb), "nil -288 -50 CENTER -288 -50", "stays where it's dropped")
+        prdOn = false
+        L:Stack()
+        Equal(At(cb), "CENTER -288 -50", "the display switched off doesn't move it")
+        prdOn = true
+        L:Stack()
+        w:Select("layout")
+        Equal(S[w.pages.layout.castStrip].shown, false, "the Layout page leaves it out of the stack")
+        w:Select("cast")
+        w:Hide()
+        Equal(S[C.mover].shown, false, "the page closed: the box goes")
+        B:SetUnlocked(true)
+        Equal(S[C.mover].shown, true, "unlocking the bars brings it back")
+        B:SetUnlocked(false)
+        Equal(S[C.mover].shown, false, "locking them takes it away")
+        C:SetFree(false)
+        C:Apply()
+        Equal(At(cb) .. " " .. Y(down), under .. " " .. downY, "unticked: back under the display, the rows too")
+    end
+    -- At Blizzard's spot: off to begin with; on, it's where Blizzard's bar is
+    -- (only read), at its scale too, follows Edit Mode from the next cast, and
+    -- the rows close up. Dragging and this are one or the other.
+    do
+        local function Y(frame) return S[frame].points[1][5] end
+        local down = B:Get(ns.LayoutData().below[1])
+        local under, downY = At(cb), Y(down)
+        local native = PlayerCastingBarFrame
+        local cx, cy = UIParent:GetCenter()
+        S[native].cx, S[native].cy = cx - 100, cy - 200
+        local nativePoints = #(S[native].points or {})
+        Equal(ns.Get("castNative"), false, "Blizzard's spot starts off")
+        SlashCmdList.FECM("")
+        local w = FECMFrame
+        w:Select("cast")
+        local cp = w.pages.cast
+        cp.atNative:Click()
+        Equal(ns.Get("castNative"), true, "ticked on the Cast bar page")
+        Equal(At(cb), "CENTER -100 -200", "sits where Blizzard's bar is")
+        Equal(Y(down) - downY, 22, "the rows close up: it takes no room now")
+        Equal(#(S[native].points or {}), nativePoints, "Blizzard's bar isn't moved")
+        cp.free:Click()
+        Equal(tostring(ns.Get("castFree")) .. " " .. tostring(ns.Get("castNative")), "true false", "dragging turns it off")
+        cp.atNative:Click()
+        Equal(tostring(ns.Get("castFree")) .. " " .. tostring(ns.Get("castNative")), "false true", "and it turns dragging off")
+        Equal(S[C.mover].shown, false, "no box to drag it by")
+        -- Moved in Edit Mode: the next cast goes there.
+        S[native].cx, S[native].cy = cx + 40, cy - 60
+        local realCasting = _G.UnitCastingInfo
+        ns.Set("castBar", true)
+        C:Event("PLAYER_ENTERING_WORLD")
+        _G.UnitCastingInfo = function() return "Fireball", "Fireball", "icon", 1000, 3000, false, 77 end
+        C:Event("UNIT_SPELLCAST_START", 77)
+        Equal(At(cb), "CENTER 40 -60", "the next cast follows Edit Mode")
+        _G.UnitCastingInfo = realCasting
+        C:Event("UNIT_SPELLCAST_STOP", 77)
+        ns.Set("castBar", false)
+        -- The game can't say: where it was last read.
+        S[native].cx, S[native].cy = nil, nil
+        C:Apply()
+        Equal(At(cb), "CENTER 40 -60", "can't be read: stays where it was last read")
+        -- Blizzard's bar at another scale.
+        S[native].cx, S[native].cy = (cx + 40) / 2, (cy - 60) / 2
+        rawset(native, "GetEffectiveScale", function() return 2 end)
+        C:Apply()
+        Equal(At(cb), "CENTER 40 -60", "a scaled bar is measured in the screen's units")
+        rawset(native, "GetEffectiveScale", nil)
+        cp.atNative:Click()
+        Equal(At(cb) .. " " .. Y(down), under .. " " .. downY, "unticked: back under the display, the rows too")
+        w:Hide()
+        Equal(#printed, 0, "no errors at Blizzard's spot")
+    end
+    Equal(ns.Valid("castX", 9999), false, "a dragged spot out of range is ignored")
     local kept = ForeverEnhancedCooldownManagerDB
     kept.castWidth = 9999
     Environment(true)
