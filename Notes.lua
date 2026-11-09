@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.6",
+        sections = {
+            { "Added", {
+                "Cast bar: can sit above the resource display.",
+            } },
+        },
+    },
+    {
         version = "1.10.5",
         sections = {
             { "Added", {

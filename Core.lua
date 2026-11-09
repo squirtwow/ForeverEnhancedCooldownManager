@@ -109,6 +109,7 @@ ns.DEFAULTS = {
     castTextSize = 100, -- the name and time on it, percent of the size its height gives them
     castOwnWidth = false, -- a width of your own for it, instead of the display's
     castWidth = 200,
+    castAbove = false, -- over the display instead of under it
     castIcon = true, -- the spell's icon, name and time left on it
     castName = true,
     castTime = true,
@@ -434,7 +435,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "prdPowerRight", "prdExtraAt", "prdExtraCentre", "prdExtraLeft", "prdExtraRight", "prdEnergyAt", "prdEnergyCentre",
     "prdEnergyLeft", "prdEnergyRight", "prdHealthSize", "prdPowerSize", "prdExtraSize", "prdEnergySize",
     "prdTextNumbers", "prdTextSize", "prdTextFont",
-    "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
+    "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castAbove", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
     "castLatencyColour", "castLatencyText", "swingColour",
     "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge", "edgeColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",

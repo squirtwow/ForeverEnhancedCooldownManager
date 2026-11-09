@@ -7556,6 +7556,38 @@ end)()
     ns.Set("castOwnWidth", false)
     C:Apply()
     Equal(Seen(cb), "399.00 601.00", "off: as wide as the display again")
+
+    -- Over the display instead of under it: off to begin with; on, the rows
+    -- above make room and the rows below close up, and off puts it all back.
+    do
+        local function Y(frame) return S[frame].points[1][5] end
+        local layout = ns.LayoutData()
+        local up, down = B:Get(layout.above[#layout.above]), B:Get(layout.below[1])
+        local shown, upY, downY = L:Display(), Y(up), Y(down)
+        local under = At(cb)
+        Equal(ns.Get("castAbove"), false, "above the display starts off")
+        Equal(under:sub(1, 4), "TOP ", "off: hung under the display")
+        SlashCmdList.FECM("")
+        local w = FECMFrame
+        w:Select("cast")
+        local cp = w.pages.cast
+        cp.above:Click()
+        Equal(ns.Get("castAbove"), true, "ticked on the Cast bar page")
+        Equal(At(cb), string.format("BOTTOM %g %g", shown.x, shown.y + shown.height / 2 + 4), "on: just over the display")
+        Equal(Seen(cb), "399.00 601.00", "over the display, still edge to edge with it")
+        Equal(Y(up) - upY, 22, "the row above goes over the bar: its height and the gap")
+        Equal(Y(down) - downY, 22, "the row below closes up under the display")
+        Equal(S[cp.status].text, "Swing timer above your resource display. Casts show on Blizzard's cast bar.", "the page says where it is")
+        w:Select("layout")
+        local strip = w.pages.layout.castStrip
+        Equal(S[strip].points[1][1] .. " " .. S[strip].points[1][3], "BOTTOM TOP", "the Layout page draws it over the display")
+        w:Select("cast")
+        cp.above:Click()
+        Equal(At(cb) .. " " .. Y(up) .. " " .. Y(down), under .. " " .. upY .. " " .. downY, "unticked: everything back where it was")
+        w:Select("layout")
+        Equal(S[strip].points[1][1] .. " " .. S[strip].points[1][3], "TOP BOTTOM", "and the Layout page draws it under again")
+        w:Hide()
+    end
     local kept = ForeverEnhancedCooldownManagerDB
     kept.castWidth = 9999
     Environment(true)

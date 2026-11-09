@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.6
+
+### Added
+- Cast bar: can sit above the resource display.
+
 ## 1.10.5
 
 ### Added

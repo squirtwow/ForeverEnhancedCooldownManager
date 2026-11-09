@@ -1013,18 +1013,26 @@ function ns.BuildLayoutPage(window, page, width, height)
             Stacked(Draws(Row(key)), y, Tile(key))
             y = y + Tile(key) + gap
         end
+        -- The cast bar over the display (if chosen) takes the same room at the
+        -- top of its line as it otherwise does at the bottom.
+        local castOver = castRoom and ns.Get("castAbove")
+        local lineTop = y + (castOver and lineBottom - lineHeight or 0)
         display:ClearAllPoints()
-        display:SetPoint("TOP", box, "TOP", 0, -(y + (lineHeight - displayHeight) / 2))
+        display:SetPoint("TOP", box, "TOP", 0, -(lineTop + (lineHeight - displayHeight) / 2))
         display:SetSize(math.max(20, displayWidth), displayHeight)
         display.health:SetHeight(math.max(2, math.ceil(displayHeight * .6)))
         display.power:SetHeight(math.max(2, displayHeight - math.ceil(displayHeight * .6) - 1))
         -- Switched off, it's drawn faintly where it would be.
         display:SetAlpha(L:DisplayOff() and .3 or 1)
-        for side, key in pairs(sides) do Beside(Draws(Row(key)), side, y, Tile(key), lineHeight, displayWidth, gap) end
+        for side, key in pairs(sides) do Beside(Draws(Row(key)), side, lineTop, Tile(key), lineHeight, displayWidth, gap) end
         castStrip:SetShown(castRoom ~= nil)
         if castRoom then
             castStrip:ClearAllPoints()
-            castStrip:SetPoint("TOP", display, "BOTTOM", 0, -castGap)
+            if castOver then
+                castStrip:SetPoint("BOTTOM", display, "TOP", 0, castGap)
+            else
+                castStrip:SetPoint("TOP", display, "BOTTOM", 0, -castGap)
+            end
             local castWide = ns.Get("castOwnWidth") and math.min(boxWidth, math.floor(ns.Get("castWidth") * scale)) or displayWidth
             castStrip:SetSize(math.max(20, castWide), castHeight)
             T:Fill(castStrip, ns.CastBar:Colour())

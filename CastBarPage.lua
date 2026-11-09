@@ -128,7 +128,7 @@ function ns.BuildCastBarPage(window, page, width)
 
     -- A width of their own, beside the swing timer's tick: its slider beside it, only while ticked.
     local ownWidth = Tick("Own width", "castOwnWidth", -26,
-        "Off, your cast bar and swing timer are as wide as your resource display. On, pick their width, to line them up with your rows. (experimental)")
+        "Off, your cast bar and swing timer are as wide as your resource display. On, pick their width, to line them up with your rows.")
     ownWidth:ClearAllPoints()
     ownWidth:SetPoint("TOPLEFT", 300, -26)
     local barWidth = T:Slider(options, "", ns.CAST_WIDTH, 1, inner - 300 - 96, function(value)
@@ -136,8 +136,15 @@ function ns.BuildCastBarPage(window, page, width)
         Changed()
     end, 1)
     barWidth:SetPoint("TOPLEFT", 396, -26)
-    window:Hint(barWidth, "How wide your cast bar and swing timer are, icon included. They stay centred under your resource display. (experimental)")
+    window:Hint(barWidth, "How wide your cast bar and swing timer are, icon included. They stay centred on your resource display.")
     page.ownWidth, page.barWidth = ownWidth, barWidth
+
+    -- Over the display instead of under it, in the free space under Own width.
+    local above = Tick("Above the resource display", "castAbove", -54,
+        "Your cast bar and swing timer go just over your resource display instead of under it, and in a layout the rows above go over them.")
+    above:ClearAllPoints()
+    above:SetPoint("TOPLEFT", 300, -54)
+    page.above = above
 
     -- A colour for one of them: its swatch opens the colours, and the
     -- chosen one clicked again goes back to its own (shown: the colour in use).
@@ -360,8 +367,8 @@ function ns.BuildCastBarPage(window, page, width)
     local about = T:Text(options, "GameFontHighlightSmall", T.MUTED)
     about:SetPoint("TOPLEFT", 0, -222)
     about:SetWidth(280)
-    about:SetText("It sits right under your resource display, and in a layout the rows go under it. "
-        .. "It keeps its room between casts, since the Buffs and Debuffs bars can't move in a fight.")
+    local KEEPS_ROOM = "It keeps its room between casts, since the Buffs and Debuffs bars can't move in a fight."
+    about:SetText("It sits right under your resource display, and in a layout the rows go under it. " .. KEEPS_ROOM)
     page.about = about
 
     local function Paint(choice, label, key, default)
@@ -372,17 +379,22 @@ function ns.BuildCastBarPage(window, page, width)
 
     function page:Refresh()
         local casts, swinging = ns.Get("castBar"), ns.Get("swingTimer")
+        local over = ns.Get("castAbove") and true or false
+        local where = over and "above" or "under"
         if casts and swinging then
-            status:SetText("Cast bar and swing timer under your resource display. Blizzard's cast bar is hidden.")
+            status:SetText("Cast bar and swing timer " .. where .. " your resource display. Blizzard's cast bar is hidden.")
         elseif casts then
-            status:SetText("Under your Personal Resource Display. Blizzard's cast bar is hidden.")
+            status:SetText((over and "Above" or "Under") .. " your Personal Resource Display. Blizzard's cast bar is hidden.")
         elseif swinging then
-            status:SetText("Swing timer under your resource display. Casts show on Blizzard's cast bar.")
+            status:SetText("Swing timer " .. where .. " your resource display. Casts show on Blizzard's cast bar.")
         else
             status:SetText("Off. Your rows close up, and other cast bar addons work as before.")
         end
+        about:SetText((over and "It sits right above your resource display, and in a layout the rows above go over it. "
+            or "It sits right under your resource display, and in a layout the rows go under it. ") .. KEEPS_ROOM)
         shown:SetChecked(casts)
         swings:SetChecked(swinging)
+        above:SetChecked(over)
         ownWidth:SetChecked(ns.Get("castOwnWidth"))
         barWidth:SetShown(ns.Get("castOwnWidth") and true or false)
         barWidth:Set(ns.Get("castWidth"))

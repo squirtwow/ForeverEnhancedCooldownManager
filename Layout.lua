@@ -253,6 +253,7 @@ function L:Stack()
         return bar:GetHeight() + (data.showNames and NAMES or 0)
     end
     local y = display.y + display.height / 2 + gap
+    if ns.CastBar then y = y + ns.CastBar:RoomAbove(display) end
     local above = Placed(layout, "above")
     for i = #above, 1, -1 do
         local key = above[i]

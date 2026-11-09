@@ -883,9 +883,18 @@ function C:Room()
     return nil
 end
 
--- Puts the bar under the display (and its combo points), as wide as it, and
--- gives back where the next row starts: under the bar, or under the display
--- while the bar is off. With the display switched off it sits where that was.
+-- How much further up the rows above the display start: the bar's room while
+-- it goes over the display (Cast bar page, off by default), otherwise none.
+function C:RoomAbove(display)
+    local height = self:Room()
+    if not (height and ns.Get("castAbove")) then return 0 end
+    return height + (display.height > 0 and PAD or 0)
+end
+
+-- Puts the bar under the display (and its combo points), or over it if that's
+-- chosen, as wide as it, and gives back where the next row starts: under the
+-- bar, or under the display while the bar is off or over it. With the display
+-- switched off it sits where that was.
 function C:Under(display)
     local bottom = display.y - display.height / 2
     local height = self:Room()
@@ -900,11 +909,17 @@ function C:Under(display)
     if (display.edge or 0) > 0 then width = width - 2 * EDGE end
     -- A width of your own: the whole bar you see, still centred on the display.
     if ns.Get("castOwnWidth") then width = ns.Get("castWidth") - 2 * EDGE end
+    local above = ns.Get("castAbove")
     if row then
         row:ClearAllPoints()
-        row:SetPoint("TOP", UIParent, "CENTER", display.x, bottom - pad)
+        if above then
+            row:SetPoint("BOTTOM", UIParent, "CENTER", display.x, display.y + display.height / 2 + pad)
+        else
+            row:SetPoint("TOP", UIParent, "CENTER", display.x, bottom - pad)
+        end
         row:SetWidth(width >= 40 and width or ALONE.width)
     end
+    if above then return bottom end
     return bottom - pad - height
 end
 
