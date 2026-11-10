@@ -1329,7 +1329,7 @@ end
 -- Settings a shared profile never carries: switching a part on or off, and the window's own.
 H.NOT_SHARED = { "skin", "useBars", "groupFamilies", "listItems", "listRanks", "listTicked", "accent", "prdSkin", "prdCombo", "prdEnergy", "prdText", "castBar", "castBatch", "castTicks", "castTickSound", "castLatency", "swingTimer",
     "pullTimer", "raidWarnings", "bossCasts", "pulse", "keybinds", "layoutPreview", "growArrows", "minimap", "minimapAngle",
-    "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice" }
+    "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew" }
 
 -- Every setting is either shared or kept out, on purpose -------------------------------------------
 -- A setting added later must be put on one side or the other.

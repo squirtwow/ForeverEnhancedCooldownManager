@@ -2502,6 +2502,17 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- No What's new pop-up: an update's notes are marked seen at login and never
+-- wait to open. Off, they're still due until they've shown.
+;(function()
+    _G.GetAddOnMetadata = function(addon, field) return addon == "ForeverEnhancedCooldownManager" and field == "Version" and "1.7.0" or nil end
+    local on = Start({ useBars = true, notesSeen = "1.6.0", helpSeen = true, noWhatsNew = true })
+    Equal(tostring(on.NotesSeen()), "1.7.0", "No What's new pop-up on: this update's notes count as seen at once")
+    local off = Start({ useBars = true, notesSeen = "1.6.0", helpSeen = true })
+    Equal(tostring(off.NotesSeen()), "1.6.0", "off: still due until they've shown")
+    _G.GetAddOnMetadata = nil
+end)()
+
 -- Tell me when an update is out (General page, under the minimap button): on
 -- from the start, in the shared update notices (SquirtVersions.lua, tested on
 -- its own in Tools/TestSquirtVersions.lua) by its code, title and version,
@@ -2536,6 +2547,14 @@ end)()
         "unticked: saved, and the update notices have nothing to do or share for it")
     tick:Click()
     Equal(tostring(ns.Get("updateNotice")) .. " " .. tostring(notices:Wanted()), "true true", "ticked again: back")
+    -- No What's new pop-up: beside it, off from the start, and saved.
+    Equal(tostring(w.noWhatsNew:IsVisible()) .. " " .. tostring(w.noWhatsNew:GetChecked()) .. " " .. S[w.noWhatsNew.text].text .. " | " .. Note(w.noWhatsNew),
+        "true false No What's new pop-up | What's new stops opening by itself after an update. The What's new button and /ccm new still show it. (experimental)",
+        "No What's new pop-up: the tick, off, its note")
+    w.noWhatsNew:Click()
+    Equal(tostring(ns.Get("noWhatsNew")) .. " " .. tostring(ForeverEnhancedCooldownManagerDB.noWhatsNew), "true true", "ticked: saved")
+    w.noWhatsNew:Click()
+    Equal(tostring(ns.Get("noWhatsNew")), "false", "unticked: off again")
     -- The line itself, through the addon's own chat line.
     printed = {}
     Equal(notices:Test("CM"), 1, "the hidden test")

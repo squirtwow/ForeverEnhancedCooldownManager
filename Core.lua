@@ -195,6 +195,7 @@ ns.DEFAULTS = {
     minimapY = 0,
     talentSwitch = false, -- another talent tree taking the lead in points switches to its role's profile (profile menu)
     updateNotice = true, -- a line in chat when a newer version is out (General page; SquirtVersions.lua)
+    noWhatsNew = false, -- What's new no longer opens by itself after an update (General page; Notes.lua)
 }
 -- Custom colours (a colour row's pop-up, Custom): each colour setting can
 -- hold "custom", its own colour kept beside it as six hex digits in the

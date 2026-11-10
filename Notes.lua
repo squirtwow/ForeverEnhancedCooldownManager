@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.9",
+        sections = {
+            { "Added", {
+                "What's New: option to stop it opening after updates.",
+            } },
+        },
+    },
+    {
         version = "1.10.8",
         sections = {
             { "Fixed", {
@@ -768,7 +776,9 @@ function N:Start()
     local version, seen = ns.Version(), ns.NotesSeen()
     local welcome = ns.firstInstall or ns.WelcomeDue()
     if seen == version and not welcome then return end
-    if not welcome and #ns.NOTES == 0 then
+    -- Turned off: marked seen all the same, so turning it back on later
+    -- doesn't bring up the notes of updates long past.
+    if not welcome and (#ns.NOTES == 0 or ns.Get("noWhatsNew")) then
         ns.SetNotesSeen(version)
         return
     end

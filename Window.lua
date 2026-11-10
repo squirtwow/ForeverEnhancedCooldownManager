@@ -2301,6 +2301,12 @@ local function BuildGeneral(window, page)
     window:Hint(updates, "A line in chat, once a session, when a newer version is out. It uses a hidden chat channel,"
         .. " which takes one of your chat channel slots.")
     window.updateNotice = updates
+    local noNews = T:Check(page, "No What's new pop-up", function(self)
+        ns.Set("noWhatsNew", self:GetChecked())
+    end)
+    noNews:SetPoint("TOPLEFT", 300, -196)
+    window:Hint(noNews, "What's new stops opening by itself after an update. The What's new button and /ccm new still show it. (experimental)")
+    window.noWhatsNew = noNews
     Detail(page, "Versions are swapped with your guild, your group, players nearby and a hidden chat channel.", 34, -216)
 
     -- Help: the tour of the basics, as a first install offers it, and the
@@ -2371,6 +2377,7 @@ local function BuildGeneral(window, page)
         minimap:SetChecked(ns.Get("minimap"))
         free:SetChecked(ns.Get("minimapFree"))
         updates:SetChecked(ns.Get("updateNotice"))
+        noNews:SetChecked(ns.Get("noWhatsNew"))
         -- New files only load after a full restart: until then, no tour.
         tour:SetShown(ns.Tour ~= nil)
     end

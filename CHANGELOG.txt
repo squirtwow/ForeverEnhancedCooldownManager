@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.9
+
+### Added
+- What's New: option to stop it opening after updates.
+
 ## 1.10.8
 
 ### Fixed
