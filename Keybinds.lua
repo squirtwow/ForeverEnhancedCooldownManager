@@ -13,6 +13,7 @@ local BUTTONS = 12
 local SLOTS = 18 * BUTTONS -- every page: six main pages, form/stance pages, side bars, vehicle bars
 K.SLOTS = SLOTS -- for the tests
 local DELAY = .3 -- action bar changes come in bursts: one read once they settle
+local SETTLE = .25 -- a bar addon's page follows a stance change within this long
 local MAIN = { "ACTIONBUTTON", "ActionButton" }
 local BARS = { -- side bars always hold the same slots: binding, button name, first slot
     { "MULTIACTIONBAR1BUTTON", "MultiBarBottomLeftButton", 61 },
@@ -30,6 +31,15 @@ local REPAGE = { ACTIONBAR_PAGE_CHANGED = true, UPDATE_BONUS_ACTIONBAR = true, U
 
 local actions = {} -- slot -> { spell=, item=, name=, macro= }   (read outside combat)
 local bound = {} -- binding -> key text                           (read outside combat)
+local own = {} -- a bar addon's buttons that have a key             (read outside combat)
+local ownBinding = {} -- bindings those buttons answer instead of Blizzard's
+local OWN_BUTTONS = 15 * BUTTONS
+local PAGE_BINDING = { [1] = MAIN[1] } -- a bar page's own Blizzard binding, if it has one
+for _, bar in ipairs(BARS) do PAGE_BINDING[(bar[3] - 1) / BUTTONS + 1] = bar[1] end
+-- The pages a main bar can turn to for a form or stance. A spell waiting on
+-- one still shows its key while you're in another stance, below any key that
+-- casts it now.
+local AWAY_PAGES = { 1, 2, 7, 8, 9, 10 }
 -- What the keys press now, by spell ID, item ID and spell name: each key's
 -- text, and its tier beside it (lower wins), so working them out again as
 -- the main bar changes page makes nothing new.
@@ -129,6 +139,64 @@ local function Bound(binding, button)
     return key and K:Format(key) or nil
 end
 
+-- A bar addon's buttons, with a key on them. Such a bar turns its own pages,
+-- by stance say, while Blizzard's page stands still, so the button itself says
+-- what its key presses now. Only keys are kept here: the slot is asked for
+-- each time, and a button's attributes can be read in a fight.
+local function KeyOf(binding)
+    local key = Word((Call(GetBindingKey, binding)))
+    return key and K:Format(key) or nil
+end
+
+local function AddOwn(button, id)
+    local name = Word((Call(button.GetName, button)))
+    if not name then return end
+    local page, index = math.floor((id - 1) / BUTTONS) + 1, (id - 1) % BUTTONS + 1
+    local binding = Word((Call(button.GetAttribute, button, "commandName")))
+    if not binding and PAGE_BINDING[page] then binding = PAGE_BINDING[page] .. index end
+    local text = binding and KeyOf(binding)
+    if text then
+        ownBinding[binding] = true
+    else
+        text = KeyOf("CLICK " .. name .. ":Keybind") or KeyOf("CLICK " .. name .. ":HOTKEY")
+            or KeyOf("CLICK " .. name .. ":LeftButton")
+    end
+    if text then own[#own + 1] = { button = button, id = id, index = index, main = page == 1, text = text } end
+end
+
+local function ById(a, b) return a.id < b.id end
+
+local function ScanOwn()
+    wipe(own)
+    wipe(ownBinding)
+    for id = 1, OWN_BUTTONS do
+        local button = _G["BT4Button" .. id]
+        if type(button) == "table" then AddOwn(button, id) end
+    end
+    local other = _G.Dominos and _G.Dominos.ActionButtons and _G.Dominos.ActionButtons.buttons
+    if type(other) == "table" then
+        for button, id in pairs(other) do
+            id = Number(id)
+            if id and type(button) == "table" then AddOwn(button, id) end
+        end
+    end
+    table.sort(own, ById) -- the main bar first, then the lower button
+end
+
+-- The action slot a bar addon's button holds right now, or nil.
+local function SlotOf(button)
+    local state = Call(button.GetAttribute, button, "state")
+    if not Open(state) then return nil end
+    if state ~= nil then
+        state = tostring(state)
+        local kind = Call(button.GetAttribute, button, "labtype-" .. state)
+        if not Open(kind) then return nil end
+        if kind == "action" then return Number((Call(button.GetAttribute, button, "labaction-" .. state))) end
+        if kind ~= nil then return nil end -- that page holds something other than an action slot
+    end
+    return Number((Call(button.GetAttribute, button, "action")))
+end
+
 -- Every slot and every bar's keys, hidden side bars included since their
 -- keys still work.
 local function Scan()
@@ -139,6 +207,7 @@ local function Scan()
         bound[MAIN[1] .. i] = Bound(MAIN[1] .. i, MAIN[2] .. i)
         for _, bar in ipairs(BARS) do bound[bar[1] .. i] = Bound(bar[1] .. i, bar[2] .. i) end
     end
+    ScanOwn()
 end
 
 -- Which keys press what, now ------------------------------------------------------------
@@ -168,13 +237,16 @@ local function Put(map, id, text, tier)
     local was = map.tier[id]
     if not was or tier < was then map.text[id], map.tier[id] = text, tier end
 end
-local function Take(slot, binding)
-    local action, text = actions[slot], bound[binding]
+local function Give(action, text, away)
     if not (action and text) then return end
-    local tier = action.macro and 2 or 1
+    local tier = (action.macro and 2 or 1) + (away and 2 or 0)
     Put(bySpell, action.spell, text, tier)
     Put(byItem, action.item, text, tier)
     if not action.item then Put(byName, action.name, text, tier) end
+end
+local function Take(slot, binding)
+    if ownBinding[binding] then return end -- a bar addon's button answers that key
+    Give(actions[slot], bound[binding])
 end
 
 -- From what was read only, so safe in combat.
@@ -182,6 +254,19 @@ local function Resolve()
     Clear(bySpell)
     Clear(byItem)
     Clear(byName)
+    for i = 1, #own do
+        local entry = own[i]
+        local slot = SlotOf(entry.button)
+        if slot then Give(actions[slot], entry.text) end
+    end
+    for i = 1, #own do
+        local entry = own[i]
+        if entry.main then
+            for p = 1, #AWAY_PAGES do
+                Give(actions[(AWAY_PAGES[p] - 1) * BUTTONS + entry.index], entry.text, true)
+            end
+        end
+    end
     local page = MainPage()
     if page then
         for i = 1, BUTTONS do Take((page - 1) * BUTTONS + i, MAIN[1] .. i) end
@@ -206,6 +291,8 @@ function K:Update()
     if not ns.Get("keybinds") then
         wipe(actions)
         wipe(bound)
+        wipe(own)
+        wipe(ownBinding)
         Clear(bySpell)
         Clear(byItem)
         Clear(byName)
@@ -233,9 +320,19 @@ end
 -- A form change, a stance or a paging key brings several page changes at
 -- once: the keys are worked out once, on the next frame.
 local repaging = false
+local settling = false
+local function Settled()
+    settling = false
+    K:Repage()
+end
 local function Repaged()
     repaging = false
     K:Repage()
+    -- A bar addon's bar can turn its page a moment after the event.
+    if #own > 0 and not settling then
+        settling = true
+        C_Timer.After(SETTLE, Settled)
+    end
 end
 
 -- At most one read every DELAY: one-button helpers can change a slot every

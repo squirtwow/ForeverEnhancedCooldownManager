@@ -9340,6 +9340,49 @@ end
     Fire("PLAYER_REGEN_ENABLED")
     Equal(S[over.key].text .. " " .. tostring(S[over.key].shown) .. " " .. tostring(K.pending), "2 true nil", "and shows once it's over")
 
+    -- A bar addon turns its own pages by stance while Blizzard's page stands
+    -- still: the keys go by what its button holds now.
+    do
+        local state = "1"
+        local function OwnButton(name, attributes)
+            return { GetName = function() return name end,
+                GetAttribute = function(_, what) if what == "state" then return state end return attributes[what] end }
+        end
+        local slot2 = actionSlots[2]
+        actionSlots[2], actionSlots[13], actionSlots[85] = nil, { "spell", 7384 }, { "spell", 5176 }
+        keyOf["CLICK BT4Button13:Keybind"] = "F"
+        _G.BT4Button1 = OwnButton("BT4Button1", { ["labtype-1"] = "action", ["labaction-1"] = 1, ["labtype-8"] = "action", ["labaction-8"] = 85 })
+        _G.BT4Button13 = OwnButton("BT4Button13", { ["labtype-1"] = "action", ["labaction-1"] = 13, ["labtype-8"] = "action", ["labaction-8"] = 13 })
+        K:Update()
+        Equal(S[key].text .. " " .. S[over.key].text .. " " .. S[wrath.key].text, "1 F C2",
+            "a bar addon's buttons: the page it's on, and a key bound to the button itself")
+        lockdown = true
+        state = "8"
+        local before = actionReads
+        Settle("UPDATE_SHAPESHIFT_FORM")
+        Equal(S[wrath.key].text .. " " .. S[key].text .. " " .. actionReads - before, "1 1 0",
+            "in a fight its stance page's spell takes the key, the one left behind keeps it, nothing read")
+        lockdown = false
+        state = "9"
+        _G.BT4Button1.GetAttribute = function(_, what)
+            if what == "state" then return state end
+            if what == "labtype-9" then return "custom" end
+        end
+        Settle("UPDATE_SHAPESHIFT_FORM")
+        Equal(S[wrath.key].text, "C2", "a page without an action slot presses nothing, so a key that casts it wins over a spare page's")
+        _G.BT4Button1, _G.BT4Button13, keyOf["CLICK BT4Button13:Keybind"] = nil, nil, nil
+        -- The other kind: an action attribute and the binding it answers.
+        local button = OwnButton("ActionButton1", { action = 85, commandName = "ACTIONBUTTON1" })
+        button.GetAttribute = function(_, what) if what == "action" then return 85 elseif what == "commandName" then return "ACTIONBUTTON1" end end
+        _G.Dominos = { ActionButtons = { buttons = { [button] = 1 } } }
+        K:Update()
+        Equal(S[wrath.key].text .. " " .. S[key].text, "1 1", "a button with an action attribute: the slot it holds, page 1 kept as a spare")
+        _G.Dominos = nil
+        actionSlots[2], actionSlots[13], actionSlots[85] = slot2, nil, { "spell", 5176 }
+        K:Update()
+        Equal(S[key].text .. " " .. S[wrath.key].text, "1 C2", "and with the bar addon gone, Blizzard's bars as before")
+    end
+
     -- A burst of changes is read once.
     queued, reads = #timers, actionReads
     for _ = 1, 5 do Fire("ACTIONBAR_SLOT_CHANGED", 3) end

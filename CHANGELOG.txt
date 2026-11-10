@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.10.8
+
+### Fixed
+- Keybinds: now follow bar addons that swap pages by stance.
+
 ## 1.10.7
 
 ### Added

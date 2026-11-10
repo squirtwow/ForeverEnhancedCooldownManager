@@ -10,6 +10,14 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.8",
+        sections = {
+            { "Fixed", {
+                "Keybinds: now follow bar addons that swap pages by stance.",
+            } },
+        },
+    },
+    {
         version = "1.10.7",
         sections = {
             { "Added", {
