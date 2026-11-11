@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.10
+
+### Added
+- Added procs to Cooldown pulse.
+- Profile import: using the look also turns on what the sharer had on.
+
 ## 1.10.9
 
 ### Added

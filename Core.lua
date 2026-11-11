@@ -162,6 +162,7 @@ ns.DEFAULTS = {
     pulseBorder = "thin", -- a dark edge round it: none, thin or thick
     pulseShadow = true, -- and a soft shadow
     pulseItems = true, -- your trinkets, and items on your Cooldowns and Utility bars, are listed too
+    pulseProcs = false, -- your class's procs are listed too, each pulsing as it lands (experimental)
     pulseX = 0, -- where it sits: from the middle of the screen
     pulseY = 0,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
@@ -430,11 +431,9 @@ ns.RELOAD = {
 
 -- What a shared profile carries of the look (ProfileShare.lua): how your
 -- bars, the restyled bars, your cast bar, Raid Timers and the Cooldown pulse
--- look, and where they sit. Never a tick that switches a part on or off (your
--- bars, the look on Blizzard's bars or display, the cast bar, swing timer,
--- combo points, the druid energy bar, the display's text, keybinds, the pulse, each Raid Timers
--- part), nor the window's own (its accent, lists, preview, grow arrows and
--- the minimap button), nor the update notice.
+-- look, and where they sit. Not a tick that switches a part on or off (those
+-- are ns.SHARE_PARTS, below), nor the window's own (its accent, lists,
+-- preview, grow arrows and the minimap button), nor the update notice.
 ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
     "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
     "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
@@ -442,7 +441,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "prdEnergyLeft", "prdEnergyRight", "prdHealthSize", "prdPowerSize", "prdExtraSize", "prdEnergySize",
     "prdTextNumbers", "prdTextSize", "prdTextFont",
     "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castAbove", "castFree", "castNative", "castX", "castY", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
-    "castLatencyColour", "castLatencyText", "swingColour",
+    "castLatencyColour", "castLatencyText", "castTickSound", "swingColour",
     "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge", "edgeColour",
     "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
@@ -450,6 +449,33 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseX", "pulseY" }
 -- And each colour's custom one, kept beside it.
 for _, key in ipairs(ns.COLOUR_SETTINGS) do ns.SHARE_LOOK[#ns.SHARE_LOOK + 1] = key .. "Custom" end
+-- The parts a shared profile carries the ones on of (ProfileShare.lua), each
+-- with its name for the message after an import: turned on for you only with
+-- its look and layout ticked, and never one turned off. Only ticks off by
+-- default: one on by default (the look on Blizzard's bars or display,
+-- grouping one-at-a-time spells) is on unless you turned it off, and a
+-- string won't undo that. In a string each is its letter, which keeps it
+-- short enough for Discord: never change a letter or use one again.
+-- classes: switched on for everyone (it's every character's), but only
+-- named for these. experimental: named with a quiet "(experimental)", as
+-- its own tick says.
+ns.SHARE_PARTS = {
+    { key = "useBars", code = "u", name = "Your bars" },
+    { key = "prdCombo", code = "c", name = "Combo points", classes = { ROGUE = true, DRUID = true } },
+    { key = "prdEnergy", code = "e", name = "Energy bar in other forms", classes = { DRUID = true }, experimental = true },
+    { key = "prdText", code = "t", name = "Health and power text" },
+    { key = "keybinds", code = "k", name = "Keybinds on icons" },
+    { key = "castBar", code = "b", name = "Cast bar" },
+    { key = "swingTimer", code = "s", name = "Swing timer" },
+    { key = "castBatch", code = "h", name = "Crafting batch time", experimental = true },
+    { key = "castTicks", code = "m", name = "Cast bar tick marks" },
+    { key = "castLatency", code = "l", name = "Cast bar latency" },
+    { key = "pullTimer", code = "r", name = "Pull countdown" },
+    { key = "raidWarnings", code = "w", name = "Raid warnings", experimental = true },
+    { key = "bossCasts", code = "o", name = "Boss cast bars", experimental = true },
+    { key = "pulse", code = "p", name = "Cooldown pulse" },
+    { key = "pulseProcs", code = "q", name = "Proc pulses", experimental = true },
+}
 
 -- Bars: each bar lists spells by name, so the highest known rank is
 -- always the one shown.
@@ -2831,7 +2857,8 @@ local function PulseList(field)
     return store[field]
 end
 
--- Cooldown pulse: the spells (by name) and items (by key) you ticked ->
+-- Cooldown pulse: the spells (by name), items (by key) and procs ("proc:"
+-- and their buff's ID, the same in every language, Pulse.lua) you ticked ->
 -- true. Every spell you know with a cooldown is listed, and your items;
 -- none pulses until it's ticked (the user: new ones show as you learn
 -- them, and you choose). Kept in the profile, as the bars' lists are.
@@ -2844,8 +2871,8 @@ function ns.SetPulsePick(key, pick)
     ns.PulsePicks()[key] = pick and true or nil
 end
 
--- Cooldown pulse: the spells and items switched to the Long style, by key
--- -> "long". Everything else is Quick. Kept in the profile too.
+-- Cooldown pulse: the spells, items and procs switched to the Long style, by
+-- key -> "long". Everything else is Quick. Kept in the profile too.
 function ns.PulseStyles()
     return PulseList("pulseStyle")
 end

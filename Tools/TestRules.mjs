@@ -64,9 +64,55 @@ test('the Cooldown pulse hands cooldowns on, never reads one, and takes no mouse
   // The one frame that takes the mouse: the box that moves it.
   assert.equal(count(pulse, /EnableMouse\(true\)/g), 1);
   assert.match(pulse, /mover = CreateFrame\("Frame", "FECMPulseMover", UIParent, "BackdropTemplate"\)[\s\S]*?mover:EnableMouse\(true\)/);
-  assert.equal(count(pulse, /EnableMouse\(false\)/g), 4, 'the pulse, its icon, the watchers and their frame');
+  assert.equal(count(pulse, /EnableMouse\(false\)/g), 7,
+    "the pulse, its icon (the proc pulses' too), the watchers and their frame, and the procs' container, frames and the game's icons");
+  assert.match(pulse, /local function ProcLook\(slot\)\r?\n\s+return function\(button\)\r?\n\s+button:EnableMouse\(false\)/,
+    "a proc's icon, in the middle of your screen while the proc is up, never takes the mouse");
   assert.deepEqual(where(/FECMPulse\b/), ['Pulse.lua']);
 });
+
+// The proc pulses' animation is the game's to play once handed over, so
+// nothing of the addon's may run as it plays: no script is set or hooked in
+// the Procs section but on the hush's own frame (Watch: a frame of the
+// addon's, hearing events and the interface coming back), and the only
+// alpha set there is each texture's 0 before the hand-off and the
+// container's see-through, through pcall (Fade). Tools/TestPulse.lua checks
+// the same on the mock game.
+test('the proc pulses hand the game an animation with no scripts, and never set its alpha after', () => {
+  const pulse = code['Pulse.lua'];
+  const start = pulse.indexOf('P.PROCS = {'), end = pulse.indexOf('function P:ProcReport');
+  assert.ok(start > 0 && end > start, 'the Procs section found');
+  const procs = pulse.slice(start, end);
+  assert.deepEqual(procs.match(/\w*:(SetScript|HookScript)\([^,]*/g), ['watch:SetScript("OnEvent"', 'watch:SetScript("OnShow"'],
+    "no script set or hooked but the hush's own frame's");
+  assert.match(procs, /local watch = CreateFrame\("Frame", nil, UIParent\)/, "the hush's frame is the addon's own");
+  assert.deepEqual(procs.match(/\w*:SetAlpha\w*\([^)]*\)/g), ['texture:SetAlpha(0)'], "only each texture's 0, before the hand-off");
+  assert.deepEqual(procs.match(/(?:pcall\()?[\w.:]*SetAlpha\b[^)]*\)/g), ['texture:SetAlpha(0)', 'pcall(procs.container.SetAlpha, procs.container, alpha)'],
+    "and the container's see-through, through pcall");
+  const look = procs.slice(procs.indexOf('local function ProcLook'), procs.indexOf('local function Container'));
+  assert.ok(look.indexOf('texture:SetAlpha(0)') < look.indexOf('AddAuraShownAnimation'), 'set before the hand-off');
+  assert.equal(count(procs, /pcall\(button\.AddAuraShownAnimation, button, group\)/g), 1, 'handed once, through pcall');
+  // Never a key written on the game's icon or container.
+  assert.deepEqual(procs.match(/\b(button|container)\.\w+\s*=[^=]/g), null, "nothing written on the game's icon or container");
+});
+
+// P.PROCS's block, from "P.PROCS = {" to its closing brace: each line
+// trimmed, comments already gone.
+function procsBlock(text) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex(line => line.startsWith('P.PROCS = {'));
+  const end = lines.findIndex((line, i) => i > start && line.trimEnd() === '}');
+  return start >= 0 && end > start ? lines.slice(start, end + 1).map(line => line.trim()).filter(Boolean) : null;
+}
+const pulseFile = new URL('../../ForeverEnhancedCooldownPulse/Pulse.lua', import.meta.url);
+const theirProcs = existsSync(pulseFile) ? procsBlock(bare(readFileSync(pulseFile, 'utf8'))) : null;
+
+test('the proc list is the same as Forever Enhanced Cooldown Pulse\'s, when it\'s there',
+  { skip: !existsSync(pulseFile) ? 'not beside this addon' : !theirProcs && 'no proc list there yet' }, () => {
+    const ours = procsBlock(code['Pulse.lua']);
+    assert.ok(ours && ours.length > 9, 'ours found, a line for each class');
+    assert.deepEqual(ours, theirProcs, 'line for line');
+  });
 
 test('nothing opens Edit Mode, a panel or Cooldown Settings from addon code', () => {
   for (const pattern of [/ShowUIPanel/, /HideUIPanel/, /EnterEditMode/, /ExitEditMode/, /C_EditMode/, /CooldownViewerSettings/,
@@ -201,9 +247,13 @@ test("the game's settings change only through ns.TurnOn and ns.TurnOff, from you
   assert.deepEqual(calls, ['Core.lua TurnOff("cooldownViewerEnabled")', 'Core.lua TurnOn("cooldownViewerEnabled")',
     'LayoutPage.lua TurnOff("nameplateShowSelf")', 'LayoutPage.lua TurnOn("nameplateShowSelf")',
     'Window.lua TurnOn("cooldownViewerEnabled")', 'Window.lua TurnOn("nameplateShowSelf")']);
-  // ns.SetBars itself is only ever called from a click, or a layout asked for by one.
+  // ns.SetBars itself is only ever called from a click, or a layout asked for by one,
+  // or an import with its look (ProfileShare.lua), after its question says so.
   const setters = files.flatMap(name => [...code[name].matchAll(/(?<!function )ns\.SetBars\(/g)].map(() => name)).sort();
-  assert.deepEqual(setters, ['BarPage.lua', 'Layout.lua', 'Layout.lua', 'Layout.lua', 'LayoutPage.lua', 'Window.lua']);
+  assert.deepEqual(setters, ['BarPage.lua', 'Layout.lua', 'Layout.lua', 'Layout.lua', 'LayoutPage.lua', 'ProfileShare.lua', 'Window.lua']);
+  const share = code['ProfileShare.lua'];
+  assert.match(share, /if part\.key == "useBars" then note = ns\.SetBars\(true\)/, 'an import only ever turns your bars on');
+  assert.match(share, /window:Ask\("Use its look and layout too\?", P\.LookQuestion\(shared\)/, 'after a question that names it');
   const window = code['Window.lua'], layout = code['LayoutPage.lua'];
   assert.match(window, /local function TurnOnManager\(\)\r?\n\s+local on, why = ns\.TurnOn\("cooldownViewerEnabled"\)/);
   assert.match(window, /managerOn:SetScript\("OnClick", TurnOnManager\)/, "the Cooldown Manager's Turn on button");
@@ -426,10 +476,11 @@ test("Escape closes the windows through the game's own list", () => {
 // for more than ten, and AddGroup holds a group to the icons made.
 // Tools/TestBars.lua checks it runs that way.
 test("Blizzard's aura containers never run the addon's code while they update", () => {
-  assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua'], 'the only containers');
+  assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua', 'Pulse.lua'], 'the only containers');
   assert.deepEqual(where(/:AddAura(Slot|Group)\(/), [], 'no slot or group added but through F.Add');
   const looks = files.flatMap(name => (code[name].match(/initializeFrame\s*=\s*[^,}]+/g) || []).map(look => `${name}: ${look.trim()}`));
-  assert.equal(looks.length, 5, 'five looks: Buffs bar spots, their edges (Warn at), packed entries, your debuffs, buff and debuff times');
+  assert.equal(looks.length, 6,
+    'six looks: Buffs bar spots, their edges (Warn at), packed entries, your debuffs, buff and debuff times, proc pulses');
   assert.deepEqual(looks.filter(look => !/: initializeFrame = (F|ns\.BuffBar)\.Guard\(/.test(look)), [], 'every look guarded');
   const buffs = code['Buffs.lua'];
   assert.match(buffs, /function F\.Add\(container, method, \.\.\.\)\r?\n\s+adding = true\r?\n\s+local ok, result = pcall\(container\[method\], container, \.\.\.\)\r?\n\s+adding = false\r?\n/);

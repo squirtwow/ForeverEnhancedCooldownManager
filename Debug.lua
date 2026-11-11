@@ -143,6 +143,8 @@ function ns.DebugReport()
     Add(("Countdown: size %s%%, spot %s, text %s%s"):format(tostring(ns.Get("countdownSize")), tostring(ns.Get("countdownSpot")),
         tostring(ns.Get("countdownFormat")), ns.Style and ns.Style:TimerReport() or ""))
     if ns.Style then Warns(Add) end
+    -- The Cooldown pulse's procs: what the game took, and what it keeps secret.
+    if ns.Pulse and ns.Pulse.ProcReport then ns.Pulse:ProcReport(Add) end
     Heals(Add)
     if ns.Style then Fonts(Add) end
     if ns.Bars and ns.Bars.Report then ns.Bars:Report(Add, Say) end

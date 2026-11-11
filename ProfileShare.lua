@@ -218,13 +218,24 @@ local families
 -- "Name@N" for one of its ranks, "Name#ID" for a spell pinned to one ID,
 -- "item:<id>", "slot:13" or "slot:14" (the trinkets), "ammo", "shards" (Soul
 -- Shards), "hand:main" or "hand:off" (a hand's weapon enchant), or a
--- healthstone or potion family. Nil for anything else. (A version before
--- the hands keeps those two as names it doesn't know: shown for no one.)
+-- healthstone or potion family; or the Cooldown pulse's key for a proc,
+-- "proc:" and its buff's ID, one any class has (Pulse.lua P.PROCS). Nil for
+-- anything else. (A version before the hands keeps those two as names it
+-- doesn't know: shown for no one.)
 local function Entry(value)
     local key = Word(value)
     if not key then return nil end
     if key:find("#", 1, true) then return ns.Spells:Pinned(key) and key or nil end
     if key:find("^hand:") then return ns.Spells.HAND_KEYS and ns.Spells.HAND_KEYS[key] and key or nil end
+    if key:find("^proc:") then
+        local id = tonumber(key:match("^proc:([1-9]%d?%d?%d?%d?%d?%d?%d?%d?%d?)$"))
+        for _, list in pairs(ns.Pulse and ns.Pulse.PROCS or {}) do
+            for _, ids in ipairs(list) do
+                if ids[1] == id then return key end
+            end
+        end
+        return nil
+    end
     if key:find("^item:") then
         local id = key:match("^item:([1-9]%d?%d?%d?%d?%d?%d?%d?%d?%d?)$")
         return id and ID(tonumber(id)) and key or nil
@@ -244,9 +255,11 @@ end
 -- The same for an entry on a bar's list (key: that bar; nil for a form's
 -- list, which is a cooldown bar's): a hand's weapon enchant only on a Buffs
 -- bar, as Bars.lua's B:Fits keeps it, so an edited string can't put one
--- where it would be a spell icon with no spell. Nil for anything else.
+-- where it would be a spell icon with no spell, and a proc's pulse key on
+-- none. Nil for anything else.
 local function BarEntry(value, key)
     local entry = Entry(value)
+    if entry and entry:find("^proc:") then return nil end
     if entry and entry:find("^hand:") and not (key and ns.BAR_KIND[key] == "buff") then return nil end
     return entry
 end
@@ -311,6 +324,12 @@ local LAYOUT_CHECKS = {
 local LAYOUT_FIELDS = { "on", "preset", "base", "left", "right", "gap", "spacing" }
 local LOOK = {}
 for _, key in ipairs(ns.SHARE_LOOK) do LOOK[key] = true end
+-- The parts a string carries the ones on of (ns.SHARE_PARTS), by their letter.
+local PART = {}
+for _, part in ipairs(ns.SHARE_PARTS) do PART[part.code] = part end
+-- The layout's settings at their default, which a string leaves out
+-- (ns.LayoutData puts them back).
+local LAYOUT_DEFAULTS = { on = false, gap = ns.ROW_GAP[3], spacing = ns.ICON_GAP[3] }
 -- What a string's top table holds: its name (n), the addon's version (a),
 -- the bars' lists (l), each form's lists (f: Swap with my form, form ->
 -- bar -> list) and the bars swapping with your form (w: bar -> true),
@@ -347,9 +366,19 @@ end
 -- bar's settings: true or false read (true on the Cooldowns or Utility bar
 -- goes into swap, for the profile), anything else left out.
 local function Setup(g, Skip, swap)
-    local setup = { look = {}, bars = {}, layout = {}, colours = {}, custom = {} }
+    local setup = { look = {}, bars = {}, layout = {}, colours = {}, custom = {}, parts = {} }
     for key, value in pairs(Table(g.s)) do
         if LOOK[key] and ns.Valid(key, value) then setup.look[key] = value else Skip() end
+    end
+    -- The parts it has on (o): a letter each, those this version knows. A
+    -- string made before them has none.
+    if type(g.o) == "string" and #g.o <= MAX_WORD then
+        for i = 1, #g.o do
+            local part = PART[g.o:sub(i, i)]
+            if part then setup.parts[part.key] = true else Skip() end
+        end
+    elseif g.o ~= nil then
+        Skip()
     end
     -- Custom only with its own colour beside it.
     for _, key in ipairs(ns.COLOUR_SETTINGS) do
@@ -722,7 +751,8 @@ end
 local STACKED = { point = true, x = true, y = true, grow = true, wrap = true }
 
 -- The look and layout as they are now: the look and each bar's settings
--- where they differ from the defaults, the layout, and Tracked Bar colours.
+-- where they differ from the defaults, the layout, Tracked Bar colours, and
+-- the parts you have on.
 local function SetupNow()
     local look, bars, colours = {}, {}, {}
     for _, key in ipairs(ns.SHARE_LOOK) do
@@ -738,7 +768,9 @@ local function SetupNow()
         end
         bars[key] = own
     end
-    for _, field in ipairs(LAYOUT_FIELDS) do layout[field] = saved[field] end
+    for _, field in ipairs(LAYOUT_FIELDS) do
+        if saved[field] ~= LAYOUT_DEFAULTS[field] then layout[field] = saved[field] end
+    end
     layout.above, layout.below = Entries(saved.above), Entries(saved.below)
     for key in pairs(saved.hidden) do layout.hidden[key] = true end
     local picked, custom, hexes = ns.BarColours()
@@ -750,7 +782,11 @@ local function SetupNow()
             hexes[id] = custom[id]
         end
     end
-    return { s = look, b = bars, l = layout, k = colours, h = hexes }
+    local parts = {}
+    for _, part in ipairs(ns.SHARE_PARTS) do
+        if ns.GetSaved(part.key) == true then parts[#parts + 1] = part.code end
+    end
+    return { s = look, b = bars, l = layout, k = colours, h = hexes, o = #parts > 0 and table.concat(parts) or nil }
 end
 
 -- The profile you're on, with the look and layout, as a share string; or
@@ -871,9 +907,11 @@ end
 
 -- After a look and layout came in: everything that shows them, as the Look,
 -- Layout, Cast bar, Raid Timers and Cooldown pulse pages do on a change.
--- Undo on the Layout page is for a layout you picked, so it goes.
+-- Undo on the Layout page is for a layout you picked, and the presets' Undo
+-- for a look you picked (it would switch off what came on), so both go.
 local function Redraw()
     if ns.Layout then ns.Layout.undo, ns.Layout.moved = nil, nil end
+    P.undo = nil
     P.RedrawLook()
 end
 
@@ -1079,13 +1117,78 @@ function P.UndoLook()
     return true, "Your look before the presets is back."
 end
 
+-- A part that can't run here now isn't switched on: the pulse and its procs
+-- while it runs in Forever Enhanced Cooldown Pulse, and proc pulses while
+-- the game can't show them (their ticks are greyed then).
+local function CantRun(key)
+    local pulse = ns.Pulse
+    if not pulse or (key ~= "pulse" and key ~= "pulseProcs") then return false end
+    if pulse:Elsewhere() then return true end
+    return key == "pulseProcs" and not pulse:CanProcs()
+end
+
+-- Your class's file name ("DRUID"), or nil while the game doesn't say.
+local function MyClass()
+    if not UnitClass then return nil end
+    local _, class = UnitClass("player")
+    if (issecretvalue and issecretvalue(class)) or type(class) ~= "string" then return nil end
+    return class
+end
+
+-- What a string read by P.Read switches on for you with its look and
+-- layout: each part it has on that's off here and can run now, in order, as
+-- { key, name, shown }. The name has "(experimental)" where its tick says
+-- so; shown is false for a part your class doesn't use (switched on all the
+-- same, as it's every character's, but not named).
+function P.WouldTurnOn(shared)
+    local setup = type(shared) == "table" and type(shared.setup) == "table" and shared.setup or {}
+    local parts = type(setup.parts) == "table" and setup.parts or {}
+    local class, list = MyClass(), {}
+    for _, part in ipairs(ns.SHARE_PARTS) do
+        local key = part.key
+        if parts[key] == true and ns.GetSaved(key) ~= true and not CantRun(key) then
+            list[#list + 1] = { key = key, name = part.name .. (part.experimental and " (experimental)" or ""),
+                shown = not part.classes or (class ~= nil and part.classes[class] == true) }
+        end
+    end
+    return list
+end
+
+-- Those switched on, never one turned off: your bars as General's tick
+-- turns them on. How many are named, what to tell you about your bars (or
+-- nil), and the keys turned on.
+local function SwitchOn(shared)
+    local list, shown, note, turned = P.WouldTurnOn(shared), 0, nil, {}
+    ns.SetMany(function()
+        for _, part in ipairs(list) do
+            if part.key == "useBars" then note = ns.SetBars(true) else ns.Set(part.key, true) end
+            turned[part.key] = true
+            if part.shown then shown = shown + 1 end
+        end
+    end)
+    return shown, note, turned
+end
+
 -- A string read by P.Read as a new profile (Core.lua's ns.ImportProfile),
--- switched to; with its look and layout too, if asked. True and what
--- happened, or false and why not.
+-- switched to; with its look and layout too, if asked, and the parts it has
+-- on switched on. True and what happened, or false and why not. (The
+-- question before it names them; the line after only counts them, to fit.)
 function P.Import(text, shared, withLook)
     local ok, message, name = ns.ImportProfile(text, shared, withLook)
     if not ok then return false, message end
-    if withLook then Redraw() end
+    if withLook then
+        local shown, note, turned = SwitchOn(shared)
+        -- Keys on icons: your action bars read again first, as the Look page's tick has it.
+        if turned.keybinds and ns.Keybinds then ns.Keybinds:Update() end
+        Redraw()
+        if shown > 0 then message = message .. (" Also turned on %d of its settings."):format(shown) end
+        -- Your bars on: Blizzard's Cooldown Manager went off, as the question said.
+        if note and ns.NeedsReload and ns.NeedsReload() then
+            message = message .. " Reload to finish."
+        elseif note then
+            message = message .. " " .. note
+        end
+    end
     if not ns.Get("useBars") then message = message .. " Your bars are off: tick Use my bars on General." end
     return true, message, name
 end
@@ -1101,11 +1204,31 @@ local EXPORT_DETAIL = "Your profile, with your bars' look and layout, as text. P
     .. " where you like, such as Discord."
 local IMPORT_DETAIL = "Paste a profile someone shared. It becomes a new profile, and yours stays as it is."
     .. " Spells your class can't use don't show."
-local LOOK_ON = "Your bar sizes, spots, layout and look are replaced by its own, on every character."
+local LOOK_ON = "Your bar sizes, spots, layout and look are replaced by its own, on every character. Anything it has switched on"
+    .. " comes on too."
 local LOOK_OFF = "Unticked, only its bars' spells and pulse ticks come, in your own look and layout."
 local LOOK_ASK = "Your bar sizes, spots, layout and look change to the shared ones, on every character."
-    .. " To keep a copy of yours, Share it first."
+local KEEP_YOURS = " To keep a copy of yours, Share it first."
 P.LOOK_ON, P.LOOK_OFF = LOOK_ON, LOOK_OFF
+
+-- The question before a look and layout come in: what changes, each part it
+-- switches on for you by name, and, when your bars come on, that Blizzard's
+-- Cooldown Manager goes off.
+function P.LookQuestion(shared)
+    local names, bars = {}, false
+    for _, part in ipairs(P.WouldTurnOn(shared)) do
+        if part.key == "useBars" and ns.CooldownManagerOn() then
+            bars = true
+        elseif part.shown then
+            names[#names + 1] = part.name
+        end
+    end
+    local text = LOOK_ASK
+    local last = table.remove(names)
+    if last then text = text .. " It also turns on " .. (#names > 0 and (table.concat(names, ", ") .. " and ") or "") .. last .. "." end
+    if bars then text = text .. " Your own bars come on in place of Blizzard's Cooldown Manager, which turns off (reload after)." end
+    return text .. KEEP_YOURS
+end
 
 -- A text box's text set from here, with its grey placeholder only while empty.
 local function SetBoxText(input, text)
@@ -1207,7 +1330,8 @@ function P.BuildBox(window)
         lookNote:SetText(self:GetChecked() and LOOK_ON or LOOK_OFF)
     end)
     look:SetPoint("TOPLEFT", 14, -160)
-    window:Hint(look, "Its bar sizes, spots, layout and look in place of yours, on every character. It asks first.")
+    window:Hint(look, "Its bar sizes, spots, layout and look in place of yours, on every character, and anything it has switched on"
+        .. " comes on too. It asks first.")
     box.look, box.lookNote = look, lookNote
 
     local make = T:Button(box, "Make new profile", 130, 22)
@@ -1277,7 +1401,7 @@ function P.BuildBox(window)
             -- and Escape would close the box but leave the question.
             paste:ClearFocus()
             name:ClearFocus()
-            window:Ask("Use its look and layout too?", LOOK_ASK, "Use them", Go)
+            window:Ask("Use its look and layout too?", P.LookQuestion(shared), "Use them", Go)
         else
             Go()
         end

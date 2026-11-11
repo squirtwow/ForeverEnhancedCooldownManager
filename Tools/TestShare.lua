@@ -515,8 +515,12 @@ local function Environment(keepCVars)
             return Typed("boolean", usable[id]), Typed("boolean", noMana[id])
         end,
         IsSpellInRange = function(id, unit) assert(unit == "target"); return Typed("boolean", range[id]) end,
-        GetSpellTexture = function() return 1 end,
-        GetSpellName = function(id) return ({ [16870] = "Clearcasting", [16886] = "Nature's Grace", [1243] = "Power Word: Fortitude" })[id] end,
+        -- (A mage's procs with icons of their own, for the Cooldown pulse's proc rows.)
+        GetSpellTexture = function(id) return ({ [12536] = 136170, [400589] = 236221, [400625] = 236218, [400670] = 236227 })[id] or 1 end,
+        GetSpellName = function(id)
+            return ({ [16870] = "Clearcasting", [16886] = "Nature's Grace", [1243] = "Power Word: Fortitude", [12536] = "Clearcasting",
+                [400589] = "Missile Barrage", [400625] = "Heating Up", [400670] = "Fingers of Frost" })[id]
+        end,
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
@@ -555,7 +559,15 @@ local function Environment(keepCVars)
             return { spellId = id }
         end,
     }
-    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end }
+    -- And whether the game keeps one spell's aura secret (SpellAurasSecret[id]:
+    -- true, false or SECRET; not there is false), as /ccm debug asks of procs.
+    SpellAurasSecret = {}
+    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end,
+        ShouldSpellAuraBeSecret = function(id)
+            assert(type(id) == "number", "a spell ID")
+            if SpellAurasSecret[id] == nil then return false end
+            return Typed("boolean", SpellAurasSecret[id])
+        end }
     _G.C_CVar = {
         GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end,
         GetCVar = function(name) return cvars[name] end,
@@ -643,27 +655,59 @@ local function Environment(keepCVars)
                 button:Hide()
                 return button
             end
+            -- Like the game: what makes it look at all your buffs afresh on
+            -- its next frame (UpdateAllAuras, Blizzard_ManagedAuraContainer.lua
+            -- and Blizzard_CustomAuraContainer.lua) is noted in S[f].full,
+            -- which S[f].Refresh below plays out: a slot or group added,
+            -- switched or told its filters, its unit, UpdateAllAuras, its
+            -- own OnShow and OnHide, and what it hears while it can be
+            -- seen: a full UNIT_AURA (none given, or isFullUpdate: a loading
+            -- screen) and, once a slot or group is told buff IDs, UNIT_FLAGS
+            -- and UNIT_FACTION for you (a fight starting or ending, a stun,
+            -- your PvP flag: Blizzard_AuraContainerUtil.lua
+            -- AppendCandidateFilterUnitEvents).
+            local function Full() S[f].full = true end
+            local function Named(filters)
+                if type(filters) == "table" and (filters.includeSpellIDs or filters.excludeSpellIDs) then S[f].flags = true end
+            end
+            S[f].events.UNIT_AURA, S[f].events.UNIT_FLAGS, S[f].events.UNIT_FACTION = true, true, true
+            S[f].scripts.OnEvent = function(_, event, unit, info)
+                if not S[f].listening then return end
+                if event == "UNIT_AURA" then
+                    if unit == S[f].unit and (type(info) ~= "table" or info.isFullUpdate) then Full() end
+                elseif unit == "player" and S[f].flags then
+                    Full()
+                end
+            end
             rawset(f, "AddAuraSlot", function(_, key, filter, options)
                 Guard()
                 local button = Make(options)
                 slots[key] = { filter = filter, button = button, enabled = true, supplied = S[button].supplied }
+                Named(options.candidateFilters)
+                Full()
                 return button
             end)
             rawset(f, "SetAuraSlotEnabled", function(_, key, enabled)
-                Guard(); assert(type(enabled) == "boolean"); slots[key].enabled = enabled
+                Guard(); assert(type(enabled) == "boolean"); slots[key].enabled = enabled; Full()
             end)
             rawset(f, "SetAuraSlotCandidateFilters", function(_, key, filters)
-                Guard(); slots[key].filters = filters
+                Guard(); slots[key].filters = filters; Named(filters); Full()
             end)
             -- Like the game: its unit set, it signs up for that unit's aura
             -- events, but only while it can be seen (UpdateEventRegistrations
             -- asks IsVisible); its own OnShow and OnHide below sign it up
             -- again or off. listening: whether it hears its auras change.
             rawset(f, "SetUnit", function(_, unit)
-                if S[f].unit ~= unit then S[f].listening = f:IsVisible() end
+                if S[f].unit ~= unit then
+                    S[f].listening = f:IsVisible()
+                    Full()
+                end
                 S[f].unit = unit
             end)
-            rawset(f, "UpdateAllAuras", function() S[f].refreshes = (S[f].refreshes or 0) + 1 end)
+            rawset(f, "UpdateAllAuras", function()
+                S[f].refreshes = (S[f].refreshes or 0) + 1
+                Full()
+            end)
             -- Like the game: the container's own OnShow and OnHide
             -- (AuraContainerPrivateMixin OnShow_Intrinsic and
             -- OnHide_Intrinsic, Blizzard_AuraContainer.lua) sign it up for
@@ -678,6 +722,7 @@ local function Environment(keepCVars)
                 S[f].scripts[which] = function()
                     S[f].intrinsic = (S[f].intrinsic or 0) + 1
                     S[f].listening = f:IsVisible()
+                    Full()
                     for level = 2, 60 do
                         local info = debug.getinfo(level, "Sn")
                         if not info then break end
@@ -707,6 +752,8 @@ local function Environment(keepCVars)
                 group.Batch()
                 group.button, group.supplied = group.frames[1], S[group.frames[1]].supplied
                 groups[key] = group
+                Named(options.candidateFilters)
+                Full()
             end)
             rawset(f, "GetAuraGroupFrameCount", function(_, key) return groups[key] and #groups[key].frames or 0 end)
             rawset(f, "GetAuraGroupFrame", function(_, key, i) return groups[key] and groups[key].frames[i] end)
@@ -716,9 +763,11 @@ local function Environment(keepCVars)
                 groups[key].max = count
             end)
             rawset(f, "SetAuraGroupEnabled", function(_, key, enabled)
-                Guard(); assert(type(enabled) == "boolean"); groups[key].enabled = enabled
+                Guard(); assert(type(enabled) == "boolean"); groups[key].enabled = enabled; Full()
             end)
-            rawset(f, "SetAuraGroupCandidateFilters", function(_, key, filters) Guard(); groups[key].filters = filters end)
+            rawset(f, "SetAuraGroupCandidateFilters", function(_, key, filters)
+                Guard(); groups[key].filters = filters; Named(filters); Full()
+            end)
             rawset(f, "SetAuraGroupLayout", function(_, key, layout) Guard(); groups[key].layout = layout end)
             rawset(f, "SetScale", function(_, scale) Guard(); S[f].scale = scale end)
             -- The container's own update, from its OnUpdate after UNIT_AURA or
@@ -754,7 +803,9 @@ local function Environment(keepCVars)
                     if on and not was then group:Play() elseif not on then group:Stop() end
                 end
             end
+            -- (Your buffs as it last saw them are kept for Refresh.)
             S[f].Update = function(auras)
+                S[f].auras = auras
                 S[f].updating = true
                 debug.sethook(function()
                     local info = debug.getinfo(2, "S")
@@ -791,6 +842,20 @@ local function Environment(keepCVars)
                 debug.sethook()
                 S[f].updating = false
                 assert(ok, err)
+            end
+            -- Its next frame after a full refresh was asked for (S[f].full),
+            -- while it can be seen: every icon showing goes, its animations
+            -- stopped, then each takes its aura again and comes into sight,
+            -- playing them again (ResetFrameAssignments, then
+            -- RefreshFrameAssignments). auras: your buffs now, else as it
+            -- last saw them. True when it ran.
+            S[f].Refresh = function(auras)
+                if not (S[f].full and f:IsVisible()) then return false end
+                S[f].full = false
+                local now = auras or S[f].auras or {}
+                S[f].Update({})
+                S[f].Update(now)
+                return true
             end
         end
         if template == "ActionButtonSpellAlertTemplate" then
@@ -1125,6 +1190,7 @@ function H.Sane(ns, shared)
             if v:find("^slot:") and v ~= "slot:13" and v ~= "slot:14" then return "a slot key " .. v end
             if v:find("^hand:") and v ~= "hand:main" and v ~= "hand:off" then return "a hand key " .. v end
             if v:find("^hand:") and ns.BAR_KIND[key] ~= "buff" then return "a hand off the Buffs bar: " .. key end
+            if v:find("^proc:") then return "a proc's pulse key on a bar: " .. key end
             -- A spell pinned to one ID: a name, # and a whole ID, nothing else.
             local pinned = v:match("^[^#@]+#([1-9]%d*)$")
             if v:find("#", 1, true) and not (pinned and ID(tonumber(pinned))) then return "a pinned key " .. v end
@@ -1143,6 +1209,7 @@ function H.Sane(ns, shared)
             for k, v in pairs(list) do
                 if type(k) ~= "number" or not Word(v) or inForm[v] then return "an entry on a form's " .. key end
                 if v:find("^hand:") then return "a hand on a form's " .. key end
+                if v:find("^proc:") then return "a proc's pulse key on a form's " .. key end
                 inForm[v], on[v] = true, true
             end
         end
@@ -1269,6 +1336,12 @@ function H.Sane(ns, shared)
     for _, key in ipairs(ns.COLOUR_SETTINGS) do
         if setup.look[key] == ns.CUSTOM and not ns.Hex(setup.look[key .. "Custom"]) then return "Custom with no colour: " .. key end
     end
+    -- Parts: only those a string can switch on, each true.
+    local known = {}
+    for _, part in ipairs(ns.SHARE_PARTS) do known[part.key] = true end
+    for key, v in pairs(setup.parts or {}) do
+        if not known[key] or v ~= true then return "a part " .. tostring(key) end
+    end
     return ""
 end
 
@@ -1326,10 +1399,14 @@ function H.Spy(ns)
     end
 end
 
--- Settings a shared profile never carries: switching a part on or off, and the window's own.
-H.NOT_SHARED = { "skin", "useBars", "groupFamilies", "listItems", "listRanks", "listTicked", "accent", "prdSkin", "prdCombo", "prdEnergy", "prdText", "castBar", "castBatch", "castTicks", "castTickSound", "castLatency", "swingTimer",
-    "pullTimer", "raidWarnings", "bossCasts", "pulse", "keybinds", "layoutPreview", "growArrows", "minimap", "minimapAngle",
-    "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew" }
+-- Settings a shared profile never carries: parts on by default (a string
+-- never switches one back on), and the window's own. (The parts it
+-- switches on are ns.SHARE_PARTS.)
+H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
+    "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew" }
+-- Every part a string can switch on, in order, with its letter.
+H.PARTS = "useBars=u prdCombo=c prdEnergy=e prdText=t keybinds=k castBar=b swingTimer=s castBatch=h castTicks=m castLatency=l"
+    .. " pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q"
 
 -- Every setting is either shared or kept out, on purpose -------------------------------------------
 -- A setting added later must be put on one side or the other.
@@ -1339,6 +1416,10 @@ do
     local ns = Start({ notesSeen = "dev", helpSeen = true })
     local sides, both = {}, {}
     for _, key in ipairs(ns.SHARE_LOOK) do sides[key] = "shared" end
+    for _, part in ipairs(ns.SHARE_PARTS) do
+        if sides[part.key] then both[#both + 1] = part.key end
+        sides[part.key] = "part"
+    end
     for _, key in ipairs(H.NOT_SHARED) do
         if sides[key] then both[#both + 1] = key end
         sides[key] = "kept"
@@ -1401,7 +1482,7 @@ do
         keybindSize = 120, barScale = 110, prdHideRepeat = false, prdHealth = "green", castHeight = 24, castIcon = false,
         swingColour = "purple", pullColour = "class", warningFont = "morpheus", warningShadow = false, raidSize = 120,
         pulseSize = 300, pulseSound = "bell", pulseMaster = true, pulseX = -120, pulseY = 85.5,
-        -- Never shared: these stay each account's own.
+        -- Parts it switches on (keybinds, pulse); the rest never shared, each account's own.
         accent = "teal", keybinds = true, pulse = true, minimap = false, growArrows = true, listItems = true })
     local P, B, L = ns.ProfileShare, ns.Bars, ns.Layout
     for key, list in pairs({ cd = { "Moonfire", "Wrath", "Mortal Strike", "slot:13", "family:healing", "Moonfire@1" },
@@ -1513,7 +1594,8 @@ do
     Equal(redrawn(), "cast bar, display, font, icon decor, icon glow, icon keys, raid timers, restyled bars",
         "everything that shows the look is drawn again, as the pages do on a change")
     Equal(tostring(ran and done) .. " " .. #importTried .. " | " .. tostring(name) .. " | " .. tostring(message),
-        "true 0 | Shared profile | Imported Shared profile with its look and layout, and switched to it.",
+        "true 0 | Shared profile | Imported Shared profile with its look and layout, and switched to it. Also turned on 2 of its"
+        .. " settings.",
         "imported with its look and layout, running nothing, as \"Shared profile\" when no name is typed")
     Equal(ns2.ProfileName() .. " | " .. tostring(db.chars["Player-1-0077"]), "Shared profile | Shared profile",
         "and this character switched to it")
@@ -1538,8 +1620,8 @@ do
     Equal(H.Text(db.profiles[own]), ownBefore, "the importer's own profile is as it was")
     Equal(ns2.Get("accent") .. " " .. tostring(ns2.Get("keybinds")) .. " " .. tostring(ns2.Get("castBar")) .. " "
         .. tostring(ns2.Get("pulse")) .. " " .. tostring(ns2.Get("minimap")) .. " " .. tostring(ns2.Get("growArrows")) .. " "
-        .. tostring(ns2.Get("listItems")), "orange false false false true false false",
-        "nothing the string doesn't carry changes: the accent, and every part still on or off as it was")
+        .. tostring(ns2.Get("listItems")), "orange true false true true false false",
+        "the parts it has on come on (keybinds, the pulse); nothing the string doesn't carry changes: the accent, the window's own")
     Equal(ns2.ProfileShare.Export(), text, "and it shares the very same string back")
     Equal(table.concat((ns2.Bars:Mine("cd")), ","), "Moonfire,Wrath,slot:13,family:healing,Moonfire@1",
         "the bars show it: a druid's own, the warrior's spell left off")
@@ -2648,7 +2730,8 @@ do
 
     -- Its look ticked: asked first; Cancel changes nothing.
     Equal(S[box.look.text].text .. " | " .. tostring(rawget(box.look, "hint")), "Also use its look and layout (experimental) | Its bar"
-        .. " sizes, spots, layout and look in place of yours, on every character. It asks first.", "the tick quietly says it's experimental")
+        .. " sizes, spots, layout and look in place of yours, on every character, and anything it has switched on comes on too."
+        .. " It asks first.", "the tick quietly says it's experimental")
     box.look:Click()
     Equal(S[box.lookNote].text, P.LOOK_ON, "ticked, it says what changes")
     local count = #ns.ProfileNames()
@@ -2659,7 +2742,7 @@ do
         "the text boxes let go of the keyboard while it asks: keys don't type behind it, and Escape closes the window")
     Equal(tostring(S[confirm.shade].shown) .. " " .. S[confirm.dialog.title].text .. " | " .. S[confirm.dialog.detail].text,
         "true Use its look and layout too? | Your bar sizes, spots, layout and look change to the shared ones, on every character."
-        .. " To keep a copy of yours, Share it first.", "Make asks first, saying what changes and how to keep yours")
+        .. " To keep a copy of yours, Share it first.", "Make asks first, saying what changes and how to keep yours (it has nothing to switch on)")
     confirm.no:Click()
     Equal(tostring(S[box.shade].shown) .. " " .. (#ns.ProfileNames() - count) .. " " .. ns.Get("barStyle"), "true 0 outline",
         "Cancel: back in the box, nothing made or changed")
@@ -2969,6 +3052,189 @@ do
         .. " | " .. tostring(ns2.Bars:OnlyWhenMissing("buff", "hand:off")) .. " " .. tostring(ns2.Bars:WarnAt("buff", "hand:main")),
         "true | hand:main,hand:off,Thorns | hand:main,hand:off,Thorns | true 600", "imported on a warlock: both hands his too, as they were")
     Equal(ns2.ProfileShare.Export(), text, "and shared back as the very same string")
+end
+
+-- The Cooldown pulse's procs, shared ------------------------------------------------------------------
+-- A proc ticked to pulse, and one switched to Long, go in a string by key
+-- ("proc:" and its buff's ID, the same in every language) and come back on
+-- another account. A key for a proc no class has, or not written as one,
+-- is left out and counted; a proc's key on a bar's list is left out too
+-- (a spell icon with no spell). Procs too itself is never in the look: it
+-- switches a part on (ns.SHARE_PARTS).
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, pulse = true, pulseProcs = true })
+    local P = ns.ProfileShare
+    ns.SetPulsePick("proc:16870", true)
+    ns.SetPulseStyle("proc:16870", "long")
+    -- A mage's, ticked in a profile a druid shares: any class's proc reads.
+    ns.SetPulsePick("proc:400589", true)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Text(shared.pick) .. " | " .. H.Text(shared.style) .. " | " .. shared.skipped .. " | " .. tostring(shared.setup.look.pulseProcs)
+        .. " | " .. H.Sane(ns, shared) .. "|", '{["proc:16870"]=true,["proc:400589"]=true} | {["proc:16870"]="long"} | 0 | nil | |',
+        "a proc's tick and Long in the string by its key, Procs too left out")
+    local odd = P.Read(H.String({ l = { cd = { "Moonfire", "proc:16870" }, util = {}, buff = { "proc:16870", "Thorns" }, debuff = {} },
+        p = { ["proc:16870"] = true, ["proc:1326083"] = true, ["proc:99"] = true, ["proc:"] = true, ["proc:016870"] = true,
+            ["proc:16870x"] = true, ["proc:abc"] = true },
+        q = { ["proc:16870"] = "long", ["proc:99"] = "long" } }))
+    Equal(H.Text(odd.pick) .. " | " .. H.Text(odd.style) .. " | " .. table.concat(odd.lists.cd, ",") .. " | "
+        .. table.concat(odd.lists.buff, ",") .. " | " .. odd.skipped .. " | " .. H.Sane(ns, odd) .. "|",
+        '{["proc:16870"]=true} | {["proc:16870"]="long"} | Moonfire | Thorns | 9 | |',
+        "only a proc's own key read: not its second buff's, one no class has, nor one written another way; none on a bar; each counted")
+    -- Another account, a mage: the same ticks and Long, and his proc rows show them.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, pulse = true, pulseProcs = true })
+    _G.UnitClass = function() return "Mage", "MAGE" end
+    local ok, done = H.Trap(ns2.ProfileShare.Import, "Procs", ns2.ProfileShare.Read(text), false)
+    local rows = {}
+    for _, entry in ipairs(ns2.Pulse:Procs()) do rows[#rows + 1] = entry.name .. " " .. tostring(entry.on) .. " " .. entry.style end
+    Equal(tostring(ok and done) .. " | " .. table.concat(rows, ", ") .. " | " .. tostring(ns2.PulsePicks()["proc:16870"]),
+        "true | Clearcasting false quick, Fingers of Frost false quick, Heating Up false quick, Missile Barrage true quick | true",
+        "imported on a mage: Missile Barrage ticked; the druid's Clearcasting kept by its key, not the mage's own")
+    Equal(ns2.ProfileShare.Export(), text, "and shared back as the very same string")
+end
+
+-- The parts it has on, in strings ------------------------------------------------------------------
+-- Every part on goes with the look and layout (o), a letter each. Imported
+-- with its look ticked, each one off for you is switched on: named in the
+-- question first, counted in the line after (short enough for the footer);
+-- nothing of yours is turned off. The pulse and its procs aren't switched on
+-- while they run in the other addon, nor procs the game can't show; a part
+-- your class doesn't use comes on unnamed. Without the look nothing
+-- switches. Only letters this version knows are read; a part on by default
+-- (the look on Blizzard's bars) never goes in a string. The cast bar's tick
+-- sound goes with the look, as the pulse's sounds do.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, prdCombo = true, swingTimer = true, keybinds = true,
+        castTickSound = "bell", skin = false })
+    local P = ns.ProfileShare
+    local order, letters = {}, {}
+    for _, part in ipairs(ns.SHARE_PARTS) do
+        order[#order + 1] = part.key .. "=" .. part.code
+        letters[part.code] = (letters[part.code] or 0) + 1
+    end
+    local twice = {}
+    for code, count in pairs(letters) do
+        if count > 1 or #code ~= 1 then twice[#twice + 1] = code end
+    end
+    Equal(table.concat(order, " ") .. " |" .. table.concat(twice, " "), H.PARTS .. " |",
+        "every part a string can switch on, in order, each its own single letter")
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Text(shared.setup.parts) .. " | " .. shared.skipped .. " | " .. H.Sane(ns, shared) .. "| " .. shared.setup.look.castTickSound,
+        '{["keybinds"]=true,["prdCombo"]=true,["swingTimer"]=true,["useBars"]=true} | 0 | | bell',
+        "the parts you have on go in the string, those off and the looks on by default don't; the tick sound goes with the look")
+    Equal(P.Describe(shared), "Holds 0 bar entries, with its look and layout.", "said as before")
+
+    -- Another account: with its look, what's off there comes on; nothing goes off.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, prdSkin = false, skin = false, castTickSound = "chime", pulse = true })
+    local keyed = 0
+    local update = ns2.Keybinds.Update
+    ns2.Keybinds.Update = function(...)
+        keyed = keyed + 1
+        return update(...)
+    end
+    _G.UnitClass = function() return "Rogue", "ROGUE" end
+    Equal(ns2.ProfileShare.LookQuestion(ns2.ProfileShare.Read(text)), "Your bar sizes, spots, layout and look change to the shared ones,"
+        .. " on every character. It also turns on Combo points, Keybinds on icons and Swing timer. Your own bars come on in place of"
+        .. " Blizzard's Cooldown Manager, which turns off (reload after). To keep a copy of yours, Share it first.",
+        "the question names each part it switches on, and says Blizzard's Cooldown Manager goes off as your bars come on")
+    local ok, message = ns2.ProfileShare.Import("Parts", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. message, "true Imported Parts with its look and layout, and switched to it. Also turned on 4 of its"
+        .. " settings. Reload to finish.", "imported with its look: the parts counted, and a reload asked for (your bars came on)")
+    local now = {}
+    for _, key in ipairs({ "useBars", "skin", "prdSkin", "prdCombo", "keybinds", "swingTimer", "castTickSound", "pulse", "castBar" }) do
+        now[#now + 1] = key .. "=" .. tostring(ns2.Get(key))
+    end
+    Equal(table.concat(now, " ") .. " | " .. keyed, "useBars=true skin=false prdSkin=false prdCombo=true keybinds=true swingTimer=true"
+        .. " castTickSound=bell pulse=true castBar=false | 1",
+        "on as shared; the looks you turned off stay off, the tick sound is the look's, your pulse stays on; keys read again")
+    Equal(#ns2.ProfileShare.WouldTurnOn(ns2.ProfileShare.Read(text)) .. " | " .. ns2.ProfileShare.LookQuestion(ns2.ProfileShare.Read(text)),
+        "0 | Your bar sizes, spots, layout and look change to the shared ones, on every character. To keep a copy of yours, Share it first.",
+        "the same string again: nothing left to switch on, and the question says none")
+    Equal(H.Text(ns2.ProfileShare.Read(ns2.ProfileShare.Export()).setup.parts), '{["keybinds"]=true,["prdCombo"]=true,["pulse"]=true,'
+        .. '["swingTimer"]=true,["useBars"]=true}', "shared back: its parts and your own pulse")
+
+    -- A third: without its look, nothing switches.
+    character = { guid = "Player-1-0088", name = "Tam", realm = "Zephras" }
+    local ns3 = Start({ notesSeen = "dev", helpSeen = true })
+    ok, message = ns3.ProfileShare.Import("Lists only", ns3.ProfileShare.Read(text), false)
+    Equal(tostring(ok) .. " " .. tostring(ns3.Get("prdCombo")) .. " " .. tostring(ns3.Get("swingTimer")) .. " " .. ns3.Get("castTickSound")
+        .. " | " .. message, "true false false none | Imported Lists only, and switched to it. Your bars are off: tick Use my bars on General.",
+        "unticked: no part switches")
+
+    -- Only letters this version knows; the rest left out and counted.
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {} } end
+    local odd = P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "cpZ1 c?" } }))
+    Equal(H.Text(odd.setup.parts) .. " | " .. odd.skipped .. " | " .. H.Sane(ns, odd) .. "|", '{["prdCombo"]=true,["pulse"]=true} | 4 | |',
+        "only letters it knows, one twice still once; a capital, a digit, a space and a mark left out, each counted")
+    local map = P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = { prdCombo = true } } }))
+    local long = P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = ("c"):rep(65) } }))
+    local empty = P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "" } }))
+    local old = P.Read(H.String({ a = "1.9.0", l = Lists(), g = { s = {}, b = {}, l = {}, k = {} } }))
+    Equal(H.Text(map.setup.parts) .. " " .. map.skipped .. " | " .. H.Text(long.setup.parts) .. " " .. long.skipped .. " | "
+        .. H.Text(empty.setup.parts) .. " " .. empty.skipped .. " | " .. H.Text(old.setup.parts) .. " " .. old.skipped,
+        "{} 1 | {} 1 | {} 0 | {} 0", "not letters, or too many: left out and counted; none, or a string from before them: no parts")
+
+    -- The pulse running in the other addon: neither it nor its procs switched
+    -- on here. A preset's Undo goes (it would switch off what came on).
+    character = { guid = "Player-1-0099", name = "Vel", realm = "Zephras" }
+    local ns4 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns4.Pulse.Elsewhere = function() return "Forever Enhanced Cooldown Pulse" end
+    ns4.ProfileShare.ApplyLook("clean", { cast = true })
+    local undoBefore = ns4.ProfileShare.CanUndoLook()
+    local elsewhere = ns4.ProfileShare.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "pqbsu" } }))
+    ok, message = ns4.ProfileShare.Import("Elsewhere", elsewhere, true)
+    Equal(elsewhere.skipped .. " " .. tostring(ok) .. " " .. tostring(ns4.Get("pulse")) .. " " .. tostring(ns4.Get("pulseProcs")) .. " "
+        .. tostring(ns4.Get("castBar")) .. " " .. tostring(ns4.Get("swingTimer")) .. " " .. tostring(undoBefore) .. " "
+        .. tostring(ns4.ProfileShare.CanUndoLook()) .. " | " .. message, "0 true false false true true true false | Imported Elsewhere with"
+        .. " its look and layout, and switched to it. Also turned on 1 of its settings.",
+        "the pulse and its procs left to the other addon; the cast bar already on from the preset; the swing timer on, counted; Undo gone")
+
+    -- A mage: combo points and the druid's energy bar come on (every
+    -- character's) but aren't named; proc pulses the game can't show stay off.
+    character = { guid = "Player-1-0101", name = "Mira", realm = "Zephras" }
+    local ns6 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    _G.UnitClass = function() return "Mage", "MAGE" end
+    ns6.Pulse.CanProcs = function() return false end
+    local mage = ns6.ProfileShare.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "ceq" } }))
+    local asked = ns6.ProfileShare.LookQuestion(mage)
+    ok, message = ns6.ProfileShare.Import("Mage", mage, true)
+    Equal(tostring(ok) .. " " .. tostring(ns6.Get("prdCombo")) .. " " .. tostring(ns6.Get("prdEnergy")) .. " " .. tostring(ns6.Get("pulseProcs"))
+        .. " | " .. asked .. " | " .. message, "true true true false | Your bar sizes, spots, layout and look change to the shared ones, on"
+        .. " every character. To keep a copy of yours, Share it first. | Imported Mage with its look and layout, and switched to it.",
+        "on for the account, named for no one who can't use them; proc pulses the game can't show left off")
+
+    -- Every part at once, a druid with the longest name: each named in the
+    -- question (the experimental ones say so); the line after still fits the
+    -- footer's two lines (560 wide, at most 5.6 a letter).
+    character = { guid = "Player-1-0102", name = "Bram", realm = "Zephras" }
+    local ns7 = Start({ notesSeen = "dev", helpSeen = true })
+    _G.UnitClass = function() return "Druid", "DRUID" end
+    local all = ns7.ProfileShare.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "ucetkbshmlrwopq" } }))
+    asked = ns7.ProfileShare.LookQuestion(all)
+    ok, message = ns7.ProfileShare.Import(("N"):rep(ns7.PROFILE_MAX), all, true)
+    local _, experimental = asked:gsub("%(experimental%)", "")
+    Equal(tostring(ok) .. " " .. experimental .. " " .. tostring(#message * 5.6 <= 2 * 560) .. " | " .. asked,
+        "true 5 true | Your bar sizes, spots, layout and look change to the shared ones, on every character. It also turns on Combo"
+        .. " points, Energy bar in other forms (experimental), Health and power text, Keybinds on icons, Cast bar, Swing timer, Crafting"
+        .. " batch time (experimental), Cast bar tick marks, Cast bar latency, Pull countdown, Raid warnings (experimental), Boss cast"
+        .. " bars (experimental), Cooldown pulse and Proc pulses (experimental). Your own bars come on in place of Blizzard's Cooldown"
+        .. " Manager, which turns off (reload after). To keep a copy of yours, Share it first.",
+        "all fifteen named before, five quietly experimental; the line after fits the footer (" .. #message .. " letters)")
+    -- In a fight nothing switches (an import is refused there).
+    character = { guid = "Player-1-0100", name = "Pell", realm = "Zephras" }
+    local ns5 = Start({ notesSeen = "dev", helpSeen = true })
+    lockdown = true
+    ok = ns5.ProfileShare.Import("Fight", ns5.ProfileShare.Read(text), true)
+    lockdown = false
+    Equal(tostring(ok) .. " " .. tostring(ns5.Get("prdCombo")) .. " " .. tostring(ns5.Get("useBars")), "false false false",
+        "refused in a fight: no part switched")
+    Equal(#printed, 0, "no errors")
 end
 
 print = _G.print

@@ -28,6 +28,10 @@
 -- and shows in a fight like anything that isn't secure. Nothing of
 -- Blizzard's is touched.
 --
+-- Procs can pulse too, the moment one lands (Procs, below): the game plays
+-- those itself, in its own aura container, as your Buffs bar shows your
+-- buffs, so they take no turns with the cooldowns and play no sound.
+--
 -- Forever Enhanced Cooldown Pulse is this same pulse as an addon of its
 -- own: with both installed, only one of them pulses, so a cooldown never
 -- pops up twice. Whichever pulse is on keeps it; the other's on/off tick
@@ -338,9 +342,26 @@ local function Frame()
     return pulse
 end
 
+-- The proc pulses (Procs, below): the game's aura container, its slots (each
+-- with the addon's own frame it sits on, and the look made for it), what
+-- each slot was last told, whether a change waits for a fight to end, a
+-- failure to start, and the hush (Hush, below): when it ends, how many
+-- there were, and the game refusing one.
+local procs = { slots = {}, applied = {}, hushUntil = 0, hushes = 0 }
+
+-- Each proc's frame in the pulse's spot. The addon's own frames: fine in a
+-- fight, and the game's icons on them follow.
+local function PlaceProcs()
+    for _, slot in ipairs(procs.slots) do
+        slot.holder:ClearAllPoints()
+        slot.holder:SetPoint("CENTER", UIParent, "CENTER", ns.Get("pulseX"), ns.Get("pulseY"))
+    end
+end
+
 -- Where it sits and how big: from the middle of the screen, as moved, at
--- the size of the style showing.
+-- the size of the style showing. The proc pulses sit there too.
 function P:Place()
+    PlaceProcs()
     if not pulse then return end
     local size = self:Size(showing and showing.style)
     pulse:SetSize(size, size)
@@ -661,7 +682,7 @@ end
 
 -- Watchers for what pulses now (none while it's off): kept for what still
 -- does, so a cooldown counting down carries on, let go for the rest, then
--- every one fed.
+-- every one fed. Then the procs ticked (P:ApplyProcs).
 local built -- the read of your spells and items the watchers were last made from
 
 function P:Rebuild()
@@ -691,6 +712,7 @@ function P:Rebuild()
         watch.spellID, watch.itemID, watch.slot = entry.spellID, entry.itemID, entry.slot
     end
     self:Feed()
+    self:ApplyProcs()
 end
 
 -- Your bags changed and nothing else: what's watched stays the same unless
@@ -776,6 +798,367 @@ function P:Preview()
         if waiting.preview then waiting.style = style end
     end
     return self:Queue(self:SampleIcon(), "preview", true, style)
+end
+
+-- Procs ------------------------------------------------------------------------------------
+-- A pulse the moment a proc's buff lands. Your buffs are secret in a fight
+-- and the addon never reads one, so the game does the work: Blizzard's
+-- secure aura container, as your Buffs bar uses (Buffs.lua),
+-- is told out of a fight which buffs go in which slot, one slot per proc
+-- ticked. Each slot's icon is the pulse's own look, see-through, with one
+-- animation handed to the game, which plays it as the icon comes into sight
+-- (Blizzard_CustomAuraButton.lua ApplyVisibility): in fast, a hold, then
+-- out, growing as it goes, as the pulse does. So it pulses as the proc lands
+-- while it isn't up; refreshed, stacking or replaced while up, it doesn't
+-- pulse again. One already up would pulse again whenever the container
+-- looks at all your buffs afresh, so those moments are hushed (Hush, below).
+-- Used up before the pulse ends, its icon goes and the pulse with it. No
+-- sound and no turns with the cooldowns: the addon never hears one land.
+-- The look is made only as a slot is added (Buffs.lua F.Add and F.Guard),
+-- nothing of the addon's runs as the game plays it (no scripts), and
+-- nothing is written on the game's icons or container; of the container
+-- only its see-through changes (Hush). A change made in a fight waits for
+-- it to end. Off until "Procs too" is ticked.
+
+-- Each class's procs, each a list of its buff's IDs (the first is its key,
+-- name and icon): your Buffs bar's (Spells.lua S.PROCS), and every buff a
+-- talent of the class puts on you (Ranks.lua PASSIVE_BUFFS) that the game
+-- data (build 70888: SpellEffect, SpellMisc, SpellDuration) makes an aura on
+-- yourself (effect 6, target 1) lasting 1 to 60 seconds. Left out: Divine
+-- Aegis and Inspiration (on whoever you heal), Frenzy (your pet's), Spirit
+-- of Redemption, Furor, and anything that lasts. Run that check again with
+-- each build. The same as Forever Enhanced Cooldown Pulse's, line for line
+-- (Tools/TestRules.mjs checks the two match).
+P.PROCS = {
+    DRUID = { { 16870 }, { 16886 }, { 408255 } }, -- Clearcasting, Nature's Grace, Eclipse
+    HUNTER = { { 6150 }, { 415407 }, { 1242512 }, { 1242688 }, { 1310726 } }, -- Quick Shots, Rapid Killing, Rapid Recuperation, Resourcefulness, Expose Prey
+    MAGE = { { 12536 }, { 400589, 1326083 }, { 400625 }, { 400670 } }, -- Clearcasting, Missile Barrage, Heating Up, Fingers of Frost
+    PALADIN = { { 20050 }, { 20128 }, { 53672, 437063 }, { 20272 }, { 1311033 }, { 1328551 }, { 440668 } }, -- Vengeance, Redoubt, Infusion of Light, Illumination, Iron Creed, Shieldsworn, Vindication
+    PRIEST = { { 15271 }, { 1326168 }, { 27813 } }, -- Spirit Tap, Dark Inspiration, Blessed Recovery
+    ROGUE = { { 14143 }, { 1329282 }, { 1310703 } }, -- Remorseless, Quick Getaway, Venom
+    SHAMAN = { { 16246 }, { 16257 }, { 408505 }, { 30165 }, { 1238931 }, { 415144 } }, -- Clearcasting, Flurry, Maelstrom Weapon, Elemental Devastation, Improved Stormstrike, Mental Dexterity
+    WARLOCK = { { 17941 }, { 440873 }, { 1242853 } }, -- Shadow Trance, Decimation, Soul Harvest
+    WARRIOR = { { 12966 }, { 12880 }, { 16488 }, { 1323969 } }, -- Flurry, Enrage, Blood Craze, Gore Drinker
+}
+-- Each side of a ring (Ring: top, bottom, left, right): the way from a
+-- strip's own middle to the icon's.
+local SIDES = { { 0, -1 }, { 0, 1 }, { 1, 0 }, { -1, 0 } }
+
+-- Whether the game has the containers proc pulses need.
+function P:CanProcs()
+    return CustomAuraContainerSlotDefaultOptions ~= nil
+end
+
+-- Whether proc pulses run: ticked on, with the pulse on and running here.
+function P:ProcsOn()
+    return ns.Get("pulseProcs") == true and self:On() and self:CanProcs()
+end
+
+-- Your class's procs, by name: each one's key ("proc:" and its first buff
+-- ID, the same in every language, and never a spell's name), name, icon,
+-- buff IDs, whether it's ticked and its style. One the game has no name for
+-- is left out.
+function P:Procs()
+    local _, class = UnitClass("player")
+    local found, picks = {}, ns.PulsePicks()
+    if not (Open(class) and type(class) == "string") then return found end
+    for _, ids in ipairs(self.PROCS[class] or {}) do
+        local name = C_Spell.GetSpellName and C_Spell.GetSpellName(ids[1])
+        local icon = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(ids[1])
+        if Open(name) and type(name) == "string" and name ~= "" then
+            local key = "proc:" .. ids[1]
+            found[#found + 1] = { key = key, name = name, icon = Open(icon) and icon or nil, ids = ids, on = picks[key] == true,
+                style = self:StyleOf(key) }
+        end
+    end
+    table.sort(found, function(a, b) return a.name < b.name end)
+    return found
+end
+
+-- What a proc's pulse looks like in a style, with your choices, to tell
+-- whether a slot needs tuning again.
+local function Look(style)
+    return table.concat({ P:Size(style), P:Seconds(style), P:Opacity(), ns.Get("pulseGrow"), tostring(ns.Get("pulseBorder")),
+        tostring(ns.Get("pulseShadow")) }, " ")
+end
+
+-- A slot's pulse in a style, with your choices: its border and shadow as
+-- chosen, then each texture's fades (in, held, out, as P:Shape) and its
+-- grow, from the icon's middle, so the rings grow with it. Never its
+-- textures' alpha: the game's once handed over.
+local function Tune(slot, style)
+    local size, total = P:Size(style), P:Seconds(style)
+    local opacity, grow = P:Opacity(), ns.Get("pulseGrow") / 100
+    local border, ring = P:Edges(size)
+    P:Dress(slot.art, size)
+    for _, part in ipairs(slot.parts) do
+        local fadeIn, hold, out, scale = part[1], part[2], part[3], part[4]
+        fadeIn:SetFromAlpha(0)
+        fadeIn:SetToAlpha(opacity)
+        fadeIn:SetStartDelay(0)
+        fadeIn:SetDuration(FADE_IN * total)
+        hold:SetFromAlpha(opacity)
+        hold:SetToAlpha(opacity)
+        hold:SetStartDelay(FADE_IN * total)
+        hold:SetDuration(HOLD * total)
+        out:SetFromAlpha(opacity)
+        out:SetToAlpha(0)
+        out:SetStartDelay((FADE_IN + HOLD) * total)
+        out:SetDuration((1 - FADE_IN - HOLD) * total)
+        -- A strip's middle is this far out from the icon's (P:Dress: the
+        -- border's ring at the edge, each of the shadow's past it).
+        local reach, side = 0, SIDES[part.side] or { 0, 0 }
+        if part.ring == 0 then
+            reach = size / 2 + math.max(1, border) / 2
+        elseif part.ring then
+            reach = size / 2 + border + (part.ring - 1) * ring + ring / 2
+        end
+        scale:SetScaleFrom(1, 1)
+        scale:SetScaleTo(grow, grow)
+        scale:SetStartDelay(0)
+        scale:SetDuration(total)
+        scale:SetOrigin("CENTER", side[1] * reach, side[2] * reach)
+    end
+    slot.look = Look(style)
+end
+
+-- A slot's look, made as the game adds the slot (and never later: F.Guard):
+-- on its frame, taking no mouse, the pulse's icon with its border and
+-- shadow, every texture see-through, and one animation group handed to the
+-- game. What's made is kept in slot, nothing written on the game's icon.
+local function ProcLook(slot)
+    return function(button)
+        button:EnableMouse(false)
+        button:SetAllPoints(slot.holder)
+        local art = P:NewArt(button)
+        art:SetAllPoints(button)
+        button:SetIcon(art.texture)
+        local group = art:CreateAnimationGroup()
+        slot.button, slot.art, slot.group, slot.parts = button, art, group, {}
+        -- Each texture fades in, holds and out, and grows: plain animations
+        -- side by side, no scripts.
+        local function Part(texture, side, ring)
+            texture:SetAlpha(0)
+            local part = { texture = texture, side = side, ring = ring }
+            for i, kind in ipairs({ "Alpha", "Alpha", "Alpha", "Scale" }) do
+                local animation = group:CreateAnimation(kind)
+                animation:SetTarget(texture)
+                animation:SetOrder(1)
+                part[i] = animation
+            end
+            part[4]:SetSmoothing("OUT")
+            slot.parts[#slot.parts + 1] = part
+        end
+        Part(art.texture)
+        for side, strip in ipairs(art.border) do Part(strip, side, 0) end
+        for i, shadow in ipairs(art.shadow) do
+            for side, strip in ipairs(shadow) do Part(strip, side, i) end
+        end
+        Tune(slot, slot.style)
+        -- If the game won't take it, the icon stays see-through: nothing shows.
+        local ok, err = pcall(button.AddAuraShownAnimation, button, group)
+        slot.taken, slot.error = ok, not ok and tostring(err) or nil
+    end
+end
+
+-- Hushed: the container looks at all your buffs afresh, hiding every icon
+-- showing and showing it again (UpdateAllAuras, Blizzard_CustomAuraContainer.lua
+-- and Blizzard_ManagedAuraContainer.lua), as a fight starts or ends, on a
+-- stun, fear or mount, and as your PvP flag changes (UNIT_FLAGS and
+-- UNIT_FACTION, which it hears for you once told buff IDs:
+-- Blizzard_AuraContainerUtil.lua AppendCandidateFilterUnitEvents), after a
+-- loading screen, with the interface back after Alt+Z, and as its slots
+-- are made or changed (after logging in or a reload too). Each time, a proc
+-- already up would pulse again, and nothing tells that from one landing. So
+-- from each of those the container is see-through for as long as a pulse
+-- lasts (the longest style of the procs on), after a loading screen or a
+-- change to the slots for the cooldown pulse's quiet (P.QUIET) too. The
+-- cost: a proc landing then shows only the end of its pulse, or nothing.
+-- Only the container's see-through changes, never its icons. If the game
+-- refuses it, the replays show as before, and /ccm debug says so.
+local HUSH_PAD = .25 -- a moment more: the game replays it on its next frame
+
+-- How long the longest pulse of the procs on lasts (Quick's with none on).
+local function Longest()
+    local longest = 0
+    for i, slot in ipairs(procs.slots) do
+        if procs.applied[i] ~= nil and procs.applied[i] ~= "" then longest = math.max(longest, P:Seconds(slot.style)) end
+    end
+    return longest > 0 and longest or P:Seconds("quick")
+end
+
+-- The container see-through (0) or not (1); a refusal kept for /ccm debug.
+local function Fade(alpha)
+    local ok, err = pcall(procs.container.SetAlpha, procs.container, alpha)
+    if not ok then procs.hushError = procs.hushError or tostring(err) end
+end
+
+-- The hush over once its time is up, or looked at again then.
+local function Unhush()
+    local left = procs.hushUntil - GetTime()
+    if left > 0 then
+        C_Timer.After(left, Unhush)
+        return
+    end
+    procs.timing = nil
+    Fade(1)
+end
+
+-- Hushed from now, for as long as a pulse lasts and extra seconds more.
+local function Hush(extra)
+    if not procs.container then return end
+    procs.hushUntil = math.max(procs.hushUntil, GetTime() + extra + Longest() + HUSH_PAD)
+    procs.hushes = procs.hushes + 1
+    Fade(0)
+    if not procs.timing then
+        procs.timing = true
+        C_Timer.After(procs.hushUntil - GetTime(), Unhush)
+    end
+end
+
+-- What hushes it, heard on a frame of the addon's own in the interface:
+-- your flags and faction, a loading screen, and the interface coming back
+-- (shown with it, the frame hears OnShow). Never a hook on the game's frames.
+local function Watch()
+    local watch = CreateFrame("Frame", nil, UIParent)
+    watch:SetSize(1, 1)
+    watch:SetPoint("BOTTOMLEFT")
+    watch:RegisterUnitEvent("UNIT_FLAGS", "player")
+    watch:RegisterUnitEvent("UNIT_FACTION", "player")
+    watch:RegisterEvent("PLAYER_ENTERING_WORLD")
+    watch:SetScript("OnEvent", function(_, event, unit)
+        if event == "PLAYER_ENTERING_WORLD" then
+            Hush(P.QUIET)
+        elseif unit == "player" then
+            Hush(0)
+        end
+    end)
+    watch:SetScript("OnShow", function() Hush(0) end)
+    P.procWatch = watch
+end
+
+-- The container, made once, never in a fight: the player's, high up, taking
+-- no mouse, with no stand-in auras in Edit Mode (they'd pulse). Then what
+-- hushes it (Watch).
+local function Container()
+    if procs.container then return procs.container end
+    local container = CreateFrame("AuraContainer", nil, UIParent, "CustomAuraContainerTemplate")
+    container:SetPoint("CENTER")
+    container:SetSize(1, 1)
+    container:EnableMouse(false)
+    container:SetFrameStrata("HIGH")
+    container:SetEditModePreviewEnabled(false)
+    container:SetUnit("player")
+    procs.container = container
+    Watch()
+    return container
+end
+
+-- Slot i ("p1", "p2" ...), made the first time it's wanted: its frame, then
+-- the slot, switched off until it's told its proc.
+local function Slot(i, style)
+    if procs.slots[i] then return procs.slots[i] end
+    local slot = { name = "p" .. i, style = style }
+    slot.holder = CreateFrame("Frame", nil, UIParent)
+    slot.holder:EnableMouse(false)
+    slot.holder:SetSize(P:Size(style), P:Size(style))
+    ns.BuffBar.Add(procs.container, "AddAuraSlot", slot.name, "HELPFUL", { initializeFrame = ns.BuffBar.Guard(ProcLook(slot)) })
+    procs.container:SetAuraSlotEnabled(slot.name, false)
+    procs.slots[i] = slot
+    return slot
+end
+
+-- Each slot told its proc (the ones wanted, in order) or switched off, only
+-- when that changed; each sized and tuned for its proc's style. Anything
+-- told, the game looks at all your buffs afresh: hushed (Hush).
+local function Assign(wanted)
+    Container()
+    for i, entry in ipairs(wanted) do Slot(i, entry.style) end
+    local told = false
+    for i, slot in ipairs(procs.slots) do
+        local entry = wanted[i]
+        if entry then
+            slot.style = entry.style
+            slot.holder:SetSize(P:Size(entry.style), P:Size(entry.style))
+            -- The game may not let a handed animation change: then a
+            -- reload, which makes the slots again, brings the change.
+            if slot.art and slot.look ~= Look(entry.style) then
+                local tuned, why = pcall(Tune, slot, entry.style)
+                if not tuned then slot.retuneError = tostring(why) end
+            end
+        end
+        local signature = entry and (entry.key .. ":" .. table.concat(entry.ids, ",")) or ""
+        if procs.applied[i] ~= signature then
+            procs.applied[i], told = signature, true
+            if entry then
+                local ids = {}
+                for _, id in ipairs(entry.ids) do ids[id] = true end
+                procs.container:SetAuraSlotCandidateFilters(slot.name, { includeSpellIDs = ids })
+                procs.container:SetAuraSlotEnabled(slot.name, true)
+            else
+                procs.container:SetAuraSlotEnabled(slot.name, false)
+            end
+        end
+    end
+    if told then Hush(P.QUIET) end
+    PlaceProcs()
+end
+
+-- The procs ticked, told to the game (none while proc pulses are off, or
+-- the pulse runs in Forever Enhanced Cooldown Pulse). Never in a fight: then
+-- it waits for it to end. Nothing is made until a proc is ticked; a failure
+-- is reported once, and proc pulses stop for the session.
+function P:ApplyProcs()
+    if InCombatLockdown() then
+        procs.pending = true
+        return
+    end
+    procs.pending = nil
+    if procs.error then return end
+    local wanted = {}
+    if self:ProcsOn() then
+        for _, entry in ipairs(self:Procs()) do
+            if entry.on then wanted[#wanted + 1] = entry end
+        end
+    end
+    if not procs.container and #wanted == 0 then return end
+    local ok, err = pcall(Assign, wanted)
+    if not ok then
+        procs.error = tostring(err)
+        print("|cffffd100" .. ns.TITLE .. ":|r proc pulses couldn't start. Please report this: " .. procs.error)
+    end
+end
+
+-- One line for /ccm debug: the procs ticked, whether proc pulses run and
+-- the game can show them, the slots made and switched on, how many the
+-- game took the pulse for, a retune it refused, a change waiting for a
+-- fight to end, how many times it was hushed and whether the game refused
+-- that, whether the game keeps each ticked proc secret (C_Secrets: whether
+-- a sound could ever follow one), and any failure.
+function P:ProcReport(Add)
+    local ticked, secret = 0, {}
+    local ask = C_Secrets and C_Secrets.ShouldSpellAuraBeSecret
+    for _, entry in ipairs(self:Procs()) do
+        if entry.on then
+            ticked = ticked + 1
+            local ok, value = false, nil
+            if ask then ok, value = pcall(ask, entry.ids[1]) end
+            local said = "?"
+            if ok and Open(value) and type(value) == "boolean" then said = tostring(value) end
+            secret[#secret + 1] = entry.name .. " " .. said
+        end
+    end
+    local on, taken, refused, failed = 0, 0, nil, procs.error
+    for i, slot in ipairs(procs.slots) do
+        if procs.applied[i] and procs.applied[i] ~= "" then on = on + 1 end
+        if slot.taken then taken = taken + 1 end
+        refused = refused or slot.retuneError
+        failed = failed or slot.error
+    end
+    Add(("Proc pulse: ticked %d, on %s, game can %s | slots made %d, on %d, taken %d/%d, retune refused %s | pending %s"
+        .. " | hushed %d, hush refused %s | secret: %s | error %s"):format(ticked, tostring(self:ProcsOn()), tostring(self:CanProcs()),
+        #procs.slots, on, taken, #procs.slots, refused or "no", tostring(procs.pending == true), procs.hushes, procs.hushError or "no",
+        #secret > 0 and table.concat(secret, ", ") or "none", failed or "none"))
 end
 
 -- Moving it -------------------------------------------------------------------------------
@@ -897,7 +1280,8 @@ end
 
 -- Setup -----------------------------------------------------------------------------------
 
--- A choice changed on the page: what's watched, and where and how big the pulse is.
+-- A choice changed on the page: what's watched (the procs too, P:Rebuild),
+-- and where and how big the pulse is.
 function P:Apply()
     self:Rebuild()
     self:Place()
@@ -946,6 +1330,9 @@ local function OnEvent(_, event)
         Soon("rebuild")
     elseif event == "PLAYER_REGEN_DISABLED" then
         if P:Moving() then P:StopMove(false) end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- A change to the procs made in the fight, told to the game now.
+        if procs.pending then P:ApplyProcs() end
     elseif event == "START_AUTOREPEAT_SPELL" then
         wanding = WandWorn()
     elseif event == "STOP_AUTOREPEAT_SPELL" then
@@ -979,7 +1366,7 @@ function P:Start()
     driver = CreateFrame("Frame")
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "SPELL_UPDATE_COOLDOWN", "BAG_UPDATE_COOLDOWN",
         "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP", "PLAYER_LEVEL_CHANGED", "PLAYER_REGEN_DISABLED",
-        "START_AUTOREPEAT_SPELL", "STOP_AUTOREPEAT_SPELL" }) do
+        "PLAYER_REGEN_ENABLED", "START_AUTOREPEAT_SPELL", "STOP_AUTOREPEAT_SPELL" }) do
         driver:RegisterEvent(event)
     end
     driver:SetScript("OnEvent", OnEvent)

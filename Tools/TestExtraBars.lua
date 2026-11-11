@@ -517,8 +517,12 @@ local function Environment(keepCVars)
             return Typed("boolean", usable[id]), Typed("boolean", noMana[id])
         end,
         IsSpellInRange = function(id, unit) assert(unit == "target"); return Typed("boolean", range[id]) end,
-        GetSpellTexture = function() return 1 end,
-        GetSpellName = function(id) return ({ [16870] = "Clearcasting", [16886] = "Nature's Grace", [1243] = "Power Word: Fortitude" })[id] end,
+        -- (A mage's procs with icons of their own, for the Cooldown pulse's proc rows.)
+        GetSpellTexture = function(id) return ({ [12536] = 136170, [400589] = 236221, [400625] = 236218, [400670] = 236227 })[id] or 1 end,
+        GetSpellName = function(id)
+            return ({ [16870] = "Clearcasting", [16886] = "Nature's Grace", [1243] = "Power Word: Fortitude", [12536] = "Clearcasting",
+                [400589] = "Missile Barrage", [400625] = "Heating Up", [400670] = "Fingers of Frost" })[id]
+        end,
         GetSpellInfo = function() return nil end,
     }
     _G.UnitClass = function() return "Druid", "DRUID" end
@@ -557,7 +561,15 @@ local function Environment(keepCVars)
             return { spellId = id }
         end,
     }
-    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end }
+    -- And whether the game keeps one spell's aura secret (SpellAurasSecret[id]:
+    -- true, false or SECRET; not there is false), as /ccm debug asks of procs.
+    SpellAurasSecret = {}
+    _G.C_Secrets = { ShouldAurasBeSecret = function() return lockdown or Typed("boolean", AurasSecret) end,
+        ShouldSpellAuraBeSecret = function(id)
+            assert(type(id) == "number", "a spell ID")
+            if SpellAurasSecret[id] == nil then return false end
+            return Typed("boolean", SpellAurasSecret[id])
+        end }
     _G.C_CVar = {
         GetCVarBool = function(name) if name == "nameplateShowSelf" then return prdOn end return cvarOn end,
         GetCVar = function(name) return cvars[name] end,
@@ -645,27 +657,59 @@ local function Environment(keepCVars)
                 button:Hide()
                 return button
             end
+            -- Like the game: what makes it look at all your buffs afresh on
+            -- its next frame (UpdateAllAuras, Blizzard_ManagedAuraContainer.lua
+            -- and Blizzard_CustomAuraContainer.lua) is noted in S[f].full,
+            -- which S[f].Refresh below plays out: a slot or group added,
+            -- switched or told its filters, its unit, UpdateAllAuras, its
+            -- own OnShow and OnHide, and what it hears while it can be
+            -- seen: a full UNIT_AURA (none given, or isFullUpdate: a loading
+            -- screen) and, once a slot or group is told buff IDs, UNIT_FLAGS
+            -- and UNIT_FACTION for you (a fight starting or ending, a stun,
+            -- your PvP flag: Blizzard_AuraContainerUtil.lua
+            -- AppendCandidateFilterUnitEvents).
+            local function Full() S[f].full = true end
+            local function Named(filters)
+                if type(filters) == "table" and (filters.includeSpellIDs or filters.excludeSpellIDs) then S[f].flags = true end
+            end
+            S[f].events.UNIT_AURA, S[f].events.UNIT_FLAGS, S[f].events.UNIT_FACTION = true, true, true
+            S[f].scripts.OnEvent = function(_, event, unit, info)
+                if not S[f].listening then return end
+                if event == "UNIT_AURA" then
+                    if unit == S[f].unit and (type(info) ~= "table" or info.isFullUpdate) then Full() end
+                elseif unit == "player" and S[f].flags then
+                    Full()
+                end
+            end
             rawset(f, "AddAuraSlot", function(_, key, filter, options)
                 Guard()
                 local button = Make(options)
                 slots[key] = { filter = filter, button = button, enabled = true, supplied = S[button].supplied }
+                Named(options.candidateFilters)
+                Full()
                 return button
             end)
             rawset(f, "SetAuraSlotEnabled", function(_, key, enabled)
-                Guard(); assert(type(enabled) == "boolean"); slots[key].enabled = enabled
+                Guard(); assert(type(enabled) == "boolean"); slots[key].enabled = enabled; Full()
             end)
             rawset(f, "SetAuraSlotCandidateFilters", function(_, key, filters)
-                Guard(); slots[key].filters = filters
+                Guard(); slots[key].filters = filters; Named(filters); Full()
             end)
             -- Like the game: its unit set, it signs up for that unit's aura
             -- events, but only while it can be seen (UpdateEventRegistrations
             -- asks IsVisible); its own OnShow and OnHide below sign it up
             -- again or off. listening: whether it hears its auras change.
             rawset(f, "SetUnit", function(_, unit)
-                if S[f].unit ~= unit then S[f].listening = f:IsVisible() end
+                if S[f].unit ~= unit then
+                    S[f].listening = f:IsVisible()
+                    Full()
+                end
                 S[f].unit = unit
             end)
-            rawset(f, "UpdateAllAuras", function() S[f].refreshes = (S[f].refreshes or 0) + 1 end)
+            rawset(f, "UpdateAllAuras", function()
+                S[f].refreshes = (S[f].refreshes or 0) + 1
+                Full()
+            end)
             -- Like the game: the container's own OnShow and OnHide
             -- (AuraContainerPrivateMixin OnShow_Intrinsic and
             -- OnHide_Intrinsic, Blizzard_AuraContainer.lua) sign it up for
@@ -680,6 +724,7 @@ local function Environment(keepCVars)
                 S[f].scripts[which] = function()
                     S[f].intrinsic = (S[f].intrinsic or 0) + 1
                     S[f].listening = f:IsVisible()
+                    Full()
                     for level = 2, 60 do
                         local info = debug.getinfo(level, "Sn")
                         if not info then break end
@@ -709,6 +754,8 @@ local function Environment(keepCVars)
                 group.Batch()
                 group.button, group.supplied = group.frames[1], S[group.frames[1]].supplied
                 groups[key] = group
+                Named(options.candidateFilters)
+                Full()
             end)
             rawset(f, "GetAuraGroupFrameCount", function(_, key) return groups[key] and #groups[key].frames or 0 end)
             rawset(f, "GetAuraGroupFrame", function(_, key, i) return groups[key] and groups[key].frames[i] end)
@@ -718,9 +765,11 @@ local function Environment(keepCVars)
                 groups[key].max = count
             end)
             rawset(f, "SetAuraGroupEnabled", function(_, key, enabled)
-                Guard(); assert(type(enabled) == "boolean"); groups[key].enabled = enabled
+                Guard(); assert(type(enabled) == "boolean"); groups[key].enabled = enabled; Full()
             end)
-            rawset(f, "SetAuraGroupCandidateFilters", function(_, key, filters) Guard(); groups[key].filters = filters end)
+            rawset(f, "SetAuraGroupCandidateFilters", function(_, key, filters)
+                Guard(); groups[key].filters = filters; Named(filters); Full()
+            end)
             rawset(f, "SetAuraGroupLayout", function(_, key, layout) Guard(); groups[key].layout = layout end)
             rawset(f, "SetScale", function(_, scale) Guard(); S[f].scale = scale end)
             -- The container's own update, from its OnUpdate after UNIT_AURA or
@@ -756,7 +805,9 @@ local function Environment(keepCVars)
                     if on and not was then group:Play() elseif not on then group:Stop() end
                 end
             end
+            -- (Your buffs as it last saw them are kept for Refresh.)
             S[f].Update = function(auras)
+                S[f].auras = auras
                 S[f].updating = true
                 debug.sethook(function()
                     local info = debug.getinfo(2, "S")
@@ -793,6 +844,20 @@ local function Environment(keepCVars)
                 debug.sethook()
                 S[f].updating = false
                 assert(ok, err)
+            end
+            -- Its next frame after a full refresh was asked for (S[f].full),
+            -- while it can be seen: every icon showing goes, its animations
+            -- stopped, then each takes its aura again and comes into sight,
+            -- playing them again (ResetFrameAssignments, then
+            -- RefreshFrameAssignments). auras: your buffs now, else as it
+            -- last saw them. True when it ran.
+            S[f].Refresh = function(auras)
+                if not (S[f].full and f:IsVisible()) then return false end
+                S[f].full = false
+                local now = auras or S[f].auras or {}
+                S[f].Update({})
+                S[f].Update(now)
+                return true
             end
         end
         if template == "ActionButtonSpellAlertTemplate" then

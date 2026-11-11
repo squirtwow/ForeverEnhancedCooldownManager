@@ -10,6 +10,15 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.10",
+        sections = {
+            { "Added", {
+                "Added procs to Cooldown pulse.",
+                "Profile import: using the look also turns on what the sharer had on.",
+            } },
+        },
+    },
+    {
         version = "1.10.9",
         sections = {
             { "Added", {
