@@ -878,8 +878,8 @@ end
 -- Made the first time it opens.
 local DETAIL = { width = 540, at = 110, row = 25, icon = 40, gap = 14, tray = { 38, 64 } }
 local DETAIL_TIMES = { 9, 15, 24, 40 } -- each preview icon's cooldown, in seconds, round and round
-local DETAIL_NOTE = "On your bars, and on Blizzard's icons while Apply this look to the Cooldown Manager is on."
-    .. " Each change shows at once."
+local DETAIL_NOTE = "On your bars, and on Blizzard's icons while Apply this look to the Cooldown Manager is on"
+    .. " (Icons: your bars only). Each change shows at once."
 
 -- The preview: four icons in a row, each with a cooldown of the addon's
 -- own going round, its key on it as on your bars.
@@ -913,6 +913,7 @@ local function DetailTray(dialog)
         icon.cooldown, icon.seconds = cooldown, seconds
         icon.key = ns.Style:KeyText(top)
         icon.decor = ns.Style:Decor(icon, icon)
+        icon.shape = ns.Style:ShapeKit(icon, art, { cooldown })
         tray.icons[i] = icon
     end
     return tray
@@ -921,9 +922,10 @@ end
 -- The preview in the details picked, drawn by the calls your bars' icons use.
 local function PaintDetails(tray)
     local S = ns.Style
-    local border, shadow = S:DecorFor("icon")
+    local border, shadow = S:DecorFor("icon", true)
     for i, icon in ipairs(tray.icons) do
         local cooldown = icon.cooldown
+        S:Shape(icon.shape, DETAIL.icon)
         S:CooldownLook(cooldown)
         cooldown:SetCountdownFont(S:Countdown(DETAIL.icon))
         local lift = S:KeyLook(icon.key, icon, DETAIL.icon, S:CountdownSize(DETAIL.icon))
@@ -1022,6 +1024,23 @@ local function CountdownRows(window, dialog, Changed)
     return size, colourLabel, colour, spot, format
 end
 
+-- The icons' row: square as your bars have always been, or drawn like
+-- Blizzard's Cooldown Manager (Style.lua's Icons).
+local function IconsRow(window, dialog, Changed)
+    local items = {}
+    for _, key in ipairs(ns.ICON_STYLE_KEYS) do items[#items + 1] = { key = key, label = ns.ICON_STYLE_NAMES[key] } end
+    local style = T:Segmented(dialog, items, 160, function(key)
+        ns.Set("iconStyle", key)
+        Changed()
+    end)
+    for _, button in ipairs(style.buttons) do
+        window:Hint(button, button.key == "square" and "Square icons with no frame, as your bars have always looked."
+            or ("Your bars' icons drawn like Blizzard's Cooldown Manager: rounded, in its frame, with its swipe and range"
+                .. " shadow. Its own rows sit 4 closer. (experimental)"))
+    end
+    return style
+end
+
 -- The edge line's row: the tick, and its colour while it's ticked.
 local function EdgeRow(window, dialog, Changed)
     local tick = T:Check(dialog, "Edge line", function(self)
@@ -1063,7 +1082,7 @@ local function IconPanel(window)
     title:SetPoint("TOPLEFT", 16, -16)
     local quiet = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     quiet:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    quiet:SetText("the swipe, the countdown and the edge line")
+    quiet:SetText("the icons, the swipe, the countdown and the edge line")
     local tray = DetailTray(dialog)
     shade.tray = tray
     local function Changed()
@@ -1077,33 +1096,37 @@ local function IconPanel(window)
     local function At(region, x, row, down)
         region:SetPoint("TOPLEFT", x, y - row * DETAIL.row - (down or 0))
     end
-    At(DetailLabel(dialog, "Swipe"), 16, 0, 4)
+    At(DetailLabel(dialog, "Icons"), 16, 0, 4)
+    local iconStyle = IconsRow(window, dialog, Changed)
+    At(iconStyle, DETAIL.at, 0)
+    At(DetailLabel(dialog, "Swipe"), 16, 1, 4)
     local swipeColour, seeThrough = SwipeRow(window, dialog, Changed)
-    At(swipeColour, DETAIL.at, 0)
-    At(seeThrough, DETAIL.width - 16 - 292, 0)
-    At(DetailLabel(dialog, "Countdown"), 16, 1, 4)
+    At(swipeColour, DETAIL.at, 1)
+    At(seeThrough, DETAIL.width - 16 - 292, 1)
+    At(DetailLabel(dialog, "Countdown"), 16, 2, 4)
     local size, colourLabel, countdownColour, spot, format = CountdownRows(window, dialog, Changed)
-    At(size, DETAIL.at, 1)
-    At(colourLabel, DETAIL.at + 248, 1, 4)
-    At(countdownColour, DETAIL.at + 298, 1)
+    At(size, DETAIL.at, 2)
+    At(colourLabel, DETAIL.at + 248, 2, 4)
+    At(countdownColour, DETAIL.at + 298, 2)
     -- The countdown's own two rows under it, their labels set in and quieter.
     for row, label in ipairs({ "Spot", "Text" }) do
         local text = DetailLabel(dialog, label)
         text:SetTextColor(T.MUTED[1], T.MUTED[2], T.MUTED[3])
-        At(text, 28, row + 1, 4)
+        At(text, 28, row + 2, 4)
     end
-    At(spot, DETAIL.at, 2)
-    At(format, DETAIL.at, 3)
+    At(spot, DETAIL.at, 3)
+    At(format, DETAIL.at, 4)
     local edge, edgeColour = EdgeRow(window, dialog, Changed)
-    At(edge, 16, 4, 2)
-    At(edgeColour, DETAIL.at, 4)
+    At(edge, 16, 5, 2)
+    At(edgeColour, DETAIL.at, 5)
     shade.swipeColour, shade.seeThrough, shade.size, shade.countdownColour = swipeColour, seeThrough, size, countdownColour
     shade.spot, shade.format, shade.edge, shade.edgeColour = spot, format, edge, edgeColour
+    shade.iconStyle = iconStyle
 
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     note:SetWidth(DETAIL.width - 32)
     note:SetText(DETAIL_NOTE)
-    At(note, 16, 5, 4)
+    At(note, 16, 6, 4)
     local done = T:Button(dialog, "Done", 90, 22)
     done:SetPoint("BOTTOMRIGHT", -16, 14)
     done:SetScript("OnClick", function() shade:Hide() end)
@@ -1116,15 +1139,15 @@ local function IconPanel(window)
         end)
         Changed()
     end)
-    window:Hint(defaults, "Every detail here back as the icons always looked: a 70% black swipe, white numbers in the middle"
-        .. " and no edge line. A custom colour you picked is kept for next time.")
+    window:Hint(defaults, "Every detail here back as the icons always looked: square, a 70% black swipe, white numbers in the"
+        .. " middle and no edge line. A custom colour you picked is kept for next time.")
     shade.done, shade.defaults = done, defaults
     window:HookScript("OnHide", function() shade:Hide() end)
     -- Tall enough for the note's lines: sized as it's made, and again each
     -- time it shows, as the other panels are (a hidden note may not have
     -- measured its lines yet).
     local function Height()
-        dialog:SetHeight(math.ceil(-y + 5 * DETAIL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
+        dialog:SetHeight(math.ceil(-y + 6 * DETAIL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
     end
     Height()
 
@@ -1136,6 +1159,7 @@ local function IconPanel(window)
             local key = choice.spec.chosen()
             choice.name:SetText(key == ns.CUSTOM and ns.CUSTOM_NAME or choice.names[key] or "")
         end
+        iconStyle:SetSelected(ns.Get("iconStyle"))
         seeThrough:Set(ns.Get("swipeSeeThrough"))
         size:Set(ns.Get("countdownSize"))
         spot:SetSelected(ns.Get("countdownSpot"))
@@ -1199,6 +1223,7 @@ local function PresetTray(dialog)
         ns.Style:Zoom(texture)
         icon.decor = ns.Style:Decor(icon, icon)
         icon.key = ns.Style:KeyText(icon)
+        icon.shape = ns.Style:ShapeKit(icon, texture)
         tray.icons[i] = icon
     end
     if ns.Skin and ns.Skin.Sample then
@@ -1240,8 +1265,9 @@ end
 local function PaintTray(tray)
     local S = ns.Style
     S:ApplyFont()
-    local iconBorder, iconShadow = S:DecorFor("icon")
+    local iconBorder, iconShadow = S:DecorFor("icon", true)
     for i, icon in ipairs(tray.icons) do
+        S:Shape(icon.shape, ICON)
         S:ShowDecor(icon.decor, iconBorder, iconShadow)
         S:KeyLook(icon.key, icon, ICON, S:CountdownSize(ICON))
         S:SetKey(icon.key, ns.Get("keybinds") and SAMPLE_KEYS[(i - 1) % #SAMPLE_KEYS + 1] or nil)
@@ -1677,7 +1703,7 @@ local function BuildLook(window, page, width)
         window.iconPanel:Open()
     end)
     window:Hint(details, "The cooldown swipe's colour and see-through, the countdown's size, colour and spot, and an edge line,"
-        .. " on your icons and Blizzard's, with a preview.")
+        .. " on your icons and Blizzard's, and your icons' shape, with a preview.")
     window.iconDetails = details
 
     -- The choices: the design and colour, then what the look applies to.
@@ -1746,9 +1772,11 @@ local function BuildLook(window, page, width)
         return pills
     end
     local border = Decor("Border", "iconBorder", -60,
-        "A thin black border round each icon, or each whole bar whose icons stay put. Yours and Blizzard's.")
+        "A thin black border round each icon, or each whole bar whose icons stay put. Yours and Blizzard's,"
+            .. " but not your icons drawn like Blizzard's (Icon details).")
     local shadow = Decor("Shadow", "iconShadow", -88,
-        "A soft shadow round each icon, or each whole bar whose icons stay put. Your cast bar gets one too.")
+        "A soft shadow round each icon, or each whole bar whose icons stay put. Your cast bar gets one too."
+            .. " Not on your icons drawn like Blizzard's (Icon details).")
     window.iconBorder, window.iconShadow = border, shadow
 
     -- What the look applies to; the footer explains each.
@@ -1794,15 +1822,22 @@ local function BuildLook(window, page, width)
     local KEYS_X = 330
     local function KeyLook()
         if ns.Bars then ns.Bars:ApplyKeybinds() end
-        if ns.Skin then ns.Skin:ApplyKeybinds() end
+        if ns.Skin then
+            ns.Skin:StartKeys()
+            ns.Skin:ApplyKeybinds()
+        end
     end
     local function Rekey()
         if ns.Keybinds then ns.Keybinds:Update() end
         KeyLook()
     end
     local keybinds = Choice("Keybinds on icons", "keybinds", -2,
-        "The key that casts each spell or uses each item, from your action bars, on your Cooldowns and Utility bars. Blizzard's icons get them while Apply this look to the Cooldown Manager is on.",
+        "The key that casts each spell or uses each item, from your action bars, on your Cooldowns and Utility bars. Blizzard's icons get them while Apply this look to the Cooldown Manager is on, or with Blizzard look ticked.",
         Rekey, KEYS_X)
+    -- Blizzard's icons keyed with the look off, on the tick's own row.
+    local keysPlain = Choice("Blizzard look", "keybindsPlain", -2,
+        "Keys on Blizzard's Cooldown Manager icons too, with Apply this look to the Cooldown Manager off: Blizzard's own look stays. (experimental)",
+        KeyLook, KEYS_X + 150)
     local placeItems = {}
     for _, key in ipairs(ns.KEYBIND_POSITIONS) do
         placeItems[#placeItems + 1] = { key = key, label = ns.KEYBIND_POSITION_NAMES[key] }
@@ -1832,6 +1867,7 @@ local function BuildLook(window, page, width)
             or KEYS_OFF
     end)
     window.keybinds, window.keyPlace, window.keySize = keybinds, keyPlace, keySize
+    window.keysPlain = keysPlain
 
     -- The font for the numbers and text, and the texture for the bars, under
     -- the keybinds, level with Shadow and the first tick: each font's name in
@@ -2102,6 +2138,8 @@ local function BuildLook(window, page, width)
         keyPlace:SetShown(here)
         keySize:SetShown(here)
         keybinds:SetChecked(keysOn)
+        keysPlain:SetShown(here)
+        keysPlain:SetChecked(ns.Get("keybindsPlain"))
         keyPlace:SetSelected(ns.Get("keybindPosition"))
         keyPlace:SetUsable(keysOn)
         keySize:Set(ns.Get("keybindSize"))

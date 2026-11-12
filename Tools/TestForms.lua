@@ -199,6 +199,17 @@ function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
+-- Mask textures, and the masks on each texture, in the order added.
+function Proto:CreateMaskTexture() return New("MaskTexture", self) end
+function Proto:AddMaskTexture(mask)
+    local s = S[self]
+    s.masks = s.masks or {}
+    table.insert(s.masks, mask)
+end
+function Proto:RemoveMaskTexture(mask)
+    local masks = S[self].masks or {}
+    for i = #masks, 1, -1 do if masks[i] == mask then table.remove(masks, i) end end
+end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
     local text = New("FontString", self)
@@ -1114,6 +1125,41 @@ do
     Shift(ns, 5)
     B:SetOption("cd", "swapForm", true)
     Equal(Showing(bar), SHOWN.bear, "and ticked again: bear form's list once more")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Icons drawn like Blizzard's, swapping with your form -------------------------------------------
+-- (A player's ask: Blizzard's Cooldown Manager look, but swapping with the
+-- stance.) With Icon details' Icons on Blizzard, every icon a form's list
+-- shows is drawn like Blizzard's, in a fight too, its count 2 in from the
+-- corner; each form's icons as the bar swaps, and back out of form.
+
+do
+    local ns, B, bar = Character("DRUID", DRUID, Ticked("DRUID", { "cd" }, { useBars = true, iconStyle = "blizzard" }))
+    local function Drawn()
+        local out = {}
+        for i = 1, bar.count do
+            local icon = bar.icons[i]
+            local count = S[icon.count].points[1]
+            if S[icon].shown then
+                out[#out + 1] = #(S[icon.texture].masks or {}) .. tostring(S[icon.shape.frame].shown and "f" or "-")
+                    .. (Last(icon.cooldown, "SetSwipeTexture") == ns.Style.BLIZZARD_SWIPE and "s" or "-") .. count[4] .. "," .. count[5]
+            end
+        end
+        return table.concat(out, " ")
+    end
+    local ALL = "1fs-2,2 1fs-2,2 1fs-2,2 1fs-2,2 1fs-2,2 1fs-2,2 1fs-2,2"
+    Equal(Showing(bar) .. " | " .. Drawn(), SHOWN.all .. " | " .. ALL, "no form: every icon drawn like Blizzard's, its count 2 in")
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    Shift(ns, 5)
+    local bear = Showing(bar) .. " | " .. Drawn()
+    Shift(ns, nil)
+    local out = Showing(bar) .. " | " .. Drawn()
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(bear .. " || " .. out, SHOWN.bear .. " | 1fs-2,2 1fs-2,2 1fs-2,2 1fs-2,2 || " .. SHOWN.all .. " | " .. ALL,
+        "in a fight: bear form's icons drawn like Blizzard's as the bar swaps, and every one again out of form")
     Equal(#printed, 0, "no errors")
 end
 

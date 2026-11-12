@@ -142,6 +142,7 @@ local function PanelIcon(tray)
         if tray:IsVisible() then self:SetCooldown(GetTime(), PANEL_TIME) end
     end)
     icon.cooldown = cooldown
+    icon.shape = ns.Style:ShapeKit(icon, icon.art, { cooldown }) -- square or like Blizzard's, as your bars'
     return icon
 end
 
@@ -154,6 +155,7 @@ local function PaintPanelIcon(icon, bar, name)
     if ns.Bars:OwnSizeUsable(bar) then shown = ns.IconSizeFor(bar, name, shown) end
     local size = math.max(24, math.min(PANEL.tray[2] - 12, shown))
     icon:SetSize(size, size)
+    S:Shape(icon.shape, size)
     icon.art:SetTexture(ns.Spells:Icon(name))
     icon.art:SetDesaturated(ns.Spells:Find(name) == nil)
     local cooldown = icon.cooldown

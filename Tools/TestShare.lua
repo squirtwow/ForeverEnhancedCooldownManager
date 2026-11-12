@@ -195,6 +195,17 @@ function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
+-- Mask textures, and the masks on each texture, in the order added.
+function Proto:CreateMaskTexture() return New("MaskTexture", self) end
+function Proto:AddMaskTexture(mask)
+    local s = S[self]
+    s.masks = s.masks or {}
+    table.insert(s.masks, mask)
+end
+function Proto:RemoveMaskTexture(mask)
+    local masks = S[self].masks or {}
+    for i = #masks, 1, -1 do if masks[i] == mask then table.remove(masks, i) end end
+end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
     local text = New("FontString", self)
@@ -1403,7 +1414,8 @@ end
 -- never switches one back on), and the window's own. (The parts it
 -- switches on are ns.SHARE_PARTS.)
 H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
-    "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew" }
+    "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew",
+    "keybindsPlain" }
 -- Every part a string can switch on, in order, with its letter.
 H.PARTS = "useBars=u prdCombo=c prdEnergy=e prdText=t keybinds=k castBar=b swingTimer=s castBatch=h castTicks=m castLatency=l"
     .. " pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q"
@@ -1478,7 +1490,7 @@ do
     character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, barStyle = "split", barColour = "blue",
         barTexture = "raid", font = "arial", iconBorder = "icon", iconShadow = "bar", barDarkness = 40, thickEdges = true,
-        readyGlow = "edge", keybindPosition = "TOP",
+        readyGlow = "edge", keybindPosition = "TOP", iconStyle = "blizzard",
         keybindSize = 120, barScale = 110, prdHideRepeat = false, prdHealth = "green", castHeight = 24, castIcon = false,
         swingColour = "purple", pullColour = "class", warningFont = "morpheus", warningShadow = false, raidSize = 120,
         pulseSize = 300, pulseSound = "bell", pulseMaster = true, pulseX = -120, pulseY = 85.5,
@@ -2891,7 +2903,7 @@ do
 end
 
 -- Icon details, shared ---------------------------------------------------------------------------
--- The swipe's colour and see-through, the countdown's size, colour, spot and
+-- The icons' style (square or like Blizzard's), the swipe's colour and see-through, the countdown's size, colour, spot and
 -- text (Timer text), and the edge line go with the look, each where it differs from the
 -- default (Custom with its own colour beside it); another account takes
 -- them, on its icons too, and shares the very same string. Odd values are
@@ -2901,7 +2913,7 @@ do
     character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, swipeColour = "custom", swipeColourCustom = "112233",
         swipeSeeThrough = 55, countdownSize = 130, countdownColour = "gold", countdownSpot = "TOPRIGHT", countdownFormat = "minutes",
-        swipeEdge = true, edgeColour = "purple", bars = { cd = { spells = { "Moonfire" } } } })
+        swipeEdge = true, edgeColour = "purple", iconStyle = "blizzard", bars = { cd = { spells = { "Moonfire" } } } })
     local P = ns.ProfileShare
     local setup = H.SetupNow(ns)
     local text = P.Export()
@@ -2909,8 +2921,29 @@ do
     local look, kept = shared.setup.look, {}
     for _, key in ipairs(ns.ICON_DETAILS) do kept[#kept + 1] = tostring(look[key]) end
     Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. table.concat(kept, " ") .. " " .. tostring(look.swipeColourCustom) .. " "
-        .. tostring(look.countdownColourCustom), "|0 | custom 55 130 gold TOPRIGHT minutes true purple 112233 nil",
+        .. tostring(look.countdownColourCustom), "|0 | custom 55 130 gold TOPRIGHT minutes true purple blizzard 112233 nil",
         "shared: every detail unlike the default, Custom with its own colour, nothing left out")
+    -- Blizzard's icons go short (I = "b"), so a full profile drawn like
+    -- Blizzard's still fits one Discord message (the full profile's check);
+    -- spelled out in full they read the same.
+    local function Raw(shareText)
+        local letters, bits, out = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", {}, {}
+        for c in (shareText:sub(7):gsub("=", "")):gmatch(".") do
+            local n = letters:find(c, 1, true) - 1
+            for b = 5, 0, -1 do bits[#bits + 1] = math.floor(n / 2 ^ b) % 2 end
+        end
+        for i = 1, #bits - 7, 8 do
+            local n = 0
+            for b = 0, 7 do n = n * 2 + bits[i + b] end
+            out[#out + 1] = string.char(n)
+        end
+        return table.concat(out)
+    end
+    local raw = Raw(text)
+    local long = P.Read(H.String({ l = { cd = {}, util = {}, buff = {}, debuff = {} }, g = { s = { iconStyle = "blizzard" }, b = {}, l = {} } }))
+    Equal(tostring(raw:find("S1:IS1:b", 1, true) ~= nil) .. " " .. tostring(raw:find("iconStyle", 1, true)) .. " " .. long.skipped .. " "
+        .. tostring(long.setup.look.iconStyle), "true nil 0 blizzard",
+        "Blizzard's icons written short, with no iconStyle in the string; spelled out in full, read the same")
     -- Another account takes all of it, on its icons too, and shares the same string.
     character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
     local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true, bars = { cd = { spells = { "Wrath" } } } })
@@ -2923,14 +2956,18 @@ do
         "true true | 0.067,0.133,0.200,0.45 true 0.60,0.43,0.91 FECMCountdown23",
         "imported: the same look and string, and its icons in the details at once")
     Equal(ns2.Get("countdownFormat"), "minutes", "and minutes then seconds with it")
+    local art = ns2.Bars:Get("cd").icons[1].texture
+    Equal(ns2.Get("iconStyle") .. " " .. #(S[art].masks or {}) .. " " .. tostring(Last(cooldown, "SetSwipeTexture")),
+        "blizzard 1 Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe", "and its icons drawn like Blizzard's at once")
     -- Odd values left out and counted; a string from before them reads as it did.
     local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {} } end
     local odd = P.Read(H.String({ l = Lists(), g = { s = { swipeColour = "custom", swipeSeeThrough = 120, countdownSize = 40,
         countdownColour = "pink", countdownSpot = "MIDDLE", swipeEdge = "yes", edgeColour = "gold", countdownColourCustom = "#00ff00",
-        countdownFormat = "hours" }, b = {}, l = {} } }))
-    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look), "|9 | {}", "odd details: all left out, and counted")
+        countdownFormat = "hours", iconStyle = "round", I = "round" }, b = {}, l = {} } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " | " .. H.Text(odd.setup.look), "|11 | {}", "odd details: all left out, and counted")
     local before = P.Read(H.String({ a = "1.8.2", l = Lists(), g = { s = { iconBorder = "icon" }, b = {}, l = {} } }))
-    Equal(H.Sane(ns, before) .. "|" .. before.skipped .. " " .. tostring(before.setup.look.swipeColour), "|0 nil", "a string from before reads as it did")
+    Equal(H.Sane(ns, before) .. "|" .. before.skipped .. " " .. tostring(before.setup.look.swipeColour) .. " "
+        .. tostring(before.setup.look.iconStyle), "|0 nil nil", "a string from before reads as it did, its icons square")
 end
 
 -- Percent (no sign), shared ------------------------------------------------------------------------

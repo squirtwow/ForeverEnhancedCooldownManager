@@ -295,8 +295,12 @@ function S:Decor(owner, region, inset, now)
 end
 
 -- Whether the border and the shadow go round each icon ("icon") or round
--- whole bars ("bar"), as chosen.
-function S:DecorFor(scope)
+-- whole bars ("bar"), as chosen. own: for your bars' icons, which skip
+-- both while drawn like Blizzard's (Icons, below): square rings fight its
+-- rounded frame. Blizzard's restyled icons, the cast bar and the Look
+-- page's own preview ask without it, so they keep them.
+function S:DecorFor(scope, own)
+    if own and self:Rounded() then return false, false end
     return ns.Get("iconBorder") == scope, ns.Get("iconShadow") == scope
 end
 
@@ -326,6 +330,194 @@ function S:ShowDecor(decor, border, shadow)
     if decor.shadowShown ~= shadow then
         decor.shadowShown = shadow
         for _, ring in ipairs(decor.shadow) do Show(ring, shadow) end
+    end
+end
+
+-- Icons ----------------------------------------------------------------------------
+-- Icon details' Icons (a player's idea: Blizzard's look with Swap with my
+-- form): your bars' icons square as always, or drawn like Blizzard's
+-- Cooldown Manager icons in the game's own art, on the addon's own frames
+-- (nothing of Blizzard's is touched): the whole icon art rounded by its
+-- mask, in its frame, with its swipe, and its shadow while out of range.
+-- Each icon keeps a kit of its pieces; the mask, frame and shadow are only
+-- made the first time Blizzard is picked.
+S.BLIZZARD_MASK = "UI-HUD-CoolDownManager-Mask"
+S.BLIZZARD_FRAME = "UI-HUD-CoolDownManager-IconOverlay"
+S.BLIZZARD_RANGE = "UI-CooldownManager-OORshadow"
+S.BLIZZARD_SWIPE = "Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
+S.AURA_SWIPE = { 1, .95, .57, .7 } -- Blizzard's gold swipe over a buff or debuff of the spell's that's up
+-- How far the art reaches past the icon, as a share of its size. 0: an icon
+-- of size N is Blizzard's own size-N icon (its art the icon, its frame as
+-- far out as Blizzard's). Blizzard's mask leaves a little of the edge empty,
+-- and Blizzard's own rows sit 4 closer than their spacing says to close it
+-- (its GetAdditionalPaddingOffset); your Spacing stays as set, and the
+-- Blizzard choice's hover says so.
+local ART_OUT = 0
+local NAME_GAP = 3 -- names under an icon: this far under it, or under Blizzard's frame
+
+-- Whether your icons are drawn like Blizzard's.
+function S:Rounded()
+    return ns.Get("iconStyle") == "blizzard"
+end
+
+-- How far Blizzard's frame reaches past an icon's art of size (across, then
+-- up and down): its own 9,8 at 50, 8,7 at 40 and 6,5 at 30, and in step
+-- between and past them.
+function S:FrameOut(size)
+    return math.floor(2 + .15 * size), math.floor(1 + .15 * size)
+end
+
+-- How far an icon of size drawn like Blizzard's reaches: its art past the
+-- icon (out), then Blizzard's frame past the art (across, up and down).
+local function Reach(size)
+    local out = math.floor(size * ART_OUT + .5)
+    local x, y = S:FrameOut(size + 2 * out)
+    return out, x, y
+end
+
+-- How much lower names go under an icon of size drawn like Blizzard's (0
+-- while square): under Blizzard's frame. Bars.lua and Layout.lua leave that
+-- much more room under a row of icons with names.
+function S:NameDrop(size)
+    if not self:Rounded() then return 0 end
+    local out, _, y = Reach(size)
+    return out + y
+end
+
+-- The pieces Blizzard's look adds, hidden, on the kit's owner (the art's own
+-- frame, where its mask must be): the mask, the frame round the art, and the
+-- shadow out of range over both. Under any text on the owner (a key).
+-- Should the game refuse any of them (an aura container's icon, say), that
+-- icon stays square, its bar working as before, and /ccm debug says why.
+local function Pieces(kit)
+    local ok, err = pcall(function()
+        local owner, art = kit.owner, kit.art
+        local mask = owner:CreateMaskTexture()
+        mask:SetAtlas(S.BLIZZARD_MASK)
+        mask:SetAllPoints(art)
+        local frame = owner:CreateTexture(nil, "OVERLAY", nil, -2)
+        frame:SetAtlas(S.BLIZZARD_FRAME)
+        frame:Hide()
+        local range = owner:CreateTexture(nil, "OVERLAY", nil, -1)
+        range:SetAtlas(S.BLIZZARD_RANGE)
+        range:SetAllPoints(art)
+        range:SetVertexColor(1, 1, 1, .5)
+        range:Hide()
+        kit.mask, kit.frame, kit.range = mask, frame, range
+    end)
+    if ok then return end
+    kit.refused = true
+    if not S.shapeError then S.shapeError = tostring(err) end
+end
+
+-- The mask on the art or off it. Refused (as above), the art stays whole
+-- under the frame.
+local function Mask(kit, on)
+    local art = kit.art
+    local ok, err = pcall(on and art.AddMaskTexture or art.RemoveMaskTexture, art, kit.mask)
+    if ok then
+        kit.masked = on
+    elseif not S.shapeError then
+        S.shapeError = tostring(err)
+    end
+end
+
+-- For /ccm debug: what the game refused of Blizzard's look, if anything.
+function S:ShapeReport()
+    return S.shapeError and (" (refused: " .. S.shapeError .. ")") or ""
+end
+
+-- One icon's kit. owner: the frame its art (a texture) is on and fills;
+-- cooldowns: the sweeps over the art. Made square, as every icon is; now
+-- makes the pieces at once (an aura container's icon, which only takes art
+-- as it's made). label: the name under the owner (placed NAME_GAP under it),
+-- moved under Blizzard's frame while drawn like Blizzard's.
+function S:ShapeKit(owner, art, cooldowns, now, label)
+    local kit = { owner = owner, art = art, cooldowns = cooldowns or {}, rounded = false, swipe = S.FLAT, label = label }
+    if now then Pieces(kit) end
+    return kit
+end
+
+-- A sweep made later (the global cooldown's, a weapon enchant's time), in
+-- the kit's swipe now.
+function S:Sweep(kit, cooldown)
+    table.insert(kit.cooldowns, cooldown)
+    cooldown:SetSwipeTexture(kit.swipe)
+end
+
+-- Out of range (far) or not: Blizzard's shadow over the icon while it's
+-- drawn like Blizzard's. Only a change is set.
+function S:Far(kit, far)
+    kit.far = far
+    local shown = far == true and kit.rounded == true
+    if kit.range and kit.farShown ~= shown then
+        kit.farShown = shown
+        kit.range:SetShown(shown)
+    end
+end
+
+-- A spot gone from sight with its art (the Debuffs bar's greyed spots with
+-- no enemy): Blizzard's frame round it goes too. Only a change is set.
+function S:Away(kit, away)
+    away = away == true
+    if kit.away == away then return end
+    kit.away = away
+    if kit.frame then kit.frame:SetShown(kit.rounded and not away) end
+end
+
+-- The art's coordinates as it's drawn now: whole while rounded, zoomed past
+-- its bevel while square (again after new art: the Layout page's tiles).
+function S:Crop(kit)
+    if kit.rounded then kit.art:SetTexCoord(0, 1, 0, 1) else self:Zoom(kit.art) end
+end
+
+-- Draws an icon as picked at size (its frame's; nil keeps the last), or
+-- square whatever's picked (square: a Layout page tile too small or empty).
+-- Only a change is set, and nothing at all while it stays square.
+function S:Shape(kit, size, square)
+    if not kit then return end
+    kit.size = size or kit.size
+    local rounded = not square and kit.size ~= nil and self:Rounded()
+    if rounded and not (kit.mask or kit.refused) then Pieces(kit) end
+    if kit.refused then rounded = false end
+    if kit.rounded == rounded and (not rounded or kit.drawn == kit.size) then return end
+    kit.rounded = rounded
+    local art, owner = kit.art, kit.owner
+    art:ClearAllPoints()
+    local drop = 0
+    if rounded then
+        local out, x, y = Reach(kit.size)
+        kit.drawn, drop = kit.size, out + y
+        art:SetPoint("TOPLEFT", owner, "TOPLEFT", -out, out)
+        art:SetPoint("BOTTOMRIGHT", owner, "BOTTOMRIGHT", out, -out)
+        if not kit.masked then Mask(kit, true) end
+        local frame = kit.frame
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", art, "TOPLEFT", -x, y)
+        frame:SetPoint("BOTTOMRIGHT", art, "BOTTOMRIGHT", x, -y)
+        frame:SetShown(kit.away ~= true)
+    else
+        kit.drawn = nil
+        art:SetAllPoints(owner)
+        if kit.masked then Mask(kit, false) end
+        if kit.frame then kit.frame:Hide() end
+    end
+    if kit.label then
+        kit.label:ClearAllPoints()
+        kit.label:SetPoint("TOP", owner, "BOTTOM", 0, -(NAME_GAP + drop))
+    end
+    self:Crop(kit)
+    self:Far(kit, kit.far)
+    -- New swipe art, and its colour (Icon details) again: the game can set
+    -- a swipe white with new art.
+    local swipe = rounded and S.BLIZZARD_SWIPE or S.FLAT
+    if kit.swipe ~= swipe then
+        kit.swipe = swipe
+        local colour, alpha = self:Swipe()
+        for _, cooldown in ipairs(kit.cooldowns) do
+            cooldown:SetSwipeTexture(swipe)
+            cooldown:SetSwipeColor(colour[1], colour[2], colour[3], alpha)
+        end
     end
 end
 

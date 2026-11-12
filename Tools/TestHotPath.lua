@@ -198,6 +198,17 @@ function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
+-- Mask textures, and the masks on each texture, in the order added.
+function Proto:CreateMaskTexture() return New("MaskTexture", self) end
+function Proto:AddMaskTexture(mask)
+    local s = S[self]
+    s.masks = s.masks or {}
+    table.insert(s.masks, mask)
+end
+function Proto:RemoveMaskTexture(mask)
+    local masks = S[self].masks or {}
+    for i = #masks, 1, -1 do if masks[i] == mask then table.remove(masks, i) end end
+end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
     local text = New("FontString", self)
@@ -1526,6 +1537,55 @@ do
     Style:ShowDecor(decor, true, false)
     Equal(At(top) .. " " .. tostring(S[top].shown) .. " " .. tostring(S[glow].shown), "BOTTOMLEFT owner -1 0 true false",
         "shown again: placed where it is now")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Icons drawn like Blizzard's: nothing more in a fight, nothing again on a relayout ----------------
+-- (Icon details' Icons.) Each icon is drawn as it's laid out at a new size
+-- or in a new style, never again while neither changes: a relayout sets
+-- nothing on its art, mask, frame or sweeps. In a fight the icons cost what
+-- square ones do; Blizzard's range shadow is set only as an icon goes in or
+-- out of range, with its tint.
+
+do
+    local ns = Start({ notesSeen = "dev", useBars = true, iconStyle = "blizzard" })
+    local B = ns.Bars
+    for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+    local moon = B:Get("cd").icons[1]
+    target = true
+    Fire("PLAYER_TARGET_CHANGED")
+    NextFrame(ns)
+    Equal(moon.name .. " " .. #(S[moon.texture].masks or {}) .. " " .. tostring(S[moon.shape.frame].shown), "Moonfire 1 true",
+        "your icons drawn like Blizzard's")
+    io.write("Icons drawn like Blizzard's (3 spells, an enemy targeted):\n")
+    local game = Measure(function() Frames(ns, 60, 1 / 60) end)
+    Note("a second of frames, nothing changing", game)
+    Equal(game.all, 0, "a second with nothing changing: nothing asked or set")
+    game = Measure(function()
+        Fire("SPELL_UPDATE_COOLDOWN")
+        NextFrame(ns)
+    end)
+    Note("SPELL_UPDATE_COOLDOWN (every cast)", game)
+    Equal(Counts(game, "GetSpellCooldownDuration", "SetCooldownFromDurationObject", "SetDesaturated", "SetShown", "SetSwipeTexture",
+        "SetPoint", "SetTexCoord"), "3 3 3 0 0 0 0", "a cooldown started: the same as square icons, nothing of Blizzard's look set again")
+    range[8924] = false
+    game = Measure(function()
+        Fire("SPELL_RANGE_CHECK_UPDATE", 8924, false, true)
+        NextFrame(ns)
+    end)
+    Note("SPELL_RANGE_CHECK_UPDATE (Moonfire out of range)", game)
+    local far = Tint(moon) .. " " .. tostring(S[moon.shape.range].shown) .. " | " .. Counts(game, "SetVertexColor", "SetShown")
+    range[8924] = nil
+    game = Measure(function()
+        Fire("SPELL_RANGE_CHECK_UPDATE", 8924, true, true)
+        NextFrame(ns)
+    end)
+    Equal(far .. " || " .. Tint(moon) .. " " .. tostring(S[moon.shape.range].shown) .. " | " .. Counts(game, "SetVertexColor", "SetShown"),
+        "0.64 0.15 0.15 true | 1 1 || 1 1 1 false | 1 1", "out of range: red and Blizzard's shadow, one of each set; back in range the same")
+    game = Measure(function() B:Rebuild() end)
+    Note("laid out again, nothing changed", game)
+    Equal(Counts(game, "SetTexCoord", "AddMaskTexture", "RemoveMaskTexture", "SetAtlas", "SetSwipeTexture", "CreateMaskTexture"),
+        "0 0 0 0 0 0", "laid out again with nothing changed: nothing of Blizzard's look set again or made")
     Equal(#printed, 0, "no errors")
 end
 

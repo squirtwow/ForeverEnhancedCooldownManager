@@ -680,6 +680,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         -- and text on the tile itself, so the tile keeps the mouse.
         tile.decor = ns.Style:Decor(tile, tile)
         tile.key = ns.Style:KeyText(tile)
+        tile.shape = ns.Style:ShapeKit(tile, tile.texture) -- square, or like your icons drawn like Blizzard's
         tile:RegisterForDrag("LeftButton")
         tile:SetScript("OnDragStart", function(self)
             -- Nothing is still held from a drag that never landed.
@@ -692,6 +693,7 @@ function ns.BuildLayoutPage(window, page, width, height)
             ghost.texture:SetDesaturated(false)
             ghost:Show()
             -- Picked up: its spot is empty until it lands somewhere.
+            ns.Style:Shape(self.shape, nil, true)
             T:Fill(self.texture, T.CONTROL_BORDER)
             ns.Style:ShowDecor(self.decor, false, false)
             self.keyed = false
@@ -844,7 +846,7 @@ function ns.BuildLayoutPage(window, page, width, height)
     local function Fill(row, size, fromRight)
         local data, entries = ns.BarData(row.key), Entries(row.key)
         local live = ns.Get("layoutPreview")
-        local border, shadow = ns.Style:DecorFor("icon")
+        local border, shadow = ns.Style:DecorFor("icon", true)
         local keys = live and not ns.AURA_BARS[row.key] and ns.Style:KeyReadable(size)
         for i = 1, data.perRow do
             local tile = Tile(row, i)
@@ -858,11 +860,15 @@ function ns.BuildLayoutPage(window, page, width, height)
             end
             local name = entries[i]
             tile.name = name
+            -- Drawn like your icons (square, or like Blizzard's: Icon
+            -- details' Icons) where drawn in your look and big enough to
+            -- read, as keys are; square otherwise, and while empty.
+            ns.Style:Shape(tile.shape, size, not (live and name ~= nil and ns.Style:KeyReadable(size)))
             if name then
                 -- A spell you haven't learned yet: its own icon, greyed.
                 tile.texture:SetTexture(ns.Spells:Icon(name))
                 tile.texture:SetDesaturated(ns.Spells:Find(name) == nil)
-                ns.Style:Zoom(tile.texture)
+                ns.Style:Crop(tile.shape)
             else
                 tile.texture:SetDesaturated(false)
                 T:Fill(tile.texture, T.CONTROL_BORDER)

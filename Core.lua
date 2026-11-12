@@ -183,7 +183,11 @@ ns.DEFAULTS = {
     countdownFormat = "game", -- its text: the game's own (2:52), or "minutes" (3m, 2m, 1m, then 59s; a player's idea)
     swipeEdge = false, -- the edge line on every icon; off, none on yours and Blizzard's own on theirs
     edgeColour = "game", -- its colour: the game's own line, or tinted in a bar colour
+    -- Your bars' icons square as always, or drawn like Blizzard's Cooldown
+    -- Manager's ("blizzard": a player's idea, its look with Swap with my form)
+    iconStyle = "square",
     keybinds = false, -- each Cooldowns/Utility icon's key, from your action bars (Look page)
+    keybindsPlain = false, -- and on Blizzard's icons with the look off, Blizzard's look kept (Skin.lua, Keys alone)
     keybindPosition = "BOTTOM", -- where on the icon: BOTTOM, TOPLEFT, TOP or TOPRIGHT
     keybindSize = 100, -- its size, as a share of the automatic size that follows the icon
     layoutPreview = true, -- the Layout page draws your icons with the Look page's border, shadow and keybinds
@@ -350,9 +354,12 @@ ns.COUNTDOWN_SPOT_NAMES = { TOPLEFT = "Top left", TOP = "Top", TOPRIGHT = "Top r
 -- The countdown's text: the game's own, or whole minutes then seconds (Style.lua's Timer text).
 ns.COUNTDOWN_FORMATS = { "game", "minutes" }
 ns.COUNTDOWN_FORMAT_NAMES = { game = "Game (2:52)", minutes = "Minutes, then seconds (3m, 59s)" }
+-- Your bars' icons: square, or drawn like Blizzard's Cooldown Manager (Style.lua's Icons).
+ns.ICON_STYLE_KEYS = { "square", "blizzard" }
+ns.ICON_STYLE_NAMES = { square = "Square", blizzard = "Blizzard" }
 -- Every Icon details setting (the panel's Defaults puts them all back).
 ns.ICON_DETAILS = { "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge",
-    "edgeColour" }
+    "edgeColour", "iconStyle" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
@@ -400,7 +407,8 @@ for _, key in ipairs(ns.TEXT_NUMBER_KEYS) do CHOICES.prdTextNumbers[key] = true 
 for _, key in ipairs(ns.TEXT_FONT_KEYS) do CHOICES.prdTextFont[key] = true end
 -- Icon details.
 CHOICES.swipeColour, CHOICES.countdownColour, CHOICES.countdownSpot, CHOICES.edgeColour = {}, {}, {}, {}
-CHOICES.countdownFormat = {}
+CHOICES.countdownFormat, CHOICES.iconStyle = {}, {}
+for _, key in ipairs(ns.ICON_STYLE_KEYS) do CHOICES.iconStyle[key] = true end
 for _, key in ipairs(ns.SWIPE_COLOUR_KEYS) do CHOICES.swipeColour[key] = true end
 for _, key in ipairs(ns.COUNT_COLOUR_KEYS) do CHOICES.countdownColour[key] = true end
 for _, key in ipairs(ns.COUNTDOWN_SPOTS) do CHOICES.countdownSpot[key] = true end
@@ -443,7 +451,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castAbove", "castFree", "castNative", "castX", "castY", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
     "castLatencyColour", "castLatencyText", "castTickSound", "swingColour",
     "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge", "edgeColour",
-    "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
+    "iconStyle", "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
     "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",
     "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseX", "pulseY" }
@@ -3216,6 +3224,7 @@ local function Load()
 
     if ns.loaded.skin and ns.Skin then ns.Skin:Start() end
     if ns.Keybinds then ns.Keybinds:Start() end
+    if ns.Skin then ns.Skin:StartKeys() end
     if ns.Resource then ns.Resource:Start() end
     if ns.CastBar then ns.CastBar:Start() end
     if ns.RaidTimers then ns.RaidTimers:Start() end

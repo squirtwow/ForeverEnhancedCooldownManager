@@ -193,6 +193,17 @@ function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
+-- Mask textures, and the masks on each texture, in the order added.
+function Proto:CreateMaskTexture() return New("MaskTexture", self) end
+function Proto:AddMaskTexture(mask)
+    local s = S[self]
+    s.masks = s.masks or {}
+    table.insert(s.masks, mask)
+end
+function Proto:RemoveMaskTexture(mask)
+    local masks = S[self].masks or {}
+    for i = #masks, 1, -1 do if masks[i] == mask then table.remove(masks, i) end end
+end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
     local text = New("FontString", self)
@@ -4051,6 +4062,156 @@ end)()
     Equal(All(), "0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0 | 0,0,0,0.7 false FECMFont18 CENTER 0 0",
         "the defaults again: as they always were, the numbers in the middle")
     Equal(#printed, 0, "no errors")
+end)()
+
+-- Icons drawn like Blizzard's on the aura containers' icons ----------------------------------------
+-- (A player's idea: Blizzard's look with Swap with my form.) Icon details'
+-- Icons reach the Buffs and Debuffs bars' icons (packed, fixed slots and the
+-- spots under them) and the buff and debuff times over the cooldown icons.
+-- A container's icon gets its pieces (mask, frame, range shadow) as it's
+-- made, hidden, since it only takes art then; the spots and your own icons
+-- only once Blizzard is picked. Picked in a fight, your own icons change at
+-- once and the containers' as it ends. Blizzard: masked whole art filling
+-- the icon, in its frame, its swipe; the times over your icons lose their
+-- gold edge for Blizzard's gold swipe, running as its cooldown items'; no
+-- border round any of them. A greyed Debuffs spot going with no enemy takes
+-- its frame with it. Square puts each back exactly.
+
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true, iconBorder = "icon" })
+    local B, Style = ns.Bars, ns.Style
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    B:Assign("Wrath", "cd")
+    B:SetOption("cd", "showAuras", true)
+    B:SetOption("debuff", "showMissing", true)
+    B:Changed()
+    target, hostile = true, true -- (the greyed Debuffs spots show with an enemy targeted)
+    Fire("PLAYER_TARGET_CHANGED")
+    local buff, debuff, cd = B:Get("buff"), B:Get("debuff"), B:Get("cd")
+    local packed, holder = buff.groupParts[1], debuff.holders[1]
+    local fixed, over, own = holder.slot, cd.auraAnchors[1].parts[1], cd.icons[1]
+    -- One icon as drawn: masks on its art, the art's coordinates and points,
+    -- its frame shown and its points, its swipe's art.
+    local function Drawn(kit, cooldown)
+        local frame, swipe = kit.frame, cooldown and Last(cooldown, "SetSwipeTexture")
+        local p = frame and S[frame].points[1]
+        return #(S[kit.art].masks or {}) .. " " .. tostring(Last(kit.art, "SetTexCoord")) .. " " .. #S[kit.art].points .. " "
+            .. tostring(frame ~= nil and S[frame].shown) .. (p and S[frame].shown and (" " .. p[4] .. "," .. p[5]) or "") .. " "
+            .. (swipe == nil and "-" or swipe == Style.FLAT and "flat" or swipe == Style.BLIZZARD_SWIPE and "blizzard" or tostring(swipe))
+    end
+    local function All()
+        return Drawn(packed.shape, packed.cooldown) .. " | " .. Drawn(fixed.shape, fixed.cooldown) .. " | " .. Drawn(holder.shape)
+            .. " | " .. Drawn(over.shape, over.cooldown)
+    end
+    local function Over()
+        local swipe = S[over.cooldown].last.SetSwipeColor
+        return tostring(S[over.edge].shown) .. " " .. tostring(Last(over.cooldown, "SetReverse")) .. " "
+            .. ("%g,%g,%g,%g"):format(swipe[1], swipe[2], swipe[3], swipe[4])
+    end
+    local function Ringed(decor) return tostring(decor.border ~= nil and S[decor.border[1]].shown == true) end
+    local SQUARE = "0 0.08 0 false flat | 0 0.08 0 false flat | 0 0.08 0 false - | 0 0.08 0 false flat"
+    Equal(All() .. " | " .. Over() .. " | " .. tostring(packed.shape.mask ~= nil) .. " " .. tostring(over.shape.mask ~= nil) .. " "
+        .. tostring(holder.shape.mask) .. " " .. tostring(own.shape.mask) .. " | " .. Ringed(packed.decor) .. " " .. Ringed(holder.decor),
+        SQUARE .. " | true true 0,0,0,0.7 | true true nil nil | true true",
+        "square as always: the containers' icons get Blizzard's pieces as they're made, hidden; the spots and your icons none yet")
+    -- Picked in a fight: your own icons at once, the containers' (and their spots) as it ends.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    ns.Set("iconStyle", "blizzard")
+    Style:ApplyDetails()
+    local fight = All() .. " || " .. Drawn(own.shape, own.cooldown)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight, SQUARE .. " || 1 0 2 true -7,6 blizzard", "in a fight: your own icon at once, the containers' left alone")
+    Equal(All() .. " | " .. Over(), "1 0 2 true -7,6 blizzard | 1 0 2 true -7,6 blizzard | 1 0 2 true -7,6 - | 1 0 2 true -7,6 blizzard"
+        .. " | false false 1,0.95,0.57,0.7", "as it ends: each masked, whole, in Blizzard's frame and swipe; the time over your"
+        .. " icon in Blizzard's gold swipe, running its way, no gold edge")
+    local mask = packed.shape.mask
+    Equal(tostring(Last(mask, "SetAtlas")) .. " " .. tostring(Last(packed.shape.frame, "SetAtlas")) .. " "
+        .. tostring(S[mask].parent == S[packed.shape.art].parent) .. " " .. tostring(Last(mask, "SetAllPoints") == packed.shape.art),
+        "UI-HUD-CoolDownManager-Mask UI-HUD-CoolDownManager-IconOverlay true true",
+        "Blizzard's own mask and frame atlases, the mask on the icon's own button, over its art")
+    Equal(Ringed(packed.decor) .. " " .. Ringed(holder.decor), "false false", "no border round them")
+    -- New icons come drawn like Blizzard's.
+    B:SetAura("debuff", "Wrath", true)
+    B:Changed()
+    local second = debuff.holders[2]
+    Equal(Drawn(second.slot.shape, second.slot.cooldown) .. " | " .. Drawn(second.shape), "1 0 2 true -7,6 blizzard | 1 0 2 true -7,6 -",
+        "a new icon and its spot drawn like Blizzard's as they're made")
+    -- A greyed Debuffs spot going with no enemy takes Blizzard's frame with it.
+    target = false
+    Fire("PLAYER_TARGET_CHANGED")
+    local gone = tostring(S[holder.icon].alpha) .. " " .. tostring(S[holder.shape.frame].shown)
+    target, hostile = true, true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(gone .. " | " .. tostring(S[holder.icon].alpha) .. " " .. tostring(S[holder.shape.frame].shown), "0 false | 0.45 true",
+        "no enemy: the greyed spot goes, frame and all; back with one")
+    -- A bigger bar: the spots drawn at their new size (Blizzard's frame further out).
+    B:SetOption("debuff", "size", 50)
+    local p = S[holder.icon].points[1]
+    Equal(p[1] .. " " .. p[4] .. "," .. p[5] .. " | " .. Drawn(holder.shape) .. " | " .. Drawn(fixed.shape, fixed.cooldown),
+        "TOPLEFT 0,0 | 1 0 2 true -9,8 - | 1 0 2 true -9,8 blizzard", "at 50: the art fills the spot, the frame 9 and 8 past it,"
+        .. " as Blizzard's own 50 icon")
+    -- Names under the spots go under Blizzard's frame (8 under the spot at 50).
+    B:SetOption("debuff", "showNames", true)
+    local function Name()
+        local at = S[holder.label].points[1]
+        return at[1] .. " " .. tostring(at[2] == holder) .. " " .. at[3] .. " " .. at[4] .. "," .. at[5]
+    end
+    local under = Name()
+    -- Back to square: each exactly as before.
+    ns.Set("iconStyle", "square")
+    Style:ApplyDetails()
+    Equal(All() .. " | " .. Over() .. " | " .. Drawn(own.shape, own.cooldown) .. " | " .. Ringed(packed.decor) .. " " .. Ringed(holder.decor),
+        SQUARE .. " | true true 0,0,0,0.7 | 0 0.08 0 false flat | true true", "square again: every piece back as it was, the gold"
+        .. " edge, the swipe running the buff's way in Icon details' colour, and the borders")
+    Equal(under .. " | " .. Name(), "TOP true BOTTOM 0,-11 | TOP true BOTTOM 0,-3",
+        "a spot's name under Blizzard's frame (3 under it), and back just under the spot when square")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Should the game refuse Blizzard's look on an aura container's icon (its
+-- pieces as the icon is made, or the mask on art already handed to it), the
+-- bars still start and work, square or unmasked, nothing printed, and
+-- /ccm debug says what was refused.
+;(function()
+    local create, add = Proto.CreateMaskTexture, Proto.AddMaskTexture
+    -- Pieces refused as the containers' icons are made (Blizzard picked at login).
+    Fresh()
+    Proto.CreateMaskTexture = function(self)
+        if S[self].kind == "Button" then error("refused") end
+        return create(self)
+    end
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true, iconStyle = "blizzard" })
+    local B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:Assign("Wrath", "cd")
+    local parts, own = B:Get("buff").groupParts[1], B:Get("cd").icons[1]
+    Equal(tostring(B:Get("buff").container ~= nil) .. " " .. #parts.shape.cooldowns .. " " .. tostring(parts.shape.refused) .. " "
+        .. #(S[parts.shape.art].masks or {}) .. " " .. tostring(Last(parts.shape.art, "SetTexCoord")) .. " | "
+        .. #(S[own.texture].masks or {}) .. " | " .. #printed, "true 1 true 0 0.08 | 1 | 0",
+        "pieces refused: the Buffs bar still starts, its icons square; your own icons drawn like Blizzard's; nothing printed")
+    Equal(tostring(ns.DebugReport():match("Look: [^\n]*"):find("icons blizzard (refused: ", 1, true) ~= nil), "true", "/ccm debug says so")
+    Proto.CreateMaskTexture = create
+    -- The mask refused on art already handed over (picked later): drawn in
+    -- its frame, unmasked.
+    Fresh()
+    ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    parts = B:Get("buff").groupParts[1]
+    Proto.AddMaskTexture = function() error("refused") end
+    ns.Set("iconStyle", "blizzard")
+    ns.Style:ApplyDetails()
+    Proto.AddMaskTexture = add
+    Equal(#(S[parts.shape.art].masks or {}) .. " " .. tostring(S[parts.shape.frame].shown) .. " " .. tostring(parts.shape.masked == true) .. " "
+        .. #printed .. " " .. tostring(ns.Style.shapeError ~= nil), "0 true false 0 true", "the mask refused: in its frame, unmasked, nothing printed")
+    ns.Set("iconStyle", "square")
+    ns.Style:ApplyDetails()
+    Equal(#(S[parts.shape.art].masks or {}) .. " " .. tostring(S[parts.shape.frame].shown) .. " " .. tostring(Last(parts.shape.art, "SetTexCoord"))
+        .. " " .. #printed, "0 false 0.08 0", "and square again as before")
 end)()
 
 -- Settings per spell on the aura containers' icons -------------------------------------------------

@@ -38,13 +38,35 @@ local function Fit(parts, size, showTimer, look)
     Style:AuraNumbers(parts)
 end
 
--- Icon details (the Look page) on every overlay made: the swipe, the edge
--- line and the countdown, sized for its icon (in its spell's own look).
--- Only out of a fight (Bars.lua AuraDetails).
+-- An overlay square with its gold edge, as always, or drawn like the icon
+-- under it in Blizzard's look (Icon details' Icons): rounded in its frame,
+-- with Blizzard's own gold swipe over a buff or debuff that's up, running
+-- as its cooldown items' do, and no edge. Only what changed is set; after
+-- the swipe's colour is set again (recolour: Style:CooldownLook), the gold
+-- goes back over it. Out of a fight only.
+local function Draw(parts, size, recolour)
+    Style:Shape(parts.shape, size)
+    local rounded = parts.shape.rounded
+    if parts.gold ~= rounded then
+        parts.gold = rounded
+        parts.edge:SetShown(not rounded)
+        parts.cooldown:SetReverse(not rounded)
+        recolour = true
+    end
+    if rounded and recolour then
+        local gold = Style.AURA_SWIPE
+        parts.cooldown:SetSwipeColor(gold[1], gold[2], gold[3], gold[4])
+    end
+end
+
+-- Icon details (the Look page) on every overlay made: square or like
+-- Blizzard's, the swipe, the edge line and the countdown, sized for its icon
+-- (in its spell's own look). Only out of a fight (Bars.lua AuraDetails).
 function A:Details(bar)
     for _, anchor in ipairs(bar and bar.auraAnchors or {}) do
         for _, parts in ipairs(anchor.parts) do
             Style:CooldownLook(parts.cooldown)
+            Draw(parts, anchor.size or 36, true)
             parts.cooldown:SetCountdownFont(Style:Countdown(anchor.size or 36, anchor.look))
             Style:AuraNumbers(parts)
         end
@@ -79,8 +101,12 @@ local function Look(anchor)
         local count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         count:SetPoint("BOTTOMRIGHT", -1, 1)
         button:SetApplicationCount(count)
-        local parts = { cooldown = cooldown, count = count }
+        -- Made square with its edge, reversed (gold false); Blizzard's look's
+        -- pieces made now, as the container's icons only take art as they're made.
+        local parts = { cooldown = cooldown, count = count, edge = edge, gold = false,
+            shape = Style:ShapeKit(button, icon, { cooldown }, true) }
         Fit(parts, anchor.size or 36, anchor.showTimer ~= false, anchor.look)
+        Draw(parts, anchor.size or 36)
         anchor.parts[#anchor.parts + 1] = parts
     end
 end
@@ -185,6 +211,15 @@ local function Place(bar, data)
         if anchor.size ~= size or anchor.showTimer ~= data.showTimer or Style:LookKey(anchor.look) ~= Style:LookKey(look) then
             anchor.size, anchor.showTimer, anchor.look = size, data.showTimer, look
             for _, parts in ipairs(anchor.parts) do Fit(parts, size, data.showTimer, look) end
+        end
+        -- Square or like Blizzard's at its icon's size, out of a fight: a
+        -- size changed in one waits for it to end.
+        for _, parts in ipairs(anchor.parts) do
+            if not fight then
+                Draw(parts, size)
+            elseif parts.shape.size ~= size then
+                bar.auraPending = true
+            end
         end
     end
 end

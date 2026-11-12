@@ -134,8 +134,8 @@ function ns.DebugReport()
     local _, class = UnitClass("player")
     Add(("%s %s | game %s (%s) | %s level %s | in combat %s"):format(ns.TITLE or "FECM", ns.Version(), Say(version), Say(build),
         Say(class), Say(UnitLevel and UnitLevel("player")), tostring(InCombatLockdown())))
-    Add(("Look: icon border %s, shadow %s, ready glow %s"):format(tostring(ns.Get("iconBorder")), tostring(ns.Get("iconShadow")),
-        tostring(ns.Get("readyGlow"))))
+    Add(("Look: icon border %s, shadow %s, ready glow %s, icons %s%s"):format(tostring(ns.Get("iconBorder")), tostring(ns.Get("iconShadow")),
+        tostring(ns.Get("readyGlow")), tostring(ns.Get("iconStyle")), ns.Style and ns.Style:ShapeReport() or ""))
     -- The design, and whether bars fade (or why not: the game refused a gradient).
     Add(("Bars: design %s, colour fade %s%s"):format(tostring(ns.Get("barStyle")), tostring(ns.Get("colourFade")),
         ns.Style and ns.Style.fadeError and (", refused: " .. ns.Style.fadeError) or ""))

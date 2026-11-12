@@ -195,6 +195,17 @@ function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
+-- Mask textures, and the masks on each texture, in the order added.
+function Proto:CreateMaskTexture() return New("MaskTexture", self) end
+function Proto:AddMaskTexture(mask)
+    local s = S[self]
+    s.masks = s.masks or {}
+    table.insert(s.masks, mask)
+end
+function Proto:RemoveMaskTexture(mask)
+    local masks = S[self].masks or {}
+    for i = #masks, 1, -1 do if masks[i] == mask then table.remove(masks, i) end end
+end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
     local text = New("FontString", self)
@@ -3096,10 +3107,12 @@ end)()
     local _, _, sampleLeft = Fit.Rect(w.preview)
     local left, _, right = Fit.Rect(button)
     local iconsLeft = Fit.Rect(w.sampleIcons)
-    Equal(tostring(button:IsVisible()) .. " " .. S[button.label].text .. " " .. tostring(left > sampleLeft and right < iconsLeft) .. " | " .. Note(button),
-        "true Icon details true | The cooldown swipe's colour and see-through, the countdown's size, colour and spot, and an edge line,"
-        .. " on your icons and Blizzard's, with a preview.",
-        "Icon details in the preview, between the sample bar and the sample icons, no longer marked experimental")
+    Equal(tostring(button:IsVisible()) .. " " .. S[button.label].text .. " " .. tostring(left > sampleLeft and right < iconsLeft) .. " | " .. Note(button)
+        .. " | " .. tostring(Fit.Wide(Note(button), "GameFontHighlightSmall") <= 2 * S[w.note].width),
+        "true Icon details true | The cooldown swipe's colour and see-through, the countdown's size, colour and spot, and an edge"
+        .. " line, on your icons and Blizzard's, and your icons' shape, with a preview. | true",
+        "Icon details in the preview, between the sample bar and the sample icons, the shape only your icons', in two lines of the"
+        .. " footer, no longer marked experimental")
     Equal(Looks(icon.cooldown), "0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0", "your icons as always: a 70% black swipe, no edge line,"
         .. " white numbers half the icon in its middle")
 
@@ -3131,9 +3144,74 @@ end)()
         "what the swipe, see-through, a spot and the edge line's colour say (greyed until it's ticked)")
     Equal(S[panel.swipeColour.name].text .. " " .. S[panel.seeThrough.value].text .. " " .. S[panel.size.value].text .. " "
         .. S[panel.countdownColour.name].text .. " " .. panel.spot.selected .. " " .. tostring(panel.edge:GetChecked()) .. " "
-        .. S[panel.edgeColour.name].text .. " " .. tostring(Last(panel.edgeColour, "SetEnabled")) .. " " .. S[panel.defaults].alpha,
-        "Black 30% 100% White CENTER false Game's own false 0.45",
-        "the defaults: black at 30%, 100% white numbers in the middle, no edge line (its colour greyed), Defaults greyed")
+        .. S[panel.edgeColour.name].text .. " " .. tostring(Last(panel.edgeColour, "SetEnabled")) .. " " .. S[panel.defaults].alpha
+        .. " " .. panel.iconStyle.selected,
+        "Black 30% 100% White CENTER false Game's own false 0.45 square",
+        "the defaults: square icons, black at 30%, 100% white numbers in the middle, no edge line (its colour greyed), Defaults greyed")
+
+    -- Icons (a player's idea: Blizzard's look with Swap with my form): the
+    -- first row, Square as always or Blizzard, its own hover quietly
+    -- experimental, each fitting two lines of the footer. Blizzard draws
+    -- your icons and the preview's like Blizzard's at once; Square puts them
+    -- back exactly; the panel fits either way.
+    do
+        local row = panel.iconStyle
+        local square, blizzard = row.buttons[1], row.buttons[2]
+        local swipeTop = select(2, Fit.Rect(panel.swipeColour))
+        local _, rowTop, _, rowBottom = Fit.Rect(row)
+        local fits = Fit.Wide(Note(square), "GameFontHighlightSmall") <= 2 * S[w.note].width
+            and Fit.Wide(Note(blizzard), "GameFontHighlightSmall") <= 2 * S[w.note].width
+        Equal(S[square.label].text .. "/" .. S[blizzard.label].text .. " " .. tostring(rowBottom <= swipeTop and rowTop > 0) .. " "
+            .. tostring(fits) .. " | " .. Note(square) .. " | " .. Note(blizzard),
+            "Square/Blizzard true true | Square icons with no frame, as your bars have always looked. | Your bars' icons drawn like"
+            .. " Blizzard's Cooldown Manager: rounded, in its frame, with its swipe and range shadow. Its own rows sit 4 closer."
+            .. " (experimental)", "the first row, above the swipe: Square, then Blizzard, only its hover experimental and saying"
+            .. " Blizzard's rows sit closer (Border and Shadow say they skip them), both two lines at most")
+        local quiet, note
+        for _, obj in ipairs(objects) do
+            if S[obj].parent == dialog and S[obj].kind == "FontString" and tostring(S[obj].text):find("^the icons") then quiet = obj end
+            if S[obj].parent == dialog and S[obj].kind == "FontString" and tostring(S[obj].text):find("^On your bars") then note = obj end
+        end
+        Equal(quiet and S[quiet].text, "the icons, the swipe, the countdown and the edge line",
+            "the title's quiet words name the icons (Check: still inside the panel)")
+        Equal(note and S[note].text, "On your bars, and on Blizzard's icons while Apply this look to the Cooldown Manager is on"
+            .. " (Icons: your bars only). Each change shows at once.", "the panel's note: Icons reach only your bars (Check: it fits)")
+        local art = icon.texture
+        local function Drawn(texture, cooldown)
+            return #(S[texture].masks or {}) .. " " .. tostring(Last(texture, "SetTexCoord")) .. " "
+                .. tostring(Last(cooldown, "SetSwipeTexture"))
+        end
+        S[blizzard].scripts.OnClick(blizzard)
+        Equal(ns.Get("iconStyle") .. " " .. row.selected .. " | " .. Drawn(art, icon.cooldown) .. " | " .. Drawn(first.shape.art, first.cooldown)
+            .. " | " .. tostring(S[first.shape.frame].shown) .. " " .. S[panel.defaults].alpha,
+            "blizzard blizzard | 1 0 Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe | 1 0 Interface\\HUD\\UI-HUD-CoolDownManager-Icon-Swipe"
+            .. " | true 1", "Blizzard: your icons and the preview's masked, whole, in its frame and swipe at once; Defaults usable")
+        Check(dialog, "Blizzard's icons")
+        -- Presets' preview draws your icons the same way, with no border.
+        panel:Hide()
+        w.presets:Click()
+        local preset = w.presetsPanel.tray.icons[1]
+        local ringed = preset.decor.border ~= nil and S[preset.decor.border[1]].shown == true
+        Equal(#(S[preset.shape.art].masks or {}) .. " " .. tostring(S[preset.shape.frame].shown) .. " " .. tostring(ringed),
+            "1 true false", "Presets' preview draws your icons like Blizzard's too")
+        w.presetsPanel:Hide()
+        -- The Look page's Border and Shadow say they skip your icons drawn
+        -- like Blizzard's, each in two lines of the footer.
+        local borderNote, shadowNote = Note(w.iconBorder.buttons[1]), Note(w.iconShadow.buttons[2])
+        Equal(borderNote .. " | " .. shadowNote .. " | " .. tostring(Fit.Wide(borderNote, "GameFontHighlightSmall") <= 2 * S[w.note].width
+            and Fit.Wide(shadowNote, "GameFontHighlightSmall") <= 2 * S[w.note].width),
+            "A thin black border round each icon, or each whole bar whose icons stay put. Yours and Blizzard's, but not your icons"
+            .. " drawn like Blizzard's (Icon details). | A soft shadow round each icon, or each whole bar whose icons stay put. Your cast"
+            .. " bar gets one too. Not on your icons drawn like Blizzard's (Icon details). | true",
+            "Border and Shadow say they skip your icons drawn like Blizzard's, each in two lines of the footer")
+        button:Click()
+        S[square].scripts.OnClick(square)
+        Equal(ns.Get("iconStyle") .. " " .. row.selected .. " | " .. Drawn(art, icon.cooldown) .. " | " .. Drawn(first.shape.art, first.cooldown)
+            .. " | " .. tostring(S[first.shape.frame].shown) .. " " .. S[panel.defaults].alpha,
+            "square square | 0 0.08 Interface\\Buttons\\WHITE8X8 | 0 0.08 Interface\\Buttons\\WHITE8X8 | false 0.45",
+            "Square: both back as always, Defaults greyed again")
+        Check(dialog, "square icons again")
+    end
 
     -- The swipe: white, half see-through, at once on the preview and your bars.
     panel.swipeColour:Click()
@@ -3243,13 +3321,16 @@ end)()
     Equal(table.concat(said, " | "), "a page true false | the window closing true false | the window opened true false",
         "another page, the window closing or opened again: the panel goes")
 
-    -- Kept over a reload: your bars' new icons come in the details picked.
+    -- Kept over a reload: your bars' new icons come in the details picked
+    -- (Blizzard's icons too).
+    S[panel.iconStyle.buttons[2]].scripts.OnClick(panel.iconStyle.buttons[2])
     local kept = ForeverEnhancedCooldownManagerDB
     w:Hide()
     ns = Start(kept)
     icon = ns.Bars:Get("cd").icons[1]
-    Equal(Looks(icon.cooldown) .. " " .. Num4(S[icon.cooldown].last.SetEdgeColor), "1,1,1,0.5 true FECMCountdown27 TOPLEFT TOPLEFT 1 -1"
-        .. " 0.24,0.55,0.88,1", "kept over a reload: your icons made with them")
+    Equal(Looks(icon.cooldown) .. " " .. Num4(S[icon.cooldown].last.SetEdgeColor) .. " " .. #(S[icon.texture].masks or {}),
+        "1,1,1,0.5 true FECMCountdown27 TOPLEFT TOPLEFT 1 -1 0.24,0.55,0.88,1 1", "kept over a reload: your icons made with them,"
+        .. " drawn like Blizzard's")
     -- Defaults: all back, the custom colour kept beside for next time.
     SlashCmdList.FECM("")
     w = FECMFrame
@@ -3260,20 +3341,21 @@ end)()
     local back = {}
     for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
     Equal(table.concat(back, " ") .. " " .. ns.Get("countdownColourCustom") .. " | " .. Looks(icon.cooldown) .. " | "
-        .. Looks(panel.tray.icons[1].cooldown) .. " " .. S[panel.defaults].alpha, "black 30 100 white CENTER game false game 00ffff |"
-        .. " 0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0 | 0,0,0,0.7 false FECMFont20 CENTER CENTER 0 0 0.45",
-        "Defaults: every detail back, on your icons and the preview, the custom colour kept beside")
+        .. Looks(panel.tray.icons[1].cooldown) .. " " .. S[panel.defaults].alpha .. " " .. #(S[icon.texture].masks or {}),
+        "black 30 100 white CENTER game false game square 00ffff |"
+        .. " 0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0 | 0,0,0,0.7 false FECMFont20 CENTER CENTER 0 0 0.45 0",
+        "Defaults: every detail back, square icons too, on your icons and the preview, the custom colour kept beside")
     -- Anything odd saved goes back to its default.
     kept = ForeverEnhancedCooldownManagerDB
     kept.swipeColour, kept.swipeSeeThrough, kept.countdownSize, kept.countdownColour = "pink", 101, 49.5, ns.CUSTOM
     kept.countdownColourCustom, kept.countdownSpot, kept.swipeEdge, kept.edgeColour = "zzzzzz", "MIDDLE", "yes", "gold"
-    kept.countdownFormat = "hours"
+    kept.countdownFormat, kept.iconStyle = "hours", "round"
     w:Hide()
     ns = Start(kept)
     back = {}
     for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
     Equal(table.concat(back, " ") .. " " .. tostring(ForeverEnhancedCooldownManagerDB.countdownColourCustom),
-        "black 30 100 white CENTER game false game nil", "odd values saved: each back to its default, a Custom with no colour too")
+        "black 30 100 white CENTER game false game square nil", "odd values saved: each back to its default, a Custom with no colour too")
     _G.ColorPickerFrame = nil
     Equal(table.concat(found, " | "), "", "in every state: every piece inside the panel and none on another, under the title bar, clear of the footer")
     Equal(#printed, 0, "no errors from Icon details")

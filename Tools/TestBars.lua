@@ -189,6 +189,17 @@ function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
 function Proto:CreateTexture() return New("Texture", self) end
+-- Mask textures, and the masks on each texture, in the order added.
+function Proto:CreateMaskTexture() return New("MaskTexture", self) end
+function Proto:AddMaskTexture(mask)
+    local s = S[self]
+    s.masks = s.masks or {}
+    table.insert(s.masks, mask)
+end
+function Proto:RemoveMaskTexture(mask)
+    local masks = S[self].masks or {}
+    for i = #masks, 1, -1 do if masks[i] == mask then table.remove(masks, i) end end
+end
 -- The font it starts in, as the game does: the template's.
 function Proto:CreateFontString(_, _, template)
     local text = New("FontString", self)
@@ -11475,6 +11486,225 @@ end)()
     ns.BuffBar.Guard(function() ran = true end)(UIParent)
     Equal(tostring(ok) .. " " .. tostring(ran), "false false", "a failed add leaves looks shut off")
     Equal(#printed, 0, "no errors from the aura containers")
+end)()
+
+-- Icons drawn like Blizzard's Cooldown Manager ----------------------------------------------------
+-- (A player's idea: Blizzard's look, with Swap with my form.) Icon details'
+-- Icons: Square as always, or Blizzard: your icons in the game's own art on
+-- the addon's own frames. The whole art masked by Blizzard's mask, filling
+-- the icon (size N is Blizzard's own size-N icon), in Blizzard's frame (as
+-- far past the art as Blizzard's own at 50, 40 and 30), its swipe on every
+-- sweep of the icon (the global cooldown's too), its shadow only while out
+-- of range, the count 2 in from the corner as on Blizzard's, and no border
+-- or shadow on your icons or bars (Blizzard's restyled icons keep theirs).
+-- Names go under Blizzard's frame, with that much more room under each row
+-- (and under the bar in a layout). Each size follows (a bar's, a spell's
+-- own), new icons come drawn, and relayouts set nothing again. Square puts
+-- every piece back exactly. The
+-- previews follow: Icon details' tray, a spell's own panel, and the Layout
+-- page's tiles where big enough (Live preview on); Presets' tray in
+-- Tools/TestHelp.lua (this file loads no profile sharing).
+
+;(function()
+    local function Flush()
+        for _ = 1, 5 do
+            local list = timers
+            timers = {}
+            for _, timer in ipairs(list) do timer() end
+            if #timers == 0 then return end
+        end
+    end
+    local function Points(region)
+        local out = {}
+        for _, p in ipairs(S[region].points) do
+            out[#out + 1] = p[1] .. " " .. tostring(p[4]) .. "," .. tostring(p[5])
+        end
+        return #out > 0 and table.concat(out, " ") or "all"
+    end
+    local function Ringed(decor) return tostring(decor.border ~= nil and S[decor.border[1]].shown == true) end
+    local function Shaded(decor) return tostring(decor.shadow ~= nil and S[decor.shadow[1][1]].shown == true) end
+    -- One icon as drawn: masks on its art, the art's coordinates and points,
+    -- its frame (shown, and where), its range shadow, its sweep's art and
+    -- colour, where its count sits, and its border.
+    local function Drawn(icon)
+        local kit, Style = icon.shape, ns.Style
+        local swipe, colour = Last(icon.cooldown, "SetSwipeTexture"), S[icon.cooldown].last.SetSwipeColor
+        local count = S[icon.count].points[1]
+        return table.concat({ #(S[kit.art].masks or {}), tostring(Last(kit.art, "SetTexCoord")), Points(kit.art),
+            kit.frame and S[kit.frame].shown and ("frame " .. Points(kit.frame)) or "no frame",
+            tostring(kit.range ~= nil and S[kit.range].shown), swipe == Style.FLAT and "flat" or swipe == Style.BLIZZARD_SWIPE and "blizzard" or tostring(swipe),
+            ("%g,%g,%g,%g"):format(colour[1], colour[2], colour[3], colour[4]), count[4] .. "," .. count[5], Ringed(icon.decor) }, " | ")
+    end
+
+    Environment()
+    Display()
+    _G.FECMFrame = nil
+    ns = Load({ useBars = true, prdSkin = false, notesSeen = "dev", helpSeen = true, iconBorder = "icon", iconShadow = "bar" })
+    local Bars, Style = ns.Bars, ns.Style
+    Bars:Assign("Overpower", "cd")
+    Bars:Assign("Moonfire", "cd")
+    Flush()
+    local bar = Bars:Get("cd")
+    local first, moon = bar.icons[1], bar.icons[2]
+    local SQUARE = "0 | 0.08 | all | no frame | false | flat | 0,0,0,0.7 | -1,1 | true"
+    Equal(Drawn(first) .. " || " .. tostring(first.shape.mask) .. " " .. tostring(first.shape.frame) .. " " .. Shaded(bar.decor) .. " "
+        .. ns.Get("iconStyle"), SQUARE .. " || nil nil true square", "Square to start with: as always, its border, the bar's shadow,"
+        .. " and none of Blizzard's pieces made")
+    Equal(table.concat({ Style:FrameOut(50) }, ",") .. " " .. table.concat({ Style:FrameOut(40) }, ",") .. " "
+        .. table.concat({ Style:FrameOut(30) }, ",") .. " " .. table.concat({ Style:FrameOut(38) }, ","), "9,8 8,7 6,5 7,6",
+        "Blizzard's frame as far past the art as its own icons' at 50, 40 and 30, and in step between")
+
+    -- Blizzard, as Icon details sets it.
+    ns.Set("iconStyle", "blizzard")
+    Style:ApplyDetails()
+    local BLIZZARD = "1 | 0 | TOPLEFT 0,0 BOTTOMRIGHT 0,0 | frame TOPLEFT -7,6 BOTTOMRIGHT 7,-6 | false | blizzard | 0,0,0,0.7 | -2,2 | false"
+    local kit = first.shape
+    Equal(Drawn(first) .. " || " .. Drawn(moon), BLIZZARD .. " || " .. BLIZZARD, "Blizzard: each icon's whole art masked, filling"
+        .. " the icon at 36, in Blizzard's frame 7 and 6 past it, Blizzard's swipe in Icon details' colour, the count 2 in from the"
+        .. " art's corner, no border")
+    Equal(tostring(Last(kit.mask, "SetAtlas")) .. " " .. tostring(Last(kit.mask, "SetAllPoints") == kit.art) .. " " .. tostring(S[kit.mask].parent == first)
+        .. " " .. tostring(S[kit.art].masks[1] == kit.mask) .. " | " .. tostring(Last(kit.frame, "SetAtlas")) .. " " .. tostring(S[kit.frame].parent == first)
+        .. " | " .. tostring(Last(kit.range, "SetAtlas")) .. " " .. table.concat(S[kit.range].tint, ",") .. " "
+        .. tostring(Last(kit.range, "SetAllPoints") == kit.art) .. " | " .. Shaded(bar.decor),
+        "UI-HUD-CoolDownManager-Mask true true true | UI-HUD-CoolDownManager-IconOverlay true | UI-CooldownManager-OORshadow 1,1,1 true | false",
+        "Blizzard's own mask, frame and range shadow, on the addon's own icon, over its art; no shadow round the bar either")
+    Equal(tostring(S[kit.art].points[1][2] == first) .. " " .. tostring(S[kit.frame].points[1][2] == kit.art) .. " "
+        .. tostring(Last(first.cooldown, "SetAllPoints") == kit.art), "true true true", "the art on the icon, the frame and the sweep on the art")
+    Equal(ns.DebugReport():match("Look: [^\n]*"), "Look: icon border icon, shadow bar, ready glow proc, icons blizzard", "/ccm debug says which")
+
+    -- Out of range: the red tint, and Blizzard's shadow over it while it lasts.
+    target, range[8924] = true, false
+    Bars:RefreshAll()
+    local far = S[moon.texture].tint[1] .. " " .. tostring(S[moon.shape.range].shown) .. " " .. tostring(S[kit.range].shown)
+    range[8924] = true
+    Bars:RefreshAll()
+    Equal(far .. " | " .. S[moon.texture].tint[1] .. " " .. tostring(S[moon.shape.range].shown), "0.64 true false | 1 false",
+        "out of range: red under Blizzard's shadow, on that icon only; back in range, gone")
+    range[8924], target = nil, false
+
+    -- Relayouts set nothing again; a new size draws it again.
+    S[kit.art].points = {}
+    Bars:Rebuild()
+    Equal(Points(kit.art), "all", "a relayout at the same size sets nothing again")
+    -- Blizzard's own icons at 50 (Cooldowns) and 30 (Utility): art 50 in a
+    -- 68x66 frame, art 30 in a 42x40 one. Yours at those sizes are the same.
+    local function Frame(icon)
+        local p, q = S[icon.shape.frame].points[1], S[icon.shape.frame].points[2]
+        return ("%s %gx%g"):format(Points(icon.shape.art), S[icon].width + q[4] - p[4], S[icon].height + p[5] - q[5])
+    end
+    Bars:SetOption("cd", "size", 50)
+    local fifty = Frame(first)
+    Bars:SetOption("cd", "size", 30)
+    Equal(fifty .. " | " .. Frame(first) .. " | " .. Points(kit.frame) .. " | " .. Points(first.count),
+        "TOPLEFT 0,0 BOTTOMRIGHT 0,0 68x66 | TOPLEFT 0,0 BOTTOMRIGHT 0,0 42x40 | TOPLEFT -6,5 BOTTOMRIGHT 6,-5 | BOTTOMRIGHT -2,2",
+        "at 50 and 30: the art the icon itself, in a frame as big as Blizzard's own 50 and 30 icons', the count 2 in from its corner")
+    Bars:SetOption("cd", "size", 36)
+    -- A spell's own size (settings per spell): its icon drawn at that size.
+    Bars:SetOwnSize("cd", "Moonfire", 150)
+    Equal(S[moon].width .. " " .. Points(moon.shape.frame) .. " | " .. Points(first.shape.frame), "54 TOPLEFT -10,9 BOTTOMRIGHT 10,-9 |"
+        .. " TOPLEFT -7,6 BOTTOMRIGHT 7,-6", "a spell's own size: its icon drawn at that, the rest at the bar's")
+    Bars:SetOwnSize("cd", "Moonfire", nil)
+    -- Show the global cooldown: its sweep in Blizzard's swipe too. (The mock
+    -- game's cooldown with the global one counted is the same answer.)
+    local without = C_Spell.GetSpellCooldownDuration
+    C_Spell.GetSpellCooldownDuration = function(id) return without(id, true) end
+    Bars:SetOption("cd", "showGCD", true)
+    Bars:RefreshAll()
+    Equal(tostring(Last(moon.gcd, "SetSwipeTexture") == Style.BLIZZARD_SWIPE), "true", "the global cooldown's sweep in Blizzard's swipe")
+    -- New icons come drawn; keys and counts step as before.
+    Bars:Assign("Wrath", "cd")
+    Equal(Drawn(bar.icons[3]), BLIZZARD, "a new icon comes drawn like Blizzard's")
+
+    -- Names: under Blizzard's frame (8 under a 50 icon, then 3 more), each
+    -- row that much further down; Square (from Icon details, no other
+    -- change) lays the bar out again with them just under the icons.
+    Bars:SetOption("cd", "size", 50)
+    Bars:SetOption("cd", "perRow", 2)
+    Bars:SetOption("cd", "showNames", true)
+    local function Names()
+        local at, row = S[first.label].points[1], S[bar.icons[3]].points[1]
+        return at[1] .. " " .. tostring(at[2] == first) .. " " .. at[3] .. " " .. at[4] .. "," .. at[5] .. " " .. row[5] .. " " .. S[bar].height
+    end
+    local under = Names()
+    ns.Set("iconStyle", "square")
+    Style:ApplyDetails()
+    local plain = Names()
+    ns.Set("iconStyle", "blizzard")
+    Style:ApplyDetails()
+    Equal(under .. " | " .. plain .. " | " .. Names(), "TOP true BOTTOM 0,-11 -76 126 | TOP true BOTTOM 0,-3 -68 118 | TOP true BOTTOM"
+        .. " 0,-11 -76 126", "names under Blizzard's frame, the second row 8 further down; square, just under the icons again")
+    -- With a spell's own size, the row's biggest icon sets the room.
+    Bars:SetOption("cd", "size", 36)
+    Bars:SetOwnSize("cd", "Moonfire", 150)
+    Equal(S[bar.icons[3]].points[1][5], -(54 + 4 + 14 + 9), "own sizes: the room under a row by its biggest icon's frame")
+    Bars:SetOwnSize("cd", "Moonfire", nil)
+    Bars:SetOption("cd", "showNames", false)
+    Bars:SetOption("cd", "perRow", 20)
+
+    -- The previews: Icon details' tray, Presets' tray, a spell's own panel,
+    -- the Layout page's tiles (big enough ones, with Live preview on).
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    w.iconDetails:Click()
+    local tray = w.iconPanel.tray.icons[1]
+    Equal(#(S[tray.shape.art].masks or {}) .. " " .. tostring(S[tray.shape.frame].shown) .. " " .. tostring(Last(tray.cooldown, "SetSwipeTexture")
+        == Style.BLIZZARD_SWIPE) .. " " .. Ringed(tray.decor), "1 true true false", "Icon details' preview drawn like your icons, no border")
+    w.iconPanel:Hide()
+    w:Select("cd")
+    w.pages.bar.icons[1]:Click()
+    local own = w.spellPanel.preview
+    Equal(#(S[own.shape.art].masks or {}) .. " " .. tostring(S[own.shape.frame].shown) .. " " .. tostring(Last(own.cooldown, "SetSwipeTexture")
+        == Style.BLIZZARD_SWIPE), "1 true true", "and a spell's own panel's preview")
+    w.spellPanel:Hide()
+    w:Select("look")
+    local sample = w.sampleIcons.icons[1]
+    Equal(Ringed(sample.decor) .. " " .. tostring(rawget(sample, "shape")), "true nil",
+        "the Look page's own sample icons stay square, showing the border Blizzard's restyled icons get")
+    -- (Four across in the pyramid: tiles big enough for keys and Blizzard's look.)
+    Bars:SetOption("cd", "perRow", 4)
+    ns.Layout:Apply("pyramid")
+    Flush()
+    -- In the layout, Cooldowns above the display with names sits higher by
+    -- the frame's reach under its icons (6 at 36), so they clear what's under.
+    Bars:SetOption("cd", "showNames", true)
+    local high = ns.BarData("cd").y
+    ns.Set("iconStyle", "square")
+    Style:ApplyDetails()
+    local low = ns.BarData("cd").y
+    ns.Set("iconStyle", "blizzard")
+    Style:ApplyDetails()
+    Equal(("%g %g"):format(high - low, ns.BarData("cd").y - low), "6 6", "in a layout: a bar above the display with names sits 6 higher"
+        .. " while drawn like Blizzard's, square as before")
+    Bars:SetOption("cd", "showNames", false)
+    w:Select("layout")
+    local tiles, wrong, named = w.pages.layout.rows.cd.tiles, {}, 0
+    for i, tile in ipairs(tiles) do
+        if S[tile].shown then
+            local want = tile.name ~= nil and Style:KeyReadable(S[tile].width)
+            local masks, framed = #(S[tile.texture].masks or {}), tile.shape.frame ~= nil and S[tile.shape.frame].shown
+            if want then named = named + 1 end
+            if (masks == 1) ~= want or framed ~= want then wrong[#wrong + 1] = i .. " " .. masks .. " " .. tostring(framed) end
+        end
+    end
+    Equal(table.concat(wrong, ", ") .. " | " .. tostring(named > 0), " | true",
+        "the Layout page's tiles: those big enough with a spell drawn like Blizzard's, a small or empty one square")
+    ns.Set("layoutPreview", false)
+    w:Refresh()
+    local plain = 0
+    for _, tile in ipairs(tiles) do plain = plain + #(S[tile.texture].masks or {}) end
+    Equal(plain, 0, "Live preview off: every tile square")
+    ns.Set("layoutPreview", true)
+    w:Hide()
+
+    -- Back to square: every piece back exactly as it was.
+    ns.Set("iconStyle", "square")
+    Style:ApplyDetails()
+    Equal(Drawn(first) .. " || " .. Drawn(bar.icons[3]) .. " || " .. tostring(Last(moon.gcd, "SetSwipeTexture") == Style.FLAT) .. " "
+        .. Shaded(bar.decor) .. " " .. tostring(S[kit.range].shown), SQUARE .. " || " .. SQUARE .. " || true true false",
+        "Square again: each as before, the global cooldown's sweep too, the border and the bar's shadow back")
+    C_Spell.GetSpellCooldownDuration = without
+    Equal(#printed, 0, "no errors from Blizzard's look")
 end)()
 
 print = _G.print

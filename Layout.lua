@@ -247,10 +247,15 @@ function L:Stack()
         end
         return data
     end
+    -- Room for names under a bar's last row (under Blizzard's frame round
+    -- icons drawn like Blizzard's: Style:NameDrop).
+    local function Names(data)
+        return data.showNames and NAMES + ns.Style:NameDrop(ns.IconSize(data)) or 0
+    end
     local function Room(key, data)
         local bar = B:Get(key)
         if not (bar and (bar.count > 0 or B:IsUnlocked())) then return nil end
-        return bar:GetHeight() + (data.showNames and NAMES or 0)
+        return bar:GetHeight() + Names(data)
     end
     local y = display.y + display.height / 2 + gap
     if ns.CastBar then y = y + ns.CastBar:RoomAbove(display) end
@@ -259,7 +264,7 @@ function L:Stack()
         local key = above[i]
         local data = Grow(key, "centre", "up")
         -- Names hang under the icons, so the bar sits above them.
-        B:PlaceAt(key, "BOTTOM", display.x, y + (data.showNames and NAMES or 0))
+        B:PlaceAt(key, "BOTTOM", display.x, y + Names(data))
         local room = Room(key, data)
         if room then y = y + room + gap end
     end

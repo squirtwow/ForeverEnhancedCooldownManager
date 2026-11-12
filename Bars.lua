@@ -252,7 +252,10 @@ local function NewIcon(bar)
     icon.label:SetPoint("TOP", icon, "BOTTOM", 0, -3)
     icon.label:SetWordWrap(false)
     icon.decor = Style:Decor(icon, icon)
-    Style:ShowDecor(icon.decor, Style:DecorFor("icon"))
+    Style:ShowDecor(icon.decor, Style:DecorFor("icon", true))
+    -- Square, or drawn like Blizzard's (Icon details' Icons) as it's laid
+    -- out, its name then under Blizzard's frame.
+    icon.shape = Style:ShapeKit(icon, icon.texture, { icon.cooldown }, false, icon.label)
     return icon
 end
 
@@ -283,11 +286,13 @@ local function Follow(icon)
 end
 
 -- The icon's colour: white, blue (low on mana), grey (can't be used now) or
--- red (out of range). Only set when it changes.
+-- red (out of range), with Blizzard's shadow out of range on an icon drawn
+-- like Blizzard's. Only set when it changes.
 local function Tint(icon, tint)
     if icon.tint == tint then return end
     icon.tint = tint
     icon.texture:SetVertexColor(tint[1], tint[2], tint[3])
+    Style:Far(icon.shape, tint == TINT.range)
 end
 
 -- The icon's opacity when it's a plain number, only set when it changes.
@@ -398,7 +403,7 @@ local function Global(icon, active)
     if not gcd then
         gcd = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
         gcd:SetAllPoints(icon.texture)
-        gcd:SetSwipeTexture(Style.FLAT)
+        Style:Sweep(icon.shape, gcd) -- the icon's own swipe art, square or Blizzard's
         Style:CooldownLook(gcd) -- the same swipe as the icon's own (Icon details)
         gcd:SetDrawBling(false)
         gcd:SetHideCountdownNumbers(true)
@@ -562,6 +567,7 @@ end
 local function Sized(bar, frames, count, data, room, size, spacing)
     local across = math.max(1, math.min(data.perRow, room))
     local lines, under = math.ceil(room / across), spacing + (data.showNames and NAMES or 0)
+    local named = data.showNames -- (and under Blizzard's frame, by the row's biggest icon: Style:NameDrop)
     local widths, heights, widest = {}, {}, across * size + (across - 1) * spacing
     for line = 1, lines do
         local first, last = (line - 1) * across + 1, math.min(line * across, count)
@@ -591,7 +597,7 @@ local function Sized(bar, frames, count, data, room, size, spacing)
             end
             x = data.grow == "left" and x - spacing or x + own + spacing
         end
-        y = y + heights[line] + (line < lines and under or 0)
+        y = y + heights[line] + (line < lines and under + (named and Style:NameDrop(heights[line]) or 0) or 0)
     end
     Whole(bar)
     return widest, y
@@ -617,7 +623,8 @@ function B:Arrange(bar, frames, count, data, room)
     end
     local across = math.max(1, math.min(data.perRow, room))
     local rows = math.ceil(room / across)
-    local step = size + spacing + (data.showNames and NAMES or 0)
+    -- (Names under icons drawn like Blizzard's go under its frame: Style:NameDrop.)
+    local step = size + spacing + (data.showNames and NAMES + Style:NameDrop(size) or 0)
     local width = across * size + (across - 1) * spacing
     for i = 1, count do
         local row, column = math.floor((i - 1) / across), (i - 1) % across
@@ -757,7 +764,7 @@ local function BarDecor(bar)
     -- A layout waiting for the fight to end still has the old shape: keep the
     -- box as it is until then.
     if bar.pendingLayout then return end
-    local border, shadow = Style:DecorFor("bar")
+    local border, shadow = Style:DecorFor("bar", true)
     local steady = Steady(bar.key, bar.data, bar) and bar.enemy ~= false
     border, shadow = border and steady, shadow and steady
     -- A short last row gets its own, round just its icons (Outline).
@@ -781,7 +788,7 @@ local function GroupDecor(bar)
         return
     end
     bar.pendingDecor = nil
-    local border, shadow = Style:DecorFor("icon")
+    local border, shadow = Style:DecorFor("icon", true)
     for _, parts in ipairs(bar.groupParts) do Style:ShowDecor(parts.decor, border, shadow) end
 end
 
@@ -999,8 +1006,9 @@ local function Numbers(cooldown)
     return type(get) == "function" and get(cooldown) or nil
 end
 
+-- (The count 2 in from the corner on an icon drawn like Blizzard's, as on its own.)
 local function Room(icon)
-    Style:KeyRoom(icon.count, icon, 1, Numbers(icon.cooldown), icon.cooldown, icon.lift or 0, icon.keyed)
+    Style:KeyRoom(icon.count, icon, icon.shape.rounded and 2 or 1, Numbers(icon.cooldown), icon.cooldown, icon.lift or 0, icon.keyed)
 end
 
 -- (Clear of the icon's countdown at its own size: settings per spell.)
@@ -1031,6 +1039,7 @@ end
 local function Layout(bar)
     local data = ns.BarData(bar.key)
     bar.data = data
+    bar.namesRounded = Style:Rounded() -- (its names' room as laid out: B:ApplyIconDetails)
     if bar.kind == "aura" then return LayoutAuras(bar, data) end
     -- Families laid out from the list follow what you carry at the next refresh.
     follow = true
@@ -1053,6 +1062,7 @@ local function Layout(bar)
             local own = ns.IconSizeFor(bar.key, name, size)
             icon.size, icon.ownSize = own, own ~= size and own or nil
             icon:SetSize(own, own)
+            Style:Shape(icon.shape, own)
             -- Its countdown in the spell's own font and size, if it has them
             -- (settings per spell), else the Look page's.
             icon.look = ns.SpellLook(name)
@@ -1251,14 +1261,15 @@ end
 -- The border and shadow round a whole bar as set up, for the Layout page's
 -- drawing: as chosen on the Look page, round a bar whose icons stay put.
 function B:BarDecorFor(key)
-    local border, shadow = Style:DecorFor("bar")
+    local border, shadow = Style:DecorFor("bar", true)
     local steady = Steady(key, ns.BarData(key), bars[key])
     return border and steady, shadow and steady
 end
 
--- Borders and shadows as chosen on the Look page, round every icon or bar.
+-- Borders and shadows as chosen on the Look page, round every icon or bar
+-- (none while your icons are drawn like Blizzard's).
 function B:ApplyDecor()
-    local border, shadow = Style:DecorFor("icon")
+    local border, shadow = Style:DecorFor("icon", true)
     for _, bar in pairs(bars) do
         BarDecor(bar)
         for _, icon in ipairs(bar.icons or {}) do Style:ShowDecor(icon.decor, border, shadow) end
@@ -1323,16 +1334,19 @@ function B:ShowKeys()
 end
 
 -- Icon details picked on the Look page, on every icon, those not in use
--- too: the swipe and edge line, and the countdown's size, colour and spot
--- (still clear of a key in the middle). The addon's own icons at once, in a
--- fight too; the aura containers' as AuraDetails allows.
+-- too: the icons square or drawn like Blizzard's, the swipe and edge line,
+-- and the countdown's size, colour and spot (still clear of a key in the
+-- middle). The addon's own icons at once, in a fight too; the aura
+-- containers' as AuraDetails allows. Then the borders and shadows, which
+-- skip icons drawn like Blizzard's.
 function B:ApplyIconDetails()
     for _, bar in pairs(bars) do
         local size = bar.data and ns.IconSize(bar.data)
         for _, icon in ipairs(bar.icons or {}) do
+            local own = icon.size or size
+            Style:Shape(icon.shape, own)
             Style:CooldownLook(icon.cooldown)
             if icon.gcd then Style:CooldownLook(icon.gcd) end -- its global cooldown's sweep too, once made
-            local own = icon.size or size
             if own then
                 icon.cooldown:SetCountdownFont(Style:Countdown(own, icon.look))
                 KeyLook(icon, own)
@@ -1340,6 +1354,18 @@ function B:ApplyIconDetails()
         end
         AuraDetails(bar)
     end
+    -- A bar with names laid out again when the icons' style changes: under
+    -- icons drawn like Blizzard's they go under its frame, with more room
+    -- under each row. A layout stacked again for that room too.
+    local rounded, named = Style:Rounded(), false
+    for _, bar in pairs(bars) do
+        if bar.data and bar.data.showNames and bar.namesRounded ~= rounded then
+            Layout(bar)
+            named = true
+        end
+    end
+    if named and ns.Layout then ns.Layout:Stack() end
+    self:ApplyDecor()
 end
 
 function B:Get(key)

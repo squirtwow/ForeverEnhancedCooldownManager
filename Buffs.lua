@@ -101,8 +101,12 @@ end
 
 -- Sizes an icon's numbers for its size, and shows or hides the countdown,
 -- in the spot picked in Icon details; look: its entry's own countdown font
--- and size (settings per spell), or nil for the Look page's.
+-- and size (settings per spell), or nil for the Look page's. An aura
+-- container's icon is drawn square or like Blizzard's at that size too
+-- (out of a fight, as it's made or laid out; a weapon enchant's own time
+-- has no art of its own: its spot's).
 local function Fit(parts, size, showTimer, look)
+    if parts.shape then Style:Shape(parts.shape, size) end
     parts.cooldown:SetCountdownFont(Style:Countdown(size, look))
     parts.cooldown:SetHideCountdownNumbers(not showTimer)
     parts.count:SetFontObject(Style:Count(size))
@@ -110,10 +114,12 @@ local function Fit(parts, size, showTimer, look)
 end
 
 -- Icon details (the Look page) on the bar's icons as made: each packed
--- icon's and each fixed spot's, its numbers sized as laid out (in its
--- entry's own look). Only out of a fight (Bars.lua AuraDetails).
+-- icon's and each fixed spot's, square or like Blizzard's and its numbers
+-- sized as laid out (in its entry's own look). Only out of a fight
+-- (Bars.lua AuraDetails).
 function F:Details(bar)
     local function Detail(parts, size, look)
+        if parts.shape then Style:Shape(parts.shape, size) end
         Style:CooldownLook(parts.cooldown)
         parts.cooldown:SetCountdownFont(Style:Countdown(size, look))
         Style:AuraNumbers(parts)
@@ -121,6 +127,7 @@ function F:Details(bar)
     local looks = bar.looks or {}
     for _, parts in ipairs(bar.groupParts or {}) do Detail(parts, BASE, parts.index and looks[parts.index]) end
     for _, holder in ipairs(bar.holders or {}) do
+        Style:Shape(holder.shape) -- the spot itself, at its size as laid out
         if holder.slot then Detail(holder.slot, holder.size or BASE, holder.look) end
         if holder.enchant then Detail(holder.enchant, holder.size or BASE, holder.look) end
     end
@@ -453,13 +460,15 @@ local function Look(button, size, showTimer, decorate, counts, look, active)
     local count = top:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     count:SetPoint("BOTTOMRIGHT", -1, 1)
     button:SetApplicationCount(count)
-    local parts = { cooldown = cooldown, count = count }
+    -- Square, or drawn like Blizzard's (Icon details' Icons): its pieces made
+    -- now, as the container's icons only take art as they're made (Fit draws it).
+    local parts = { cooldown = cooldown, count = count, shape = Style:ShapeKit(button, icon, { cooldown }, true) }
     if counts then parts.ticks = TickCount(button, top) end
     if active then parts.active = ActiveGlow(button, top) end
     if decorate then
         -- Made now: the container's icons only take art as they're made.
         parts.decor = Style:Decor(button, button, 0, true)
-        Style:ShowDecor(parts.decor, Style:DecorFor("icon"))
+        Style:ShowDecor(parts.decor, Style:DecorFor("icon", true))
     end
     Fit(parts, size, showTimer, look)
     parts.lookKey = Style:LookKey(look)
@@ -928,7 +937,7 @@ local function EnchantParts(holder)
     if holder.enchant then return holder.enchant end
     local cooldown = CreateFrame("Cooldown", nil, holder, "CooldownFrameTemplate")
     cooldown:SetAllPoints(holder.icon)
-    cooldown:SetSwipeTexture(Style.FLAT)
+    Style:Sweep(holder.shape, cooldown) -- in its spot's swipe art, square or Blizzard's
     cooldown:SetReverse(true)
     Style:CooldownLook(cooldown)
     cooldown:SetDrawBling(false)
@@ -996,7 +1005,9 @@ function F:Create(bar)
         holder.label:SetPoint("TOP", holder, "BOTTOM", 0, -3)
         holder.label:SetWordWrap(false)
         holder.decor = Style:Decor(holder, holder)
-        Style:ShowDecor(holder.decor, Style:DecorFor("icon"))
+        Style:ShowDecor(holder.decor, Style:DecorFor("icon", true))
+        -- Square or like Blizzard's, as laid out, its name then under Blizzard's frame.
+        holder.shape = Style:ShapeKit(holder, holder.icon, nil, false, holder.label)
         holder:Hide()
         bar.holders[i] = holder
     end
@@ -1044,7 +1055,7 @@ end
 -- are left behind. Only changed when something about them has.
 function F:HolderDecor(bar)
     if not (bar and bar.holders) then return end
-    local border, shadow = Style:DecorFor("icon")
+    local border, shadow = Style:DecorFor("icon", true)
     local shown = bar.enemy ~= false
     border, shadow = border and shown, shadow and shown
     local state = (border and "b" or "") .. (shadow and "s" or "")
@@ -1083,7 +1094,10 @@ function F:UpdateTarget(bar)
     -- Kept greyed: no target, a friendly or a dead one leave them up too.
     if self:KeepGreyed(bar.data) then hostile = true end
     bar.enemy = hostile and true or false
-    for _, holder in ipairs(bar.holders) do holder.icon:SetAlpha(bar.enemy and .45 or 0) end
+    for _, holder in ipairs(bar.holders) do
+        holder.icon:SetAlpha(bar.enemy and .45 or 0)
+        Style:Away(holder.shape, not bar.enemy) -- (Blizzard's frame round it goes too)
+    end
     self:TargetGlow(bar)
     self:HolderDecor(bar)
     if bar.container then bar.container:UpdateAllAuras() end
@@ -1352,6 +1366,7 @@ function F:Layout(bar, data)
                 if not sized and ns.OwnSize(bar.key, name) then own, sized = ns.IconSizeFor(bar.key, name, size), true end
             end
             holder:SetSize(own, own)
+            Style:Shape(holder.shape, own)
             holder.ownSize = own ~= size and own or nil
             -- Its countdown in its entry's own look (settings per spell; a
             -- joined icon: the first of yours with one).

@@ -29,6 +29,7 @@ local bars = setmetatable({}, { __mode = "k" }) -- restyled bar items and the pi
 local decors = setmetatable({}, { __mode = "k" }) -- each icon's border and shadow
 local rows = {} -- each icon viewer's border and shadow, round the whole row
 local keys = setmetatable({}, { __mode = "k" }) -- Essential/Utility item -> { frame, text, spec, lift, keyed }: the addon's own
+local plain = setmetatable({}, { __mode = "k" }) -- items with only a key on them, the look off (Keys alone, below)
 local room = setmetatable({}, { __mode = "k" }) -- item -> { top, lift, spot } last applied to its count and countdown
 -- Icon details: every Essential, Utility and buff icon -> its spec; those
 -- whose refreshes are hooked, and those whose swipe or edge line the addon
@@ -175,7 +176,8 @@ end
 -- relayout.
 local function ShowKey(item, none)
     local parts = keys[item]
-    local key = not none and ns.Get("keybinds") and KeyFor(item) or nil
+    local wanted = ns.Get("keybinds") and (not plain[item] or ns.Get("keybindsPlain"))
+    local key = not none and wanted and KeyFor(item) or nil
     if parts.keyed ~= nil and parts.key == key then return end
     parts.key = key
     parts.keyed = Style:SetKey(parts.text, key)
@@ -762,26 +764,59 @@ local function Watch(spec)
     return true
 end
 
-local function WatchAll()
+local function WatchAll(list)
     local all = true
-    for _, spec in ipairs(M.VIEWERS) do
+    for _, spec in ipairs(list) do
         all = Watch(spec) and all
     end
     return all
 end
 
-function M:Start()
-    if self.started then return end
-    self.started = true
-    if WatchAll() then return end
-    -- Blizzard's Cooldown Manager normally loads first; wait for it if not.
+-- Every viewer in list watched now, or once Blizzard's Cooldown Manager
+-- loads (it normally loads first).
+local function WatchWhenLoaded(list)
+    if WatchAll(list) then return end
     local watcher = CreateFrame("Frame")
     watcher:RegisterEvent("ADDON_LOADED")
     watcher:SetScript("OnEvent", function(frame, _, name)
         if name ~= "Blizzard_CooldownViewer" then return end
         frame:UnregisterAllEvents()
-        WatchAll()
+        WatchAll(list)
     end)
+end
+
+function M:Start()
+    if self.started then return end
+    self.started = true
+    WatchWhenLoaded(M.VIEWERS)
+end
+
+-- Keys alone --------------------------------------------------------------------
+-- Keybinds on icons on Blizzard's Essential and Utility icons with the look
+-- off, Blizzard's own look kept: the key's own frame over each icon and
+-- nothing else of the look (the count and countdown step clear of a key as
+-- they do with the look on). Only while Apply this look to the Cooldown
+-- Manager was off at login, so the two never both watch the viewers. Hooked
+-- once, from login or the tick on; unticked, the keys just go.
+local function KeyOnly(item, spec)
+    plain[item] = true
+    Keybind(item, spec)
+end
+M.KEY_VIEWERS = {
+    { name = "EssentialCooldownViewer", skin = KeyOnly, size = 50 },
+    { name = "UtilityCooldownViewer", skin = KeyOnly, size = 30 },
+}
+
+function M:StartKeys()
+    if self.started or self.keysStarted or ns.loaded.skin then return end
+    if not (ns.Get("keybinds") and ns.Get("keybindsPlain")) then return end
+    self.keysStarted = true
+    WatchWhenLoaded(M.KEY_VIEWERS)
+end
+
+-- Whether an item has only a key on it (Keys alone). For the tests.
+function M:IsPlain(item)
+    return plain[item] == true
 end
 
 -- Whether an item has the addon's look on it. For the tests.

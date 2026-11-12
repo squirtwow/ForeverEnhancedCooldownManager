@@ -324,6 +324,10 @@ local LAYOUT_CHECKS = {
 local LAYOUT_FIELDS = { "on", "preset", "base", "left", "right", "gap", "spacing" }
 local LOOK = {}
 for _, key in ipairs(ns.SHARE_LOOK) do LOOK[key] = true end
+-- Icon details' Icons goes in the look as I = "b", not iconStyle =
+-- "blizzard", so a full profile drawn like Blizzard's still fits one
+-- Discord message (under 2000 letters). Read back either way.
+local SHORT_ICONS, LONG_ICONS = { blizzard = "b" }, { b = "blizzard" }
 -- The parts a string carries the ones on of (ns.SHARE_PARTS), by their letter.
 local PART = {}
 for _, part in ipairs(ns.SHARE_PARTS) do PART[part.code] = part end
@@ -368,6 +372,7 @@ end
 local function Setup(g, Skip, swap)
     local setup = { look = {}, bars = {}, layout = {}, colours = {}, custom = {}, parts = {} }
     for key, value in pairs(Table(g.s)) do
+        if key == "I" then key, value = "iconStyle", LONG_ICONS[value] or value end
         if LOOK[key] and ns.Valid(key, value) then setup.look[key] = value else Skip() end
     end
     -- The parts it has on (o): a letter each, those this version knows. A
@@ -759,6 +764,7 @@ local function SetupNow()
         local value = ns.Get(key)
         if value ~= ns.DEFAULTS[key] then look[key] = value end
     end
+    if look.iconStyle then look.I, look.iconStyle = SHORT_ICONS[look.iconStyle] or look.iconStyle, nil end
     local saved, layout = ns.LayoutData(), { hidden = {} }
     for _, key in ipairs(ns.BAR_KEYS) do
         local data, own, stacked = ns.BarData(key), {}, saved.on and not saved.hidden[key]

@@ -2771,6 +2771,64 @@ do
     kns = Load({ skin = false, keybinds = true })
     local ok = pcall(kns.Keybinds.Update, kns.Keybinds)
     Equal(tostring(next(kns.Skin.keys)) .. " " .. tostring(ok) .. " " .. #printed, "nil true 0", "the look off: no keys on Blizzard's icons, no errors")
+
+    -- Blizzard look (keybindsPlain) with the look off: keys on Blizzard's
+    -- Essential and Utility icons and nothing else of the look.
+    Environment()
+    views = Viewers(1)
+    Game()
+    essential, utility = First(views.essentialActive), First(views.utilityActive)
+    S[essential].baseSpell = 8924
+    S[utility].equipSlot = 13
+    keyOf.ACTIONBUTTON1, keyOf.ACTIONBUTTON2 = "SHIFT-1", "2"
+    kns = Load({ skin = false, keybinds = true, keybindsPlain = true })
+    kns.Keybinds:Update()
+    Equal(tostring(kns.Skin.started) .. " " .. tostring(kns.Skin.keysStarted), "nil true", "keys alone started, the look not")
+    parts = kns.Skin.keys[essential]
+    Equal(S[parts.text].text .. " " .. tostring(S[parts.text].shown) .. " " .. S[kns.Skin.keys[utility].text].text,
+        "S1 true 2", "Blizzard's icons get their keys with the look off")
+    Equal(#S[essential.Icon].masks .. " " .. tostring(S[essential.Icon].coords) .. " " .. tostring(S[essential.Cooldown].swipe)
+        .. " " .. tostring(S[essential.Cooldown].countdownFont) .. " " .. tostring(S[essential.OutOfRange].alpha),
+        "1 nil nil nil 1", "Blizzard's own look kept: mask, art, swipe, countdown font and range shadow untouched")
+    Equal(tostring(kns.Skin.decors[essential]) .. " " .. tostring(next(kns.Skin.rows)) .. " " .. tostring(kns.Skin:IsPlain(essential)),
+        "nil nil true", "no border, shadow or row box")
+    Equal(tostring(kns.Skin.keys[First(views.buffsActive)]) .. " " .. tostring(kns.Skin.keys[First(views.barsActive)]), "nil nil",
+        "Tracked Buffs and Tracked Bars untouched")
+    local fresh2 = CooldownItem()
+    S[fresh2].baseSpell = 8924
+    Blizzard(views.essential, "OnAcquireItemFrame", fresh2)
+    Blizzard(fresh2, "OnCooldownIDSet")
+    Equal(S[kns.Skin.keys[fresh2].text].text .. " " .. #S[fresh2.Icon].masks, "S1 1", "a newly handed out icon keyed, its mask kept")
+    -- Unticked: the keys go and Blizzard's count is back home.
+    kns.Set("keybindsPlain", false)
+    kns.Skin:ApplyKeybinds()
+    Equal(tostring(S[parts.text].shown) .. " " .. Count(essential), "false BOTTOMRIGHT true BOTTOMRIGHT -2 2",
+        "Blizzard look unticked: keys gone, the count back where Blizzard puts it")
+    held = 0
+    for _ in pairs(S[essential].fields) do held = held + 1 end
+    Equal(tostring(next(essential)), "nil", "nothing written on Blizzard's icon")
+    Equal(#printed, 0, "no errors from keys alone")
+
+    -- Off at login and ticked later: started then, not before.
+    Environment()
+    views = Viewers(1)
+    Game()
+    essential = First(views.essentialActive)
+    S[essential].baseSpell = 8924
+    kns = Load({ skin = false, keybinds = true })
+    Equal(tostring(kns.Skin.keysStarted) .. " " .. tostring(next(kns.Skin.keys)), "nil nil", "Blizzard look off: nothing hooked")
+    kns.Set("keybindsPlain", true)
+    kns.Skin:StartKeys()
+    kns.Keybinds:Update()
+    kns.Skin:ShowKeys()
+    Equal(S[kns.Skin.keys[essential].text].text, "S1", "ticked later: keyed at once")
+
+    -- With the look on, keys alone never starts: the look already keys them.
+    Environment()
+    Viewers(1)
+    Game()
+    kns = Load({ keybinds = true, keybindsPlain = true })
+    Equal(tostring(kns.Skin.started) .. " " .. tostring(kns.Skin.keysStarted), "true nil", "the look on: keys alone stays out")
     _G.issecretvalue = nil
 end
 
@@ -4246,6 +4304,41 @@ do
         "the character known at login: its profile's look; switched to one with none: the Look page's; and back")
     Equal(#printed .. " " .. tostring(next(item)), "0 nil", "no errors, nothing written on Blizzard's icon")
     _G.UnitGUID, _G.C_Spell = nil, nil
+end
+
+-- Icon details' Icons (square, or drawn like Blizzard's) are your bars'
+-- own: with the look on, Blizzard's restyled icons come out exactly as with
+-- Square, their border too; with it off, Blizzard's icons are untouched,
+-- Blizzard look's keys and all; and picking it later sets nothing on them.
+do
+    local function Overlay(item)
+        for _, region in ipairs(S[item].regions) do
+            if S[region].atlas == "UI-HUD-CoolDownManager-IconOverlay" then return region end
+        end
+    end
+    local function Look(ns, item)
+        local icon, cooldown = item.Icon, item.Cooldown
+        return table.concat({ #S[icon].masks, tostring(S[icon].coords), tostring(S[cooldown].swipe), tostring(S[cooldown].countdownFont),
+            tostring(S[Overlay(item)].alpha), tostring(S[cooldown].addonCalls or 0), tostring(ns.Skin.decors[item] ~= nil),
+            tostring(ns.Skin.keys[item] ~= nil) }, " ")
+    end
+    local looks = {}
+    for _, saved in ipairs({ { iconBorder = "icon" }, { iconBorder = "icon", iconStyle = "blizzard" },
+        { skin = false, keybinds = true, keybindsPlain = true }, { skin = false, keybinds = true, keybindsPlain = true, iconStyle = "blizzard" } }) do
+        Environment()
+        local v = Viewers(1)
+        local item = First(v.essentialActive)
+        local ns = Load(saved)
+        local made = Look(ns, item)
+        -- Picked afterwards, as Icon details does: nothing more on Blizzard's icon.
+        ns.Set("iconStyle", ns.Get("iconStyle") == "blizzard" and "square" or "blizzard")
+        ns.Style:ApplyDetails()
+        looks[#looks + 1] = made .. (Look(ns, item) == made and "" or (" then " .. Look(ns, item))) .. " " .. tostring(next(item))
+    end
+    Equal(looks[1] .. " | " .. looks[3], "0 0.08,0.92,0.08,0.92 Interface\\Buttons\\WHITE8X8 FECMFont25 0 0 true true nil"
+        .. " | 1 nil nil nil 1 0 false true nil", "the look on: square as always, with its border; off: Blizzard's own, keyed only")
+    Equal(tostring(looks[2] == looks[1]) .. " " .. tostring(looks[4] == looks[3]) .. " " .. #printed, "true true 0",
+        "Blizzard's icons the same whichever is picked, at login or later: nothing set on them, nothing written, no errors")
 end
 
 -- Nothing was ever left on a sealed frame, even by rawset, which skips the seal.
