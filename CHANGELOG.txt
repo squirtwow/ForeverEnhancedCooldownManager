@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.10.11
+
+### Added
+- Keybinds: show on Blizzard's icons while keeping Blizzard's own look.
+- Your bars: icons can now look like Blizzard's Cooldown Manager.
+
 ## 1.10.10
 
 ### Added

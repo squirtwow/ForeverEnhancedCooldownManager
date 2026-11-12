@@ -10,6 +10,15 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.11",
+        sections = {
+            { "Added", {
+                "Keybinds: show on Blizzard's icons while keeping Blizzard's own look.",
+                "Your bars: icons can now look like Blizzard's Cooldown Manager.",
+            } },
+        },
+    },
+    {
         version = "1.10.10",
         sections = {
             { "Added", {
