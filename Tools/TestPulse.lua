@@ -2674,7 +2674,14 @@ end
             titles[#titles + 1] = S[box.title].text
             shown[w.selected] = true
             if not (S[box.outline].shown and S[box.arrow].shown) then outlined = false end
-            local wrong = BoxFits(page)
+            -- (A step pointing into the list on the left, Extra bars' + Add a
+            -- bar: its box inside the window.)
+            local part, inList = S[box.outline].points[1][2], false
+            while part and S[part] do
+                if part == w.navFrame then inList = true end
+                part = S[part].parent
+            end
+            local wrong = BoxFits(inList and FECMFrame or page)
             if wrong ~= "" then problems[#problems + 1] = key .. " " .. S[box.title].text .. ": " .. wrong end
             done = S[box.next.label].text == "Done"
             box.next:Click()
@@ -2825,14 +2832,21 @@ end)()
     w:Select("buff")
     help:Click()
     -- (1.8.1's Glow when missing and 1.9.0's Only when missing point at the
-    -- list, after the options; 1.10.0's two at the tray and + Another bar.)
-    local parts = { bp.listPanel, bp.optionsArea, bp.listPanel, bp.listPanel, bp.tray, bp.another:IsShown() and bp.another or bp.tray,
+    -- list, after the options; 1.10.0's two at the tray and, in the list on
+    -- the left, + Add a bar under Buffs, or Buffs' own row while that waits
+    -- for a spell.)
+    local plus = w.navPlus.buff
+    local parts = { bp.listPanel, bp.optionsArea, bp.listPanel, bp.listPanel, bp.tray, plus:IsShown() and plus or w.nav.buff,
         bp.options.showMissing, bp.options.onlyMissing, bp.tray, bp.options.showSelf }
     local right = 0
     for i, part in ipairs(parts) do
         local o, p = S[box.outline].points, S[box].points[1]
         if o[1][2] == part and o[2][2] == part and p[2] == part and S[part].shown then right = right + 1 end
-        if i == 3 then
+        if i == 6 then
+            Equal(S[box.title].text .. " | " .. S[box.text].text .. " | " .. p[1] .. " " .. p[3], "EXTRA BARS | Once this bar has a spell,"
+                .. " + Add a bar in the list on the left adds another bar of its kind, with its own spells, size and options and its own"
+                .. " row on the Layout page. | TOPLEFT TOPRIGHT", "1.10.0's Extra bars, in the list on the left, the box beside it")
+        elseif i == 3 then
             Equal(S[box.title].text, "GLOW WHEN MISSING", "1.8.1's Glow when missing, on the list")
         elseif i == 4 then
             Equal(S[box.title].text .. " | " .. S[box.text].text, "ONLY WHEN MISSING | Tick Only when missing beside a buff in this list"

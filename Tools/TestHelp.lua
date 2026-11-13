@@ -1227,6 +1227,44 @@ function Fit.Rows(w)
     end
     return table.concat(found, "; ")
 end
+-- The bars' list on the left, which scrolls once they don't all fit (so
+-- the list's check leaves it out): each shown bar's row and + Add a bar
+-- line across the list's width, none on another; in each row its name,
+-- count and the icons showing inside it, none on another (a long name like
+-- Cooldowns 2 clear of its count, the icons under the name).
+function Fit.BarList(w)
+    local found, parts = {}, {}
+    local content = w.barList.content
+    local sl, _, sr = Fit.Rect(w.barList)
+    for key, item in pairs(w.nav) do
+        if S[item].parent == content and item:IsVisible() then parts[#parts + 1] = { item, key } end
+    end
+    for kind, line in pairs(w.navPlus) do
+        if line:IsVisible() then parts[#parts + 1] = { line, "+" .. kind } end
+    end
+    for i, part in ipairs(parts) do
+        local l, t, r, b = Fit.Rect(part[1])
+        if l < sl or r > sr then found[#found + 1] = ("%s (%.1f to %.1f) wider than the list (%.1f to %.1f)"):format(part[2], l, r, sl, sr) end
+        for j = i + 1, #parts do
+            if not Fit.Clear(part[1], parts[j][1]) then found[#found + 1] = part[2] .. " on " .. parts[j][2] end
+        end
+        local bits = { { part[1].label, "name " .. tostring(S[part[1].label].text) } }
+        if part[1].count then
+            bits[#bits + 1] = { part[1].count, "count " .. tostring(S[part[1].count].text) }
+            for n, icon in ipairs(part[1].icons) do
+                if icon:IsVisible() then bits[#bits + 1] = { icon, "icon " .. n } end
+            end
+        end
+        for p, bit in ipairs(bits) do
+            local pl, pt, pr, pb = Fit.Rect(bit[1])
+            if pl < l or pr > r or pt < t or pb > b then found[#found + 1] = ("%s: %s out of it"):format(part[2], bit[2]) end
+            for q = p + 1, #bits do
+                if not Fit.Clear(bit[1], bits[q][1]) then found[#found + 1] = ("%s: %s on %s"):format(part[2], bit[2], bits[q][2]) end
+            end
+        end
+    end
+    return table.concat(found, "; ")
+end
 
 -- The ?'s tooltip: just under it, in the addon's own look ------------------------------------------
 -- Hovering the ? shows a small tooltip under it, as Show me what's new's
@@ -1477,17 +1515,25 @@ end)()
     Equal(table.concat(shownOn, ", "), "cd, util, buff, debuff, general, general with EraUI, cd bars off, general bars off, util taken out",
         "the note shows on the bar pages and General only")
     Equal(table.concat(problems, "; "), "", "where it shows, nothing on the page is under it; the ? pulses on every page")
-    -- A bar with spells shows + Another bar (extra bars) with Clear at the
-    -- right of its top row: there only the ? pulses, as on other pages with
-    -- buttons there; an empty bar's page still has the note.
+    -- A bar with spells shows Clear at the right of its top row, an extra
+    -- bar's page Remove bar there: only the ? pulses, as on other pages with
+    -- buttons there. An empty bar's page still has the note, even with an
+    -- extra bar of its kind (added from the list now, no button there).
     ns.Bars:SetAura("debuff", "Moonfire", true)
     w:Select("debuff")
     Step(w, 0)
-    local withSpells = Nudge(w) .. " " .. tostring(w.pages.bar.another:IsVisible())
-    w:Select("buff")
+    local bp = w.pages.bar
+    local withSpells = Nudge(w) .. " " .. tostring(bp.clear:IsVisible()) .. " " .. tostring(bp.another:IsVisible())
+    ns.Bars:AddBar("buff")
+    w:Select("buff2")
     Step(w, 0)
-    Equal(withSpells .. " | " .. Nudge(w) .. " " .. tostring(w.pages.bar.another:IsVisible()), "false true true | true true false",
-        "a bar with spells: + Another bar shows, the note doesn't (the ? still pulses); an empty bar's page keeps the note")
+    local extra = Nudge(w) .. " " .. tostring(bp.another:IsVisible())
+    Check("buff", "buff empty with Buffs 2 there")
+    Equal(withSpells .. " | " .. extra .. " | " .. Nudge(w) .. " " .. tostring(bp.clear:IsVisible()) .. " " .. tostring(bp.another:IsVisible())
+        .. " | " .. table.concat(problems, "; "), "false true true false | false true true | true true false false | ",
+        "a bar with spells: Clear shows, the note doesn't (the ? still pulses); an extra bar's page: Remove bar, no note; an empty"
+        .. " bar's page keeps the note, with an extra bar of its kind too, over nothing")
+    ns.Bars:RemoveBar("buff2")
     Equal(#printed, 0, "no errors")
 end)()
 
@@ -1655,7 +1701,7 @@ end)()
         if problems ~= "" then found[#found + 1] = (label or key) .. ": " .. problems end
     end
     for _, key in ipairs({ "cd", "util", "buff", "debuff", "look", "layout", "cast", "general", "pulse" }) do Check(key) end
-    local problems = Fit.Problems(w.navFrame) .. Fit.Problems(w.header)
+    local problems = Fit.Problems(w.navFrame) .. Fit.BarList(w) .. Fit.Problems(w.header)
     if problems ~= "" then found[#found + 1] = "list or title bar: " .. problems end
     -- Look, with Blizzard's Cooldown Manager and your display off, a reload
     -- waiting: the warnings take their rows' room.
@@ -1701,11 +1747,13 @@ end)()
     ns.Set("useBars", true)
     ns.Layout:TakeOut("util")
     Check("util", "taken out")
-    -- Extra bars: with spells on it, + Another bar left of Clear (Cooldowns 2
-    -- > once added); Cooldowns 2's page, its title the longest, with Remove
-    -- bar, and taken out of the layout too.
+    -- Extra bars: with spells on it, Clear, and + Add a bar under Cooldowns
+    -- in the list (checked too); Cooldowns 2's page, its title the longest,
+    -- with Remove bar, and taken out of the layout too.
     ns.Bars:Assign("Moonfire", "cd")
-    Check("cd", "cd with spells: + Another bar")
+    Check("cd", "cd with spells")
+    local plus = Fit.Problems(w.navFrame) .. Fit.BarList(w)
+    if plus ~= "" then found[#found + 1] = "the list with + Add a bar under Cooldowns: " .. plus end
     ns.Bars:AddBar("cd")
     Check("cd", "cd with Cooldowns 2 there")
     Check("cd2", "Cooldowns 2, empty: Remove bar in Clear's place")
@@ -1715,6 +1763,35 @@ end)()
     Check("cd2", "Cooldowns 2 taken out")
     Equal(tostring(w.pages.bar.another:IsVisible()) .. " " .. S[w.pages.bar.another.label].text .. " " .. tostring(w.pages.bar.putBack:IsVisible())
         .. " " .. tostring(w.pages.bar.clear:IsVisible()), "true Remove bar true true", "(Remove bar, Put back and Clear all checked there)")
+    -- Four extra bars, third ones too (a player's idea: a third cooldown
+    -- bar): Cooldowns 3's page, Cooldowns', the list of eight bars on the
+    -- left with every kind's + Add a bar line (the most it ever holds), and
+    -- the Layout page with all eight taken out (Put back and its buttons,
+    -- four lines of two).
+    ns.Layout:PutBack("cd2")
+    ns.Bars:AddBar("cd")
+    ns.Bars:AddBar("debuff")
+    ns.Bars:AddBar("debuff")
+    ns.Bars:Assign("Overpower", "cd3")
+    ns.Bars:Assign("Thorns", "util")
+    ns.Bars:SetAura("buff", "Thorns", true)
+    Check("cd3", "Cooldowns 3")
+    Check("cd", "cd with Cooldowns 2 and 3 there")
+    Check("debuff3", "Debuffs 3, empty")
+    local eight = Fit.Problems(w.navFrame) .. Fit.BarList(w)
+    if eight ~= "" then found[#found + 1] = "the list with eight bars: " .. eight end
+    local lines = {}
+    for _, kind in ipairs(ns.BASE_BAR_KEYS) do lines[#lines + 1] = tostring(w.navPlus[kind]:IsVisible()) end
+    for _, key in ipairs(ns.BAR_KEYS) do ns.Layout:TakeOut(key) end
+    Check("layout", "layout with all eight taken out")
+    for _, key in ipairs(ns.BAR_KEYS) do ns.Layout:PutBack(key) end
+    Equal(table.concat(ns.BAR_KEYS, " ") .. " | " .. tostring(w.nav.cd3:IsVisible()) .. " " .. tostring(w.nav.debuff3:IsVisible())
+        .. " | " .. table.concat(lines, " "), "cd cd2 cd3 util buff debuff debuff2 debuff3 | true true | true true true true",
+        "(eight bars, each in the list, and four + Add a bar lines, checked there)")
+    for _, key in ipairs({ "cd3", "debuff3", "debuff2" }) do ns.Bars:RemoveBar(key) end
+    ns.Bars:Assign("Overpower", nil)
+    ns.Bars:Assign("Thorns", nil)
+    ns.Bars:SetAura("buff", "Thorns", false)
     ns.Bars:RemoveBar("cd2")
     ns.Bars:Assign("Moonfire", nil)
     -- Buffs with Only show missing: rows, names and missing ones greyed
@@ -3410,8 +3487,8 @@ end)()
     Equal(Font(preview.cooldown) .. " " .. S[preview].width .. " " .. tostring(Last(preview.cooldown, "SetCooldown", 2)) .. " "
         .. tostring(S[preview.cooldown].scripts.OnCooldownDone ~= nil) .. " " .. tostring(S[preview.art].texture == ns.Spells:Icon("Moonfire")),
         "FECMFont18 36 75 true true", "the preview: its icon at the bar's size, its countdown going round and round")
-    Equal(tostring(panel.warn:IsVisible()) .. " " .. tostring(panel.warnLabel:IsVisible()), "false false",
-        "no Warn at on Cooldowns: it's for the Buffs and Debuffs bars' auras")
+    Equal(tostring(panel.warn:IsVisible()) .. " " .. tostring(panel.warnLabel:IsVisible()) .. " " .. tostring(panel.dim:IsVisible()),
+        "false false false", "no Warn at on Cooldowns, nor Dim until Warn at: they're for the Buffs and Debuffs bars' auras")
     Check(panel, "Cooldowns, at the start")
     -- Show reagent count: only on a spell that uses a reagent, and it shows
     -- the game's number on that icon alone, gone when unticked.
@@ -3555,8 +3632,35 @@ end)()
         "with missing debuffs greyed: the edge too (no glow on the Debuffs bar)")
     Check(panel, "Debuffs, Warn at")
     Equal(ns.DebugReport():match("Warn at: [^|]*"), "Warn at: debuff: Moonfire 3s ", "/ccm debug lists it")
+    -- Dim until Warn at (a player's idea: Moonfire not ticking down all 12
+    -- seconds), right under Warn at: with a time picked and missing debuffs
+    -- greyed, usable, saying what it does in two lines of the footer at most,
+    -- not marked experimental (seen working in game); kept as ticked; greyed with why with no time, or
+    -- packed, the tick kept. The panel fits.
+    local function Fits(text) return Fit.Wide(text, "GameFontHighlightSmall") <= 2 * S[w.note].width end
+    local warnY, dimY = S[panel.warn].points[1][3], S[panel.dim].points[1][3]
+    Equal(table.concat({ tostring(panel.dim:IsVisible()), S[panel.dim.text].text, tostring(panel.dim:GetChecked()), tostring(panel.dim.usable),
+        tostring(warnY - dimY), S[panel.dim].points[1][2], tostring(Fits(Note(panel.dim))) }, " ") .. " | " .. Note(panel.dim),
+        "true Dim until Warn at false true 28 16 true | While it's up, its icon stays dark until Warn at's time is left, then lights up"
+        .. " with its countdown. Missing, it shows greyed as before.",
+        "Dim until Warn at in the row under Warn at, usable, saying what it does in two lines")
+    panel.dim:Click()
+    Equal(tostring(B:DimsUntilWarn("debuff", "Moonfire")) .. " " .. tostring(panel.dim:GetChecked()) .. " " .. tostring(S[panel].shown) .. " "
+        .. tostring(ns.DebugReport():match("dim until Warn at: [^\n]*")), "true true true dim until Warn at: debuff: Moonfire",
+        "ticked: kept for Moonfire on the Debuffs bar, the panel still open, /ccm debug lists it")
+    Check(panel, "Debuffs, Dim until Warn at")
     panel.warn.buttons[1]:Click()
+    local noTime = tostring(panel.dim.usable) .. " " .. tostring(panel.dim:GetChecked()) .. " | " .. Note(panel.dim)
+    panel.warn.buttons[2]:Click()
     B:SetOption("debuff", "showMissing", false)
+    w:Refresh()
+    Equal(noTime .. " | " .. tostring(panel.dim.usable) .. " " .. tostring(panel.dim:GetChecked()) .. " | " .. Note(panel.dim),
+        "false true | Pick a Warn at time first: its icon lights up from then. | false true | Tick Show missing debuffs greyed first: the"
+        .. " dimmed icon needs a spot of its own.", "greyed with why with Warn at Off, then packed; the tick kept")
+    Check(panel, "Debuffs, Dim until Warn at greyed")
+    B:SetDimUntilWarn("debuff", "Moonfire", false)
+    w:Refresh()
+    panel.warn.buttons[1]:Click()
     Equal(tostring(B:WarnAt("debuff", "Moonfire")) .. " " .. tostring(panel.warn.selected) .. " " .. tostring(ns.ProfileLists().warnAt),
         "nil 0 nil", "Off: none kept")
     -- With a spell held, a click drops it on the bar, as before: no panel.
@@ -3583,6 +3687,8 @@ end)()
     Equal(tostring(S[panel.warn].alpha) .. " " .. tostring(Last(panel.warn.buttons[2], "SetEnabled")) .. " | " .. Note(panel.warn.buttons[2]),
         "0.35 false | Not for a buff shown Only when missing: it has no icon while it's on you, so nothing to warn on.",
         "Only when missing: Warn at greyed, and says why")
+    Equal(tostring(panel.dim:IsVisible()) .. " " .. tostring(panel.dim.usable) .. " | " .. Note(panel.dim), "true false | Not for a buff"
+        .. " shown Only when missing: it has no icon while it's on you, so nothing to dim.", "and Dim until Warn at greyed, saying why")
     -- Glow while active under them (no row of its own in the list; seen
     -- working in game, so no longer marked experimental): greyed while
     -- Thorns shows only while it's missing, saying why; then usable, saying
@@ -3657,6 +3763,9 @@ end)()
         "Main hand enchant: the countdown and the glow, no edge")
     Equal(tostring(panel.active.usable) .. " | " .. Note(panel.active), "false | Not for a weapon enchant: only a buff's icon can glow"
         .. " while it's up.", "Main hand enchant: Glow while active greyed, saying why")
+    Equal(tostring(panel.dim.usable) .. " | " .. Note(panel.dim), "false | Not for a weapon enchant: its spot is the addon's own, not the"
+        .. " game's.", "Main hand enchant: Dim until Warn at greyed, saying why")
+    Check(panel, "Buffs, Main hand enchant")
     bp.icons[1]:Click()
     B:SetAura("buff", "hand:main", false)
     w:Refresh()
@@ -3954,6 +4063,45 @@ end)()
     w:Refresh()
     Equal(tostring(move:IsVisible()) .. " " .. tostring(page.dragHint:IsVisible()), "false true", "locked again: the drag hint back")
     Equal(#printed, 0, "no errors from moving bars by numbers")
+end)()
+
+-- Glow for more procs on the Cooldowns and Utility pages -------------------------------------------
+-- (A player's report: Nightfall never lit Shadow Bolt.) A tick beside Show
+-- the global cooldown, off by default, each bar its own; its note says what
+-- it does in two lines of the footer at most (not marked experimental: Squirt's
+-- call, 13 Nov 2026). Not on the Buffs or Debuffs pages. Clear of everything else on the page.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("cd")
+    local bp = w.pages.bar
+    local tick = bp.options.glowProcs
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local p = S[tick].points[1]
+    local note = Note(tick)
+    Equal(table.concat({ tostring(tick:IsVisible()), S[tick.text].text, tostring(tick:GetChecked()), p[1], p[2], p[3],
+        tostring(ns.BarData("cd").glowProcs), Fit.Problems(bp) }, " "), "true Glow for more procs false TOPLEFT 320 -173 false ",
+        "on the Cooldowns page beside Show the global cooldown, off by default, clear of everything else")
+    Equal(note .. " " .. tostring(Fit.Wide(note, S[w.note].template) <= 2 * S[w.note].width), "Lights a spell while a proc that empowers"
+        .. " it is on you, where the game lights nothing: Shadow Bolt with Nightfall's Shadow Trance. true",
+        "its note says what it does in two lines of the footer at most")
+    tick:Click()
+    local cd = tostring(ns.BarData("cd").glowProcs) .. " " .. tostring(tick:GetChecked())
+    w:Select("util")
+    local util = tostring(tick:IsVisible()) .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(ns.BarData("util").glowProcs)
+    w:Select("buff")
+    local buff = tostring(tick:IsVisible()) .. " " .. Fit.Problems(bp)
+    w:Select("debuff")
+    local debuff = tostring(tick:IsVisible())
+    w:Select("cd")
+    tick:Click()
+    Equal(cd .. " | " .. util .. " | " .. buff .. " | " .. debuff .. " | " .. tostring(ns.BarData("cd").glowProcs) .. " " .. tostring(tick:GetChecked()),
+        "true true | true false false | false  | false | false false",
+        "ticked: Cooldowns' own, Utility's stays off; not on the Buffs or Debuffs pages; unticked again")
+    Equal(#printed, 0, "no errors from Glow for more procs")
 end)()
 
 Equal(#printed, 0, "no errors")

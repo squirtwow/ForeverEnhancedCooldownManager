@@ -328,7 +328,7 @@ function L:Apply(key)
     -- An extra bar (Extra bars, Core.lua) goes under the display, last
     -- (ns.LayoutData), with the layout's icon spacing too.
     for _, bar in ipairs(ns.BAR_KEYS) do
-        if not ns.EXTRA_OF[bar] then ns.BarData(bar).spacing = layout.spacing end
+        if not ns.EXTRAS_OF[bar] then ns.BarData(bar).spacing = layout.spacing end
     end
     ns.LayoutData()
     local note = not ns.Bars:Enabled() and ns.SetBars(true) or nil

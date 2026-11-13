@@ -28,15 +28,16 @@
 //   row: Tiger's Fury, Cat Form's) needs that form, and one that can't be
 //   cast with a form's aura on you (Penance, Shadowform's) not in that form.
 //
-// Reads Blizzard's own game tables for build 1.60.1.70790 (wago.tools db2
+// Reads Blizzard's own game tables for build 1.60.1.70938 (wago.tools db2
 // exports of SpellName, Spell, SpellMisc, SpellShapeshift,
 // SpellShapeshiftForm, SpellAuraRestrictions, SpellEffect, SkillLine,
 // SkillLineAbility and TraitDefinition). No addon code or data is an input.
 //
 //   node Tools/GenerateForms.mjs [cache folder] [--out file]
 //
-// The cache folder (C:\AddonDev\_ForeverData\changes-2026-11-06\wago-70790
-// when none is given; 70753's is C:\AddonDev\_ForeverData\changes-2026-11-03\impact\wago-70753,
+// The cache folder (C:\AddonDev\_ForeverData\changes-2026-11-13\wago-70938
+// when none is given; 70790's is C:\AddonDev\_ForeverData\changes-2026-11-06\wago-70790
+// (before Fear Ward and Confounding Flash could be cast in Shadowform), 70753's is C:\AddonDev\_ForeverData\changes-2026-11-03\impact\wago-70753,
 // 70707's is C:\AddonDev\_ForeverData\gamedata\forever-70707,
 // builds up to 70425 sit in C:\AddonDev\_Toolchain\gamedata) holds the tables
 // as CSV; any missing is downloaded into it. A table already there is used
@@ -47,9 +48,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70790';
+const BUILD = '1.60.1.70938';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-export const DEFAULT_CACHE = join(root, '..', '_ForeverData', 'changes-2026-11-06', 'wago-70790');
+export const DEFAULT_CACHE = join(root, '..', '_ForeverData', 'changes-2026-11-13', 'wago-70938');
 const args = process.argv.slice(2);
 let out = join(root, 'Forms.lua'), cache = DEFAULT_CACHE;
 for (let i = 0; i < args.length; i++) {

@@ -479,8 +479,9 @@ test("Blizzard's aura containers never run the addon's code while they update", 
   assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua', 'Pulse.lua'], 'the only containers');
   assert.deepEqual(where(/:AddAura(Slot|Group)\(/), [], 'no slot or group added but through F.Add');
   const looks = files.flatMap(name => (code[name].match(/initializeFrame\s*=\s*[^,}]+/g) || []).map(look => `${name}: ${look.trim()}`));
-  assert.equal(looks.length, 6,
-    'six looks: Buffs bar spots, their edges (Warn at), packed entries, your debuffs, buff and debuff times, proc pulses');
+  assert.equal(looks.length, 7,
+    'seven looks: Buffs bar spots, their edges (Warn at), packed entries, your debuffs, buff and debuff times, proc pulses,'
+    + ' glows for more procs');
   assert.deepEqual(looks.filter(look => !/: initializeFrame = (F|ns\.BuffBar)\.Guard\(/.test(look)), [], 'every look guarded');
   const buffs = code['Buffs.lua'];
   assert.match(buffs, /function F\.Add\(container, method, \.\.\.\)\r?\n\s+adding = true\r?\n\s+local ok, result = pcall\(container\[method\], container, \.\.\.\)\r?\n\s+adding = false\r?\n/);

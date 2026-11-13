@@ -993,8 +993,10 @@ end
 -- it isn't read; it's read the first time something looks in it.
 Equal(#ns.Spells:List(), 0, "bars off: your spellbook and bags aren't read at login")
 local list = ns.Spells:Fresh()
-Equal(#list, 13, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower, the two hands' weapon enchants, two druid procs,"
-    .. " then the healthstone and potion families; passive and future spells left out")
+Equal(#list, 15, "Attack, Walk on Air, Moonfire, Wrath, Thorns, Overpower, the two hands' weapon enchants, two druid procs,"
+    .. " then the healthstone and potion families, then the two trinkets' buffs; passive and future spells left out")
+Equal(list[14].name .. " " .. list[15].name .. " " .. list[14].line .. " " .. list[15].kind, "Trinket 1 Trinket 2 Trinkets trinket",
+    "the two trinkets' buffs last, in a Trinkets section of their own")
 local moonfire = ns.Spells:Find("Moonfire")
 Equal(moonfire.spellID, 8924, "Moonfire uses the highest rank")
 Equal(moonfire.rankText, "Rank 2", "shows that rank")
@@ -4077,19 +4079,18 @@ w:Select("buff")
 Equal(tostring((Row("Underwater Breathing"))) .. " " .. tostring(Row("Contingency Plan") ~= nil), "nil true",
     "and off the Buffs page's list")
 -- On the Debuffs bar, a debuff added by ID that no class or race owns (a
--- talent's or item's effect, like Improved Shadow Bolt's Shadow Vulnerability)
--- stays, as it always did: the game never says you know it. A cooldown bar
--- still asks.
-ForeverEnhancedCooldownManagerDB.custom["Shadow Vulnerability"] = { 17794 }
-table.insert(ns.BarData("debuff").spells, "Shadow Vulnerability")
+-- talent's or item's effect, like an item's Armor Shatter) stays, as it
+-- always did: the game never says you know it. A cooldown bar still asks.
+ForeverEnhancedCooldownManagerDB.custom["Armor Shatter"] = { 16928 }
+table.insert(ns.BarData("debuff").spells, "Armor Shatter")
 B:SetOption("debuff", "showMissing", true)
 B:Changed()
-Equal(tostring(ns.Spells:ForMe("Shadow Vulnerability", "debuff")) .. " " .. table.concat((B:Mine("debuff")), ",")
-    .. " " .. B:Get("debuff").count .. " " .. tostring(ns.Spells:ForMe("Shadow Vulnerability", "cd")),
-    "true Shadow Vulnerability 1 false",
+Equal(tostring(ns.Spells:ForMe("Armor Shatter", "debuff")) .. " " .. table.concat((B:Mine("debuff")), ",")
+    .. " " .. B:Get("debuff").count .. " " .. tostring(ns.Spells:ForMe("Armor Shatter", "cd")),
+    "true Armor Shatter 1 false",
     "an effect debuff added by ID shows on the Debuffs bar, though the game never says you know it")
 w:Select("debuff")
-Equal(Row("Shadow Vulnerability") ~= nil, true, "and is listed on the Debuffs page")
+Equal(Row("Armor Shatter") ~= nil, true, "and is listed on the Debuffs page")
 -- Back on the undead warlock: its active racial is on its Buffs bar; its
 -- passive one isn't, even there, and isn't listed on its own pages.
 Racials(5, "WARLOCK")
@@ -4176,7 +4177,7 @@ Equal(IDs(data.PASSIVE_BUFFS[8076]) .. " " .. IDs(data.PASSIVE_BUFFS[25362]) .. 
 -- the class procs, and spells the data doesn't cover (an effect, two active
 -- racials it has no IDs for, and made-up spells from a later build), and
 -- the totem buffs.
-local named = { [17794] = "Shadow Vulnerability", [1229504] = "Faction Banner", [1260270] = "Rapid Regeneration",
+local named = { [16928] = "Armor Shatter", [1229504] = "Faction Banner", [1260270] = "Rapid Regeneration",
     [16870] = "Clearcasting", [12536] = "Clearcasting", [16246] = "Clearcasting", [17941] = "Shadow Trance",
     [14143] = "Remorseless", [6150] = "Quick Shots", [1326168] = "Dark Inspiration", [1400001] = "Moonlit Path", [1400002] = "Starlit Path",
     [1400003] = "Sunlit Path", [1400004] = "Dawnlit Path", [8076] = "Strength of Earth", [25362] = "Strength of Earth",
@@ -4352,8 +4353,8 @@ end
 w:Hide()
 
 -- A debuff of its own: a mage's Winter's Chill talent goes on the Debuffs
--- bar, lit by the debuff. An effect debuff added by ID (Shadow Vulnerability,
--- which the data doesn't cover; the game says it isn't passive) stays.
+-- bar, lit by the debuff. An effect debuff added by ID (an item's Armor
+-- Shatter, which the data doesn't cover; the game says it isn't passive) stays.
 Start(1, "MAGE")
 w:Select("debuff")
 cursor = { "spell", 1, "spell", 11180 }
@@ -4363,11 +4364,688 @@ w:Select("buff")
 cursor = { "spell", 1, "spell", 11180 }
 Equal(Drop(page.tray) .. " " .. List("buff"), "Winter's Chill is passive. Only its debuff can be tracked, on the Debuffs bar. ",
     "not on the Buffs page")
-says[17794] = false
-ok = B:Add("debuff", "17794")
+says[16928] = false
+ok = B:Add("debuff", "16928")
 Equal(tostring(ok) .. " " .. table.concat((B:Mine("debuff")), ",") .. " " .. B:Get("debuff").count .. " " .. table.concat(asks, ","),
-    "true Winter's Chill,Shadow Vulnerability 2 17794", "Shadow Vulnerability by ID shows on the Debuffs bar; the game was asked")
+    "true Winter's Chill,Armor Shatter 2 16928", "Armor Shatter by ID shows on the Debuffs bar; the game was asked")
 w:Hide()
+
+-- The debuffs an audit put in ns.RANKS (2026-11-13; a review found them on
+-- the cooldown bars, icons that never cool down): no one casts one, so each
+-- goes on the Debuffs bar only (ns.DEBUFF_AURAS), as a passive's debuff
+-- does. A warrior's Charge Stun isn't offered or added anywhere else, by
+-- name or ID; a mage's Winter's Chill is its passive talent there again,
+-- talent taken or not; a paladin with the Turn Evil talent puts Turn Evil on
+-- the Debuffs bar (the talent leads to it); a hunter's Entrapment is its
+-- passive talent, Intimidation still the talent with a cooldown; a
+-- warlock's Spell Lock by name is the felhunter's spell, whichever demon is
+-- out (Squirt's call, 2026-11-13; more in "A warlock's demons' abilities"
+-- below). (In a function of its own: the main chunk is at 200 locals.)
+;(function()
+    local function Can(key, text)
+        local ok, said = B:CanAdd(key, text)
+        return tostring(ok) .. " " .. said
+    end
+    -- Whether a page's search offers the name under Other spells.
+    local function Offered(key, text, name)
+        w:Select(key)
+        Search(text)
+        local found = Other(name) ~= nil
+        Search("")
+        return tostring(found)
+    end
+    -- The spells the game says you know, by ID (your pet knows none).
+    local function KnownSpells(ids)
+        Enum.SpellBookSpellBank.Pet = 1
+        C_SpellBook.IsSpellKnown = function(id, bank) return bank == 0 and ids[id] == true end
+    end
+    local DEBUFF = " is a debuff on your target. It only goes on the Debuffs bar."
+    local PASSIVE = " is passive. Only its debuff can be tracked, on the Debuffs bar."
+    Start(1, "WARRIOR")
+    KnownSpells({})
+    Equal(Offered("cd", "stun", "Charge Stun") .. " " .. Offered("cd", "stun", "Intercept Stun") .. " " .. Offered("util", "deep w", "Deep Wound")
+        .. " " .. Offered("debuff", "charge st", "Charge Stun"), "false false false true",
+        "a warrior's Charge Stun, Intercept Stun and Deep Wound offered on the Debuffs page only")
+    Equal(table.concat({ Can("cd", "Charge Stun"), Can("util", "Intercept Stun"), Can("cd", "7922"), Can("buff", "Deep Wound"),
+        Can("debuff", "Charge Stun") }, " | "), "false Charge Stun" .. DEBUFF .. " | false Intercept Stun" .. DEBUFF .. " | false Charge Stun"
+        .. DEBUFF .. " | false Deep Wound" .. DEBUFF .. " | true Drop to add Charge Stun to Debuffs.",
+        "and turned away on every other bar, by name or ID, saying where it goes")
+    Start(1, "MAGE")
+    KnownSpells({})
+    local untaught = Can("cd", "Winter's Chill") .. " | " .. Offered("cd", "chill", "Winter's Chill")
+    KnownSpells({ [11180] = true })
+    Equal(untaught .. " | " .. Can("cd", "Winter's Chill") .. " | " .. Can("debuff", "Winter's Chill") .. " | " .. Can("cd", "Ignite")
+        .. " | " .. table.concat(select(2, ns.Spells:Resolve("Winter's Chill")), ","),
+        "false Winter's Chill" .. PASSIVE .. " | false | false Winter's Chill" .. PASSIVE .. " | true Drop to add Winter's Chill to Debuffs."
+        .. " | false Ignite" .. DEBUFF .. " | 11180",
+        "a mage's Winter's Chill is its passive talent on the Cooldowns bar, taken or not; Ignite is a debuff")
+    Start(1, "PALADIN")
+    KnownSpells({ [1328370] = true })
+    local talented = Can("debuff", "Turn Evil") .. " " .. tostring(ns.Spells:ForMe("Turn Evil", "debuff"))
+    KnownSpells({ [1328370] = true, [1328372] = true })
+    Equal(talented .. " | " .. Can("debuff", "Turn Evil") .. " | " .. Can("cd", "Turn Evil") .. " | "
+        .. table.concat(ns.PASSIVE_DEBUFFS[1328370] or {}, ","), "true Drop to add Turn Evil to Debuffs. true | true Drop to add Turn Evil"
+        .. " to Debuffs. | false Turn Evil" .. PASSIVE .. " | 1328372,1328373,1328374",
+        "a paladin with the Turn Evil talent puts Turn Evil on the Debuffs bar, whatever the game says of its turns; not on Cooldowns")
+    Start(1, "HUNTER")
+    KnownSpells({})
+    Equal(Can("cd", "Entrapment") .. " | " .. Can("cd", "Intimidation") .. " | " .. Can("debuff", "Entrapment"),
+        "false Entrapment" .. PASSIVE .. " | true Drop to add Intimidation to Cooldowns. | true Drop to add Entrapment to Debuffs.",
+        "a hunter's Entrapment is its passive talent on Cooldowns; Intimidation goes by the talent with a cooldown")
+    Start(1, "WARLOCK")
+    KnownSpells({})
+    local away = Can("cd", "Spell Lock") .. " | " .. Can("debuff", "Spell Lock") .. " | "
+        .. table.concat(select(2, ns.Spells:Resolve("Spell Lock")), ",")
+    _G.C_Spell.GetSpellInfo = function(text)
+        if text == "Spell Lock" then return { name = "Spell Lock", spellID = 19647 } end
+    end
+    Equal(away .. " | " .. Can("cd", "Spell Lock") .. " | " .. table.concat(select(2, ns.Spells:Resolve("Spell Lock")), ","),
+        "true Drop to add Spell Lock to Cooldowns. | true Drop to add Spell Lock to Debuffs. | 19647 | true Drop to add Spell Lock to"
+        .. " Cooldowns. | 19647", "a warlock's Spell Lock by name is the felhunter's spell, never its silence, whether or not the game"
+        .. " finds it (no felhunter out)")
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
+-- A warlock's demons' abilities (Squirt's call, 2026-11-13: "only show if
+-- that pet is out and it's on the bar"). The debuff audit made the
+-- succubus's Seduction and the felhunter's Spell Lock warlock names (for the
+-- Debuffs search), so on a cooldown bar they showed for every warlock, any
+-- demon out. Now on Cooldowns and a Utility extra bar each shows only while
+-- its demon is out (ns.PET_SPELLS.WARLOCK), as before the audit: the imp,
+-- then the succubus, the felhunter, no pet, each told by the game (UNIT_PET)
+-- and redrawn. Added with the imp out, by name or by the demon's ID, each
+-- goes on, by the demon's own spell. The Debuffs page and the Layout page's
+-- search still offer both debuffs to a warlock, kept with any demon. A
+-- hunter's pets' abilities: the block after this one. (In a function of its
+-- own: the main chunk is at 200 locals.)
+;(function()
+    local IMP = { [3110] = true, [7799] = true, [4511] = true } -- Firebolt ranks 1 and 2, Phase Shift
+    local SUCCUBUS = { [6358] = true, [7814] = true } -- Seduction, Lash of Pain
+    local FELHUNTER = { [19244] = true, [19647] = true, [19505] = true } -- Spell Lock ranks 1 and 2, Devour Magic
+    named[19244], named[19647] = "Spell Lock", "Spell Lock"
+    -- Your pet now and the spells it knows, as the game says (none: nil; you
+    -- know none of these), and the next frame.
+    local function Out(spells)
+        Enum.SpellBookSpellBank.Pet = 1
+        C_SpellBook.IsSpellKnown = function(id, bank)
+            assert(bank == 0 or bank == 1, "the player's or the pet's spells")
+            return bank == 1 and (spells or {})[id] == true
+        end
+        Settle("UNIT_PET", "player")
+    end
+    -- A bar's icons on screen, then the entries on it that are yours.
+    local function Shows(key)
+        local bar, out = B:Get(key), {}
+        for i = 1, bar.count do out[i] = bar.icons[i].name end
+        return table.concat(out, ",") .. "/" .. table.concat((B:Mine(key)), ",")
+    end
+    -- What Cooldowns and Utility 2 show with each demon out in turn, then none.
+    local function EachDemon()
+        local out = {}
+        for _, demon in ipairs({ { "imp", IMP }, { "succubus", SUCCUBUS }, { "felhunter", FELHUNTER }, { "none" } }) do
+            Out(demon[2])
+            out[#out + 1] = demon[1] .. ": " .. Shows("cd") .. " " .. Shows("util2")
+        end
+        return table.concat(out, " | ")
+    end
+    local function Said(key, text)
+        local ok, message = B:Add(key, text)
+        return tostring(ok) .. " " .. message
+    end
+    -- Whether a page's search offers the name under Other spells.
+    local function Offered(key, text, name)
+        w:Select(key)
+        Search(text)
+        local found = Other(name) ~= nil
+        Search("")
+        return tostring(found)
+    end
+    local function Custom(name) return table.concat(ForeverEnhancedCooldownManagerDB.custom[name] or {}, ",") end
+    local function Remembered(name) return table.concat(select(2, ns.Spells:Resolve(name)) or {}, ",") end
+    -- Said as one goes on while its demon isn't out (Spells.lua S:PetAway).
+    local AWAY = " It shows while a pet that knows it is out."
+
+    -- Added by name on Cooldowns with the imp out: offered, taken, each by
+    -- its demon's spell (Spell Lock's rank 2, never the silence 24259).
+    Start(1, "WARLOCK")
+    Out(IMP)
+    B:AddBar("util")
+    local demons = ns.PET_SPELLS.WARLOCK
+    Equal(table.concat(demons.Seduction, ",") .. " " .. table.concat(demons["Spell Lock"], ",") .. " "
+        .. tostring(demons.Torment) .. " " .. tostring(demons.Growl), "6358 19244,19647 nil nil",
+        "the data: Seduction and Spell Lock by the demons' own spells; not the voidwalker's Torment (no class list names it), nor Growl")
+    local offered = Offered("cd", "seduc", "Seduction") .. " " .. Offered("util2", "spell lo", "Spell Lock")
+    Equal(offered .. " | " .. Said("cd", "Seduction") .. " | " .. Said("cd", "Spell Lock") .. " | " .. Custom("Seduction") .. " "
+        .. Custom("Spell Lock") .. " " .. ns.Spells:Find("Spell Lock").spellID,
+        "true true | true Added Seduction to Cooldowns." .. AWAY .. " | true Added Spell Lock to Cooldowns." .. AWAY .. " | 6358 19647 19647",
+        "the imp out: Seduction and Spell Lock offered and added by name, each by its demon's own spell, saying when it shows")
+    Equal(EachDemon(), "imp: / / | succubus: Seduction/Seduction / | felhunter: Spell Lock/Spell Lock / | none: / /",
+        "on Cooldowns each shows only while its demon is out, and is back as it's summoned again")
+    Out({ [19244] = true })
+    Equal(Shows("cd") .. " " .. ns.Spells:Find("Spell Lock").spellID .. " | " .. List("cd"),
+        "Spell Lock/Spell Lock 19244 | Seduction,Spell Lock", "a felhunter with rank 1 only: shown, by that rank; both kept in the profile")
+
+    -- Added by the demons' IDs on Utility 2 with the imp out: the same.
+    Start(1, "WARLOCK")
+    Out(IMP)
+    B:AddBar("util")
+    Equal(Said("util2", "6358") .. " | " .. Said("util2", "19244") .. " | " .. Custom("Seduction") .. " " .. Custom("Spell Lock") .. " "
+        .. ns.Spells:Find("Spell Lock").spellID, "true Added Seduction to Utility 2." .. AWAY .. " | true Added Spell Lock to Utility 2." .. AWAY
+        .. " | 6358 19244 19244", "the imp out: both added to Utility 2 by the demons' IDs")
+    Equal(EachDemon(), "imp: / / | succubus: / Seduction/Seduction | felhunter: / Spell Lock/Spell Lock | none: / /",
+        "on a Utility extra bar each shows only while its demon is out")
+    Equal(#printed, 0, "no errors")
+
+    -- By name, nothing added yet: the rank your felhunter knows, else its
+    -- highest. The Debuffs page and the Layout page's search offer both
+    -- debuffs, the imp out; on the Debuffs bar each watches its debuff and
+    -- stays, any demon or none.
+    Start(1, "WARLOCK")
+    Out({ [19244] = true })
+    local rankOne = Remembered("Spell Lock")
+    Out(IMP)
+    Equal(rankOne .. " " .. Remembered("Spell Lock") .. " " .. Remembered("Seduction"), "19244 19647 6358",
+        "by name: the felhunter's rank 1 while it knows no rank 2, its rank 2 with the imp out; Seduction the succubus's")
+    local pages = Offered("debuff", "seduc", "Seduction") .. " " .. Offered("debuff", "spell lo", "Spell Lock")
+    w:Select("layout")
+    local lp = w.pages.layout
+    S[lp.search].scripts.OnEditFocusGained(lp.search)
+    local function First(text)
+        lp.search:SetText(text)
+        S[lp.search].scripts.OnTextChanged(lp.search, true)
+        return tostring(S[lp.found[1]].shown and lp.found[1].spell)
+    end
+    local search = First("seduc") .. " " .. First("spell lock")
+    S[lp.search].scripts.OnEditFocusLost(lp.search)
+    local function Watches(name, id)
+        for _, each in ipairs(ns.Spells:Find(name).ids) do
+            if each == id then return "true" end
+        end
+        return "false"
+    end
+    Equal(pages .. " | " .. search .. " | " .. Said("debuff", "Seduction") .. " | " .. Said("debuff", "Spell Lock") .. " | "
+        .. Watches("Seduction", 6358) .. " " .. Watches("Spell Lock", 24259) .. " " .. table.concat((B:Mine("debuff")), ","),
+        "true true | Seduction Spell Lock | true Added Seduction to Debuffs. | true Added Spell Lock to Debuffs. | true true"
+        .. " Seduction,Spell Lock", "the imp out: the Debuffs page and the Layout page's search offer both; on the Debuffs bar each"
+        .. " watches its debuff")
+    Out(nil)
+    local none = table.concat((B:Mine("debuff")), ",")
+    Out(FELHUNTER)
+    Equal(none .. " | " .. table.concat((B:Mine("debuff")), ","), "Seduction,Spell Lock | Seduction,Spell Lock",
+        "kept on the Debuffs bar with no pet or the felhunter, as before")
+
+    -- A warlock's demons' abilities aren't a hunter's (his pets': below).
+    Start(1, "HUNTER")
+    Out(nil)
+    Equal(tostring(ns.Spells:ForMe("Seduction", "cd")) .. " " .. tostring(ns.Spells:ForMe("Spell Lock", "util")), "false false",
+        "a warlock's demons' abilities aren't a hunter's")
+    named[19244], named[19647] = nil, nil
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
+-- A hunter's pets' abilities (Squirt, 2026-11-13: "Yea plz same as lock").
+-- An ability Beast Training teaches a pet is in the hunter's class list, so
+-- on a cooldown bar it showed for every hunter, pet out or not. Now on
+-- Cooldowns and a Utility extra bar each shows only while a pet that knows
+-- it is out (ns.PET_SPELLS.HUNTER), as a warlock's demons' do: a wolf, a
+-- boar, a cat, then no pet (dismissed, stabled), each told by the game
+-- (UNIT_PET) and redrawn, all kept in the profile. Added with no pet out or
+-- another pet, by name or by the pet's ID, each goes on, by the pet's own
+-- spell. A druid's Growl, Claw and Dash and a warrior's Charge are theirs,
+-- as before; a hunter's own spells (Intimidation, Bestial Wrath) show with
+-- no pet; the Debuffs bar and the Layout page's search keep the pets'
+-- debuffs with any pet or none. (In a function of its own: the main chunk
+-- is at 200 locals.)
+;(function()
+    local WOLF = { [14921] = true, [17261] = true, [23110] = true, [24597] = true } -- Growl, Bite, Dash, Furious Howl
+    local BOAR = { [14916] = true, [17255] = true, [7371] = true, [23099] = true } -- Growl and Bite rank 2, Charge rank 1, Dash
+    local CAT = { [14921] = true, [17261] = true, [3009] = true, [24453] = true } -- Growl, Bite, Claw rank 8, Prowl
+    local mine = {}
+    -- Your pet now and the spells it knows, as the game says (none: nil),
+    -- the spells you know (mine), and the next frame.
+    local function Out(spells)
+        Enum.SpellBookSpellBank.Pet = 1
+        C_SpellBook.IsSpellKnown = function(id, bank)
+            assert(bank == 0 or bank == 1, "the player's or the pet's spells")
+            return (bank == 0 and mine or spells or {})[id] == true
+        end
+        Settle("UNIT_PET", "player")
+    end
+    -- A bar's icons on screen, then the entries on it that are yours.
+    local function Shows(key)
+        local bar, out = B:Get(key), {}
+        for i = 1, bar.count do out[i] = bar.icons[i].name end
+        return table.concat(out, ",") .. "/" .. table.concat((B:Mine(key)), ",")
+    end
+    -- What Cooldowns and Utility 2 show with each pet out in turn, then none.
+    local function EachPet()
+        local out = {}
+        for _, pet in ipairs({ { "wolf", WOLF }, { "boar", BOAR }, { "cat", CAT }, { "none" } }) do
+            Out(pet[2])
+            out[#out + 1] = pet[1] .. ": " .. Shows("cd") .. " " .. Shows("util2")
+        end
+        return table.concat(out, " | ")
+    end
+    local function Said(key, text)
+        local ok, message = B:Add(key, text)
+        return tostring(ok) .. " " .. message
+    end
+    -- Whether a page's search offers the name under Other spells.
+    local function Offered(key, text, name)
+        w:Select(key)
+        Search(text)
+        local found = Other(name) ~= nil
+        Search("")
+        return tostring(found)
+    end
+    local function Custom(name) return table.concat(ForeverEnhancedCooldownManagerDB.custom[name] or {}, ",") end
+    local function Names(map)
+        local out = {}
+        for name in pairs(map or {}) do out[#out + 1] = name end
+        table.sort(out)
+        return table.concat(out, ",")
+    end
+    -- Said as one goes on while no pet that knows it is out (Spells.lua S:PetAway).
+    local AWAY = " It shows while a pet that knows it is out."
+
+    -- The data: every pet ability Beast Training teaches, by the pets' own
+    -- spells (not a druid's 6795 or a warrior's 100); not the hunter's own
+    -- Intimidation, Bestial Wrath or Mend Pet, nor a bat's Sonic Blast (no
+    -- class list names it: it already showed only with the bat out); no
+    -- table for a druid or a warrior.
+    Start(1, "HUNTER")
+    mine = {}
+    Out(nil)
+    local hunter = ns.PET_SPELLS.HUNTER
+    Equal(Names(hunter) .. " | " .. table.concat(hunter.Growl, ",") .. " | " .. table.concat(hunter.Charge, ",") .. " | "
+        .. table.concat(hunter.Claw, ",") .. " | " .. tostring(hunter.Intimidation) .. " " .. tostring(hunter["Bestial Wrath"]) .. " "
+        .. tostring(hunter["Mend Pet"]) .. " " .. tostring(hunter["Sonic Blast"]) .. " " .. tostring(ns.PET_SPELLS.DRUID) .. " "
+        .. tostring(ns.PET_SPELLS.WARRIOR),
+        "Bite,Charge,Claw,Cower,Dash,Demoralizing Screech,Dismember,Dive,Dust Cloud,Furious Howl,Growl,Harass,Lava Breath,"
+        .. "Lightning Breath,Mine!,Pinch,Prowl,Savage Rend,Scorpid Poison,Shell Shield,Swipe,Tendon Rip,Thunderstomp,"
+        .. "Trickster's Dance,Web | 2649,14916,14917,14918,14919,14920,14921 | 7371,26177,26178,26179,26201,27685"
+        .. " | 16827,16828,16829,16830,16831,16832,3010,3009 | nil nil nil nil nil nil",
+        "the data: a hunter's pets' abilities by the pets' own spells; not his own spells, nor a druid's or a warrior's")
+
+    -- No pet out: Growl and the boar's Charge offered on Cooldowns and added
+    -- by name, a cat's Claw and Bite added to Utility 2 by the pets' IDs:
+    -- all taken, each by the pet's own spell (by name the highest with a
+    -- cooldown); none shows yet.
+    B:AddBar("util")
+    local offered = Offered("cd", "growl", "Growl") .. " " .. Offered("cd", "charge", "Charge") .. " " .. Offered("util2", "claw", "Claw")
+    Equal(offered .. " | " .. Said("cd", "Growl") .. " | " .. Said("cd", "Charge") .. " | " .. Said("util2", "16832") .. " | "
+        .. Said("util2", "17261") .. " | " .. Custom("Growl") .. " " .. Custom("Charge") .. " " .. Custom("Claw") .. " " .. Custom("Bite")
+        .. " | " .. Shows("cd") .. " " .. Shows("util2") .. " | " .. List("cd") .. " " .. List("util2"),
+        "true true true | true Added Growl to Cooldowns." .. AWAY .. " | true Added Charge to Cooldowns." .. AWAY .. " | true Added Claw to"
+        .. " Utility 2." .. AWAY .. " | true Added Bite to Utility 2." .. AWAY .. " | 14921 27685 16832 17261 | / / | Growl,Charge Claw,Bite",
+        "no pet out: Growl and Charge by name, Claw and Bite by the pets' IDs, all taken by the pet's own spell; none shows yet, as"
+        .. " each add says")
+    Equal(EachPet(), "wolf: Growl/Growl Bite/Bite | boar: Growl,Charge/Growl,Charge Bite/Bite | cat: Growl/Growl Claw,Bite/Claw,Bite"
+        .. " | none: / /", "on Cooldowns and Utility 2 each shows only while a pet that knows it is out, and is back as it's called again")
+    -- A boar with Charge rank 1 and Growl rank 2: shown, by those ranks;
+    -- dismissed or stabled (no pet): hidden, all kept in the profile.
+    Out(BOAR)
+    local boar = Shows("cd") .. " " .. ns.Spells:Find("Charge").spellID .. " " .. ns.Spells:Find("Growl").spellID
+    Out(nil)
+    Equal(boar .. " | " .. Shows("cd") .. " " .. ns.Spells:Find("Charge").spellID .. " " .. List("cd") .. " " .. List("util2"),
+        "Growl,Charge/Growl,Charge 7371 14916 | / 27685 Growl,Charge Claw,Bite",
+        "a boar with Charge rank 1: shown, by the ranks it knows; no pet: hidden, by the highest again, all kept")
+    Equal(#printed, 0, "no errors")
+
+    -- A fresh profile, a wolf out: the boar's Charge by its rank 1 ID on
+    -- Cooldowns and the cat's Claw by its rank 8 ID on Utility 2, taken
+    -- though the wolf knows neither; each shows only with its pet.
+    Start(1, "HUNTER")
+    Out(WOLF)
+    B:AddBar("util")
+    Equal(Said("cd", "7371") .. " | " .. Said("util2", "3009") .. " | " .. Custom("Charge") .. " " .. Custom("Claw") .. " "
+        .. ns.Spells:Find("Charge").spellID .. " | " .. Shows("cd") .. " " .. Shows("util2"),
+        "true Added Charge to Cooldowns." .. AWAY .. " | true Added Claw to Utility 2." .. AWAY .. " | 7371 3009 7371 | / /",
+        "a wolf out: the boar's Charge and the cat's Claw added by their IDs, by those IDs, not shown, as each add says")
+    Equal(EachPet(), "wolf: / / | boar: Charge/Charge / | cat: / Claw/Claw | none: / /",
+        "each shows only while its pet is out")
+    Equal(#printed, 0, "no errors")
+
+    -- A hunter's own spells show with no pet out, as before: Intimidation
+    -- (its rows are on Pet - Generic, but the talent is his) and Bestial
+    -- Wrath. The Debuffs bar goes by the class list, as before: Scorpid
+    -- Poison and the boar's Charge's debuff (Boar Charge) by name with no
+    -- pet, kept with no pet or a wolf; the Layout page's search offers both.
+    Start(1, "HUNTER")
+    mine = { [19577] = true, [19574] = true }
+    Out(nil)
+    local own = Said("cd", "Intimidation") .. " | " .. Said("cd", "Bestial Wrath") .. " | " .. Custom("Intimidation") .. " "
+        .. Custom("Bestial Wrath") .. " | " .. Shows("cd")
+    Equal(own, "true Added Intimidation to Cooldowns. | true Added Bestial Wrath to Cooldowns. | 19577 19574 | Intimidation,Bestial Wrath"
+        .. "/Intimidation,Bestial Wrath", "a hunter with the talents: Intimidation and Bestial Wrath show with no pet out")
+    local debuffs = Said("debuff", "Scorpid Poison") .. " | " .. Said("debuff", "Boar Charge") .. " | " .. table.concat((B:Mine("debuff")), ",")
+    Out(WOLF)
+    debuffs = debuffs .. " | " .. table.concat((B:Mine("debuff")), ",")
+    w:Select("layout")
+    local lp = w.pages.layout
+    S[lp.search].scripts.OnEditFocusGained(lp.search)
+    local function First(text)
+        lp.search:SetText(text)
+        S[lp.search].scripts.OnTextChanged(lp.search, true)
+        return tostring(S[lp.found[1]].shown and lp.found[1].spell)
+    end
+    local search = First("scorpid p") .. " | " .. First("boar ch")
+    S[lp.search].scripts.OnEditFocusLost(lp.search)
+    Equal(debuffs .. " | " .. search, "true Added Scorpid Poison to Debuffs. | true Added Boar Charge to Debuffs. | Scorpid Poison,Boar Charge"
+        .. " | Scorpid Poison,Boar Charge | Scorpid Poison | Boar Charge",
+        "on the Debuffs bar the pets' debuffs go on with no pet and stay with a wolf; the Layout page's search offers them")
+    mine = {}
+    Equal(#printed, 0, "no errors")
+
+    -- A druid's Growl, Claw and Dash and a warrior's Charge are their own,
+    -- as before (no pet table for them): by name each is remembered by the
+    -- rank they know (Dash not learned yet: the data's highest with a
+    -- cooldown, as before) and shows with no pet out or a cat.
+    Start(1, "DRUID")
+    mine = { [6795] = true, [9850] = true }
+    Out(nil)
+    B:AddBar("util")
+    local druid = Said("cd", "Growl") .. " | " .. Said("cd", "Claw") .. " | " .. Said("util2", "Dash") .. " | " .. Custom("Growl") .. " "
+        .. Custom("Claw") .. " " .. Custom("Dash") .. " | " .. Shows("cd") .. " " .. Shows("util2")
+    Out(CAT)
+    Equal(druid .. " | " .. Shows("cd") .. " " .. Shows("util2"), "true Added Growl to Cooldowns. | true Added Claw to Cooldowns. | true"
+        .. " Added Dash to Utility 2. | 6795 9850 23110 | Growl,Claw/Growl,Claw Dash/Dash | Growl,Claw/Growl,Claw Dash/Dash",
+        "a druid's Growl, Claw and Dash: by the ranks he knows, shown with no pet or a cat, as before")
+    Start(1, "WARRIOR")
+    mine = { [11578] = true }
+    Out(nil)
+    local warrior = Said("cd", "Charge") .. " " .. Custom("Charge") .. " " .. Shows("cd")
+    Out(BOAR)
+    Equal(warrior .. " | " .. Shows("cd") .. " " .. ns.Spells:Find("Charge").spellID,
+        "true Added Charge to Cooldowns. 11578 Charge/Charge | Charge/Charge 11578",
+        "a warrior's Charge: by the rank he knows, shown with no pet, as before; a boar's never his")
+    mine = {}
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
+-- A pet's ability dragged onto a cooldown bar (Squirt, 2026-11-13, "Yea";
+-- the demon and hunter reviews' low finding). On the Layout page, moved
+-- from the Buffs or Debuffs bar (B:Transfer) or swapped with a cooldown
+-- bar's icon (B:CanTrade), it was turned away while no pet that knows it
+-- was out ("Growl can't show on the Cooldowns bar for you."), though adding
+-- it on that bar's page took it. Now it goes as it's added there: hidden
+-- till a pet that knows it is out, listed with the note, by the pet's own
+-- spell, the move saying when it shows. Spell Lock put on the Debuffs bar
+-- by its silence (24259) takes the felhunter's spell with it, moved or typed
+-- by name on Cooldowns (that was "is a debuff on your target", felhunter
+-- out or not); the Debuffs bar still watches the silence. Every other
+-- refusal stays: a druid moving a hunter's pet ability, a warrior's Charge
+-- Stun onto Cooldowns. (In a function of its own: the main chunk is at 200
+-- locals.)
+;(function()
+    local WOLF = { [14921] = true, [17261] = true, [23110] = true } -- Growl, Bite, Dash
+    local BOAR = { [14916] = true, [7371] = true } -- Growl rank 2, Charge rank 1
+    local SCORPID = { [14921] = true, [24586] = true } -- Growl, Scorpid Poison rank 3
+    local IMP = { [3110] = true, [7799] = true, [4511] = true } -- Firebolt ranks 1 and 2, Phase Shift
+    local SUCCUBUS = { [6358] = true, [7814] = true } -- Seduction, Lash of Pain
+    local FELHUNTER = { [19244] = true, [19647] = true, [19505] = true } -- Spell Lock ranks 1 and 2, Devour Magic
+    named[19244], named[19647] = "Spell Lock", "Spell Lock"
+    -- Your pet now and the spells it knows, as the game says (none: nil; you
+    -- know none of these), and the next frame.
+    local function Out(spells)
+        Enum.SpellBookSpellBank.Pet = 1
+        C_SpellBook.IsSpellKnown = function(id, bank)
+            assert(bank == 0 or bank == 1, "the player's or the pet's spells")
+            return bank == 1 and (spells or {})[id] == true
+        end
+        Settle("UNIT_PET", "player")
+    end
+    -- A bar's icons on screen, then the entries on it that are yours.
+    local function Shows(key)
+        local bar, out = B:Get(key), {}
+        for i = 1, bar.count do out[i] = bar.icons[i].name end
+        return table.concat(out, ",") .. "/" .. table.concat((B:Mine(key)), ",")
+    end
+    -- What each pet out in turn, then none, shows on Cooldowns and Utility 2,
+    -- and the spell each named entry then goes by.
+    local function Each(pets, names)
+        local out = {}
+        for _, pet in ipairs(pets) do
+            Out(pet[2])
+            local ids = {}
+            for i, name in ipairs(names) do ids[i] = ns.Spells:Find(name).spellID end
+            out[#out + 1] = pet[1] .. ": " .. Shows("cd") .. " " .. Shows("util2") .. " " .. table.concat(ids, ",")
+        end
+        return table.concat(out, " | ")
+    end
+    local function Said(key, text)
+        local ok, message = B:Add(key, text)
+        return tostring(ok) .. " " .. message
+    end
+    local function Moved(from, to, name)
+        local ok, message = B:Transfer(from, to, name)
+        return tostring(ok) .. " " .. tostring(message)
+    end
+    -- Whether two icons can swap (B:CanTrade, changing nothing), then the swap.
+    local function Swapped(from, name, to, other)
+        local can, why = B:CanTrade(from, name, to, other)
+        local ok, message = B:Trade(from, name, to, other)
+        return tostring(can) .. " " .. tostring(why) .. " -> " .. tostring(ok) .. " " .. tostring(message)
+    end
+    local function Custom(name) return table.concat(ForeverEnhancedCooldownManagerDB.custom[name] or {}, ",") end
+    -- A bar page's row for the name: ticked or not, and what it says after the name.
+    local function Listed(key, name)
+        w:Select(key)
+        Search("")
+        local row = Row(name)
+        if not row then return name .. " not listed" end
+        return name .. (row.check:GetChecked() and " ticked" or " unticked") .. " (" .. tostring(S[row.where].text) .. ")"
+    end
+    local function Watches(name, id)
+        for _, each in ipairs(ns.Spells:Find(name).ids) do
+            if each == id then return "true" end
+        end
+        return "false"
+    end
+    -- Whether the cooldown of these spells was asked of the game.
+    local function Asked(...)
+        local out = {}
+        for i, id in ipairs({ ... }) do
+            out[i] = "false"
+            for _, call in ipairs(cooldownCalls) do
+                if call == id then out[i] = "true" end
+            end
+        end
+        return table.concat(out, " ")
+    end
+    -- Said as one goes on while no pet that knows it is out (Spells.lua S:PetAway).
+    local AWAY = " It shows while a pet that knows it is out."
+    local NOTE = "shows while a pet that knows it is out"
+    local HUNTER_PETS = { { "wolf", WOLF }, { "boar", BOAR }, { "scorpid", SCORPID }, { "none" } }
+
+    -- A hunter with no pet out moves Growl and Scorpid Poison from the
+    -- Debuffs bar and the boar's Charge from the Buffs bar onto Cooldowns
+    -- and Utility 2: each moves, hidden, listed with the note, kept by the
+    -- pet's own spell, and shows with a pet that knows it, by the rank it
+    -- knows (the boar's Charge rank 1, the scorpid's Scorpid Poison rank 3).
+    Start(1, "HUNTER")
+    Out(nil)
+    B:AddBar("util")
+    local added = Said("debuff", "Growl") .. " | " .. Said("debuff", "Scorpid Poison") .. " | " .. Said("buff", "Charge")
+    Equal(added, "true Added Growl to Debuffs. | true Added Scorpid Poison to Debuffs. | true Added Charge to Buffs.",
+        "a hunter, no pet out: Growl and Scorpid Poison on the Debuffs bar, the boar's Charge on the Buffs bar")
+    Equal(Moved("debuff", "cd", "Growl") .. " | " .. Moved("debuff", "util2", "Scorpid Poison") .. " | " .. Moved("buff", "cd", "Charge")
+        .. " | " .. List("cd") .. " " .. List("util2") .. " [" .. List("debuff") .. List("buff") .. "] | " .. Custom("Growl") .. " "
+        .. Custom("Scorpid Poison") .. " " .. Custom("Charge") .. " | " .. Shows("cd") .. " " .. Shows("util2"),
+        "true Moved Growl to Cooldowns." .. AWAY .. " | true Moved Scorpid Poison to Utility 2." .. AWAY .. " | true Moved Charge to"
+        .. " Cooldowns." .. AWAY .. " | Growl,Charge Scorpid Poison [] | 14921 24587 27685 | / /",
+        "no pet out: each moved onto Cooldowns or Utility 2, by the pet's own spell, hidden, as each move says")
+    Equal(Listed("cd", "Growl") .. " | " .. Listed("cd", "Charge") .. " | " .. Listed("util2", "Scorpid Poison"),
+        "Growl ticked (" .. NOTE .. ") | Charge ticked (" .. NOTE .. ") | Scorpid Poison ticked (" .. NOTE .. ")",
+        "each listed on its bar's page, saying when it shows")
+    Equal(Each(HUNTER_PETS, { "Growl", "Charge", "Scorpid Poison" }),
+        "wolf: Growl/Growl / 14921,27685,24587 | boar: Growl,Charge/Growl,Charge / 14916,7371,24587"
+        .. " | scorpid: Growl/Growl Scorpid Poison/Scorpid Poison 14921,27685,24586 | none: / / 14921,27685,24587",
+        "each shows only while a pet that knows it is out (UNIT_PET), by the pet's own spell: the rank it knows, else the highest")
+    Equal(#printed, 0, "no errors")
+
+    -- The same three swapped with a cooldown bar's icon (Moonfire, Overpower
+    -- and Wrath, which go to the aura bars in their places).
+    Start(1, "HUNTER")
+    Out(nil)
+    B:AddBar("util")
+    B:Assign("Moonfire", "cd")
+    B:Assign("Overpower", "cd")
+    B:Assign("Wrath", "util2")
+    Said("debuff", "Growl")
+    Said("debuff", "Scorpid Poison")
+    Said("buff", "Charge")
+    Equal(Swapped("debuff", "Growl", "cd", "Moonfire") .. " | " .. Swapped("buff", "Charge", "cd", "Overpower") .. " | "
+        .. Swapped("debuff", "Scorpid Poison", "util2", "Wrath") .. " | " .. List("cd") .. " " .. List("util2") .. " " .. List("debuff")
+        .. " " .. List("buff") .. " | " .. Shows("cd") .. " " .. Shows("util2"),
+        "true nil -> true Swapped Growl and Moonfire. Growl shows while a pet that knows it is out. | true nil -> true Swapped Charge and"
+        .. " Overpower. Charge shows while a pet that knows it is out. | true nil -> true Swapped Scorpid Poison and Wrath. Scorpid"
+        .. " Poison shows while a pet that knows it is out. | Growl,Charge Scorpid Poison Moonfire,Wrath Overpower | / /",
+        "no pet out: each swaps onto Cooldowns or Utility 2, hidden, as each swap says")
+    Equal(Listed("cd", "Charge") .. " | " .. Each(HUNTER_PETS, { "Growl", "Charge", "Scorpid Poison" }),
+        "Charge ticked (" .. NOTE .. ") | wolf: Growl/Growl / 14921,27685,24587 | boar: Growl,Charge/Growl,Charge / 14916,7371,24587"
+        .. " | scorpid: Growl/Growl Scorpid Poison/Scorpid Poison 14921,27685,24586 | none: / / 14921,27685,24587",
+        "listed, then each shows only while a pet that knows it is out, by the pet's own spell")
+    Equal(#printed, 0, "no errors")
+
+    -- Saved by none of the pet's IDs (1.5.7 remembered a druid's Growl 6795
+    -- and Dash 1850): moved, or typed by name, onto Cooldowns, the pet's own
+    -- spell joins them, so it goes by that there, not the druid's.
+    Start(1, "HUNTER")
+    Out(nil)
+    ns.AddCustom("Growl", { 6795 })
+    B:SetAura("debuff", "Growl", true)
+    ns.AddCustom("Dash", { 1850 })
+    B:SetAura("buff", "Dash", true)
+    Equal(Moved("debuff", "cd", "Growl") .. " | " .. Said("cd", "Dash") .. " | " .. Custom("Growl") .. " " .. Custom("Dash") .. " | "
+        .. ns.Spells:Find("Growl").spellID .. " " .. ns.Spells:Find("Dash").spellID .. " | " .. Shows("cd") .. " | " .. List("buff"),
+        "true Moved Growl to Cooldowns." .. AWAY .. " | true Added Dash to Cooldowns." .. AWAY .. " | 6795,14921 1850,23110 | 14921 23110 | /"
+        .. " | Dash", "saved by a druid's IDs: moved or added by name onto Cooldowns with no pet out, by the pet's own spell")
+    Out(BOAR)
+    Equal(Shows("cd") .. " " .. ns.Spells:Find("Growl").spellID, "Growl/Growl 14916", "a boar out: Growl shows, by the boar's rank")
+    Equal(#printed, 0, "no errors")
+
+    -- On the Layout page itself: Growl held over the Cooldowns row and let
+    -- go, Scorpid Poison over Moonfire's icon there.
+    Start(1, "HUNTER")
+    Out(nil)
+    B:Assign("Moonfire", "cd")
+    Said("debuff", "Growl")
+    Said("debuff", "Scorpid Poison")
+    w:Select("layout")
+    local rows = w.pages.layout.rows
+    local function Tile(key, name)
+        for _, tile in ipairs(rows[key].tiles) do
+            if tile.name == name and S[tile].shown then return tile end
+        end
+    end
+    local growl = Held(Tile("debuff", "Growl"), rows.cd)
+    w:Refresh()
+    Equal(growl .. " | " .. Held(Tile("debuff", "Scorpid Poison"), rows.cd, Tile("cd", "Moonfire")) .. " | " .. List("cd") .. " "
+        .. List("debuff"), "Let go to move Growl to Cooldowns. | Moved Growl to Cooldowns." .. AWAY .. " | Let go to swap Scorpid Poison"
+        .. " and Moonfire. | Swapped Scorpid Poison and Moonfire. Scorpid Poison shows while a pet that knows it is out. | Scorpid"
+        .. " Poison,Growl Moonfire", "on the Layout page: moved, and swapped, with no pet out, each saying when it shows")
+    Equal(#printed, 0, "no errors")
+
+    -- A warlock with the imp out moves Seduction and Spell Lock (added by
+    -- name: the felhunter's 19647) from the Debuffs bar onto Cooldowns: the
+    -- same, each shown only with its demon.
+    Start(1, "WARLOCK")
+    Out(IMP)
+    B:AddBar("util")
+    Said("debuff", "Seduction")
+    Said("debuff", "Spell Lock")
+    Equal(Moved("debuff", "cd", "Seduction") .. " | " .. Moved("debuff", "cd", "Spell Lock") .. " | " .. List("cd") .. " [" .. List("debuff")
+        .. "] | " .. Custom("Seduction") .. " " .. Custom("Spell Lock") .. " | " .. Listed("cd", "Seduction") .. " | " .. Listed("cd", "Spell Lock"),
+        "true Moved Seduction to Cooldowns." .. AWAY .. " | true Moved Spell Lock to Cooldowns." .. AWAY .. " | Seduction,Spell Lock []"
+        .. " | 6358 19647 | Seduction ticked (" .. NOTE .. ") | Spell Lock ticked (" .. NOTE .. ")",
+        "a warlock, the imp out: Seduction and Spell Lock moved onto Cooldowns, hidden and listed, as each move says")
+    Equal(Each({ { "imp", IMP }, { "succubus", SUCCUBUS }, { "felhunter", FELHUNTER }, { "none" } }, { "Seduction", "Spell Lock" }),
+        "imp: / / 6358,19647 | succubus: Seduction/Seduction / 6358,19647 | felhunter: Spell Lock/Spell Lock / 6358,19647"
+        .. " | none: / / 6358,19647", "each shows only while its demon is out, by the demon's own spell")
+    Equal(#printed, 0, "no errors")
+
+    -- Spell Lock put on the Debuffs bar by its silence (24259), then typed
+    -- by name on Cooldowns: taken by the felhunter's spell, the felhunter
+    -- out (no note) or the imp (the note); the Debuffs bar still watches the
+    -- silence. The rank the felhunter knows when it's out.
+    Start(1, "WARLOCK")
+    Out(FELHUNTER)
+    local silence = Said("debuff", "24259") .. " " .. Custom("Spell Lock")
+    Equal(silence .. " | " .. Said("cd", "Spell Lock") .. " | " .. Custom("Spell Lock") .. " " .. ns.Spells:Find("Spell Lock").spellID .. " | "
+        .. Shows("cd") .. " | " .. List("debuff") .. " " .. Watches("Spell Lock", 24259) .. " " .. table.concat((B:Mine("debuff")), ","),
+        "true Added Spell Lock to Debuffs. 24259 | true Added Spell Lock to Cooldowns. | 24259,19647 19647 | Spell Lock/Spell Lock | Spell Lock"
+        .. " true Spell Lock", "Spell Lock on the Debuffs bar by 24259, the felhunter out: by name onto Cooldowns too, by its spell; the"
+        .. " Debuffs bar still watches the silence")
+    Out(IMP)
+    Equal(Shows("cd") .. " " .. table.concat((B:Mine("debuff")), ","), "/ Spell Lock", "the imp out: hidden on Cooldowns, kept on Debuffs")
+    Start(1, "WARLOCK")
+    Out(IMP)
+    Said("debuff", "24259")
+    Equal(Said("cd", "Spell Lock") .. " | " .. Custom("Spell Lock") .. " " .. ns.Spells:Find("Spell Lock").spellID .. " | " .. Shows("cd")
+        .. " | " .. Listed("cd", "Spell Lock"), "true Added Spell Lock to Cooldowns." .. AWAY .. " | 24259,19647 19647 | / | Spell Lock"
+        .. " ticked (" .. NOTE .. ")", "the imp out: taken by the felhunter's spell, hidden, as the add says")
+    Out({ [19244] = true })
+    Equal(Shows("cd") .. " " .. ns.Spells:Find("Spell Lock").spellID .. " " .. Asked(19244, 24259), "Spell Lock/Spell Lock 19244 true false",
+        "a felhunter with rank 1 only: shown, by that rank, never the silence")
+
+    -- The same Spell Lock moved, or swapped, off the Debuffs bar onto
+    -- Cooldowns with the imp out: by the felhunter's spell, never the silence.
+    Start(1, "WARLOCK")
+    Out(IMP)
+    Said("debuff", "24259")
+    Equal(Moved("debuff", "cd", "Spell Lock") .. " | " .. Custom("Spell Lock") .. " " .. ns.Spells:Find("Spell Lock").spellID .. " | "
+        .. List("cd") .. " [" .. List("debuff") .. "] | " .. Shows("cd"), "true Moved Spell Lock to Cooldowns." .. AWAY .. " | 24259,19647"
+        .. " 19647 | Spell Lock [] | /", "moved with the imp out: by the felhunter's spell, hidden, as the move says")
+    Out(FELHUNTER)
+    Equal(Shows("cd") .. " " .. ns.Spells:Find("Spell Lock").spellID .. " " .. Asked(19647, 24259), "Spell Lock/Spell Lock 19647 true false",
+        "the felhunter out: shown, its cooldown asked of the felhunter's spell, never the silence")
+    Start(1, "WARLOCK")
+    Out(IMP)
+    B:Assign("Moonfire", "cd")
+    Said("debuff", "24259")
+    Equal(Swapped("debuff", "Spell Lock", "cd", "Moonfire") .. " | " .. Custom("Spell Lock") .. " | " .. List("cd") .. " " .. List("debuff"),
+        "true nil -> true Swapped Spell Lock and Moonfire. Spell Lock shows while a pet that knows it is out. | 24259,19647 | Spell Lock"
+        .. " Moonfire", "swapped with the imp out: the same")
+    Out(FELHUNTER)
+    Equal(Shows("cd") .. " " .. ns.Spells:Find("Spell Lock").spellID, "Spell Lock/Spell Lock 19647", "and shown with the felhunter")
+    Equal(#printed, 0, "no errors")
+
+    -- Unchanged: a druid on a hunter's profile moving the hunter's Scorpid
+    -- Poison onto Cooldowns, or swapping it there, is turned away as before;
+    -- so is a warrior's Charge Stun, a debuff no one casts, and a hunter's
+    -- move of a bat's Sonic Blast with no bat out (no class list names it,
+    -- so it isn't your class's pet ability: judged as before).
+    Start(1, "HUNTER")
+    Out(nil)
+    B:Assign("Moonfire", "cd")
+    Said("debuff", "Scorpid Poison")
+    named[1264482] = "Sonic Blast"
+    Equal(Said("buff", "1264482") .. " | " .. Moved("buff", "cd", "Sonic Blast") .. " | " .. List("cd") .. " " .. List("buff"),
+        "true Added Sonic Blast to Buffs. | false Sonic Blast can't show on the Cooldowns bar for you. | Moonfire Sonic Blast",
+        "a hunter with no bat out moving the bat's Sonic Blast onto Cooldowns: turned away, as before")
+    named[1264482] = nil
+    _G.UnitClass = function() return "Druid", "DRUID" end
+    B:Changed()
+    Equal(Moved("debuff", "cd", "Scorpid Poison") .. " | " .. Swapped("debuff", "Scorpid Poison", "cd", "Moonfire") .. " | " .. List("cd")
+        .. " " .. List("debuff"), "false Scorpid Poison can't show on the Cooldowns bar for you. | false Scorpid Poison can't show on the"
+        .. " Cooldowns bar for you. -> false Scorpid Poison can't show on the Cooldowns bar for you. | Moonfire Scorpid Poison",
+        "a druid moving or swapping a hunter's pet ability onto Cooldowns: turned away, as before")
+    Start(1, "WARRIOR")
+    Out(nil)
+    B:Assign("Moonfire", "cd")
+    Said("debuff", "Charge Stun")
+    local STUN = "Charge Stun is a debuff on your target. It only goes on the Debuffs bar."
+    Equal(Moved("debuff", "cd", "Charge Stun") .. " | " .. Swapped("debuff", "Charge Stun", "cd", "Moonfire") .. " | " .. List("cd") .. " "
+        .. List("debuff"), "false " .. STUN .. " | false " .. STUN .. " -> false " .. STUN .. " | Moonfire Charge Stun",
+        "a warrior's Charge Stun onto Cooldowns: turned away, as before")
+    named[19244], named[19647] = nil, nil
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
 
 -- Regeneration: a mage's active spell, and a troll's passive racial. A troll
 -- warrior added its own (and a tauren's Endurance) before passives were
@@ -5293,6 +5971,61 @@ end)()
         "true true true Conductive Shield Coating", "joined: one icon for both hands, lit by the off hand's")
     ns.Joins("buff")["hand:off"] = nil
     B:Changed()
+
+    -- (A player's report.) On Forever a weapon holds two at once, a stone or
+    -- poison and an oil: the first way of asking names only one, the second
+    -- lists both, and each is read. Others only on a hand entry leaves an
+    -- enchant with its own entry on the bar (the poison) to that entry, so a
+    -- missing oil shows missing.
+    buff = B:Get("buff")
+    main, poison = buff.holders[1], buff.holders[3]
+    local listed = {}
+    local enchantInfo = C_Item.GetWeaponEnchantInfo
+    C_Item.GetWeaponEnchantInfo = function(hand)
+        local list = {}
+        for _, id in ipairs(hand == 0 and listed or {}) do
+            list[#list + 1] = { hasEnchant = true, enchantType = 2, enchantID = id, timeLeft = (id == 2628 and 600 or 1800) * 1000 }
+        end
+        return list
+    end
+    onHand[16], onHand[17], held[17] = 323, nil, 2092
+    listed = { 323, 2628 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. tostring(poison.enchantLit) .. " "
+        .. ("%d"):format(Last(main.enchant.cooldown, "SetCooldown", 2) or -1), "Brilliant Wizard Oil true true 600",
+        "both read: the main hand shows the oil (the sooner to end), the poison's entry lit too")
+    Equal(tostring(B:SetHandOthers("buff", "Instant Poison", true)) .. " " .. tostring(B:SetHandOthers("debuff", "hand:main", true)) .. " "
+        .. tostring(B:HandOthers("buff", "hand:main")), "false false false", "Others only: a hand entry's on a Buffs bar alone, off at first")
+    listed = { 323 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. Glows(main), "Instant Poison true false",
+        "unticked, as before: the poison alone lights the main hand")
+    Equal(tostring(B:SetHandOthers("buff", "hand:main", true)) .. " " .. tostring(ns.HandOthers("buff")["hand:main"]), "true true",
+        "ticked, kept in the profile")
+    main = B:Get("buff").holders[1]
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. Glows(main) .. " " .. tostring(poison.enchantLit),
+        "Main hand enchant false true true", "ticked: the poison has its own entry, so the main hand is missing, glowing")
+    listed = { 323, 2628 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. Glows(main), "Brilliant Wizard Oil true false",
+        "the oil on as well: lit as the oil")
+    -- Read by the second way alone, the same.
+    local paperDoll = _G.C_PaperDollInfo
+    _G.C_PaperDollInfo = nil
+    listed = { 2628, 323 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. tostring(poison.enchantLit), "Brilliant Wizard Oil true true",
+        "the second way alone: both read")
+    _G.C_PaperDollInfo = paperDoll
+    -- Unticked: as before.
+    B:SetHandOthers("buff", "hand:main", false)
+    listed = { 323 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. tostring(ns.HandOthers("buff")["hand:main"]),
+        "Instant Poison true nil", "unticked again: as before")
+    C_Item.GetWeaponEnchantInfo = enchantInfo
+    onHand[16] = nil
+    Change()
     _G.C_PaperDollInfo = nil
     Equal(#printed, 0, "no errors")
     w:Hide()
@@ -5321,6 +6054,220 @@ end)()
     local cd = B:Get("cd")
     Equal(cd.count .. " " .. tostring(cd.icons[1] and cd.icons[1].name) .. " " .. B:Get("util").count, "1 Sinister Strike 0",
         "a hand on Cooldowns or Utility: no icon there")
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
+-- Trinket 1 and Trinket 2 (a player's report): an entry for each trinket
+-- slot, for every class, in a Trinkets section of the Buffs page alone
+-- (seen working in game, so not marked experimental). Each watches the buff its trinket's use puts
+-- on you: the use spell's own (Earthstrike), or for one whose use casts
+-- another spell that buffs you, that one (Parachute-Priest Pager). Its aura
+-- slot is told those IDs, so the game lights it with its time left, as any
+-- buff's. No trinket, one with no use (or a passive), one whose use buffs no
+-- one (Gri'lek's Charm of Might) or one the game hasn't loaded yet: no
+-- spells, so it shows missing, its hint saying why; once loaded, read
+-- again. Your gear is read out of a fight only: changed in one, as it ends.
+;(function()
+    for _, class in ipairs({ "ROGUE", "WARLOCK", "PRIEST", "DRUID" }) do
+        Start(2, class)
+        local one, two = ns.Spells:Find("trinket:1"), ns.Spells:Find("trinket:2")
+        Equal(tostring(one and one.name) .. " " .. tostring(two and two.name) .. " | " .. tostring(one and one.line) .. " "
+            .. tostring(two and two.kind) .. " | " .. tostring(one and one.trinket) .. " " .. tostring(two and two.trinket) .. " | "
+            .. tostring(one and one.icon) .. " | " .. tostring(one and #one.ids) .. " " .. tostring(one and one.worn.why) .. " "
+            .. tostring(two and two.worn.why) .. " | " .. tostring(ns.Spells:ForMe("trinket:1", "buff")) .. " "
+            .. tostring(ns.Spells:ForMe("trinket:2", "buff")),
+            "Trinket 1 Trinket 2 | Trinkets trinket | 13 14 | Interface\\Paperdoll\\UI-PaperDoll-Slot-Trinket | 0 empty empty | true true",
+            class .. ": both trinket slots listed under Trinkets, no trinket worn, each resting on the slot's picture")
+        w:Hide()
+    end
+
+    -- The Buffs bar's alone, not taken or listed anywhere else.
+    Start(2, "ROGUE")
+    w:Select("cd")
+    Equal(tostring(Row("trinket:1") ~= nil) .. " " .. tostring(Row("trinket:2") ~= nil), "false false", "not listed on Cooldowns")
+    local ok, said = B:Add("cd", "Trinket 1")
+    local only = "false Trinket 1 only goes on the Buffs bar, where it lights while your trinket's buff is on you."
+    Equal(tostring(ok) .. " " .. tostring(said), only, "nor taken there, by its name")
+    Equal(tostring((B:Add("util", "Trinket 2"))) .. " " .. List("cd") .. List("util"), "false ", "nor on Utility")
+    w:Select("debuff")
+    Equal(tostring(Row("trinket:1") ~= nil) .. " " .. tostring((B:Add("debuff", "Trinket 1"))) .. " " .. List("debuff"),
+        "false false ", "nor on Debuffs")
+    w:Select("buff")
+    local row = Row("trinket:1")
+    Equal(tostring(row ~= nil) .. " | " .. tostring(row and S[row.rank].text) .. " | " .. tostring(row and row.check.hint(row.check)),
+        "true |  | Put Trinket 1 on Buffs. No trinket is in that slot, so it shows as missing.",
+        "listed on Buffs, saying why it would show missing")
+    row.check:Click()
+    Row("trinket:2").check:Click()
+    Equal(List("buff") .. " | " .. tostring(ns.CustomSpells()["Trinket 1"]), "trinket:1,trinket:2 | nil",
+        "both ticked onto Buffs, kept by their keys, nothing remembered")
+    row = Row("trinket:1")
+    Equal(row.check.hint(row.check), "Take Trinket 1 off Buffs. No trinket is in that slot, so it shows as missing.",
+        "ticked, its hint still says why it's missing")
+    ok, said = B:Transfer("buff", "cd", "trinket:1")
+    Equal(tostring(ok) .. " " .. tostring(said), only, "nor moved to Cooldowns once on")
+    w:Hide()
+
+    -- Trinkets and what each one's use casts, as the game says: Earthstrike
+    -- buffs you itself; Gri'lek's Charm of Might gives rage (no buff); the
+    -- Pager casts another spell that buffs you; Darkmoon Card: Heroism has
+    -- only an equip (if the game named it, a passive).
+    local uses = { [21180] = { "Earthstrike", 25891 }, [19951] = { "Blood Fury", 24571 },
+        [274761] = { "Parachute-Priest Pager", 1295272 }, [19287] = { "Heroism", 23689 } }
+    local itemSpell = C_Item.GetItemSpell
+    C_Item.GetItemSpell = function(id)
+        local use = uses[id]
+        if use then return use[1], use[2] end
+        return itemSpell(id)
+    end
+    local function IDs(set)
+        local list = {}
+        for id in pairs(set or {}) do list[#list + 1] = id end
+        table.sort(list)
+        return table.concat(list, ",")
+    end
+    local function Glows(holder)
+        local host = holder.glowHost
+        return tostring(host ~= nil and host.glow ~= nil and S[host.glow].shown == true and S[host].alpha ~= 0)
+    end
+    local function Shows(holder)
+        return table.concat({ tostring(holder:IsShown()), tostring(S[holder.icon].texture), tostring(S[holder.label].text), Glows(holder) }, " ")
+    end
+    local function Note() return ns.Spells:TrinketNote(ns.Spells:Find("trinket:1")) end
+    B:SetOption("buff", "showMissing", true)
+    B:SetGlowMissing("buff", "trinket:1", true)
+    trinket = 21180
+    GearChanged()
+    local buff = B:Get("buff")
+    local slots = S[buff.container].slots
+    local function Sent(i)
+        local slot = slots["b" .. i]
+        return IDs(buff.slotIDs[i]) .. " " .. tostring(slot.enabled) .. " " .. IDs(slot.enabled and slot.filters and slot.filters.includeSpellIDs)
+    end
+    Equal(Sent(1) .. " | " .. Shows(buff.holders[1]) .. " | " .. Sent(2) .. " | " .. Shows(buff.holders[2]),
+        "25891 true 25891 | true 777 Trinket 1 true |  false  | true Interface\\Paperdoll\\UI-PaperDoll-Slot-Trinket Trinket 2 false",
+        "Earthstrike worn: Trinket 1's slot told its buff, resting on the trinket's picture (glowing until it's up); Trinket 2: none")
+    Equal(Note() .. " |" .. ns.BuffBar:TrinketReport(buff, 1) .. " |" .. ns.BuffBar:TrinketReport(buff, 2),
+        "It lights while the buff from using Lucky Charm is on you, with its time left. | | trinket buff, item 21180, use 25891 |"
+        .. " | trinket empty", "its hint says what it lights for; /ccm debug says what was read")
+    -- A buff like any other: Warn at, Glow while active and Dim until Warn
+    -- at go on it (its edge slot: Tools/TestAuraContainers.lua).
+    B:SetWarnAt("buff", "trinket:1", 3)
+    B:SetGlowActive("buff", "trinket:1", true)
+    buff = B:Get("buff")
+    Equal(tostring(B:ActiveUsable("buff", "trinket:1")) .. " " .. tostring(B:DimUsable("buff", "trinket:1")) .. " | "
+        .. tostring(buff.warns[1]) .. " " .. tostring(buff.actives[1]), "true true | 3 true",
+        "Warn at and Glow while active on it, Dim until Warn at usable")
+    B:SetWarnAt("buff", "trinket:1", 0)
+    B:SetGlowActive("buff", "trinket:1", false)
+
+    -- Gri'lek's Charm of Might: its use buffs no one. Missing, glowing, saying why.
+    trinket = 19951
+    GearChanged()
+    buff = B:Get("buff")
+    Equal(Sent(1) .. " | " .. Shows(buff.holders[1]) .. " | " .. Note() .. " |" .. ns.BuffBar:TrinketReport(buff, 1),
+        " false  | true 777 Trinket 1 true | Using Lucky Charm puts no buff on you, so it shows as missing. | | trinket nobuff,"
+        .. " item 19951, use 24571", "a use that buffs no one: no spells, missing and glowing, its hint saying why")
+    -- No use at all; and a passive, had the game named its equip.
+    trinket = 11815
+    GearChanged()
+    local nouse = Sent(1) .. " | " .. Note()
+    trinket = 19287
+    says[23689] = true
+    GearChanged()
+    Equal(nouse .. " | " .. Sent(1) .. " | " .. Note() .. " | " .. ns.BuffBar:TrinketReport(B:Get("buff"), 1),
+        " false  | Lucky Charm has no use, so it shows as missing. |  false  | Lucky Charm has no use, so it shows as missing. |"
+        .. "  | trinket nouse, item 19287, use 23689", "no use, or only a passive one: missing, saying so")
+    -- The Pager: its buff is the spell its use casts.
+    trinket = 274761
+    GearChanged()
+    Equal(Sent(1), "1295661 true 1295661", "the Pager: its slot told the buff its use casts (1295661), not the use (1295272)")
+    -- Lifegiving Gem: its use (23725) is a dummy whose script casts the buff
+    -- (23782, more max health for 20 s), which the game's tables don't link.
+    uses[19341] = { "Gift of Life", 23725 }
+    trinket = 19341
+    GearChanged()
+    buff = B:Get("buff")
+    Equal(Sent(1) .. " | " .. Note() .. " |" .. ns.BuffBar:TrinketReport(buff, 1),
+        "23782 true 23782 | It lights while the buff from using Lucky Charm is on you, with its time left. | | trinket buff,"
+        .. " item 19341, use 23725", "Lifegiving Gem: its slot told the buff its use's script casts (23782), not \"puts no buff on you\"")
+
+    -- Not loaded yet: asked for, missing meanwhile, saying so; read again as
+    -- it arrives (another item arriving changes nothing).
+    local loaded, asked = {}, {}
+    C_Item.IsItemDataCachedByID = function(id) return loaded[id] == true end
+    C_Item.RequestLoadItemDataByID = function(id) asked[#asked + 1] = id end
+    trinket = 21670
+    GearChanged()
+    local waiting = Sent(1) .. " | " .. Note() .. " | " .. table.concat(asked, ",") .. " " .. tostring(ns.Spells:TrinketWaiting(21670))
+        .. " " .. tostring(ns.Spells:TrinketWaiting(118))
+    loaded[21670], uses[21670] = true, { "Badge of the Swarmguard", 26480 }
+    Settle("GET_ITEM_INFO_RECEIVED", 118)
+    local other = Sent(1)
+    Settle("GET_ITEM_INFO_RECEIVED", 21670)
+    Equal(waiting .. " | " .. other .. " | " .. Sent(1), " false  | The game hasn't loaded Lucky Charm yet. It's read again once it has."
+        .. " | 21670 true false |  false  | 26480 true 26480", "not loaded: asked for, missing, saying so; once it arrives, its buff")
+    C_Item.IsItemDataCachedByID, C_Item.RequestLoadItemDataByID = nil, nil
+
+    -- The game won't say what's worn: as last read.
+    local inventory = _G.GetInventoryItemID
+    _G.GetInventoryItemID = function(unit, slot)
+        if slot == 13 then return SECRET end
+        return inventory(unit, slot)
+    end
+    GearChanged()
+    Equal(Sent(1) .. " " .. tostring(ns.Spells:Find("trinket:1").worn.item), "26480 true 26480 21670",
+        "the game won't say what's worn: still as last read")
+    _G.GetInventoryItemID = inventory
+
+    -- Changed in a fight: nothing read or sent to the container then; read
+    -- and sent as it ends.
+    trinket = 21180
+    GearChanged()
+    local calls = containerCallsInCombat
+    lockdown = true
+    Fire("PLAYER_REGEN_DISABLED")
+    trinket = 19951
+    GearChanged()
+    local fought = Sent(1) .. " " .. tostring(ns.Spells:Find("trinket:1").worn.item) .. " " .. tostring(ns.Spells:TrinketsHeld()) .. " "
+        .. (containerCallsInCombat - calls)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fought .. " | " .. Sent(1) .. " " .. tostring(ns.Spells:Find("trinket:1").worn.item) .. " " .. tostring(ns.Spells:TrinketsHeld()),
+        "25891 true 25891 21180 true 0 |  false  19951 false",
+        "changed in a fight: still Earthstrike's, nothing read or sent; as it ends, read and sent (no buff now)")
+
+    -- Only when missing, on a packed bar: shown while its buff isn't on you.
+    trinket = 21180
+    B:SetOption("buff", "showMissing", false)
+    B:SetOnlyWhenMissing("buff", "trinket:1", true)
+    GearChanged()
+    buff = B:Get("buff")
+    local missing = tostring(buff.holders[1]:IsShown()) .. " " .. Sent(1)
+    PlayerAuras[25891] = true
+    Fire("UNIT_AURA", "player")
+    NextFrame(B)
+    Equal(missing .. " | " .. tostring(buff.holders[1]:IsShown()) .. " " .. tostring(slots.b1.enabled), "true 25891 true 25891 | false false",
+        "Only when missing: shown while Earthstrike's buff is off you, gone once it's on")
+    PlayerAuras[25891] = nil
+    B:SetOnlyWhenMissing("buff", "trinket:1", false)
+    C_Item.GetItemSpell = itemSpell
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
+-- A trinket's key on a cooldown bar (only an edited profile could put it
+-- there): no icon for it, which would be a spell icon with no spell.
+;(function()
+    Start(2, "ROGUE", { useBars = true, notesSeen = "dev", everyone = "Shared",
+        profiles = { Shared = { joins = { buff = {}, debuff = {} }, cd = { "trinket:1", "Sinister Strike" }, util = { "trinket:2" },
+            buff = {}, debuff = {} } } }, { { name = "Sinister Strike", subName = "Rank 1", spellID = 1752, iconID = 8 } })
+    B:Changed()
+    NextFrame(B)
+    local cd = B:Get("cd")
+    Equal(cd.count .. " " .. tostring(cd.icons[1] and cd.icons[1].name) .. " " .. B:Get("util").count, "1 Sinister Strike 0",
+        "a trinket's buff on Cooldowns or Utility: no icon there")
     Equal(#printed, 0, "no errors")
     w:Hide()
 end)()
@@ -8351,6 +9298,73 @@ Equal(tostring(Has(druid, "Moonfire")) .. " " .. tostring(Has(druid, "Faerie Fir
 Equal(tostring(Has(druid, "Wrath")) .. " " .. tostring(Has(druid, "Thorns")), "false false", "not a plain nuke or a buff")
 Equal(tostring(Has(ns.DEBUFFS.ROGUE, "Rupture")) .. " " .. tostring(Has(ns.DEBUFFS.WARRIOR, "Sunder Armor")), "true true",
     "every class has its own")
+-- A talent's debuff with a name of its own and no row (a player missed it):
+-- Improved Shadow Bolt's Shadow Vulnerability, a warlock's, as the mage's
+-- Fire Vulnerability is a mage's.
+Equal(tostring(Has(ns.DEBUFFS.WARLOCK, "Shadow Vulnerability")) .. " " .. tostring(ns.SPELL_CLASSES["Shadow Vulnerability"])
+    .. " " .. tostring(ns.RANKS["Shadow Vulnerability"] and ns.RANKS["Shadow Vulnerability"][1])
+    .. " " .. tostring(Has(ns.DEBUFFS.MAGE, "Shadow Vulnerability")) .. " " .. tostring(Has(ns.DEBUFFS.MAGE, "Fire Vulnerability")),
+    "true WARLOCK 17794 false true", "a warlock's Debuffs search offers Shadow Vulnerability")
+-- The rest an audit of every class found after that (2026-11-13): at least
+-- one per class, each in its own class's list only, and the class it belongs
+-- to; a tauren's War Stomp in every list (the search keeps it to tauren).
+do
+    local CLASS_ORDER = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
+    local function Lists(name)
+        local found = {}
+        for _, class in ipairs(CLASS_ORDER) do
+            if Has(ns.DEBUFFS[class], name) then found[#found + 1] = class end
+        end
+        return table.concat(found, " ")
+    end
+    local out = {}
+    for _, name in ipairs({ "Charge Stun", "Deep Wound", "Stun", "Consecration", "Freezing Trap", "Frost Trap", "Explosive Trap",
+        "Intimidation", "Deadly Poison", "Wound Poison", "Blackout", "Penance", "Frostbrand Attack", "Ignite", "Winter's Chill",
+        "Spell Lock", "Seduction", "Hurricane", "Starfire Stun" }) do
+        out[#out + 1] = name .. "=" .. Lists(name) .. "/" .. tostring(ns.SPELL_CLASSES[name])
+    end
+    Equal(table.concat(out, ", "), "Charge Stun=WARRIOR/WARRIOR, Deep Wound=WARRIOR/WARRIOR, Stun=PALADIN/PALADIN,"
+        .. " Consecration=PALADIN/PALADIN, Freezing Trap=HUNTER/HUNTER, Frost Trap=HUNTER/HUNTER, Explosive Trap=HUNTER/HUNTER,"
+        .. " Intimidation=HUNTER/HUNTER, Deadly Poison=ROGUE/ROGUE, Wound Poison=ROGUE/ROGUE, Blackout=PRIEST/PRIEST,"
+        .. " Penance=PRIEST/PRIEST, Frostbrand Attack=SHAMAN/SHAMAN, Ignite=MAGE/MAGE, Winter's Chill=MAGE/MAGE,"
+        .. " Spell Lock=WARLOCK/WARLOCK, Seduction=WARLOCK/WARLOCK, Hurricane=DRUID/DRUID, Starfire Stun=DRUID/DRUID",
+        "the debuffs the search missed, each in its own class's list only")
+    Equal(Lists("War Stomp") .. " " .. tostring(ns.SPELL_CLASSES["War Stomp"]) .. " " .. ns.SPELL_RACES["War Stomp"],
+        "WARRIOR PALADIN HUNTER ROGUE PRIEST SHAMAN MAGE WARLOCK DRUID nil 6", "War Stomp in every class's list, a tauren's alone")
+    -- Each lit by its own debuff's ID: a poison's on the target (not the
+    -- craft alone), a trap's on whatever springs it, Turn Evil's (the talent
+    -- turns Turn Undead into it, 30 sec), and the IDs two listed names lacked:
+    -- Frost and Ice Armor's Chilled, Nature's Grasp's Entangling Roots.
+    local function Holds(name, ...)
+        local seen, out = {}, {}
+        for _, id in ipairs(ns.RANKS[name] or {}) do seen[id] = true end
+        for _, id in ipairs({ ... }) do out[#out + 1] = tostring(seen[id] == true) end
+        return table.concat(out, " ")
+    end
+    Equal(Holds("Deadly Poison", 2818, 2835) .. " " .. tostring(ns.AURA_ONLY[2818]) .. " | " .. Holds("Freezing Trap", 3355, 14308, 14309)
+        .. " " .. Holds("Frost Trap", 13810) .. " | " .. Holds("Turn Evil", 1328374, 1328373, 1328372) .. " " .. ns.COOLDOWNS[1328372]
+        .. " " .. tostring(Has(ns.DEBUFFS.PALADIN, "Turn Evil")) .. " | " .. Holds("Chilled", 12484, 6136, 7321)
+        .. " | " .. Holds("Entangling Roots", 339, 19975, 19974, 19973, 19972, 19971, 19970),
+        "true true nil | true true true true | true true true 30 true | true true true | true true true true true true true",
+        "each by its own debuff's ID: Deadly Poison's, a trap's, Turn Evil's, Chilled's and Entangling Roots' other ones")
+    -- Those debuff IDs, and the stun and root a pet and a trap give a
+    -- hunter's Intimidation and Entrapment, are listed as no one's cast
+    -- (ns.DEBUFF_AURAS), so no cooldown bar goes by one; the spells and
+    -- talents beside them aren't.
+    local aura = ns.DEBUFF_AURAS or {}
+    Equal(tostring(aura[7922]) .. " " .. tostring(aura[12579]) .. " " .. tostring(aura[2818]) .. " " .. tostring(aura[1328372]) .. " "
+        .. tostring(aura[24394]) .. " " .. tostring(aura[19185]) .. " | " .. tostring(aura[19577]) .. " " .. tostring(aura[19184]) .. " "
+        .. tostring(aura[11180]) .. " " .. tostring(aura[2835]) .. " " .. tostring(aura[13809]) .. " " .. tostring(aura[1328370]),
+        "true true true true true true | nil nil nil nil nil nil", "debuffs no one casts listed; the spells and talents beside them not")
+    -- Two no one can give are gone: Long Daze (Improved Pummel is in no
+    -- warrior's tree) and Curse of Idiocy (nothing teaches it); and Enchanted
+    -- Flare, a Season of Discovery tome's (Forever has no runes).
+    Equal(tostring(Has(ns.DEBUFFS.WARRIOR, "Long Daze")) .. " " .. tostring(ns.RANKS["Long Daze"]) .. " "
+        .. tostring(ns.SPELL_CLASSES["Long Daze"]) .. " | " .. tostring(Has(ns.DEBUFFS.WARLOCK, "Curse of Idiocy")) .. " "
+        .. tostring(ns.RANKS["Curse of Idiocy"]) .. " " .. tostring(ns.SPELL_CLASSES["Curse of Idiocy"]) .. " | "
+        .. tostring(Lists("Enchanted Flare")) .. tostring(ns.RANKS["Enchanted Flare"]),
+        "false nil nil | false nil nil | nil", "Long Daze, Curse of Idiocy and Enchanted Flare are offered to no one")
+end
 Equal(ns.RANKS["Jeff Dummy 1"], nil, "no test dummies")
 -- Each race's spells, by race ID, from the same data: racials, passive ones
 -- too, and class spells only some races get. Spells any race can have
@@ -8471,6 +9485,40 @@ _G.UnitRace = function() return "Undead", "Scourge", 5 end
 search:SetText("weakness")
 S[search].scripts.OnTextChanged(search, true)
 Equal(lp.found[1].spell .. " " .. tostring(S[lp.found[2]].shown), "Touch of Weakness false", "your race's debuffs only")
+-- The debuffs an audit found (2026-11-13). War Stomp is in every class's
+-- list: a tauren warrior finds it, an orc warrior doesn't. A warrior finds
+-- Deep Wound, a mage doesn't. And each lights for its other IDs on the
+-- Debuffs bar: a paladin's Turn Undead for Turn Evil's (the talent turns one
+-- into the other), a druid's Entangling Roots for Nature's Grasp's roots, a
+-- mage's Chilled for Frost and Ice Armor's chill.
+do
+    local function First(text)
+        search:SetText(text)
+        S[search].scripts.OnTextChanged(search, true)
+        return tostring(S[lp.found[1]].shown and lp.found[1].spell)
+    end
+    _G.UnitClass = function() return "Warrior", "WARRIOR" end
+    _G.UnitRace = function() return "Tauren", "Tauren", 6 end
+    local tauren = First("stomp")
+    _G.UnitRace = function() return "Orc", "Orc", 2 end
+    local orc, warrior = First("stomp"), First("deep wound")
+    _G.UnitClass = function() return "Mage", "MAGE" end
+    Equal(tauren .. " " .. orc .. " | " .. warrior .. " " .. First("deep wound"), "War Stomp false | Deep Wound false",
+        "War Stomp for a tauren only; Deep Wound for a warrior only")
+    local function Watches(name, ...)
+        local entry, seen, out = ns.Spells:Find(name), {}, {}
+        for _, id in ipairs(entry and entry.ids or {}) do seen[id] = true end
+        for _, id in ipairs({ ... }) do out[#out + 1] = tostring(seen[id] == true) end
+        return table.concat(out, " ")
+    end
+    local chilled = tostring(B:Add("debuff", "Chilled")) .. " " .. Watches("Chilled", 12484, 6136, 7321)
+    _G.UnitClass = function() return "Paladin", "PALADIN" end
+    local turn = tostring(B:Add("debuff", "Turn Undead")) .. " " .. Watches("Turn Undead", 2878, 10326, 1328374, 1328373, 1328372)
+    _G.UnitClass = function() return "Druid", "DRUID" end
+    Equal(turn .. " | " .. tostring(B:Add("debuff", "Entangling Roots")) .. " " .. Watches("Entangling Roots", 339, 19975, 19970)
+        .. " | " .. chilled, "true true true true true true | true true true true | true true true true",
+        "Turn Undead lit by Turn Evil's turn, Entangling Roots by Nature's Grasp's roots, Chilled by Frost and Ice Armor's")
+end
 search:SetText("")
 S[search].scripts.OnEditFocusLost(search)
 _G.UnitClass = function() return "Druid", "DRUID" end

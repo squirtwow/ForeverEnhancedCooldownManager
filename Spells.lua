@@ -101,6 +101,10 @@ local following = {}
 -- data. One rank's ID is enough: ns.AURA_FAMILIES has the buff's other ranks.
 -- (Windfury and Flametongue Totem's are in ns.SPELL_AURAS, from the same data.
 -- Totems that give you no buff, Searing Totem say, have nothing to light.)
+-- And Turn Undead's with the Turn Evil talent (2026-11-13, an audit after a
+-- player missed Shadow Vulnerability): the talent turns each rank into Turn
+-- Evil's of that rank (1328374 to 1328372, checked against build 70938's
+-- data), so the target carries those instead.
 local EXTRA_IDS = {
     ["Judgement of the Crusader"] = { 21183 },
     ["Charge"] = { 7922, 25999 },
@@ -109,6 +113,7 @@ local EXTRA_IDS = {
     ["Nature's Grasp"] = { 19970, 19971, 19972, 19973, 19974, 19975 },
     ["Frost Armor"] = { 6136 },
     ["Ice Armor"] = { 7321 },
+    ["Turn Undead"] = { 1328374, 1328373, 1328372 },
     ["Strength of Earth Totem"] = { 8076 },
     ["Stoneskin Totem"] = { 8072 },
     ["Grace of Air Totem"] = { 8836 },
@@ -142,7 +147,7 @@ function S:ByName(map, name)
     return ByName(map, name)
 end
 
-S.LINES = { procs = "Procs", items = "Items", added = "Added", totems = "Totems", weapons = "Weapon enchants" }
+S.LINES = { procs = "Procs", items = "Items", added = "Added", totems = "Totems", weapons = "Weapon enchants", trinkets = "Trinkets" }
 
 -- Healthstones and potions come in ranks, and you carry whichever you have:
 -- a family is one entry for every rank of one, showing the best you carry.
@@ -607,6 +612,137 @@ function S:UsesShards()
     return class == "WARLOCK"
 end
 
+-- Trinket 1 and Trinket 2 (a player's report: no trinket buff and its time
+-- on the Buffs page), for every class, in a Trinkets section of their own,
+-- the Buffs bar's alone: each is the buff your trinket in that slot puts on
+-- you as you use it, lit with its time left while it's up (the game's own
+-- icon for it, as any buff's), greyed while it isn't. Kept on a bar as
+-- "trinket:1" and "trinket:2" (ProfileShare.lua knows them); each rests on
+-- its trinket's picture, or the slot's with none there. The buff is the use
+-- spell's own (the spell C_Item.GetItemSpell names) for every trinket in
+-- Forever's data (build 70888) but four, whose use casts another spell that
+-- buffs you (TRINKET_BUFFS; Lifegiving Gem's by the game's script, which the
+-- tables don't show, so kept by hand in the tool). The uses in
+-- TRINKET_NO_BUFF put no buff on you (a summon, a heal, mana, a debuff on
+-- your target, a buff on your pet, a 0.1 second immunity): that entry stays
+-- missing and its hint says why. Printed by node Tools/MakeTrinketBuffs.mjs.
+local TRINKET_BUFFS = {
+    [23725] = { 23782 }, -- Lifegiving Gem
+    [467499] = { 467498 }, -- item 230249
+    [1295272] = { 1295661 }, -- Parachute-Priest Pager
+    [1309685] = { 1309728 }, -- Satchel of Potions
+}
+local TRINKET_NO_BUFF = {}
+for _, id in ipairs({
+    835, 1139, 4073, 5579, 6251, 8312, 8342, 8344, 9515, 11209,
+    13006, 13120, 13237, 14537, 15712, 17283, 17712, 18307, 18308, 18805,
+    19804, 21954, 22563, 22564, 22891, 22999, 23064, 23075, 23133, 23134,
+    23273, 23274, 23276, 23277, 23359, 23442, 23453, 23595, 23720, 24354,
+    24531, 24532, 24571, 24854, 24865, 25112, 25892, 26066, 26391, 26789,
+    28760, 30161, 435895, 435900, 436069, 436342, 436373, 436381, 436383, 438273,
+    438305, 443265, 459221, 461084, 461231, 462214, 462358, 465789, 467459, 467525,
+    467720, 468458, 474386, 1214206, 1214214, 1219506, 1226215, 1230980, 1232057, 1233908,
+    1269268, 1269339, 1270941, 1292252, 1293306, 1294063, 1294617, 1295270, 1295271, 1296564,
+    1296664, 1298497, 1299440, 1299443, 1302359, 1308917, 1315190, 1315557, 1315849, 1317424,
+    1317740, 1318944, 1319256, 1320579,
+}) do TRINKET_NO_BUFF[id] = true end
+
+local TRINKET_ENTRIES = {
+    { key = "trinket:1", name = "Trinket 1", slot = 13 },
+    { key = "trinket:2", name = "Trinket 2", slot = 14 },
+}
+S.TRINKET_KEYS = {}
+for _, trinket in ipairs(TRINKET_ENTRIES) do S.TRINKET_KEYS[trinket.key] = true end
+local TRINKET_ICON = "Interface\\Paperdoll\\UI-PaperDoll-Slot-Trinket"
+
+-- What each trinket slot held as last read, by slot: { why, item, name,
+-- icon, spell, ids }. why: "empty" (nothing there), "nouse" (no use, or
+-- one that's passive), "nobuff" (its use puts no buff on you), "loading"
+-- (the game hasn't loaded it yet: asked to, and read again once it has,
+-- Bars.lua) or "buff" (ids: its buff's IDs). Read out of a fight only: in
+-- one the last read stays, and held says to read again as it ends
+-- (Bars.lua); one the game won't say about keeps the last read too.
+local worn, held = {}, false
+
+local function ReadTrinket(slot)
+    local id = GetInventoryItemID("player", slot)
+    if not Open(id) then return nil end
+    if id == nil then return { why = "empty" } end
+    local api = C_Item and C_Item.GetItemSpell
+    if type(id) ~= "number" or type(api) ~= "function" then return nil end
+    local texture = GetInventoryItemTexture("player", slot)
+    local read = { item = id, name = ItemName(id, GetInventoryItemLink("player", slot)), icon = Open(texture) and texture or nil }
+    local ok, _, spell = pcall(api, id)
+    if not (ok and Open(spell)) then return nil end
+    if type(spell) ~= "number" then
+        local cached = C_Item.IsItemDataCachedByID
+        local loaded = type(cached) ~= "function" or cached(id)
+        if Open(loaded) and loaded == false then
+            if type(C_Item.RequestLoadItemDataByID) == "function" then pcall(C_Item.RequestLoadItemDataByID, id) end
+            read.why = "loading"
+        else
+            read.why = "nouse"
+        end
+        return read
+    end
+    read.spell = spell
+    if TRINKET_NO_BUFF[spell] then
+        read.why = "nobuff"
+        return read
+    end
+    -- (A trinket's own passive, should the game name one: no use.)
+    local passive = C_Spell and C_Spell.IsSpellPassive
+    if type(passive) == "function" then
+        local asked, is = pcall(passive, spell)
+        if asked and Open(is) and is == true then
+            read.why = "nouse"
+            return read
+        end
+    end
+    read.why, read.ids = "buff", BuffIDs(nil, TRINKET_BUFFS[spell] or { spell })
+    return read
+end
+
+local function AddTrinkets()
+    local fighting = InCombatLockdown()
+    held = false
+    for _, trinket in ipairs(TRINKET_ENTRIES) do
+        local read = not fighting and ReadTrinket(trinket.slot) or nil
+        if read then worn[trinket.slot] = read end
+        if fighting then held = true end
+        read = worn[trinket.slot] or { why = "unread" }
+        Add({ key = trinket.key, name = trinket.name, kind = "trinket", line = S.LINES.trinkets, trinket = trinket.slot,
+            ids = read.ids or {}, icon = read.icon or TRINKET_ICON, rankText = "", worn = read })
+    end
+end
+
+-- Whether a trinket slot was last read in a fight, so isn't read yet: read
+-- again as it ends (Bars.lua).
+function S:TrinketsHeld()
+    return held
+end
+
+-- Whether a trinket worn now waits for the game to load it (its use unknown):
+-- read again once it has (GET_ITEM_INFO_RECEIVED, Bars.lua).
+function S:TrinketWaiting(itemID)
+    for _, read in pairs(worn) do
+        if read.why == "loading" and read.item == itemID then return true end
+    end
+    return false
+end
+
+-- What a trinket entry lights for, or why it can't: its row's hint (BarPage.lua).
+function S:TrinketNote(entry)
+    local read = entry and entry.worn or {}
+    local why, name = read.why, read.name
+    if why == "buff" then return "It lights while the buff from using " .. name .. " is on you, with its time left." end
+    if why == "empty" then return "No trinket is in that slot, so it shows as missing." end
+    if why == "nouse" then return name .. " has no use, so it shows as missing." end
+    if why == "nobuff" then return "Using " .. name .. " puts no buff on you, so it shows as missing." end
+    if why == "loading" then return "The game hasn't loaded " .. name .. " yet. It's read again once it has." end
+    return "It lights while the buff from using the trinket in that slot is on you. Your trinkets are read out of combat."
+end
+
 local function ScanItems()
     for index, slot in ipairs(TRINKETS) do
         local itemID = GetInventoryItemID("player", slot)
@@ -625,16 +761,19 @@ local function ScanItems()
     for _, family in ipairs(FAMILIES) do
         if not (family.mana and NO_MANA[class]) then AddFamily(family) end
     end
-    if not (C_Container and C_Container.GetContainerNumSlots) then return end
-    for bag = 0, BAGS do
-        for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
-            local info = C_Container.GetContainerItemInfo(bag, slot)
-            local itemID = info and info.itemID
-            if itemID and not byKey["item:" .. itemID] and C_Item.GetItemSpell(itemID) and not NoCooldown(itemID) then
-                AddItem(itemID, info.hyperlink, info.iconFileID)
+    if C_Container and C_Container.GetContainerNumSlots then
+        for bag = 0, BAGS do
+            for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                local itemID = info and info.itemID
+                if itemID and not byKey["item:" .. itemID] and C_Item.GetItemSpell(itemID) and not NoCooldown(itemID) then
+                    AddItem(itemID, info.hyperlink, info.iconFileID)
+                end
             end
         end
     end
+    -- Your trinkets' buffs, after the items (the Buffs page lists no items).
+    AddTrinkets()
 end
 
 -- Whether you or your pet know any of these spells: nil while the game
@@ -660,11 +799,40 @@ local function Knows(ids)
     return false
 end
 
+-- Whether a spell ID in ns.RANKS is a debuff no one casts, there for the
+-- Debuffs bar alone (ns.DEBUFF_AURAS: Charge Stun, Winter's Chill's, a
+-- poison's on the target). No other bar goes by one: it never cools down.
+local function DebuffAura(id)
+    return ns.DEBUFF_AURAS ~= nil and ns.DEBUFF_AURAS[id] == true
+end
+
+-- A pet's ability that a class list names, for your class (ns.PET_SPELLS,
+-- from the game data): a warlock's demon's (the succubus's Seduction, the
+-- felhunter's Spell Lock) or a hunter's pet's (Growl, Bite, a boar's
+-- Charge, a cat's Claw...): the pet's own spell IDs, or nil. Squirt's call
+-- (2026-11-13), once the debuff audit made both demon spells warlock names,
+-- then for a hunter's pets too ("Yea plz same as lock"): on a cooldown bar
+-- each shows only while that pet is out (S:ForMe) and goes by the pet's
+-- spell. Only your class's: a druid's Growl, Claw or Dash and a warrior's
+-- Charge are their own spells. While the game won't say your class, a name
+-- only that class has (Seduction, a pet's Bite), as before.
+local function PetSpells(name)
+    local pets = ns.PET_SPELLS
+    if pets == nil or type(name) ~= "string" then return nil end
+    local _, class = UnitClass("player")
+    if Open(class) and type(class) == "string" then return pets[class] and pets[class][name] or nil end
+    for owner, spells in pairs(pets) do
+        if spells[name] and ns.SPELL_CLASSES and ns.SPELL_CLASSES[name] == owner then return spells[name] end
+    end
+    return nil
+end
+
 -- The highest rank of these spells that you or your pet know, or nil: a
--- hunter typing Growl means his pet's, not a druid's.
+-- hunter typing Growl means his pet's, not a druid's. Never a debuff no one
+-- casts (the game may say you know Turn Evil's turn: the talent counts).
 local function HighestKnown(ids)
     for i = #ids, 1, -1 do
-        if Knows({ ids[i] }) == true then return ids[i] end
+        if not DebuffAura(ids[i]) and Knows({ ids[i] }) == true then return ids[i] end
     end
     return nil
 end
@@ -674,12 +842,41 @@ end
 -- goes by. Where a druid's or warrior's spell and a pet's share a name
 -- (Growl, Charge), the highest ranks are the pet's; a helper listed after
 -- the spell itself (Frenzied Regeneration's 22845) has no cooldown to show.
+-- A debuff no one casts only when the name has nothing else (Charge Stun):
+-- Winter's Chill goes by its talent, Wound Poison by the craft.
 local function Highest(ids)
     local cooldowns = ns.COOLDOWNS or {}
+    local last
     for i = #ids, 1, -1 do
-        if cooldowns[ids[i]] then return ids[i] end
+        if not DebuffAura(ids[i]) then
+            if cooldowns[ids[i]] then return ids[i] end
+            last = last or ids[i]
+        end
     end
-    return ids[#ids]
+    return last or ids[#ids]
+end
+
+-- The pet's own spell your class's pet ability (PetSpells) takes with it
+-- onto a cooldown bar when it was added with none of the pet's IDs, so it
+-- goes by the pet's spell there (Tracked), never a debuff no one casts:
+-- Spell Lock put on the Debuffs bar by its silence 24259, a hunter's Growl
+-- saved in 1.5.7 by a druid's 6795. The rank you or your pet know, else the
+-- highest, as adding the name there new gives (S:Resolve). Nil for
+-- anything else: no bar or an aura bar, an entry pinned to one ID, or one
+-- with a pet's ID already. (A review of the demon change, 2026-11-13: Spell
+-- Lock on the Debuffs bar by 24259 was turned away from Cooldowns by name,
+-- "is a debuff on your target", felhunter out or not.)
+local function PetJoin(entry, bar)
+    if not (entry and entry.added and not entry.pinned and bar ~= nil) then return nil end
+    if ns.AURA_BARS and ns.AURA_BARS[bar] then return nil end
+    local pet = PetSpells(entry.name)
+    if not pet then return nil end
+    for _, id in ipairs(entry.added) do
+        for _, own in ipairs(pet) do
+            if id == own then return nil end
+        end
+    end
+    return HighestKnown(pet) or Highest(pet)
 end
 
 -- The spell an added entry's cooldown, range and tooltip go by: the ID it
@@ -688,17 +885,30 @@ end
 -- that one, the highest rank of its name you do (the pet out now has
 -- another rank, or a druid's Growl was saved by name), else the one added.
 -- One the game data no longer lists under that name (the teaching spell a
--- pet ability was saved by before) gives way to the data's highest rank.
+-- pet ability was saved by before) gives way to the data's highest rank,
+-- unless that's a debuff no one casts: the felhunter's Spell Lock, added by
+-- its ID, isn't its silence. A pet's ability (PetSpells) goes by the rank
+-- of the pet's own spell you or your pet know (Spell Lock's rank 1 while the
+-- felhunter has no rank 2), not its name's in ns.RANKS (the silence), and
+-- one of the pet's own it was added with stays while no pet knows it (the
+-- fox's Trickster's Dance: ns.RANKS holds the hunter's Beast Training
+-- spell, which has no cooldown).
 local function Tracked(name, added)
     local id = added[#added]
     local ranks = ns.RANKS and ns.RANKS[name]
     if not ranks or Knows({ id }) == true then return id end
-    local known = HighestKnown(ranks)
+    local pet = PetSpells(name)
+    local known = HighestKnown(pet or ranks)
     if known then return known end
+    for _, rank in ipairs(pet or {}) do
+        if rank == id then return id end
+    end
     for _, rank in ipairs(ranks) do
         if rank == id then return id end
     end
-    return Highest(ranks)
+    local highest = Highest(ranks)
+    if DebuffAura(highest) then return id end
+    return highest
 end
 
 -- Anything on a bar that isn't in your spellbook or bags right now: spells
@@ -924,20 +1134,24 @@ end
 -- the game data or the game says so. A passive has nothing to track on the
 -- Cooldowns or Utility bar, nor on the Buffs or Debuffs bar unless it gives
 -- an aura of its own there that comes and goes (Plainsrunning's speed buff,
--- a talent's proc of the same name) or is one (a totem's buff).
+-- a talent's proc of the same name) or is one (a totem's buff). A debuff no
+-- one casts (DebuffAura: Charge Stun) is tracked the same way, as the
+-- debuff a passive gives: on the Debuffs bar only.
 local function Untracked(name, ids, bar)
     if type(ids) ~= "table" or #ids == 0 then return nil end
     for _, id in ipairs(ids) do
-        if IsPassive(id) ~= true then return nil end
+        if not DebuffAura(id) and IsPassive(id) ~= true then return nil end
     end
-    local buff, debuff = false, false
+    local buff, debuff, passive = false, false, false
     for _, id in ipairs(ids) do
         buff = buff or (ns.PASSIVE_BUFFS ~= nil and ns.PASSIVE_BUFFS[id] ~= nil)
-        debuff = debuff or (ns.PASSIVE_DEBUFFS ~= nil and ns.PASSIVE_DEBUFFS[id] ~= nil)
+        debuff = debuff or DebuffAura(id) or (ns.PASSIVE_DEBUFFS ~= nil and ns.PASSIVE_DEBUFFS[id] ~= nil)
+        passive = passive or not DebuffAura(id)
     end
     -- (An extra bar goes by its kind: Buffs 2 as Buffs.)
     local kind = ns.BAR_KIND and ns.BAR_KIND[bar] or bar
     if (kind == "buff" and buff) or (kind == "debuff" and debuff) then return nil end
+    if not passive then return name .. " is a debuff on your target. It only goes on the Debuffs bar." end
     if buff then return name .. " is passive. Only its buff can be tracked, on the Buffs bar." end
     if debuff then return name .. " is passive. Only its debuff can be tracked, on the Debuffs bar." end
     return name .. " is passive, so there's nothing to track."
@@ -969,9 +1183,12 @@ end
 -- The same for what "Add by name or spell ID" finds, as it would go on a bar:
 -- judged by the ID dragged or typed, else the IDs it would be remembered by,
 -- else the entry's. A troll mage dragging the troll's Regeneration is told
--- it's passive, though the mage's Regeneration is in the spellbook.
+-- it's passive, though the mage's Regeneration is in the spellbook. Your
+-- pet's ability added before by none of the pet's IDs (Spell Lock by its
+-- silence) is judged on a cooldown bar by the pet's spell it takes there
+-- (S:Resolve with the bar).
 function S:AddNote(text, bar)
-    local found, ids, id = self:Resolve(text)
+    local found, ids, id = self:Resolve(text, bar)
     if not found then return nil end
     local entry = byKey[found]
     return Untracked(entry and entry.name or found, (id and { id }) or ids or Judged(found), bar)
@@ -1050,8 +1267,8 @@ end
 -- it off (another class's or race's spell, or on a cooldown bar a buff's
 -- ID no one learns, while the game says you don't know it). One you or
 -- your pet don't know yet (a talent not taken, a demon's spell while
--- another demon is out) still goes on, and shows once you do, as it
--- always did.
+-- another demon is out, a pet's ability with no pet out) still goes on,
+-- and shows once you do, as it always did.
 function S:ForMe(key, bar, remember)
     if type(key) ~= "string" then return false end
     if key == "ammo" then return self:UsesAmmo() end
@@ -1080,6 +1297,24 @@ function S:ForMe(key, bar, remember)
         -- While the game won't say your class, it's yours, as it always was.
         local _, class = UnitClass("player")
         if Holds((classes or "") .. " " .. (procs or ""), class) == false then return false end
+        -- A pet's ability on a cooldown bar (PetSpells: a warlock's
+        -- succubus's Seduction or felhunter's Spell Lock, a hunter's pet's
+        -- Growl, Bite or a boar's Charge) shows only while you or your pet
+        -- know it, so while a pet that has it is out, as a demon's did before
+        -- the debuff audit gave it a class (Squirt, 2026-11-13: "only show if
+        -- that pet is out and it's on the bar", then "Yea plz same as lock"
+        -- for a hunter's pets, which showed for every hunter, pet out or
+        -- not). Another pet out, or none: hidden, kept in the profile. About
+        -- to be added (remember), it goes on whichever pet is out, or none.
+        -- The IDs it was added with count too (a rank the data doesn't have
+        -- yet). A druid's Growl and a warrior's Charge aren't these.
+        local pet = not remember and not (ns.AURA_BARS and ns.AURA_BARS[bar]) and PetSpells(name)
+        if pet then
+            local known = {}
+            for _, id in ipairs(pet) do known[#known + 1] = id end
+            for _, id in ipairs(entry and entry.added or {}) do known[#known + 1] = id end
+            return Knows(known) ~= false
+        end
         if not races then return true end
     end
     if races then
@@ -1090,7 +1325,7 @@ function S:ForMe(key, bar, remember)
     end
     -- Anything else not in your spellbook isn't yours, unless added by name
     -- or ID. On the Buffs or Debuffs bar that stays, as it always did: a
-    -- talent's or item's effect (Improved Shadow Bolt's Shadow Vulnerability)
+    -- talent's or item's effect (an item's Armor Shatter)
     -- is never a spell you know, and only lights while it's up. On a cooldown
     -- bar it's yours once you or your pet know it (and while the game won't
     -- say). About to be added there, only an aura's ID no one ever learns is
@@ -1116,6 +1351,45 @@ function S:Leftover(key, bar)
     if ByName(ns.SPELL_CLASSES, name) then return false end
     if ProcClasses()[name] or ByName(ns.SPELL_RACES, name) then return false end
     return OnlyAuras(entry and entry.added)
+end
+
+-- Whether an entry on a cooldown bar is your class's pet ability hidden now
+-- only because no pet that knows it is out (S:ForMe's pet rule: a hunter's
+-- Growl with no pet, a boar's Charge with a wolf out, a warlock's Spell Lock
+-- with the imp). It's still yours: the bar's page lists it, saying so, to
+-- be unticked, Clear takes it, and adding it again says why it isn't
+-- showing (Bars.lua). A review of the hunter change (2026-11-13) found a
+-- boar's Charge stuck in the profile once the boar was gone, with no row,
+-- no icon and no Clear to take it off. A pet's ability no class list names
+-- (the voidwalker's Consume Shadows) isn't one: as before, it could be
+-- another character's.
+function S:PetAway(key, bar)
+    if type(key) ~= "string" or (ns.AURA_BARS and ns.AURA_BARS[bar]) then return false end
+    if not PetSpells(Base(key)) or self:PassiveNote(key, bar) then return false end
+    return not self:ForMe(key, bar)
+end
+
+-- The IDs your class's pet ability is judged and kept by as it's dragged
+-- onto a cooldown bar from another bar (Bars.lua B:Transfer, B:CanTrade on
+-- the Layout page): the ones it was added with, with the pet's own spell
+-- joining them when none is (PetJoin; true then too), as adding its name on
+-- that bar does. Judged by these as about to be added (S:ForMe's remember),
+-- it moves whichever pet is out, or none, and stays hidden there till a pet
+-- that knows it is out (S:PetAway). Nil for anything else, judged as
+-- before. Squirt, 2026-11-13 ("Yea"), after the reviews of the demon and
+-- hunter changes found such a move turned away with "can't show on the ...
+-- bar for you" while no such pet was out.
+function S:PetMove(key, bar)
+    if type(key) ~= "string" or (ns.AURA_BARS and ns.AURA_BARS[bar]) then return nil end
+    Ready()
+    local entry = byKey[key]
+    if not (entry and entry.added and not entry.pinned and PetSpells(entry.name)) then return nil end
+    local join = PetJoin(entry, bar)
+    if not join then return entry.added end
+    local ids = {}
+    for i, id in ipairs(entry.added) do ids[i] = id end
+    ids[#ids + 1] = join
+    return ids, true
 end
 
 -- The auras one spell ID can carry: its own, and those it leads to (BuffIDs,
@@ -1227,8 +1501,11 @@ end
 -- the spell IDs to remember when it isn't in your spellbook (by name, the
 -- game data's: the highest rank you or your pet know, else its highest
 -- with a cooldown, so a hunter's Growl is his pet's even with the pet away),
--- and the ID given (if one was), or nil and why.
-function S:Resolve(text)
+-- and the ID given (if one was), or nil and why. With the bar it's going on:
+-- your class's pet ability added before by none of the pet's IDs (Spell
+-- Lock on the Debuffs bar by its silence 24259) goes on a cooldown bar by
+-- the pet's spell, given as if typed (PetJoin), so it joins those IDs.
+function S:Resolve(text, bar)
     text = type(text) == "string" and text:match("^%s*(.-)%s*$") or ""
     if text == "" then return nil, "Type a spell name or ID first." end
     Ready()
@@ -1241,10 +1518,28 @@ function S:Resolve(text)
     end
     local lower = text:lower()
     for key, entry in pairs(byKey) do
-        if entry.name:lower() == lower then return key end
+        if entry.name:lower() == lower then return key, nil, PetJoin(entry, bar) end
     end
     for name, ids in pairs(ns.RANKS or {}) do
-        if name:lower() == lower then return name, { HighestKnown(ids) or Highest(ids) } end
+        if name:lower() == lower then
+            -- A pet's ability goes by the pet's own spell (PetSpells),
+            -- whichever pet is out, or none: the felhunter's Spell Lock,
+            -- never its silence, with the imp out too; a hunter's Growl or
+            -- Charge, never a druid's or warrior's; the fox's Trickster's
+            -- Dance, not its Beast Training spell (Squirt, 2026-11-13). By
+            -- the rank you or your pet know, else its highest.
+            local pet = PetSpells(name)
+            local best = HighestKnown(pet or ids) or Highest(pet or ids)
+            -- Only a debuff no one casts by this name in the data (Charge
+            -- Stun): a spell of it the game finds comes first, as before the
+            -- debuff was listed.
+            local info = DebuffAura(best) and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(text)
+            local found = info and Text(info.name)
+            if found and type(info.spellID) == "number" and Open(info.spellID) and not DebuffAura(info.spellID) then
+                return found, { info.spellID }
+            end
+            return name, { best }
+        end
     end
     -- An imbue a scroll puts on (Imbue Flame): a spell the game won't find by
     -- a name you don't know (Buffs.lua).

@@ -11,7 +11,8 @@ ns.Bars = B
 
 local Style = ns.Style
 -- Just above the action bar, an extra bar (Extra bars, Core.lua) higher up.
-local DEFAULT_Y = { debuff = 278, buff = 234, cd = 190, util = 146, debuff2 = 322, buff2 = 366, util2 = 410, cd2 = 454 }
+local DEFAULT_Y = { debuff = 278, buff = 234, cd = 190, util = 146, debuff2 = 322, buff2 = 366, util2 = 410, cd2 = 454,
+    debuff3 = 498, buff3 = 542, util3 = 586, cd3 = 630 }
 -- Blizzard's own Cooldown Manager tints.
 local TINT = {
     ready = { 1, 1, 1 },
@@ -1052,8 +1053,9 @@ local function Layout(bar)
     bar.list = spells
     for _, name in ipairs(spells) do
         local entry = ns.Spells:Find(name)
-        -- (A hand's weapon enchant has no spell: the Buffs bar's alone, B:Fits.)
-        if entry and not entry.hand and ns.Spells:ForMe(name, bar.key) and not Absent(name) then
+        -- (A hand's weapon enchant or a trinket's buff has no spell: the
+        -- Buffs bar's alone, B:Fits.)
+        if entry and not entry.hand and not entry.trinket and ns.Spells:ForMe(name, bar.key) and not Absent(name) then
             count = count + 1
             local icon = bar.icons[count] or NewIcon(bar)
             bar.icons[count] = icon
@@ -1189,8 +1191,8 @@ local function ReportEntry(bar, i, say)
         only = (ns.BuffBar:OnlyMissing(bar.data) and "" or " | only when missing")
             .. " | on you " .. tostring(bar.up ~= nil and bar.up[i] == true)
     end
-    return ("  %d. %s | spells %s%s%s%s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only,
-        ns.BuffBar:WarnReport(bar, i), ns.BuffBar:EnchantReport(bar, i), ns.BuffBar:ActiveReport(bar, i))
+    return ("  %d. %s | spells %s%s%s%s%s%s"):format(i, say(holder and holder.label:GetText()), table.concat(ids, ","), only,
+        ns.BuffBar:WarnReport(bar, i), ns.BuffBar:EnchantReport(bar, i), ns.BuffBar:ActiveReport(bar, i), ns.BuffBar:TrinketReport(bar, i))
 end
 
 -- For /ccm debug (Debug.lua): each of your bars and the icons on it as they
@@ -1205,7 +1207,7 @@ function B:Report(add, say)
     -- Extra bars in your profile (Core.lua), and icons with sizes of their own.
     local extras, sizes = {}, {}
     for _, key in ipairs(ns.BAR_KEYS) do
-        if not ns.EXTRA_OF[key] then extras[#extras + 1] = key end
+        if not ns.EXTRAS_OF[key] then extras[#extras + 1] = key end
         local names = {}
         for name, percent in pairs(type(ns.ProfileLists().iconSize) == "table" and ns.ProfileLists().iconSize[key] or {}) do
             names[#names + 1] = say(name) .. " " .. tostring(percent) .. "%"
@@ -1247,6 +1249,9 @@ function B:Report(add, say)
                 add(("  when ready %s, on cooldown %s, dim when you can't cast it %s, dimmed icons %s%%%s"):format(
                     tostring(data.whenReady), tostring(data.onCooldown), tostring(data.dimUnusable), tostring(data.dimOpacity),
                     data.showGCD and ", global cooldown shown" or ""))
+                -- Glow for more procs, while ticked: what it watches, or why not.
+                local glows = ns.IconAuras:GlowReport(bar)
+                if glows then add(glows) end
             elseif ns.BAR_KIND[key] == "debuff" then
                 -- Its greyed spots: ticked, kept with no target, and up now
                 -- (a player asking why they go without one).
@@ -1289,6 +1294,8 @@ function B:ApplyGlow()
         end
         -- And its buffs that glow while they're up (once out of a fight).
         if bar.holders then ns.BuffBar:Actives(bar) end
+        -- And a cooldown bar's glows for more procs (once out of a fight).
+        if bar.procGlow then ns.IconAuras:ApplyGlows(bar) end
     end
 end
 
@@ -1576,8 +1583,12 @@ function B:Changed()
 end
 
 -- The cooldown bars a spell can be on, Cooldowns' first (a spell on both
--- shows there), then Utility, then an extra one (Cooldowns 2, Utility 2).
-local SPELL_BARS = { "cd", "util", "cd2", "util2" }
+-- shows there), then Utility, then the extra ones in Core.lua's order
+-- (Cooldowns 2, Utility 2, Cooldowns 3, Utility 3), as ns.KeepApart keeps them.
+local SPELL_BARS = { "cd", "util" }
+for _, key in ipairs(ns.EXTRA_BAR_KEYS) do
+    if not ns.AURA_BARS[key] then SPELL_BARS[#SPELL_BARS + 1] = key end
+end
 
 local function IndexOf(key, name)
     for i, spell in ipairs(ns.BarData(key).spells) do
@@ -1779,9 +1790,10 @@ end
 
 -- An aura bar's entry gone from its list (not just moved along it): its own
 -- choices go with it (the icon shown faded, Glow when missing, Count ticks,
--- Only when missing, Glow while active, Warn at), so putting it back starts
--- afresh, as after a reload (Core.lua Lists). Any bar's: its own countdown
--- look too (settings per spell), once none of your lists has it.
+-- Only when missing, Glow while active, Warn at, Dim until Warn at), so
+-- putting it back starts afresh, as after a reload (Core.lua Lists). Any
+-- bar's: its own countdown look too (settings per spell), once none of your
+-- lists has it.
 local function Forget(key, name)
     if name then
         ns.ForgetSpellLook(name)
@@ -1790,15 +1802,16 @@ local function Forget(key, name)
     end
     if not (ns.AURA_BARS[key] and name) then return name end
     ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
-    if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name], ns.GlowActive(key)[name] = nil, nil end
+    if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name], ns.GlowActive(key)[name], ns.HandOthers(key)[name] = nil, nil, nil end
     ns.SetWarnAt(key, name, nil)
+    ns.DimUntilWarn(key)[name] = nil
     return name
 end
 
 -- Takes an entry off the other cooldown bar's lists that show beside this
 -- bar's list now (ns.BesideLists): with Swap with my form the two bars'
 -- lists can differ by form, and a spell sits on one of the two in each.
--- An extra cooldown bar (Cooldowns 2, Utility 2) never swaps: a spell on it
+-- An extra cooldown bar (Cooldowns 2 or 3, Utility 2 or 3) never swaps: a spell on it
 -- is on no other cooldown bar's list, in any form, and one put on another
 -- comes off it.
 local function Apart(key, name)
@@ -1880,6 +1893,15 @@ local function Unshown(name, key)
     return Named(name) .. " can't show on the " .. ns.BAR_NAMES[key] .. " bar for you."
 end
 
+-- Said as your pet's ability goes on a cooldown bar (added, moved or
+-- swapped there) while no pet that knows it is out (Spells.lua S:PetAway):
+-- it's on the bar, hidden till one is, so it isn't taken for broken. Of one
+-- of two swapped (by), by its name.
+local function PetNote(name, key, by)
+    if not ns.Spells:PetAway(name, key) then return "" end
+    return " " .. (by and Named(name) or "It") .. " shows while a pet that knows it is out."
+end
+
 -- What a drop would do, said while it's held over the bar: put the entry on
 -- it, move it there from the other cooldown bar, or nothing, as it's there.
 local function Preview(key, plan)
@@ -1914,6 +1936,10 @@ function B:Fits(key, entry, byID)
     if entry.kind == "enchant" and ns.BAR_KIND[key] ~= "buff" then
         return false, entry.name .. " only goes on the Buffs bar, where it lights while it's on your weapon."
     end
+    -- (Trinket 1 or Trinket 2: the buff your trinket's use puts on you, Spells.lua.)
+    if entry.kind == "trinket" and ns.BAR_KIND[key] ~= "buff" then
+        return false, entry.name .. " only goes on the Buffs bar, where it lights while your trinket's buff is on you."
+    end
     local passive = not byID and ns.Spells:PassiveNote(entry.key, key)
     if passive then return false, passive end
     return true
@@ -1938,7 +1964,10 @@ local function Vet(key, text)
     -- or Debuffs bar's tick does.
     local selfNote = ns.Spells:SelfDebuffNote(text)
     if selfNote then return false, selfNote end
-    local found, ids, given = ns.Spells:Resolve(text)
+    -- (With the bar: your pet's ability added before by none of the pet's
+    -- IDs, Spell Lock by its silence, goes on a cooldown bar by the pet's
+    -- spell, given as if typed.)
+    local found, ids, given = ns.Spells:Resolve(text, key)
     if not found then return false, ids end
     local pinned = given and ns.Spells:Pin(given, key)
     local shown = pinned and ns.Spells:PinName(found, given)
@@ -2017,7 +2046,9 @@ function B:Add(key, text)
     ns.PruneCustom()
     if not done then return false, Full(key) end
     local said = plan.there and Already(key, plan.shown) or Added(key, plan.shown)
-    return true, said .. self:CarryNote(found), found
+    -- Your pet's ability with no pet that knows it out (Spells.lua
+    -- S:PetAway): on the bar, hidden till one is, so it isn't taken for broken.
+    return true, said .. PetNote(found, key) .. self:CarryNote(found), found
 end
 
 -- The same, at a place in the bar's list (where the entry clicked is): the
@@ -2235,20 +2266,44 @@ function B:TakeOff(key, name)
     return true, "Took " .. shown .. " off " .. ns.BAR_NAMES[key] .. "."
 end
 
+-- Whether an entry dragged from another bar can go on this one (B:Transfer,
+-- B:CanTrade): true, or false and why not. Your class's pet ability going
+-- onto a cooldown bar (Spells.lua S:PetMove: a hunter's Growl or Scorpid
+-- Poison, a warlock's Seduction or Spell Lock) is judged as adding it there
+-- by name is (Vet), by the IDs it goes on with, so it moves whichever pet
+-- is out, or none, and stays hidden there till a pet that knows it is out;
+-- then also the IDs to remember it by, when the pet's own spell joins them
+-- (Spell Lock put on the Debuffs bar by its silence: it goes by the
+-- felhunter's spell there). Anything else as before. (Squirt, 2026-11-13,
+-- "Yea": the move was turned away, "can't show on the ... bar for you".)
+local function Movable(name, to)
+    local remember, joined = ns.Spells:PetMove(name, to)
+    local fits, why = B:Fits(to, ns.Spells:Find(name), joined)
+    if not fits then return false, why end
+    if not ns.Spells:ForMe(name, to, remember) then return false, Unshown(name, to) end
+    return true, joined and remember or nil
+end
+
 -- An entry dragged from one bar onto another: true and what happened, or
 -- false and why not.
 function B:Transfer(from, to, name)
     if from == to or not IndexOf(from, name) then return false end
-    local fits, why = self:Fits(to, ns.Spells:Find(name))
-    if not fits then return false, why end
-    if not ns.Spells:ForMe(name, to) then return false, Unshown(name, to) end
+    local fits, remember = Movable(name, to)
+    if not fits then return false, remember end
+    -- Your pet's ability takes its pet's own spell with it (Movable); a full
+    -- bar leaves what was remembered as it was.
+    local before = remember and ns.CustomSpells()[name]
+    if remember then ns.AddCustom(name, remember) end
     local ok
     if ns.AURA_BARS[to] then ok = self:SetAura(to, name, true) else ok = self:Assign(name, to) end
-    if not ok then return false, Full(to) end
+    if not ok then
+        if remember then ns.AddCustom(name, before) end
+        return false, Full(to)
+    end
     -- Between the two cooldown bars it's already moved; otherwise take it off.
     local index = IndexOf(from, name)
     if index then self:Remove(from, index) end
-    return true, "Moved " .. Named(name) .. " to " .. ns.BAR_NAMES[to] .. "."
+    return true, "Moved " .. Named(name) .. " to " .. ns.BAR_NAMES[to] .. "." .. PetNote(name, to)
 end
 
 local function Swapped(name, other)
@@ -2448,6 +2503,65 @@ end
 
 function B:GlowsActive(key, name)
     return ns.BAR_KIND[key] == "buff" and ns.GlowActive(key)[name] == true
+end
+
+-- Others only: a Main hand or Off hand enchant on a Buffs bar that isn't lit
+-- by an enchant with an entry of its own on that bar (a player's report: on
+-- Forever a Spellstone and an oil sit on one weapon, and the stone hid the
+-- missing oil). False for anything but a hand entry on a Buffs bar.
+function B:SetHandOthers(key, name, on)
+    local entry = ns.Spells:Find(name)
+    if ns.BAR_KIND[key] ~= "buff" or not IndexOf(key, name) or not (entry and entry.hand) then return false end
+    ns.HandOthers(key)[name] = on and true or nil
+    self:Changed()
+    return true
+end
+
+function B:HandOthers(key, name)
+    return ns.BAR_KIND[key] == "buff" and ns.HandOthers(key)[name] == true
+end
+
+-- Dim until Warn at (a player's idea: Moonfire's icon ticking down for all
+-- 12 seconds when only its end matters): an entry on a Buffs or Debuffs bar
+-- whose icon stays dark while it's up, its countdown and sweep hidden, until
+-- its Warn at time is left; then it lights up as usual, its countdown red.
+-- Missing, it shows greyed as before. The addon can't read an aura's time in
+-- a fight, so the game draws it: the edge's slot covers the icon with its
+-- own art darkened, from the same rule as the edge (Buffs.lua F:Warns). Not
+-- hidden outright: the greyed spot under it would then look missing. The
+-- icons change once out of a fight. False for an entry not on that bar.
+function B:SetDimUntilWarn(key, name, on)
+    if not ns.AURA_BARS[key] or not IndexOf(key, name) then return false end
+    ns.DimUntilWarn(key)[name] = on and true or nil
+    self:Changed()
+    return true
+end
+
+function B:DimsUntilWarn(key, name)
+    return ns.AURA_BARS[key] ~= nil and ns.DimUntilWarn(key)[name] == true
+end
+
+-- Whether its icon has a Warn at time: its own or one joined to it's (the
+-- icon warns at the first of yours with one, Buffs.lua F:Layout).
+function B:IconWarns(key, name)
+    local index = ns.AURA_BARS[key] and IndexOf(key, name)
+    if not index then return false end
+    local first, last = Group(key, index)
+    local warns, spells = ns.WarnAt(key), ns.BarData(key).spells
+    for i = first, last do
+        if warns[spells[i]] then return true end
+    end
+    return false
+end
+
+-- Whether it can show: as Warn at, only with an icon while it's up; with
+-- missing ones greyed (only a spot of its own has the edge's slot); not on a
+-- weapon enchant's spot (the addon's own, not the game's); and with a Warn
+-- at time to light up from.
+function B:DimUsable(key, name)
+    if not ns.AURA_BARS[key] or not self:WarnUsable(key, name) then return false end
+    if ns.BAR_KIND[key] == "buff" and not self:ActiveUsable(key, name) then return false end
+    return ns.BuffBar:Fixed(ns.BarData(key)) and self:IconWarns(key, name)
 end
 
 -- Glow size: how big those glows are on every Buffs bar, a percent of their
@@ -2688,10 +2802,10 @@ function B:CanTrade(from, name, to, other)
     if not (a and b) or from == to and a == b then return false end
     if from == to then return (Group(from, a)) ~= (Group(from, b)) end
     local moves = { { name, to, from }, { other, from, to } } -- entry, the bar it goes to, the bar it leaves
+    -- (Your pet's ability onto a cooldown bar: as it's added there, Movable.)
     for _, move in ipairs(moves) do
-        local fits, why = self:Fits(move[2], ns.Spells:Find(move[1]))
+        local fits, why = Movable(move[1], move[2])
         if not fits then return false, why end
-        if not ns.Spells:ForMe(move[1], move[2]) then return false, Unshown(move[1], move[2]) end
     end
     for _, spot in ipairs({ { from, a }, { to, b } }) do
         local why = Tied(spot[1], spot[2])
@@ -2731,7 +2845,13 @@ function B:Trade(from, name, to, other)
         self:Changed()
         return true, Swapped(name, other)
     end
+    -- Your pet's ability going onto a cooldown bar takes its pet's own
+    -- spell with it (Movable), as a move there does.
+    local _, keeps = Movable(name, to)
+    local _, gives = Movable(other, from)
     ns.BarData(from).spells[a], ns.BarData(to).spells[b] = other, name
+    if keeps then ns.AddCustom(name, keeps) end
+    if gives then ns.AddCustom(other, gives) end
     -- Neither is joined to anything, and nor is either in its new place.
     -- Between the two cooldown bars each leaves the other's lists in the
     -- forms its new place shows in (B:Assign).
@@ -2746,7 +2866,7 @@ function B:Trade(from, name, to, other)
         Apart(from, other)
     end
     self:Changed()
-    return true, Swapped(name, other)
+    return true, Swapped(name, other) .. PetNote(name, to, true) .. PetNote(other, from, true)
 end
 
 -- An option only changes how one bar looks, so only that bar is redrawn;
@@ -2845,13 +2965,27 @@ function B:Leftovers(key)
     return names
 end
 
+-- The entries on a cooldown bar that are your pet's abilities, hidden till
+-- a pet that knows them is out (Spells.lua S:PetAway): its page lists them,
+-- and Clear takes them.
+function B:Waiting(key)
+    local names = {}
+    for _, name in ipairs(ns.BarData(key).spells) do
+        if ns.Spells:PetAway(name, key) then names[#names + 1] = name end
+    end
+    return names
+end
+
 -- Empties a bar.
--- Clears what you see on a bar, and what shows there for no one; another
+-- Clears what you see on a bar (its page lists your pet's abilities hidden
+-- till their pet is out too), and what shows there for no one; another
 -- class's entries in a shared profile stay for the characters that use them.
 function B:Clear(key)
     local places = {}
     for i, name in ipairs(ns.BarData(key).spells) do
-        if ns.Spells:ForMe(name, key) or ns.Spells:Leftover(name, key) then places[#places + 1] = i end
+        if ns.Spells:ForMe(name, key) or ns.Spells:Leftover(name, key) or ns.Spells:PetAway(name, key) then
+            places[#places + 1] = i
+        end
     end
     for n = #places, 1, -1 do Forget(key, Take(key, places[n])) end
     self:Changed()
@@ -3041,6 +3175,10 @@ local function OnEvent(_, event, arg)
         B:UpdateShown()
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
+        -- Your trinkets, read now if a list was read in the fight (they
+        -- aren't then): a Buffs bar waiting for the fight's end lays out
+        -- with them below.
+        if ns.Spells:TrinketsHeld() then ns.Spells:Stale() end
         -- A weapon enchant the game wouldn't say about in the fight.
         B:EnchantsChanged()
         -- Anything the aura bars had to wait for during the fight, and the
@@ -3113,6 +3251,12 @@ local function OnEvent(_, event, arg)
         -- loaded. Your level may still read the old one as PLAYER_LEVEL_UP
         -- fires, so PLAYER_LEVEL_CHANGED (with the new one) looks again.
         if event ~= "GET_ITEM_INFO_RECEIVED" or ns.Spells:Family(arg) then follow, dirty = true, true end
+        -- A trinket worn whose use the game hadn't loaded: its buff read now
+        -- (a Buffs bar lays out again; in a fight, once it ends).
+        if event == "GET_ITEM_INFO_RECEIVED" and ns.Spells:TrinketWaiting(arg) then
+            ns.Spells:Stale()
+            RebuildSoon()
+        end
     elseif event == "SPELL_UPDATE_COOLDOWN" or event == "BAG_UPDATE_COOLDOWN" then
         -- A cooldown started (or the global cooldown, with every cast).
         cooling = true
@@ -3283,8 +3427,11 @@ function B:Start()
     for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "SPELLS_CHANGED", "PLAYER_EQUIPMENT_CHANGED", "BAG_UPDATE_DELAYED" }) do
         watch:RegisterEvent(event)
     end
-    -- Your pet summoned, dismissed or swapped: a hunter's pet abilities and
-    -- a warlock's demon's spells go by what the pet out now knows.
+    -- Your pet summoned, dismissed, stabled, swapped or dead: a hunter's pet
+    -- abilities and a warlock's demon's spells show only while the pet out
+    -- knows them (Spells.lua PetSpells). Blizzard's pet frame and pet bar
+    -- go by UNIT_PET too, and its spellbook redraws a pet's spells on
+    -- SPELLS_CHANGED (above).
     watch:RegisterUnitEvent("UNIT_PET", "player")
     watch:SetScript("OnEvent", Listing)
     self.watch = watch

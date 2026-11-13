@@ -217,16 +217,18 @@ local families
 -- A bar entry's key as the bars keep them (Spells.lua): a spell's name,
 -- "Name@N" for one of its ranks, "Name#ID" for a spell pinned to one ID,
 -- "item:<id>", "slot:13" or "slot:14" (the trinkets), "ammo", "shards" (Soul
--- Shards), "hand:main" or "hand:off" (a hand's weapon enchant), or a
--- healthstone or potion family; or the Cooldown pulse's key for a proc,
--- "proc:" and its buff's ID, one any class has (Pulse.lua P.PROCS). Nil for
--- anything else. (A version before the hands keeps those two as names it
--- doesn't know: shown for no one.)
+-- Shards), "hand:main" or "hand:off" (a hand's weapon enchant), "trinket:1"
+-- or "trinket:2" (a trinket's buff), or a healthstone or potion family; or
+-- the Cooldown pulse's key for a proc, "proc:" and its buff's ID, one any
+-- class has (Pulse.lua P.PROCS). Nil for anything else. (A version before
+-- the hands or the trinkets keeps those as names it doesn't know: shown for
+-- no one.)
 local function Entry(value)
     local key = Word(value)
     if not key then return nil end
     if key:find("#", 1, true) then return ns.Spells:Pinned(key) and key or nil end
     if key:find("^hand:") then return ns.Spells.HAND_KEYS and ns.Spells.HAND_KEYS[key] and key or nil end
+    if key:find("^trinket:") then return ns.Spells.TRINKET_KEYS and ns.Spells.TRINKET_KEYS[key] and key or nil end
     if key:find("^proc:") then
         local id = tonumber(key:match("^proc:([1-9]%d?%d?%d?%d?%d?%d?%d?%d?%d?)$"))
         for _, list in pairs(ns.Pulse and ns.Pulse.PROCS or {}) do
@@ -253,14 +255,14 @@ local function Entry(value)
 end
 
 -- The same for an entry on a bar's list (key: that bar; nil for a form's
--- list, which is a cooldown bar's): a hand's weapon enchant only on a Buffs
--- bar, as Bars.lua's B:Fits keeps it, so an edited string can't put one
--- where it would be a spell icon with no spell, and a proc's pulse key on
--- none. Nil for anything else.
+-- list, which is a cooldown bar's): a hand's weapon enchant or a trinket's
+-- buff only on a Buffs bar, as Bars.lua's B:Fits keeps them, so an edited
+-- string can't put one where it would be a spell icon with no spell, and a
+-- proc's pulse key on none. Nil for anything else.
 local function BarEntry(value, key)
     local entry = Entry(value)
     if entry and entry:find("^proc:") then return nil end
-    if entry and entry:find("^hand:") and not (key and ns.BAR_KIND[key] == "buff") then return nil end
+    if entry and (entry:find("^hand:") or entry:find("^trinket:")) and not (key and ns.BAR_KIND[key] == "buff") then return nil end
     return entry
 end
 
@@ -413,7 +415,7 @@ local function Setup(g, Skip, swap)
             own.tickColour = nil
             Skip()
         end
-        if ns.EXTRA_OF[key] or type(bars[key]) == "table" then setup.bars[key] = own end
+        if ns.EXTRAS_OF[key] or type(bars[key]) == "table" then setup.bars[key] = own end
     end
     local layout, saved = setup.layout, Table(g.l)
     for field, value in pairs(saved) do
@@ -463,11 +465,12 @@ local function Clean(data)
     local shared = { lists = {}, forms = {}, swap = {}, joins = {}, only = {}, pick = {}, style = {}, added = {}, looks = {}, warns = {},
         extras = {}, sizes = {}, count = 0, picks = 0 }
     -- Its extra bars (Extra bars, Core.lua): the keys this version knows,
-    -- true each, two at most.
+    -- true each, four at most (Cooldowns 3 and the like too; a version from
+    -- before them counts those as left out).
     if data.x ~= nil and type(data.x) ~= "table" then Skip() end
     local x, extras = Table(data.x), 0
     for key, on in pairs(x) do
-        if not (BarKey(key) and not ns.EXTRA_OF[key] and on == true) then Skip() end
+        if not (BarKey(key) and not ns.EXTRAS_OF[key] and on == true) then Skip() end
     end
     for _, key in ipairs(ns.EXTRA_BAR_KEYS) do
         if x[key] == true then
@@ -487,7 +490,7 @@ local function Clean(data)
     for _, key in ipairs(ns.BASE_BAR_KEYS) do order[#order + 1] = key end
     for _, key in ipairs(ns.EXTRA_BAR_KEYS) do order[#order + 1] = key end
     for _, key in ipairs(order) do
-        if ns.EXTRA_OF[key] or shared.extras[key] then
+        if ns.EXTRAS_OF[key] or shared.extras[key] then
             local list, seen, spells = {}, {}, not ns.AURA_BARS[key]
             for _, value in ipairs(Table(lists[key])) do
                 local entry = BarEntry(value, key)
@@ -819,7 +822,7 @@ function P.Export()
     local store, extras = ns.ProfileLists(), {}
     for _, key in ipairs(ns.BAR_KEYS) do
         data.l[key] = Listed(Table(store[key]))
-        if not ns.EXTRA_OF[key] then extras[key] = true end
+        if not ns.EXTRAS_OF[key] then extras[key] = true end
     end
     if next(extras) then data.x = extras end
     for form, own in pairs(Table(store.forms)) do

@@ -6,7 +6,9 @@
 -- slot for an aura on you and one for a debuff on your target, laid over it.
 -- The container is only told which spell IDs to watch out of combat; a change
 -- made in a fight waits for it to end. Nothing of Blizzard's is touched. Off
--- until a bar's "Show buff and debuff time" is ticked.
+-- until a bar's "Show buff and debuff time" is ticked. The same way, a
+-- spell's icon can glow for a proc the game doesn't light (Glow for more
+-- procs, below).
 local _, ns = ...
 
 local A = {}
@@ -258,10 +260,255 @@ function A:Apply(bar)
     Place(bar, bar.data)
 end
 
+-- Glow for more procs -----------------------------------------------------------------
+-- (A player's report: Nightfall never lit Shadow Bolt.) A spell's icon glows
+-- when the game lights it on your action bars (Bars.lua); for some procs
+-- that empower one spell, Forever lights nothing. With a cooldown bar's
+-- "Glow for more procs" ticked, that spell's icon glows while the proc's
+-- buff is on you, in a fight too. Your buffs are secret in a fight, so the
+-- game does it: one more secure aura container on the bar, for your buffs,
+-- with a slot for each such icon, told out of a fight which proc to watch.
+-- A slot's icon is only a glow laid over the spell's icon, made as Glow
+-- while active's is (Buffs.lua ActiveGlow), hidden inside the game's icon,
+-- so it's drawn only while the game shows that icon: in the Look page's
+-- Ready glow style, the game's proc loop on the addon's own texture, handed
+-- to the game to play while the icon shows, or the gold edge (Gold edge, or
+-- a game that won't take the loop). Nothing of the buff's own is given to
+-- the slot: no picture, no time. No burst: the game's own hands over to its
+-- loop from a script, which a container's icon can't run; the loop is the
+-- same art, as big. Off until ticked; nothing is made for a bar with none
+-- of these spells on it.
+--
+-- Each spell a proc empowers with no light from the game (every rank:
+-- ns.RANKS), and that proc's buff IDs. Checked in build 70888's data (the
+-- proc's SpellEffect class mask against SpellClassOptions): Shadow Trance
+-- (17941, from Nightfall, and the warlocks' T2 set), "Your next Shadow Bolt
+-- becomes an instant cast spell", touches every Shadow Bolt rank and
+-- nothing else.
+A.PROC_LIGHTS = {
+    { spell = "Shadow Bolt", procs = { 17941 } }, -- Shadow Trance
+}
+local GLOW_SPREAD = 1.4 -- the loop round its icon, as the game's proc glow (Bars.lua)
+local litBy -- each spell ID's PROC_LIGHTS line, made the first time it's asked
+
+-- The proc line that lights a spell ID, if any.
+local function LitBy(id)
+    if not litBy then
+        litBy = {}
+        for _, light in ipairs(A.PROC_LIGHTS) do
+            for _, rank in ipairs(ns.RANKS and ns.RANKS[light.spell] or {}) do litBy[rank] = light end
+        end
+    end
+    return type(id) == "number" and litBy[id] or nil
+end
+
+-- Whether a bar's icons glow for more procs: a cooldown bar, ticked, on a
+-- game with the containers.
+function A:GlowsOn(bar)
+    return bar ~= nil and bar.kind == "cooldown" and bar.data ~= nil and bar.data.glowProcs == true and self:Available()
+end
+
+-- The icons that glow for a proc now, in order, each name once: its name
+-- and the proc's buff IDs. Spells only (a fixed rank's too): items put no
+-- proc of their own.
+local function Wanted(bar)
+    local wanted, seen = {}, {}
+    if not (A:GlowsOn(bar) and ns.Bars:Enabled()) then return wanted end
+    for i = 1, bar.count or 0 do
+        local icon = bar.icons[i]
+        local light = icon and icon:IsShown() and (icon.kind == "spell" or icon.kind == "rank") and LitBy(icon.spellID)
+        if light and not seen[icon.name] then
+            seen[icon.name] = true
+            wanted[#wanted + 1] = { name = icon.name, procs = light.procs }
+        end
+    end
+    return wanted
+end
+
+-- The bar's glow container, made the first time one of its icons glows for
+-- a proc, never in a fight: for your buffs, over the buff and debuff times'
+-- containers (6 above the bar) and below the bar's mover, taking no mouse,
+-- with no stand-in auras in Edit Mode. From then on the bar goes right out
+-- rather than hiding (Bars.lua B:Hold).
+local function GlowContainer(bar)
+    if bar.procGlow then return bar.procGlow end
+    ns.Bars:Hold(bar)
+    local container = CreateFrame("AuraContainer", nil, bar, "CustomAuraContainerTemplate")
+    container:SetPoint("CENTER", bar, "CENTER")
+    container:SetSize(1, 1)
+    container:EnableMouse(false)
+    container:SetFrameLevel(bar:GetFrameLevel() + 7)
+    container:SetEditModePreviewEnabled(false)
+    container:SetUnit("player")
+    bar.procGlow = { container = container, slots = {}, applied = {} }
+    return bar.procGlow
+end
+
+-- A glow slot's icon, made as the slot is added (and never later: Buffs.lua
+-- F.Add and F.Guard): over its anchor, taking no mouse, holding only the
+-- glow, hidden until Light shows it.
+local function GlowLook(slot)
+    return function(button)
+        button:EnableMouse(false)
+        button:SetAllPoints(slot.anchor)
+        slot.active = ns.BuffBar.ActiveGlow(button, button)
+    end
+end
+
+-- Glow slot i ("g1", "g2" ...), made the first time it's wanted: its anchor
+-- (the addon's own frame, out of sight until placed), then the slot,
+-- switched off until it's told its proc.
+local function GlowSlot(bar, glow, i)
+    if glow.slots[i] then return glow.slots[i] end
+    local slot = { key = "g" .. i }
+    local anchor = CreateFrame("Frame", nil, bar)
+    anchor:EnableMouse(false)
+    anchor:SetSize(1, 1)
+    anchor:SetPoint("CENTER", UIParent, "BOTTOMLEFT", AWAY, AWAY)
+    slot.anchor = anchor
+    glow.slots[i] = slot
+    ns.BuffBar.Add(glow.container, "AddAuraSlot", slot.key, "HELPFUL", { initializeFrame = ns.BuffBar.Guard(GlowLook(slot)) })
+    glow.container:SetAuraSlotEnabled(slot.key, false)
+    return slot
+end
+
+-- Whether a slot's glow is the loop (Proc glow, with the loop taken) rather
+-- than the gold edge.
+local function Looping(active, proc)
+    return proc and active.loop ~= nil
+end
+
+-- A slot's glow shown, in the Ready glow style picked, the loop round its
+-- icon's size. Only what changed is set. Out of a fight only, as the icons
+-- are the game's.
+local function Light(active, size, proc)
+    if not active.on then
+        active.on = true
+        active.frame:Show()
+    end
+    local looping = Looping(active, proc)
+    if active.looping ~= looping then
+        active.looping = looping
+        for _, strip in ipairs(active.strips) do strip:SetShown(not looping) end
+        if active.loop then active.loop:SetShown(looping) end
+    end
+    local across = size * GLOW_SPREAD
+    if active.loop and active.spread ~= across then
+        active.spread = across
+        active.loop:SetSize(across, across)
+    end
+end
+
+-- Whether Light would change anything on a slot's glow.
+local function Stale(active, size, proc)
+    return not active.on or active.looping ~= Looping(active, proc) or active.loop ~= nil and active.spread ~= size * GLOW_SPREAD
+end
+
+-- Each glow slot over the icon of the spell it was told about, found by
+-- name, so icons moving in a fight never put a glow on the wrong spell (the
+-- addon's own frames only: fine in a fight). Its glow's look out of one
+-- only: a change in a fight waits for it to end.
+local function PlaceGlows(bar)
+    local glow = bar.procGlow
+    if not glow then return end
+    local fight, proc = InCombatLockdown(), ns.Get("readyGlow") ~= "edge"
+    local base = ns.IconSize(bar.data)
+    for _, slot in ipairs(glow.slots) do
+        local target
+        for j = 1, slot.name and bar.count or 0 do
+            local icon = bar.icons[j]
+            if icon and icon.name == slot.name and icon:IsShown() then
+                target = icon
+                break
+            end
+        end
+        local anchor = slot.anchor
+        anchor:ClearAllPoints()
+        if target then
+            anchor:SetAllPoints(target)
+        else
+            anchor:SetSize(1, 1)
+            anchor:SetPoint("CENTER", UIParent, "BOTTOMLEFT", AWAY, AWAY)
+        end
+        local active, size = slot.active, target and target.size or base
+        if active and fight then
+            if Stale(active, size, proc) then bar.glowPending = true end
+        elseif active then
+            Light(active, size, proc)
+        end
+    end
+end
+
+-- Tells the bar's glow container which proc goes with which icon, making
+-- what's needed. Never in a fight: then it waits for it to end, the glows
+-- only placed. Only what changed is sent. A failure is reported once, and
+-- glows for more procs stop for the session.
+function A:ApplyGlows(bar)
+    if not (bar and bar.kind == "cooldown") then return end
+    if InCombatLockdown() then
+        bar.glowPending = true
+        return PlaceGlows(bar)
+    end
+    bar.glowPending = nil
+    if A.glowError then return end
+    local wanted = Wanted(bar)
+    if not bar.procGlow and #wanted == 0 then return end
+    local ok, err = pcall(function()
+        local glow = GlowContainer(bar)
+        for i = 1, #wanted do GlowSlot(bar, glow, i) end
+        for i, slot in ipairs(glow.slots) do
+            local want = wanted[i]
+            local signature = want and (want.name .. ":" .. table.concat(want.procs, ",")) or ""
+            if glow.applied[i] ~= signature then
+                glow.applied[i] = signature
+                slot.name = want and want.name or nil
+                if want then
+                    local ids = {}
+                    for _, id in ipairs(want.procs) do ids[id] = true end
+                    glow.container:SetAuraSlotCandidateFilters(slot.key, { includeSpellIDs = ids })
+                    glow.container:SetAuraSlotEnabled(slot.key, true)
+                else
+                    glow.container:SetAuraSlotEnabled(slot.key, false)
+                end
+            end
+        end
+    end)
+    if not ok then
+        A.glowError = tostring(err)
+        print("|cffffd100" .. ns.TITLE .. ":|r glows for more procs couldn't start. Please report this: " .. A.glowError)
+        return
+    end
+    PlaceGlows(bar)
+end
+
+-- For /ccm debug: a cooldown bar's glow for more procs, while ticked: each
+-- spell it watches and its proc's buff IDs, and how it glows, or why not.
+function A:GlowReport(bar)
+    if not (bar and bar.kind == "cooldown" and bar.data and bar.data.glowProcs == true) then return nil end
+    local glow, told = bar.procGlow, {}
+    for i, slot in ipairs(glow and glow.slots or {}) do
+        if slot.name then told[#told + 1] = glow.applied[i] end
+    end
+    local how
+    if not self:Available() then
+        how = "none (the game can't)"
+    elseif A.glowError then
+        how = "couldn't start: " .. A.glowError
+    elseif #told == 0 then
+        how = "no spell on this bar has one"
+    else
+        local active = glow.slots[1].active
+        how = table.concat(told, ", ") .. ", " .. (not active and "no icon yet" or not active.loop and "edge only, the game took no loop"
+            or ns.Get("readyGlow") == "edge" and "edge (Ready glow)" or "loop")
+    end
+    return "  glow for more procs: " .. how .. (bar.glowPending and ", waiting for the fight to end" or "")
+end
+
 -- After a bar's icons are laid out (Bars.lua): made if needed, told what's
--- where, and placed over the icons.
+-- where, and placed over the icons. Its glows for more procs first.
 function A:Layout(bar, data)
     if not bar or bar.kind ~= "cooldown" then return end
+    self:ApplyGlows(bar)
     if self:On(bar) and not Create(bar) then
         -- First ticked during a fight: made as it ends.
         bar.auraPending = true
@@ -280,6 +527,7 @@ end
 
 -- Anything held back during a fight.
 function A:CombatEnded(bar)
+    if bar and bar.glowPending then self:ApplyGlows(bar) end
     if bar and bar.auraPending then
         if self:On(bar) then Create(bar) end
         self:Apply(bar)

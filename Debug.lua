@@ -108,23 +108,29 @@ local function Heals(Add)
 end
 
 -- Warn at N seconds left: each aura bar's warned entries, whether the game
--- made the red numbers' rules, and whether each bar has its edge slots.
+-- made the red numbers' rules, and whether each bar has its edge slots; then
+-- the entries ticked Dim until Warn at, if any (each entry's line says
+-- whether its dimmed icon is on, or the game turned it down).
 local function Warns(Add)
-    local list, edges, keys = {}, {}, {}
+    local list, edges, keys, dims = {}, {}, {}, {}
     for _, key in ipairs(ns.BAR_KEYS) do
         if ns.AURA_BARS[key] then keys[#keys + 1] = key end -- (Buffs 2 and Debuffs 2 too, once added)
     end
     for _, key in ipairs(keys) do
-        local names = {}
+        local names, dimmed = {}, {}
         for name, seconds in pairs(ns.WarnAt(key)) do names[#names + 1] = ("%s %ss"):format(tostring(name), tostring(seconds)) end
         table.sort(names)
         if #names > 0 then list[#list + 1] = key .. ": " .. table.concat(names, ", ") end
+        for name in pairs(ns.DimUntilWarn and ns.DimUntilWarn(key) or {}) do dimmed[#dimmed + 1] = tostring(name) end
+        table.sort(dimmed)
+        if #dimmed > 0 then dims[#dims + 1] = key .. ": " .. table.concat(dimmed, ", ") end
         local bar = ns.Bars and ns.Bars.started and ns.Bars:Get(key)
         edges[#edges + 1] = key .. " " .. (not bar and "not made" or bar.marks and "made" or "none")
     end
     local refused = ns.BuffBar and ns.BuffBar.markError
-    Add(("Warn at: %s | numbers: %s | edge slots: %s%s"):format(#list > 0 and table.concat(list, "; ") or "none",
-        ns.Style:WarnReport(), table.concat(edges, ", "), refused and ("; refused: " .. refused) or ""))
+    Add(("Warn at: %s | numbers: %s | edge slots: %s%s%s"):format(#list > 0 and table.concat(list, "; ") or "none",
+        ns.Style:WarnReport(), table.concat(edges, ", "), refused and ("; refused: " .. refused) or "",
+        #dims > 0 and (" | dim until Warn at: " .. table.concat(dims, "; ")) or ""))
 end
 
 function ns.DebugReport()

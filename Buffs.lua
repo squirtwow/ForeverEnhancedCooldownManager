@@ -433,6 +433,9 @@ local function ActiveGlow(button, top)
     if taken then active.loop = loop else loop:Hide() end
     return active
 end
+-- Shared with the cooldown bars' glow for more procs (IconAuras.lua), the
+-- same glow inside a slot's icon over a spell's.
+F.ActiveGlow = ActiveGlow
 
 -- Runs once per icon, before the client restricts it in combat. Everything
 -- supplied to the icon must be a descendant of its button. A packed icon
@@ -542,9 +545,21 @@ end
 --   starts its time again). A packed bar's icons have no spot to ring.
 -- * out of a fight, your own buff's spot glows from N seconds left (the
 --   Look page's ready glow), from your buffs read then (F:LowTime).
+-- * Dim until Warn at (a player's idea: Moonfire's icon not ticking down all
+--   12 seconds, only near its end), ticked per entry: the same edge slot's
+--   rule draws, from N seconds up, the entry's own icon art darkened over
+--   the spot, a pixel past it all round, hiding the game's icon, its sweep
+--   and its numbers under it (the edge slot's text sits above them all). From
+--   N down it draws the edge as before, so the icon lights up with its red
+--   countdown, and a recast dims it again. Missing, the greyed spot shows as
+--   before. Hiding it outright can't be done: nothing the game draws shows
+--   only while an aura is missing, so the addon's greyed spot is always
+--   there under the game's icon, and with nothing over it, an icon with
+--   time left would look missing. Fixed spots only, as the edge.
 local MARK = ns.MEDIA .. "LowEdge" -- a soft white square ring, tinted in its text
 local MARK_SPREAD = 1.25 -- the ring's art is this much bigger than the icon it sits round
 local MARK_COLOUR = "255:64:64"
+local DIM_COLOUR = "77:77:77" -- Dim until Warn at: the icon's own art at under a third of its brightness
 
 -- Whether the game can draw the edge: its number rules and an icon's time left.
 local function CanMark()
@@ -556,6 +571,17 @@ end
 -- The edge as text, size across.
 local function Edge(size)
     return ("|T%s:%d:%d:0:0:64:64:0:64:0:64:%s|t"):format(MARK, size, size, MARK_COLOUR)
+end
+
+-- Dim until Warn at: an entry's icon art as text, size across, trimmed as
+-- the icons are (Style.ZOOM) and darkened. Nil for art that can't be
+-- written in text (none, or a name with the text's own marks in it).
+local function Cover(icon, size)
+    if not (type(icon) == "number" or type(icon) == "string" and icon ~= "" and not icon:find("[|:]")) then return nil end
+    local zoom = Style.ZOOM
+    local function At(share) return math.floor(share * 100 + .5) end
+    return ("|T%s:%d:%d:0:0:100:100:%d:%d:%d:%d:%s|t"):format(tostring(icon), size, size, At(zoom[1]), At(zoom[2]), At(zoom[3]),
+        At(zoom[4]), DIM_COLOUR)
 end
 
 -- A w-slot's icon: over its entry's spot, never taking the mouse, drawing
@@ -772,15 +798,19 @@ ns.HAND_ENCHANTS = {
 -- Inventory slot: Enum.WeaponSlot.
 local HANDS = { [16] = 0, [17] = 1 }
 local PERMANENT = 1 -- Enum.ItemEnchantType.Permanent
--- What's on each hand as last read: false for nothing, else { id, ends (nil
--- with no timer), total }. One the game won't say about keeps what it was, so
--- in a fight the time left runs on from the last answer. And whether each
--- holds a weapon (Armed), kept the same way; never read counts as one.
+-- What's on each hand as last read: false for nothing, else a list of { id,
+-- ends (nil with no timer), total }, one for each enchant on it (a player's
+-- report: on Forever a stone and an oil sit on one weapon together). One the
+-- game won't say about keeps what it was, so in a fight the time left runs
+-- on from the last answer. And whether each holds a weapon (Armed), kept the
+-- same way; never read counts as one.
 local hands, armed = {}, {}
 
--- The game's three ways of asking, each giving the hand's enchant and its
--- seconds left, false for none, or nil when it won't say (a secret answer):
--- Prep's Hands.lua found Forever's imbues may show in one and not another.
+-- The game's three ways of asking, each giving the hand's enchants as a list
+-- of { id, seconds left }, false for none, or nil when it won't say (a secret
+-- answer): Prep's Hands.lua found Forever's imbues may show in one and not
+-- another. The first names only one (an imbue before an oil, Blizzard's
+-- notes say); the second lists them all.
 local ENCHANT_SOURCES = {
     { function() return type(C_PaperDollInfo) == "table" and C_PaperDollInfo.GetTemporaryEnchantmentInfo end, function(api, slot)
         local info = api(slot)
@@ -788,21 +818,22 @@ local ENCHANT_SOURCES = {
         if info == nil then return false end
         local id, ms, timed = info.enchantID, info.remainingTimeMs, info.hasExpirationTime
         if not (Open(id) and Open(ms) and Open(timed)) or type(id) ~= "number" then return nil end
-        return id, timed ~= false and type(ms) == "number" and ms / 1000 or nil
+        return { { id, timed ~= false and type(ms) == "number" and ms / 1000 or nil } }
     end },
     { function() return type(C_Item) == "table" and C_Item.GetWeaponEnchantInfo end, function(api, slot)
         local list = api(HANDS[slot])
         if not Open(list) or type(list) ~= "table" then return nil end
+        local found = {}
         for _, each in pairs(list) do
             local has, kind = each.hasEnchant, each.enchantType
             if not (Open(has) and Open(kind)) then return nil end
             if has == true and kind ~= PERMANENT then
                 local id, ms = each.enchantID, each.timeLeft
                 if not (Open(id) and Open(ms)) or type(id) ~= "number" then return nil end
-                return id, type(ms) == "number" and ms / 1000 or nil
+                found[#found + 1] = { id, type(ms) == "number" and ms / 1000 or nil }
             end
         end
-        return false
+        return found[1] and found or false
     end },
     { function() return GetWeaponEnchantInfo end, function(api, slot)
         local values, at = { api() }, slot == 16 and 0 or 4
@@ -810,22 +841,35 @@ local ENCHANT_SOURCES = {
         if not Open(has) then return nil end
         if not has then return false end
         if not (Open(ms) and Open(id)) or type(id) ~= "number" then return nil end
-        return id, type(ms) == "number" and ms / 1000 or nil
+        return { { id, type(ms) == "number" and ms / 1000 or nil } }
     end },
 }
 
--- A hand's enchant and seconds left from the first way that names one; false
--- only when one said none and none held back; nil when the game won't say.
+-- A hand's enchants, each with its seconds left, from every way that names
+-- one (each enchant once, as the first way to name it says); false only when
+-- one said none and none held back; nil when the game won't say.
 local function ReadHand(slot)
-    local none, held = false, false
+    local none, held, found, seen = false, false, nil, {}
     for _, source in ipairs(ENCHANT_SOURCES) do
         local api = source[1]()
         if api then
-            local ok, id, left = pcall(source[2], api, slot)
-            if ok and type(id) == "number" then return id, left end
-            if ok and id == false then none = true else held = true end
+            local ok, list = pcall(source[2], api, slot)
+            if ok and type(list) == "table" then
+                for _, each in ipairs(list) do
+                    if not seen[each[1]] then
+                        seen[each[1]] = true
+                        found = found or {}
+                        found[#found + 1] = each
+                    end
+                end
+            elseif ok and list == false then
+                none = true
+            else
+                held = true
+            end
         end
     end
+    if found then return found end
     if none and not held then return false end
     return nil
 end
@@ -854,14 +898,21 @@ end
 function F:ReadEnchants()
     local now = GetTime()
     for slot in pairs(HANDS) do
-        local id, left = ReadHand(slot)
-        if id == false then
+        local list = ReadHand(slot)
+        if list == false then
             hands[slot] = false
-        elseif id then
-            local old, ends = hands[slot], left and now + left or nil
-            if not old or old.id ~= id or (old.ends == nil) ~= (ends == nil) or (ends and math.abs(old.ends - ends) > 2) then
-                hands[slot] = { id = id, ends = ends, total = left }
+        elseif list then
+            local was, kept = {}, {}
+            for _, old in ipairs(hands[slot] or {}) do was[old.id] = old end
+            for _, each in ipairs(list) do
+                local id, left = each[1], each[2]
+                local old, ends = was[id], left and now + left or nil
+                if not old or (old.ends == nil) ~= (ends == nil) or (ends and math.abs(old.ends - ends) > 2) then
+                    old = { id = id, ends = ends, total = left }
+                end
+                kept[#kept + 1] = old
             end
+            hands[slot] = kept
         end
         local weapon = Armed(slot)
         if weapon ~= nil then armed[slot] = weapon end
@@ -872,14 +923,18 @@ end
 -- own: ids.hands, a hand entry's), and when the soonest to end ends, how
 -- long it had when read, which it is and on which hand. bare: an entry of
 -- hands alone (ids.handsOnly) with no weapon in any of them, so nothing's
--- missing.
+-- missing. ids.skip: a hand entry ticked Others only, which an enchant with
+-- an entry of its own on the bar doesn't light.
 local function EnchantOn(ids)
     local now, on, ends, total, id, at = GetTime(), false, nil, nil, nil, nil
-    local bare = ids.handsOnly == true
+    local bare, skip = ids.handsOnly == true, ids.skip
     for slot in pairs(HANDS) do
-        local hand, own = hands[slot], ids.hands ~= nil and ids.hands[slot] == true
-        if hand and (own or ids[hand.id]) and (not hand.ends or hand.ends > now) and (not on or (hand.ends and (not ends or hand.ends < ends))) then
-            on, ends, total, id, at = true, hand.ends, hand.total, hand.id, slot
+        local own = ids.hands ~= nil and ids.hands[slot] == true
+        for _, hand in ipairs(hands[slot] or {}) do
+            if ((own and not (skip and skip[hand.id])) or ids[hand.id]) and (not hand.ends or hand.ends > now)
+                and (not on or (hand.ends and (not ends or hand.ends < ends))) then
+                on, ends, total, id, at = true, hand.ends, hand.total, hand.id, slot
+            end
         end
         if own and armed[slot] ~= false then bare = false end
     end
@@ -922,12 +977,22 @@ function F:EnchantReport(bar, i)
     return " | weapon enchant " .. (on and ("on, " .. tostring(id)) or bare and "none, no weapon" or "missing")
 end
 
+-- For /ccm debug: what a trinket entry last read in its slot (Spells.lua):
+-- why it lights or can't, the trinket and its use's spell.
+function F:TrinketReport(bar, i)
+    local read = bar and bar.trinkets and bar.trinkets[i]
+    if not read then return "" end
+    return " | trinket " .. tostring(read.why) .. (read.item and (", item " .. tostring(read.item)) or "")
+        .. (read.spell and (", use " .. tostring(read.spell)) or "")
+end
+
 -- Seconds until an enchant on a hand runs out, or nil with none running.
 function F:NextEnchantEnd()
     local now, soonest = GetTime(), nil
     for slot in pairs(HANDS) do
-        local hand = hands[slot]
-        if hand and hand.ends and hand.ends > now and (not soonest or hand.ends < soonest) then soonest = hand.ends end
+        for _, hand in ipairs(hands[slot] or {}) do
+            if hand.ends and hand.ends > now and (not soonest or hand.ends < soonest) then soonest = hand.ends end
+        end
     end
     return soonest and soonest - now or nil
 end
@@ -992,7 +1057,7 @@ function F:Create(bar)
     bar.holders, bar.slotIDs, bar.applied, bar.appliedGroups, bar.groups = {}, {}, {}, {}, 0
     bar.groupParts, bar.names, bar.up, bar.spots, bar.only, bar.imbues = {}, {}, {}, {}, {}, {}
     bar.tickPaces, bar.tickShows, bar.groupTicks, bar.looks, bar.bare = {}, {}, {}, {}, {}
-    bar.warns, bar.appliedWarns, bar.actives = {}, {}, {}
+    bar.warns, bar.appliedWarns, bar.actives, bar.dims, bar.trinkets = {}, {}, {}, {}, {}
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -1310,16 +1375,24 @@ function F:Layout(bar, data)
     local counts = ns.BAR_KIND[bar.key] == "debuff" and ns.CountTicks(bar.key) or {}
     -- Only when missing: the Buffs bar's, and not with Only show missing.
     local flags = self:Flagged(bar.key, data) and ns.OnlyWhenMissing(bar.key) or {}
-    local warns = ns.WarnAt(bar.key)
+    local warns, dims = ns.WarnAt(bar.key), ns.DimUntilWarn(bar.key)
     -- Glow while active: a Buffs bar's own.
     local actives = ns.BAR_KIND[bar.key] == "buff" and ns.GlowActive(bar.key) or {}
     -- A packed bar's slots sit in its container, scaled with the packed
     -- icons, so their numbers are sized as those icons' are.
     local fit = packed and BASE or size
     local weapons = ns.BAR_KIND[bar.key] == "buff"
+    -- Others only, on a hand entry: every named weapon enchant on the bar,
+    -- which that entry leaves to its own (one table, filled as the bar is read).
+    local others = weapons and ns.HandOthers(bar.key) or {}
+    local namedOnBar = {}
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
         local ids, entry, picked, glow, yours, only = {}, nil, nil, false, {}, false
         local active = false -- (any of yours in it ticked Glow while active)
+        local dim = false -- (any of yours in it ticked Dim until Warn at)
+        -- A trinket's entry (Spells.lua): its spot stays with no buff to
+        -- watch (no trinket there, or one whose use buffs no one), missing.
+        local trinket = nil
         -- Weapon enchants: every one of yours in it is one (joined with a
         -- buff, it's the buff's as before: nothing tells them apart in a fight).
         -- A hand entry is any enchant on its hand (enchants.hands).
@@ -1332,15 +1405,18 @@ function F:Layout(bar, data)
                 glow = glow or glows[name] == true
                 only = only or flags[name] == true
                 active = active or actives[name] == true
+                dim = dim or dims[name] == true
                 yours[#yours + 1] = name
                 for _, id in ipairs(found.ids) do ids[id] = true end
+                if found.trinket then trinket = trinket or found.worn or {} end
                 local list = ENCHANTS[found.name]
                 if found.hand and weapons then
                     enchants.hands = enchants.hands or {}
                     enchants.hands[found.hand] = true
+                    if others[name] then enchants.skip = namedOnBar end
                 elseif list then
                     named = true
-                    for _, id in ipairs(list) do enchants[id] = true end
+                    for _, id in ipairs(list) do enchants[id], namedOnBar[id] = true, true end
                 else
                     allEnchants = false
                 end
@@ -1355,7 +1431,7 @@ function F:Layout(bar, data)
         -- while none is up; else its first of yours.
         entry = picked or entry
         -- (A hand entry has no spells of its own: its hand is what it watches.)
-        if entry and (next(ids) or enchants.hands) and count < ns.BUFF_SLOTS then
+        if entry and (next(ids) or enchants.hands or trinket) and count < ns.BUFF_SLOTS then
             count = count + 1
             local holder = bar.holders[count]
             -- Its own size (settings per spell; a joined icon: the first of
@@ -1390,6 +1466,7 @@ function F:Layout(bar, data)
             bar.only[count] = only or nil
             bar.imbues[count] = allEnchants and next(enchants) and enchants or nil
             bar.bare[count] = nil -- (read below: F:Check)
+            bar.trinkets[count] = trinket -- (its slot as read, for /ccm debug)
             -- Glow while active: not on an icon shown only while it's missing
             -- (none while it's up), nor a weapon enchant's own spot.
             bar.actives[count] = active and not (only or self:OnlyMissing(data) or bar.imbues[count]) or nil
@@ -1400,6 +1477,9 @@ function F:Layout(bar, data)
                 warn = warn or warns[name]
             end
             bar.warns[count] = not (only or self:OnlyMissing(data)) and warn or nil
+            -- Dim until Warn at: the icon art to dim it with (its entry's),
+            -- while it warns; not on a weapon enchant's own spot (no aura's).
+            bar.dims[count] = dim and bar.warns[count] and not bar.imbues[count] and entry.icon or nil
         end
     end
     for i = count + 1, ns.BUFF_SLOTS do
@@ -1407,7 +1487,7 @@ function F:Layout(bar, data)
         MissingGlow(bar.holders[i], false)
         bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i], bar.only[i] = nil, nil, nil, nil, nil
         bar.looks[i], bar.holders[i].look, bar.warns[i], bar.holders[i].ownSize = nil, nil, nil, nil
-        bar.imbues[i], bar.bare[i], bar.actives[i] = nil, nil, nil
+        bar.imbues[i], bar.bare[i], bar.actives[i], bar.dims[i], bar.trinkets[i] = nil, nil, nil, nil, nil
     end
     for _, parts in ipairs(bar.groupParts) do
         parts.cooldown:SetHideCountdownNumbers(not data.showTimer)
@@ -1736,9 +1816,12 @@ end
 
 -- Warn at: each entry's countdown red from its seconds (its fixed slot's and
 -- its packed group's icons), and its edge slot's rule: the edge, sized round
--- its spot, under its seconds and nothing from them; nothing at all while it
--- doesn't warn or has no spot. Out of combat only (F:Apply); each only sent
--- as it changes, and a rule the game turns down leaves no edge.
+-- its spot, under its seconds and nothing from them (or, dimmed until then,
+-- its icon darkened from them); nothing at all while it doesn't warn or has
+-- no spot. Out of combat only (F:Apply); each only sent as it changes, and a
+-- rule the game turns down leaves no edge. A dimmed icon the game turns down
+-- (the edge alone taken) leaves the edge alone, as without it (said in
+-- /ccm debug: F:WarnReport).
 function F:Warns(bar)
     local packed = self:Packed(bar.data)
     for i = 1, ns.BUFF_SLOTS do
@@ -1748,17 +1831,36 @@ function F:Warns(bar)
         if mark then
             local seconds = not packed and warn or nil
             local size = math.floor((holder.size or BASE) * MARK_SPREAD + .5)
-            local rule = seconds and (seconds .. ":" .. size) or ""
+            -- (Dimmed: the cover a pixel past the spot all round, so the
+            -- game's icon is hidden even if the text sits a pixel off.)
+            local across = math.floor((holder.size or BASE) + .5) + 2
+            local cover = seconds and bar.dims and bar.dims[i] and Cover(bar.dims[i], across) or nil
+            local rule = seconds and (seconds .. ":" .. size .. (cover and (":dim " .. across .. " " .. tostring(bar.dims[i])) or "")) or ""
             if mark.rule ~= rule then
-                local ok = pcall(function()
-                    mark.formatter:ClearBreakpoints()
-                    if seconds then
-                        mark.formatter:AddBreakpoint({ threshold = 0, format = Edge(size) })
-                        mark.formatter:AddBreakpoint({ threshold = seconds, format = "" })
-                    else
-                        mark.formatter:AddBreakpoint({ threshold = 0, format = "" })
+                local function Set(from)
+                    return pcall(function()
+                        mark.formatter:ClearBreakpoints()
+                        if seconds then
+                            mark.formatter:AddBreakpoint({ threshold = 0, format = Edge(size) })
+                            mark.formatter:AddBreakpoint({ threshold = seconds, format = from or "" })
+                        else
+                            mark.formatter:AddBreakpoint({ threshold = 0, format = "" })
+                        end
+                    end)
+                end
+                local ok, why = Set(cover)
+                mark.dimRefused = nil
+                if not ok and cover then
+                    -- Turned down: the edge alone, as without the dimmed icon,
+                    -- not tried again until something changes. Only the dimmed
+                    -- icon's fault if the edge alone is taken (an edge turned
+                    -- down on its own: rule nil, as without it).
+                    ok = Set(nil)
+                    if ok then
+                        if not F.dimError then F.dimError = tostring(why) end
+                        mark.dimRefused = true
                     end
-                end)
+                end
                 mark.rule = ok and rule or nil -- (turned down: tried again as it next changes)
             end
         end
@@ -1964,7 +2066,15 @@ function F:WarnReport(bar, i)
     local edge = not bar.marks and "none (the game can't)" or self:Packed(bar.data) and "none (packed)"
         or (bar.appliedWarns[i] or "") ~= "" and ("on, rule " .. tostring(holder.mark and holder.mark.rule)) or "off"
     local glow = holder.lowHost and holder.lowHost.glow
-    return (" | warn at %ds: red numbers %s, edge %s, low glow %s"):format(warn,
+    -- Dim until Warn at, when ticked: on, or why not.
+    local dim = ""
+    if bar.dims and bar.dims[i] then
+        local mark = holder.mark
+        dim = ", dim until then " .. (not bar.marks and "none (the game can't)" or self:Packed(bar.data) and "none (packed)"
+            or mark and mark.dimRefused and ("refused: " .. tostring(F.dimError))
+            or mark and type(mark.rule) == "string" and mark.rule:find(":dim ", 1, true) and "on" or "off")
+    end
+    return (" | warn at %ds: red numbers %s, edge %s, low glow %s%s"):format(warn,
         holder.slot and tostring(Style:Warned(holder.slot.cooldown) == warn) or "no icon yet", edge,
-        ns.BAR_KIND[bar.key] ~= "buff" and "not on Debuffs" or tostring(glow ~= nil and glow:IsShown()))
+        ns.BAR_KIND[bar.key] ~= "buff" and "not on Debuffs" or tostring(glow ~= nil and glow:IsShown()), dim)
 end

@@ -9,6 +9,12 @@ local WIDTH, HEIGHT = 820, 560
 local HEADER, FOOTER, NAV = 42, 28, 180
 ns.WINDOW_HEADER, ns.WINDOW_FOOTER = HEADER, FOOTER -- for a bar page's spell panel (BarPage.lua)
 local PREVIEW = 9 -- icons previewed under each bar's name
+-- The bar list (LayBars): its first bar's top, each bar's room as always
+-- (a 46 high row and 2 under it), each + Add a bar line's (12 high, and 2
+-- under it), the least a bar's row ever takes (32 high with 12 px icons,
+-- as the four with a + under each: past that the list scrolls), and the
+-- room kept at its right for the scroll thumb while it does.
+local LIST_TOP, BAR_STEP, PLUS_STEP, PLUS_HIGH, LEAST_STEP, THUMB_ROOM = 28, 48, 14, 12, 34, 8
 local HEART = "Heart.tga" -- white on clear, tinted to the accent in the footer's credit
 -- A list's scroll thumb, wherever there's one: the bar pages, Look and the profiles.
 ns.SCROLL_NOTE = "Drag to scroll the list, or turn the mouse wheel over it."
@@ -2474,6 +2480,177 @@ local function NavItem(window, nav, key, label, y, previews)
     return item
 end
 
+-- A kind's "+ Add a bar" line (Squirt's pick, 13 Nov 2026: a + under each
+-- bar to add another, instead of the button on its page): small, in the
+-- accent, set in a little under the last bar of its kind (LayBars). It
+-- shows, greys and says what it does as that button did: once the bar has
+-- spells or an extra bar of its kind is there; greyed while another can't
+-- be added (both there, four in all, a fight), saying why, a click too.
+-- Clicked: that kind's next extra bar (Core.lua), its page opened.
+local function PlusLine(window, nav, kind)
+    local line = CreateFrame("Button", nil, nav)
+    line:SetSize(NAV - 32, PLUS_HIGH)
+    line:Hide()
+    local hover = line:CreateTexture(nil, "HIGHLIGHT")
+    hover:SetAllPoints()
+    hover:SetColorTexture(1, 1, 1, .04)
+    line.label = T:Text(line, "GameFontHighlightSmall")
+    line.label:SetPoint("LEFT", 6, 0)
+    line.label:SetText("+ Add a bar")
+    T:Paint(function(accent) line.label:SetTextColor(accent[1], accent[2], accent[3]) end)
+    line.kind = kind
+    line:SetScript("OnClick", function()
+        local ok, added, message = ns.Bars:AddBar(kind)
+        if not ok then
+            window:Say(added)
+            return window:Refresh()
+        end
+        window:Say(message)
+        window:Select(added)
+    end)
+    window:Hint(line, function()
+        local can, extra = ns.CanAddBar(kind)
+        if not can then return extra end
+        -- (Its "2" is a second bar of the kind, its "3" a third.)
+        local nth = extra == ns.EXTRAS_OF[kind][2] and "third" or "second"
+        return "Adds " .. ns.BAR_NAMES[extra] .. ": a " .. nth .. " " .. ns.BAR_NAMES[kind] .. " bar with its own spells, size,"
+            .. " options and Layout row, say to keep one spell apart from the rest."
+    end)
+    return line
+end
+
+-- A bar's row, height high (every bar's the same): its name and count, and
+-- a preview of its icons under them, always: 46 as always, a little
+-- shorter with smaller icons while + lines share the room, never under 32
+-- (the list scrolls instead: LayBars). Never set in: an extra bar's row is
+-- like the four's.
+local function BarRow(item, height)
+    item:SetHeight(height)
+    local size = height >= 42 and 14 or 12
+    -- The room round the name's line and the icons: 9 over, 5 between and
+    -- 6 under at 46, less as it shrinks.
+    local free = height - 12 - size
+    local top, under = math.min(9, math.floor(free * .45 + .5)), math.min(6, math.floor(free * .3 + .5))
+    item.label:ClearAllPoints()
+    item.label:SetPoint("TOPLEFT", 14, -top)
+    item.count:ClearAllPoints()
+    item.count:SetPoint("TOPRIGHT", -12, -(top + 1))
+    for i, icon in ipairs(item.icons) do
+        icon:ClearAllPoints()
+        icon:SetSize(size, size)
+        icon:SetPoint("TOPLEFT", 14 + (i - 1) * (size + 2), -(height - under - size))
+    end
+end
+
+-- Everything under the bars (the rule, Look to General, More and its
+-- pages) in its place under them, from y down, as built (BuildWindow).
+local function PlaceUnder(window, y)
+    for _, part in ipairs(window.under) do
+        part[1]:ClearAllPoints()
+        part[1]:SetPoint("TOPLEFT", part[2], -(y + part[3]))
+        if part[4] then part[1]:SetPoint("RIGHT", part[4], 0) end
+    end
+end
+
+-- The bars' list (window.barList), pinned by two corners as every list
+-- that scrolls is on this client: from the first bar's top down its view
+-- (window.barView), the list's full width while it all shows, else short of
+-- the thumb's room at its right. Again a moment after the window shows
+-- (BuildWindow), for one pinned while the window was hidden.
+local function PinBars(window)
+    local list, scrolls = window.barList, window.barScrolls
+    list:ClearAllPoints()
+    list:SetPoint("TOPLEFT", window.navFrame, "TOPLEFT", 0, -LIST_TOP)
+    list:SetPoint("BOTTOMRIGHT", window.navFrame, "TOPRIGHT", scrolls and -THUMB_ROOM or 0, -(LIST_TOP + window.barView))
+    list.content:SetSize(NAV - (scrolls and THUMB_ROOM or 0), window.barHeight)
+    -- (Kept within its range: back at the top once it all shows.)
+    list:ScrollTo(list:GetVerticalScroll() or 0)
+end
+
+-- A bar's row in sight in a list that scrolls, with its kind's + line under
+-- it too where both fit: scrolled no further than that takes.
+local function BarInView(window, key)
+    local list, item, view = window.barList, window.nav[key], window.barView
+    local top, at = item.listY, list:GetVerticalScroll() or 0
+    local bottom = top + item:GetHeight()
+    local line = window.navPlus[ns.BAR_KIND[key]]
+    if line:IsShown() and line.listY > top and line.listY + PLUS_HIGH - top <= view then bottom = line.listY + PLUS_HIGH end
+    if top < at then
+        at = top
+    elseif bottom > at + view then
+        at = bottom - view
+    end
+    list:ScrollTo(at)
+end
+
+-- The bars down the list (concept B, Squirt's pick, 13 Nov 2026): every bar
+-- you have (ns.BAR_KEYS, each kind's together) a row like the four's, with
+-- its own count and preview, never set in; under a kind's last bar its
+-- + Add a bar line while that shows; everything else under them. Their
+-- room is what the list has left over the rest (window.barRoom, 192): the
+-- four as always while no + line shows; else every row a little shorter
+-- with smaller icons, down to 32 high with 12 px icons (the four with a +
+-- under each); past that rows stay so and the list scrolls in the room, so
+-- no row ever loses its preview or goes to one line. Either way it ends
+-- above What's new and nothing under it moves (it only moves up when the
+-- list has room to spare: a page missing until a full restart). An extra
+-- bar's row is made the first time it's there, and hidden while it isn't.
+-- Laid out again only when the bars you have, or the + lines showing,
+-- change (then true); the + lines grey on every refresh.
+local function LayBars(window)
+    local plus, shown = {}, {}
+    for _, kind in ipairs(ns.BASE_BAR_KEYS) do
+        local show = #ns.Bars:Mine(kind) > 0
+        for _, extra in ipairs(ns.EXTRAS_OF[kind]) do show = show or ns.HasBar(extra) end
+        window.navPlus[kind]:SetAlpha(ns.CanAddBar(kind) and 1 or .45)
+        if show then plus[#plus + 1], shown[kind] = kind, true end
+    end
+    local laid = table.concat(ns.BAR_KEYS, " ") .. " + " .. table.concat(plus, " ")
+    if window.barsLaid == laid then return false end
+    window.barsLaid = laid
+    -- Each bar's room: as always where it fits, else what the + lines leave,
+    -- shared, but never less than the least a row takes.
+    local room = window.barRoom
+    local step = math.max(LEAST_STEP, math.min(BAR_STEP, math.floor((room - #plus * PLUS_STEP) / #ns.BAR_KEYS)))
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        local item = window.nav[key]
+        if item and not ns.HasBar(key) then item:Hide() end
+    end
+    for _, line in pairs(window.navPlus) do line:Hide() end
+    local y = 0
+    for i, key in ipairs(ns.BAR_KEYS) do
+        local item = window.nav[key]
+        if not item then
+            item = NavItem(window, window.barList.content, key, ns.BAR_NAMES[key], y, true)
+            window.nav[key] = item
+        end
+        item:ClearAllPoints()
+        item:SetPoint("TOPLEFT", 0, -y)
+        item:SetPoint("RIGHT")
+        BarRow(item, step - 2)
+        item.listY = y
+        item:Show()
+        y = y + step
+        local kind, after = ns.BAR_KIND[key], ns.BAR_KEYS[i + 1]
+        if shown[kind] and not (after and ns.BAR_KIND[after] == kind) then
+            local line = window.navPlus[kind]
+            line:ClearAllPoints()
+            line:SetPoint("TOPLEFT", 20, -y)
+            line.listY = y
+            line:Show()
+            y = y + PLUS_STEP
+        end
+    end
+    -- Rows made shorter fill the room (a few left over at most) and a list
+    -- that scrolls takes all of it, so what's under them stays where it
+    -- always was; else it sits under the last.
+    window.barHeight, window.barScrolls = y, y > room
+    window.barView = step < BAR_STEP and room or y
+    PinBars(window)
+    PlaceUnder(window, LIST_TOP + window.barView)
+    return true
+end
+
 -- Setup ------------------------------------------------------------------------------
 
 -- "Are you sure?": a small dialog over the whole window, for anything that
@@ -2742,13 +2919,13 @@ local function BuildHelp(window, header)
     end
     -- The note only where nothing is under it: the bar pages and General.
     -- Elsewhere buttons or words sit at the right of the page's top row, so
-    -- there only the ? pulses: on a bar page too while it shows its extra
-    -- bar's button (BarPage.lua; with Clear, once the bar has spells).
+    -- there only the ? pulses: on a bar page too while it shows Clear (once
+    -- the bar has spells) or an extra bar's Remove bar (BarPage.lua).
     local function Room()
         local key = window.selected
         if ns.BAR_NAMES[key] ~= nil then
-            local another = window.pages and window.pages.bar.another
-            return not (another and another:IsShown())
+            local page = window.pages and window.pages.bar
+            return not (page and (page.another:IsShown() or page.clear:IsShown()))
         end
         return key == "general"
     end
@@ -2855,47 +3032,76 @@ local function BuildWindow()
     yours:SetPoint("TOPLEFT", 14, -12)
     yours:SetText("YOUR BARS")
     window.yourBars = yours
-    local y = 28
-    -- The four bars: an extra bar's page is reached from its kind's (BarPage.lua).
+    -- The bars, in a list that scrolls once they don't all fit (LayBars):
+    -- the four, each kind's + Add a bar line (none showing yet) and the
+    -- extra bars you add. Pinned as the four are now, and again as the
+    -- window shows (PinBars).
+    local list = T:Scroll(nav, NAV)
+    window.barList = list
+    window:Hint(list.thumb, ns.SCROLL_NOTE)
+    local y = 0
     for _, key in ipairs(ns.BASE_BAR_KEYS) do
-        window.nav[key] = NavItem(window, nav, key, ns.BAR_NAMES[key], y, true)
-        y = y + 48
+        window.nav[key] = NavItem(window, list.content, key, ns.BAR_NAMES[key], y, true)
+        window.nav[key].listY = y
+        y = y + BAR_STEP
+    end
+    window.navPlus = {}
+    for _, kind in ipairs(ns.BASE_BAR_KEYS) do window.navPlus[kind] = PlusLine(window, list.content, kind) end
+    window.barsLaid = table.concat(ns.BASE_BAR_KEYS, " ") .. " + "
+    window.barHeight, window.barView, window.barScrolls = y, y, false
+    PinBars(window)
+    window:HookScript("OnShow", function() C_Timer.After(0, function() PinBars(window) end) end)
+    y = LIST_TOP + y
+    -- Everything under the bars, where it always was, each part kept with
+    -- its x, how far under the bars it is and its right edge if it has one,
+    -- for LayBars to place it under the bars' room.
+    local under, bars = {}, y
+    window.under = under
+    local function Under(part, x, at, right)
+        under[#under + 1] = { part, x, at, right }
+        return part
     end
     local rule = nav:CreateTexture(nil, "BORDER")
     rule:SetPoint("TOPLEFT", 12, -(y + 4))
     rule:SetPoint("RIGHT", -12, 0)
     rule:SetHeight(1)
     T:Fill(rule, T.BORDER)
+    Under(rule, 12, 4, -12)
     y = y + 12
-    window.nav.look = NavItem(window, nav, "look", "Look", y)
-    window.nav.layout = NavItem(window, nav, "layout", "Layout", y + 32)
+    local function Listed(key, label)
+        window.nav[key] = Under(NavItem(window, nav, key, label, y), 0, y - bars, 0)
+        y = y + 32
+    end
+    Listed("look", "Look")
+    Listed("layout", "Layout")
     -- New files only load after a full restart: until then there's no Cast bar page.
     local castPage = ns.BuildCastBarPage ~= nil
-    if castPage then window.nav.cast = NavItem(window, nav, "cast", "Cast bar", y + 64) end
-    window.nav.general = NavItem(window, nav, "general", "General", y + (castPage and 96 or 64))
+    if castPage then Listed("cast", "Cast bar") end
+    Listed("general", "General")
     -- More: pages beyond the Cooldown Manager and your bars, headed like
     -- your bars: Raid Timers, then Cooldown pulse. New files, so each only
     -- after a full restart.
     local raidPage = ns.BuildRaidTimersPage ~= nil
     local pulsePage = ns.BuildPulsePage ~= nil
     if raidPage or pulsePage then
-        local more = y + (castPage and 128 or 96)
         local moreRule = nav:CreateTexture(nil, "BORDER")
-        moreRule:SetPoint("TOPLEFT", 12, -(more + 4))
+        moreRule:SetPoint("TOPLEFT", 12, -(y + 4))
         moreRule:SetPoint("RIGHT", -12, 0)
         moreRule:SetHeight(1)
         T:Fill(moreRule, T.BORDER)
+        Under(moreRule, 12, y + 4 - bars, -12)
         local moreHeading = T:Text(nav, "GameFontHighlightSmall", T.MUTED)
-        moreHeading:SetPoint("TOPLEFT", 14, -(more + 14))
+        moreHeading:SetPoint("TOPLEFT", 14, -(y + 14))
         moreHeading:SetText("MORE")
-        window.moreHeading = moreHeading
-        local at = more + 30
-        if raidPage then
-            window.nav.raid = NavItem(window, nav, "raid", "Raid Timers", at)
-            at = at + 32
-        end
-        if pulsePage then window.nav.pulse = NavItem(window, nav, "pulse", "Cooldown pulse", at) end
+        window.moreHeading = Under(moreHeading, 14, y + 14 - bars)
+        y = y + 30
+        if raidPage then Listed("raid", "Raid Timers") end
+        if pulsePage then Listed("pulse", "Cooldown pulse") end
     end
+    -- The bars' room (LayBars): the list's height (489) less What's new at
+    -- its foot with 3 over it (12 + 22 + 3), the heading over the bars (28)
+    -- and everything under them (232 with every page): 192, the four's.
+    window.barRoom = (HEIGHT - HEADER - FOOTER - 1) - (12 + 22 + 3) - LIST_TOP - (y - 2 - bars)
     -- What's new in this version, at the foot of the list.
     local news = T:Button(nav, "What's new", NAV - 24, 22)
     news:SetPoint("BOTTOMLEFT", 12, 12)
@@ -2951,14 +3157,20 @@ local function BuildWindow()
         if ns.BAR_NAMES[self.selected] and not ns.HasBar(self.selected) then self.selected = ns.BAR_KIND[self.selected] end
         local selected = self.selected
         local barPage = ns.BAR_NAMES[selected] ~= nil
-        -- The list has the four bars: an extra bar's page lights its kind's.
-        local lit = ns.BAR_KIND[selected] or selected
+        -- The list has every bar you have, each extra one too, and the + Add
+        -- a bar lines (LayBars). In a list that scrolls, the lit bar comes
+        -- into sight once it's lit or laid out again, not on every refresh
+        -- (that would undo the wheel).
+        local relaid = LayBars(self)
+        local lit = self.nav[selected] and selected or ns.BAR_KIND[selected] or selected
+        if self.barScrolls and ns.BAR_NAMES[lit] and (relaid or lit ~= self.barSeen) then BarInView(self, lit) end
+        self.barSeen = lit
         for key, item in pairs(self.nav) do
             local chosen = key == lit
             item.fill:SetShown(chosen)
             item.glow:SetShown(chosen)
             item.mark:SetShown(chosen)
-            if item.icons then
+            if ns.BAR_NAMES[key] and ns.HasBar(key) then
                 -- Yours only: another class's, in a shared profile, stay hidden,
                 -- and one you haven't learned yet shows greyed in its own icon.
                 local spells = ns.Bars:Mine(key)

@@ -490,23 +490,26 @@ ns.SHARE_PARTS = {
 -- The four bars everyone has.
 ns.BASE_BAR_KEYS = { "cd", "util", "buff", "debuff" }
 -- Extra bars (a player's idea: Curse of the Elements on a bar apart from
--- three damage over time spells): a second bar of a kind, added on its
--- page and kept in your profile (Extra bars, below). One of each kind, two
--- in all: each aura one is another of the game's secure containers.
-ns.EXTRA_BAR_KEYS = { "cd2", "util2", "buff2", "debuff2" }
-ns.EXTRA_OF = { cd = "cd2", util = "util2", buff = "buff2", debuff = "debuff2" } -- a kind's extra bar
-ns.EXTRA_MAX = 2
+-- three damage over time spells; then a third cooldown bar, and more rows of
+-- one kind): more bars of a kind, added in the window's list and kept in your
+-- profile (Extra bars, below). Two of each kind ("2", then "3"), four in
+-- all: each aura one is another of the game's secure containers, and the
+-- window's bar list has room for eight (Window.lua).
+-- In the order kept when a saved profile or a string has more than four.
+ns.EXTRA_BAR_KEYS = { "cd2", "util2", "buff2", "debuff2", "cd3", "util3", "buff3", "debuff3" }
+-- A kind's extra bars, in the order they're added (one of the four's keys
+-- is a key here: nil for an extra bar).
+ns.EXTRAS_OF = { cd = { "cd2", "cd3" }, util = { "util2", "util3" }, buff = { "buff2", "buff3" }, debuff = { "debuff2", "debuff3" } }
+ns.EXTRA_MAX = 4
 -- Every bar there can be, each extra after its kind: what's saved, shared
 -- and repaired goes by these.
-ns.ALL_BAR_KEYS = { "cd", "cd2", "util", "util2", "buff", "buff2", "debuff", "debuff2" }
+ns.ALL_BAR_KEYS = { "cd", "cd2", "cd3", "util", "util2", "util3", "buff", "buff2", "buff3", "debuff", "debuff2", "debuff3" }
 -- The bars you have now: the four, and the extras in your profile (in the
 -- order above), kept up to date in place (ns.SyncBarKeys).
 ns.BAR_KEYS = { "cd", "util", "buff", "debuff" }
-ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs", debuff = "Debuffs",
-    cd2 = "Cooldowns 2", util2 = "Utility 2", buff2 = "Buffs 2", debuff2 = "Debuffs 2" }
+ns.BAR_NAMES = { cd = "Cooldowns", util = "Utility", buff = "Buffs", debuff = "Debuffs" }
 -- Each bar's kind: the bar it's a copy of (each of the four is its own).
-ns.BAR_KIND = { cd = "cd", util = "util", buff = "buff", debuff = "debuff", cd2 = "cd", util2 = "util", buff2 = "buff",
-    debuff2 = "debuff" }
+ns.BAR_KIND = { cd = "cd", util = "util", buff = "buff", debuff = "debuff" }
 -- The bars fed by Blizzard's secure aura container, and what each watches.
 -- Debuffs: only yours ("PLAYER": you, your pet or vehicle), so another
 -- player's same debuff on your target never lights your icon.
@@ -514,7 +517,12 @@ ns.AURA_BARS = {
     buff = { unit = "player", filter = "HELPFUL", word = "buff" },
     debuff = { unit = "target", filter = "HARMFUL|PLAYER", mine = true, word = "debuff" },
 }
-ns.AURA_BARS.buff2, ns.AURA_BARS.debuff2 = ns.AURA_BARS.buff, ns.AURA_BARS.debuff
+-- Each extra bar: "<Kind> 2" or "<Kind> 3", of its kind, watching what it does.
+for kind, extras in pairs(ns.EXTRAS_OF) do
+    for i, key in ipairs(extras) do
+        ns.BAR_NAMES[key], ns.BAR_KIND[key], ns.AURA_BARS[key] = ns.BAR_NAMES[kind] .. " " .. (i + 1), kind, ns.AURA_BARS[kind]
+    end
+end
 -- Swap with my form: the Cooldowns and Utility bars only.
 local SWAP_BARS = { cd = true, util = true }
 function ns.CanSwap(key)
@@ -697,7 +705,7 @@ local PULSE_LISTS = { pulsePick = true, pulseStyle = "long" }
 -- in order.
 local function Present(store, key)
     if not ns.BAR_NAMES[key] then return false end
-    if ns.EXTRA_OF[key] then return true end -- one of the four
+    if ns.EXTRAS_OF[key] then return true end -- one of the four
     local extras = store and store.extraBars
     return type(extras) == "table" and extras[key] == true
 end
@@ -711,7 +719,7 @@ local function ProfileBars(store)
 end
 
 -- A profile's extra bars, repaired: the keys this version knows, true each,
--- two at most (in order); none kept leaves no table.
+-- four at most (in ns.EXTRA_BAR_KEYS' order); none kept leaves no table.
 local function RepairExtras(profile)
     local saved, kept, count = profile.extraBars, {}, 0
     if type(saved) == "table" then
@@ -947,12 +955,14 @@ local function Lists(profile)
     -- The picked icon for a joined group while none is up, the buffs that
     -- glow while they're missing, the debuffs that count their ticks, the
     -- buffs shown only while they're missing and the buffs that glow while
-    -- they're up (both a Buffs bar's own): only names on that aura bar's list.
-    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive" }) do
+    -- they're up (both a Buffs bar's own), and the entries dimmed until
+    -- their Warn at time: only names on that aura bar's list.
+    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers",
+        "dimUntilWarn" }) do
         if type(profile[field]) ~= "table" then profile[field] = {} end
         for key, set in pairs(profile[field]) do
             if not (ns.AURA_BARS[key] and Present(profile, key)) or type(set) ~= "table"
-                or ((field == "onlyWhenMissing" or field == "glowActive") and ns.BAR_KIND[key] ~= "buff") then
+                or ((field == "onlyWhenMissing" or field == "glowActive" or field == "handOthers") and ns.BAR_KIND[key] ~= "buff") then
                 profile[field][key] = nil
             else
                 local listed = {}
@@ -1367,15 +1377,16 @@ function ns.KeepApart(keep)
     -- An extra cooldown bar (Extra bars, below) never swaps, and a spell on
     -- it is on no other cooldown bar's list, in any form (B:Assign keeps it
     -- so). Where one is (a profile made from a string), the Cooldowns and
-    -- Utility bars' lists keep it, then the extras in order.
+    -- Utility bars' lists keep it, then the extras in order (Cooldowns 2,
+    -- Utility 2, Cooldowns 3, Utility 3).
     local taken = {}
     for _, key in ipairs({ "cd", "util" }) do
         for _, list in ipairs(ns.BarLists(key)) do
             for _, name in ipairs(list) do taken[name] = true end
         end
     end
-    for _, key in ipairs({ "cd2", "util2" }) do
-        local list = Present(store, key) and store[key]
+    for _, key in ipairs(ns.EXTRA_BAR_KEYS) do
+        local list = not ns.AURA_BARS[key] and Present(store, key) and store[key]
         if type(list) == "table" then
             for i = #list, 1, -1 do
                 if taken[list[i]] then
@@ -1433,6 +1444,19 @@ end
 -- (Glow while active), by name, true each.
 function ns.GlowActive(key)
     return Choices("glowActive", key)
+end
+
+-- This character's hand entries on a Buffs bar ticked Others only (a
+-- player's report: a Spellstone hid a missing oil), by name, true each.
+function ns.HandOthers(key)
+    return Choices("handOthers", key)
+end
+
+-- This character's entries on a Buffs or Debuffs bar whose icons stay dark
+-- while they're up until their Warn at time is left (Dim until Warn at, a
+-- player's idea: Moonfire not ticking down all 12 seconds), by name, true each.
+function ns.DimUntilWarn(key)
+    return Choices("dimUntilWarn", key)
 end
 
 -- And how big their glows are (Glow size): a percent of the usual size, for
@@ -1599,12 +1623,14 @@ function ns.IconSizeFor(key, name, size)
 end
 
 -- Extra bars ---------------------------------------------------------------------
--- A second bar of a kind (Cooldowns 2, Utility 2, Buffs 2 or Debuffs 2), a
--- copy of it in everything but Swap with my form: added on its kind's page,
--- one of each kind and two in all, kept in the profile beside its list
--- (profile.extraBars[bar] = true), so switching profiles brings it or takes
--- it away. Its settings and place are every character's, as the four bars'
--- are. Never changed in a fight.
+-- Another bar of a kind (Cooldowns 2 and 3, Utility 2 and 3, Buffs 2 and 3,
+-- Debuffs 2 and 3), a copy of it in everything but Swap with my form: added
+-- by its kind's + Add a bar line in the window's list (Window.lua), two of
+-- each kind and four in all, kept in the profile
+-- beside its list (profile.extraBars[bar] = true), so switching profiles
+-- brings it or takes it away. Its settings and place are every character's,
+-- as the four bars' are. Never changed in a fight. One removed leaves a gap
+-- (Cooldowns 3 with no Cooldowns 2): the next one added fills it.
 local present = { cd = true, util = true, buff = true, debuff = true } -- the bars you have now
 
 -- ns.BAR_KEYS (and ns.HasBar) as the profile you're on has them, kept in
@@ -1622,12 +1648,19 @@ function ns.HasBar(key)
     return present[key] == true
 end
 
--- Whether a kind's extra bar can be added now: true and its key, or false
--- and why not.
+-- Whether another of a kind's extra bars can be added now: true and the key
+-- of its first one you haven't got, or false and why not.
 function ns.CanAddBar(kind)
-    local key = ns.EXTRA_OF[kind]
-    if not key then return false, "There's no such bar." end
-    if present[key] then return false, ns.BAR_NAMES[key] .. " is there already." end
+    local extras = ns.EXTRAS_OF[kind]
+    if not extras then return false, "There's no such bar." end
+    local key
+    for _, extra in ipairs(extras) do
+        if not key and not present[extra] then key = extra end
+    end
+    if not key then
+        return false, ns.BAR_NAMES[extras[1]] .. " and " .. ns.BAR_NAMES[extras[2]] .. " are there already: two extra bars of"
+            .. " a kind at most."
+    end
     if #ns.BAR_KEYS - #ns.BASE_BAR_KEYS >= ns.EXTRA_MAX then
         return false, "You have " .. ns.EXTRA_MAX .. " extra bars already: remove one on its page first."
     end
@@ -1659,11 +1692,12 @@ end
 
 -- Removes an extra bar from the profile you're on, with its list and its
 -- entries' choices there (joins, picks, glow, ticks, only when missing,
--- Warn at, icon sizes); a look goes once no list of yours has its entry.
+-- Warn at and Dim until Warn at, icon sizes); a look goes once no list of
+-- yours has its entry.
 -- Its settings and place stay, for when one is added again. True, or false
 -- and why not. Bars.lua B:RemoveBar empties its frame.
 function ns.RemoveBar(key)
-    if not ns.BAR_NAMES[key] or ns.EXTRA_OF[key] then return false, "Only an extra bar can be removed." end
+    if not ns.BAR_NAMES[key] or ns.EXTRAS_OF[key] then return false, "Only an extra bar can be removed." end
     if not present[key] then return false, ns.BAR_NAMES[key] .. " isn't there." end
     if InCombatLockdown() then return false, "Finish combat first." end
     if not active then return false, "Your profile hasn't loaded yet." end
@@ -1673,7 +1707,8 @@ function ns.RemoveBar(key)
     extras[key] = nil
     store.extraBars = next(extras) ~= nil and extras or nil
     store[key] = nil
-    for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "warnAt", "iconSize" }) do
+    for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers", "warnAt",
+        "iconSize", "dimUntilWarn" }) do
         local sets = store[field]
         if type(sets) == "table" then sets[key] = nil end
     end
@@ -1908,8 +1943,10 @@ local function Duplicate(from)
     end
     -- And which entry each joined icon shows, faded, while none is up, which
     -- buffs glow while they're missing, which debuffs count their ticks,
-    -- which buffs show only while they're missing and which glow while up.
-    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive" }) do
+    -- which buffs show only while they're missing and which glow while up,
+    -- and which entries stay dim until their Warn at time.
+    for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers",
+        "dimUntilWarn" }) do
         profile[field] = {}
         for key, set in pairs(type(from[field]) == "table" and from[field] or {}) do
             profile[field][key] = {}
@@ -2112,7 +2149,7 @@ local PLACE_FIELDS = { "size", "spacing", "perRow", "grow", "wrap", "point", "x"
 -- one of the four always, an extra bar once it has some (one never added
 -- keeps none).
 local function Settled(key, from)
-    return ns.EXTRA_OF[key] ~= nil or type(from) == "table" or type(db.bars) == "table" and type(db.bars[key]) == "table"
+    return ns.EXTRAS_OF[key] ~= nil or type(from) == "table" or type(db.bars) == "table" and type(db.bars[key]) == "table"
 end
 
 -- The spots and sizes on screen now, sharing nothing with them.
@@ -2280,7 +2317,7 @@ function ns.ImportProfile(text, shared, withLook)
     local profile = { joins = {}, pulsePick = CopySet(shared.pick), pulseStyle = CopySet(shared.style),
         forms = CopyForms(shared.forms), swapForm = CopySet(shared.swap), extraBars = CopySet(shared.extras) }
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
-        if ns.EXTRA_OF[key] or type(shared.lists[key]) == "table" then profile[key] = CopyList(shared.lists[key]) end
+        if ns.EXTRAS_OF[key] or type(shared.lists[key]) == "table" then profile[key] = CopyList(shared.lists[key]) end
     end
     for key in pairs(ns.AURA_BARS) do
         local joins = type(shared.joins) == "table" and shared.joins[key]
@@ -2711,6 +2748,9 @@ function ns.BarData(key)
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
     bar.showGCD = bar.showGCD == true -- the global cooldown's sweep on cooldown icons after each cast, off unless ticked
+    -- Glow for more procs: cooldown icons glow for procs the game doesn't
+    -- light (IconAuras.lua), off unless ticked. Not in shared profiles.
+    bar.glowProcs = bar.glowProcs == true
     bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
     -- The Debuffs bar's tick count: top left, its automatic size, white,
     -- from 1, unless you choose. Custom keeps its colour beside it, and

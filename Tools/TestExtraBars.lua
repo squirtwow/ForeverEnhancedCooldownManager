@@ -1109,7 +1109,7 @@ end
 
 -- Off by default, then Debuffs 2 (the player's case) ---------------------------------------------
 -- No extra bar until one is added: the four bars, nothing kept or made. On
--- the Debuffs page's "+ Another bar", Debuffs 2: a second Debuffs bar with a
+-- the list's "+ Add a bar" under Debuffs, Debuffs 2: a second Debuffs bar with a
 -- container of its own watching your target, made with the bar, its own
 -- list (Curse of the Elements apart from three damage over time spells),
 -- its own options, as the Debuffs bar's. Each Debuffs bar follows a new
@@ -1166,10 +1166,16 @@ end
     -- Its page's Only when missing and Swap with my form: not a Debuffs bar's.
     Equal(tostring(B:SetOnlyWhenMissing("debuff2", "Wrath", true)) .. " " .. tostring(ns.Swaps("debuff2")), "false false",
         "Only when missing stays a Buffs bar's; no Swap with my form")
-    -- One of each kind: Debuffs 2 is there already.
-    local again, why = B:AddBar("debuff")
-    Equal(tostring(again) .. " " .. why .. " | " .. H.Keys(ns), "false Debuffs 2 is there already. | cd util buff debuff debuff2",
-        "one of each kind: another Debuffs bar is turned away")
+    -- Two of each kind (a player's idea: a third cooldown bar): Debuffs 3
+    -- next, with a container of its own; a fourth Debuffs bar is turned away.
+    local again, third = B:AddBar("debuff")
+    local fourth, why = B:AddBar("debuff")
+    local bar3 = B:Get("debuff3")
+    Equal(table.concat({ tostring(again), third, tostring(fourth), why, H.Keys(ns), H.Text(profile.extraBars),
+        tostring(#containers - made), tostring(bar3 and S[bar3.container].unit), tostring(bar3 and bar3.container ~= bar.container) }, " | "),
+        "true | debuff3 | false | Debuffs 2 and Debuffs 3 are there already: two extra bars of a kind at most. | cd util buff debuff"
+        .. " debuff2 debuff3 | {[\"debuff2\"]=true,[\"debuff3\"]=true} | 2 | target | true",
+        "two of each kind: Debuffs 3 next, its own container watching your target; a fourth Debuffs bar turned away, saying why")
     Equal(#printed, 0, "no errors")
 end)()
 
@@ -1267,8 +1273,8 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
--- Two at most, never in a fight, and taken away again ---------------------------------------------
--- A third extra bar is turned away, saying why; in a fight nothing is added
+-- Four at most, never in a fight, and taken away again ---------------------------------------------
+-- A fifth extra bar is turned away, saying why; in a fight nothing is added
 -- or removed. Remove bar takes it out of your profile with its spells and
 -- their choices: its frame can't be thrown away, so it's laid out with
 -- nothing on it (every slot off) and goes right out, as a bar taken out of
@@ -1278,17 +1284,19 @@ end)()
     local B = ns.Bars
     B:AddBar("debuff")
     B:AddBar("buff")
-    local third, why = B:AddBar("cd")
-    Equal(tostring(third) .. " " .. why .. " | " .. H.Keys(ns) .. " | " .. tostring(B:Get("cd2")),
-        "false You have 2 extra bars already: remove one on its page first. | cd util buff buff2 debuff debuff2 | nil",
-        "two at most: a third is turned away, saying why, nothing made")
+    B:AddBar("cd")
+    B:AddBar("util")
+    local fifth, why = B:AddBar("cd")
+    Equal(tostring(fifth) .. " " .. why .. " | " .. H.Keys(ns) .. " | " .. tostring(B:Get("cd3")),
+        "false You have 4 extra bars already: remove one on its page first. | cd cd2 util util2 buff buff2 debuff debuff2 | nil",
+        "four at most: a fifth (Cooldowns 3) is turned away, saying why, nothing made")
     lockdown = true
     local removed, inFight = B:RemoveBar("buff2")
     local addedInFight, said = ns.CanAddBar("cd")
     lockdown = false
     Equal(tostring(removed) .. " " .. inFight .. " | " .. tostring(addedInFight) .. " " .. said .. " | " .. H.Keys(ns),
-        "false Finish combat first. | false You have 2 extra bars already: remove one on its page first. | cd util buff buff2 debuff debuff2",
-        "in a fight: nothing removed")
+        "false Finish combat first. | false You have 4 extra bars already: remove one on its page first. | cd cd2 util util2 buff buff2"
+        .. " debuff debuff2", "in a fight: nothing removed")
     -- Buffs 2 with Thorns, ticked Only when missing, glowing and warned; then removed.
     B:SetAura("buff2", "Thorns", true)
     B:SetOnlyWhenMissing("buff2", "Thorns", true)
@@ -1304,7 +1312,8 @@ end)()
     Equal(table.concat({ tostring(ok), message, H.Keys(ns), H.Text(store.extraBars), tostring(store.buff2),
         tostring(store.onlyWhenMissing.buff2), tostring(store.glowMissing.buff2), tostring(store.warnAt), tostring(store.iconSize),
         tostring(store.spellLook) }, " | "),
-        "true | Buffs 2 removed, with its spells. | cd util buff debuff debuff2 | {[\"debuff2\"]=true} | nil | nil | nil | nil | nil | nil",
+        "true | Buffs 2 removed, with its spells. | cd cd2 util util2 buff debuff debuff2 | {[\"cd2\"]=true,[\"debuff2\"]=true,"
+        .. "[\"util2\"]=true} | nil | nil | nil | nil | nil | nil",
         "removed: out of the profile with its list and its entries' choices, Thorns' look with it (on no other list)")
     Equal(table.concat({ H.Slots(bar.container), tostring(bar.count), tostring(bar.gone), tostring(InSight(bar)),
         tostring(S[B.driver].events.UNIT_AURA == true), tostring(ns.HasBar("buff2")), tostring(B:Get("buff2") == bar),
@@ -1319,10 +1328,9 @@ end)()
     local container = bar.container
     B:AddBar("buff")
     Equal(H.Keys(ns) .. " | " .. tostring(B:Get("buff2") == bar) .. " " .. tostring(bar.container == container) .. " | "
-        .. H.Text(ns.BarData("buff2").spells), "cd util buff buff2 debuff debuff2 | true true | {}", "added again: the same frame, empty")
+        .. H.Text(ns.BarData("buff2").spells), "cd cd2 util util2 buff buff2 debuff debuff2 | true true | {}", "added again: the same frame, empty")
     -- A removed Cooldowns 2: its icons hidden, their range no longer watched.
     B:RemoveBar("buff2")
-    B:AddBar("cd")
     B:Assign("Moonfire", "cd2")
     local cd2 = B:Get("cd2")
     local icon = cd2.icons[1]
@@ -1368,17 +1376,22 @@ end)()
     -- Old and broken saved profiles, repaired as they load.
     local saved = { useBars = true, notesSeen = "dev", helpSeen = true, chars = { ["Player-1-0001"] = "Odd" }, profiles = {
         Odd = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {}, debuff2 = { "Wrath" }, cd2 = { "Wrath" }, util2 = { 5 },
-            extraBars = { debuff2 = true, cd2 = true, util2 = true, bogus = true }, glowMissing = { debuff2 = { Wrath = true } },
-            iconSize = { cd = { Moonfire = 130, Wrath = 120 }, cd2 = { Wrath = 49 }, debuff2 = { Wrath = 100 }, nobar = { Moonfire = 90 } } },
+            cd3 = { "Moonfire", "Overpower" }, debuff3 = { "Wrath" },
+            extraBars = { debuff2 = true, cd2 = true, util2 = true, cd3 = true, debuff3 = true, cd4 = true, bogus = true },
+            glowMissing = { debuff2 = { Wrath = true }, debuff3 = { Wrath = true } },
+            iconSize = { cd = { Moonfire = 130, Wrath = 120 }, cd2 = { Wrath = 49 }, debuff3 = { Wrath = 100 }, nobar = { Moonfire = 90 } } },
         Old = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {}, debuff2 = { "Wrath" } },
         Junk = { cd = {}, util = {}, buff = {}, debuff = {}, extraBars = "yes" } } }
     ns = Start(saved)
     local odd, old, junk = saved.profiles.Odd, saved.profiles.Old, saved.profiles.Junk
-    Equal(table.concat({ H.Text(odd.extraBars), tostring(odd.debuff2), H.Text(odd.cd2), H.Text(odd.util2), tostring(odd.glowMissing.debuff2),
-        H.Text(odd.iconSize), H.Keys(ns), tostring(ns.Bars:Get("cd2") and ns.Bars:Get("cd2").count) }, " | "),
-        "{[\"cd2\"]=true,[\"util2\"]=true} | nil | {[1]=\"Wrath\"} | {} | nil | {[\"cd\"]={[\"Moonfire\"]=130}} | cd cd2 util util2 buff debuff"
-        .. " | 1", "repaired: the extra bars it knows, two at most (Debuffs 2 let go with its list and choices), each list repaired, only"
-        .. " sizes this version keeps for names on that bar; logged in with it, Cooldowns 2 made with its icon")
+    Equal(table.concat({ H.Text(odd.extraBars), tostring(odd.debuff3), H.Text(odd.cd2), H.Text(odd.util2), H.Text(odd.cd3),
+        tostring(odd.glowMissing.debuff3) .. " " .. H.Text(odd.glowMissing.debuff2), H.Text(odd.iconSize), H.Keys(ns),
+        tostring(ns.Bars:Get("cd2") and ns.Bars:Get("cd2").count), tostring(ns.Bars:Get("cd3") and ns.Bars:Get("cd3").count) }, " | "),
+        "{[\"cd2\"]=true,[\"cd3\"]=true,[\"debuff2\"]=true,[\"util2\"]=true} | nil | {[1]=\"Wrath\"} | {} | {[1]=\"Overpower\"}"
+        .. " | nil {[\"Wrath\"]=true} | {[\"cd\"]={[\"Moonfire\"]=130}} | cd cd2 cd3 util util2 buff debuff debuff2 | 1 | 1",
+        "repaired: the extra bars it knows, four at most in order (Debuffs 3 let go with its list and choices, Cooldowns 4 and the"
+        .. " like unknown), each list repaired (Moonfire stays on Cooldowns, off Cooldowns 3), only sizes this version keeps for names"
+        .. " on that bar; logged in with it, Cooldowns 2 and 3 made with their icons")
     Equal(tostring(old.extraBars) .. " " .. tostring(old.debuff2) .. " " .. tostring(old.iconSize) .. " | " .. tostring(junk.extraBars),
         "nil nil nil | nil", "an old profile: no extra bar and nothing added (a list for a bar it hasn't goes); nonsense goes")
     Equal(#printed, 0, "no errors")
@@ -1388,7 +1401,8 @@ end)()
 -- A string carries the extra bars (x), their lists and settings, and the
 -- icons' own sizes (z). Read back the same, said in the description, made
 -- into a profile that has them; a list for an extra bar the string doesn't
--- name, more than two, or odd sizes are left out and counted.
+-- name, more than four, keys no version has, or odd sizes are left out and
+-- counted.
 ;(function()
     local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
     local B, P = ns.Bars, ns.ProfileShare
@@ -1413,14 +1427,19 @@ end)()
         .. H.Text(friend.iconSize) .. " | " .. H.Keys(ns) .. " | " .. tostring(P.Export() == text),
         "true | Friend | {[\"debuff2\"]=true} {[1]=\"Wrath\"} {[\"cd\"]={[\"Moonfire\"]=75},[\"debuff2\"]={[\"Wrath\"]=125}} | cd util"
         .. " buff debuff debuff2 | true", "imported: the new profile has the bar, its list and the sizes; it shares the same string back")
-    -- Odd strings: a list for an extra bar it doesn't name, a third extra bar, odd sizes.
+    -- Odd strings: a list for an extra bar it doesn't name, a fifth extra
+    -- bar, keys no version has (Cooldowns 4), a spell on two cooldown bars,
+    -- odd sizes.
     local odd = P.Read(H.String({ l = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {}, debuff2 = { "Wrath" }, cd2 = { "Wrath" },
-        util2 = {}, buff2 = {} }, x = { cd2 = true, util2 = true, buff2 = true, nope = true },
-        z = { cd = { Moonfire = 151, Wrath = 100 }, cd2 = { Wrath = 50 }, debuff2 = { Wrath = 100 } } }))
-    Equal(table.concat({ H.Text(odd.extras), tostring(odd.lists.debuff2), tostring(odd.lists.buff2), H.Text(odd.sizes),
-        tostring(odd.skipped) }, " | "), "{[\"cd2\"]=true,[\"util2\"]=true} | nil | nil | {[\"cd2\"]={[\"Wrath\"]=50}} | 7",
-        "odd: two extra bars kept (in order), the third and an unknown one left out, lists for bars it doesn't keep left out,"
-        .. " odd sizes left out: each counted")
+        util2 = {}, buff2 = {}, cd3 = { "Moonfire", "Overpower" }, debuff3 = { "Wrath" }, cd4 = { "Wrath" } },
+        x = { cd2 = true, util2 = true, buff2 = true, cd3 = true, debuff3 = true, cd4 = true, nope = true },
+        z = { cd = { Moonfire = 151, Wrath = 100 }, cd2 = { Wrath = 50 }, debuff2 = { Wrath = 100 }, cd3 = { Overpower = 120 } } }))
+    Equal(table.concat({ H.Text(odd.extras), tostring(odd.lists.debuff2), tostring(odd.lists.debuff3), H.Text(odd.lists.cd3),
+        H.Text(odd.lists.buff2), H.Text(odd.sizes), tostring(odd.skipped) }, " | "),
+        "{[\"buff2\"]=true,[\"cd2\"]=true,[\"cd3\"]=true,[\"util2\"]=true} | nil | nil | {[1]=\"Overpower\"} | {} | {[\"cd2\"]={[\"Wrath\"]=50},"
+        .. "[\"cd3\"]={[\"Overpower\"]=120}} | 10", "odd: four extra bars kept (in order, Cooldowns 3 among them), the fifth (Debuffs 3)"
+        .. " and unknown ones (Cooldowns 4) left out, lists for bars it doesn't keep left out, Moonfire kept on Cooldowns and off"
+        .. " Cooldowns 3, odd sizes left out: each counted")
     -- An older string (no x, no z): nothing new.
     local older = P.Read(H.String({ a = "1.9.1", l = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } }))
     Equal(H.Text(older.extras) .. " " .. H.Text(older.sizes) .. " " .. older.skipped, "{} {} 0", "a string from before: no extra bar, no sizes")
@@ -1491,13 +1510,16 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
--- The bar pages: + Another bar, the way there and back, Remove bar ------------------------------------
--- On a bar's page, once it has spells, "+ Another bar" left of Clear adds
--- its kind's second bar and opens its page; once there, the button goes to
--- it. On the extra bar's page the button is Remove bar, which asks first;
--- the list lights the kind's item, which goes back. A page whose bar is
--- gone shows its kind's. Each says what it does; the new ones quietly
--- experimental.
+-- The list's + Add a bar, the way there and back, Remove bar ------------------------------------------
+-- Under a kind's last bar in the list on the left (Squirt's pick, concept
+-- B), once the bar has spells or an extra bar of its kind is there,
+-- "+ Add a bar" adds its kind's next extra bar ("2", then "3") from any
+-- page and opens its page; once both are there, or four in all, it stays,
+-- greyed, saying why. The bar's own page has no button for it any more.
+-- Each extra bar has its own row in the list, lit on its page. On the
+-- extra bar's page, Remove bar, which asks first; the list is laid out
+-- again. A page whose bar is gone shows its kind's. Each says what it does
+-- (seen working in game 13 Nov 2026, so not marked experimental).
 ;(function()
     local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
     local B = ns.Bars
@@ -1505,20 +1527,36 @@ end)()
     local w = FECMFrame
     w:Select("debuff")
     local page = w.pages.bar
-    local another = page.another
-    Equal(tostring(another:IsShown()), "false", "an empty bar: no button yet (the ?'s note has room)")
+    local another, plus = page.another, w.navPlus.debuff
+    -- Whether the + line sits right under a row (2 below it), set in.
+    local function Under(item)
+        local p, at = S[plus].points[1], S[item].points[1]
+        return tostring(#S[plus].points == 1 and p[1] == "TOPLEFT" and p[2] == 20 and -p[3] == -at[3] + S[item].height + 2)
+    end
+    Equal(tostring(plus:IsShown()) .. " " .. tostring(another:IsShown()), "false false",
+        "an empty bar: no + Add a bar under it in the list yet, and no button on its page (the ?'s note has room)")
     B:SetAura("debuff", "Moonfire", true)
     w:Refresh()
-    Equal(table.concat({ tostring(another:IsShown()), S[another.label].text, H.Note(another), tostring(S[another].alpha),
-        tostring(S[another].points[1][2] == page.clear) }, " | "),
-        "true | + Another bar | Adds Debuffs 2: a second Debuffs bar with its own spells, size, options and Layout row, say to keep"
-        .. " one spell apart from the rest. (experimental) | 1 | true", "with spells: + Another bar left of Clear, saying what it does")
-    another:Click()
-    Equal(table.concat({ w.selected, S[w.note].text, S[page.count].text, tostring(w.nav.debuff.fill:IsShown()),
-        tostring(w.nav.cd.fill:IsShown()), tostring(another:IsShown()), S[another.label].text, H.Note(another) }, " | "),
-        "debuff2 | Debuffs 2 added. Tick spells for it in the list below. | Empty | true | false | true | Remove bar | Remove Debuffs 2"
-        .. " from this profile, with its spells. It asks first. The < before the title goes back to Debuffs. (experimental)",
-        "clicked: Debuffs 2's page, empty, the Debuffs item lit (a way back), and Remove bar")
+    Equal(table.concat({ tostring(plus:IsShown()), S[plus.label].text, H.Note(plus), tostring(S[plus].alpha), Under(w.nav.debuff),
+        tostring(another:IsShown()) }, " | "),
+        "true | + Add a bar | Adds Debuffs 2: a second Debuffs bar with its own spells, size, options and Layout row, say to keep"
+        .. " one spell apart from the rest. | 1 | true | false",
+        "with spells: + Add a bar under Debuffs in the list, set in, saying what it does; no button on the page")
+    -- In a fight: greyed, saying why; a click says so too, and adds nothing.
+    lockdown = true
+    w:Refresh()
+    local fight = tostring(S[plus].alpha) .. " | " .. H.Note(plus)
+    plus:Click()
+    lockdown = false
+    Equal(fight .. " | " .. w.selected .. " " .. S[w.note].text .. " | " .. H.Keys(ns), "0.45 | Finish combat first. | debuff Finish"
+        .. " combat first. | cd util buff debuff", "in a fight: greyed, saying why; clicked, it says so and adds nothing")
+    w:Refresh()
+    plus:Click()
+    Equal(table.concat({ w.selected, S[w.note].text, S[page.count].text, tostring(w.nav.debuff2 and w.nav.debuff2.fill:IsShown()),
+        tostring(w.nav.debuff.fill:IsShown()), Under(w.nav.debuff2), tostring(another:IsShown()), S[another.label].text, H.Note(another) },
+        " | "), "debuff2 | Debuffs 2 added. Tick spells for it in the list below. | Empty | true | false | true | true | Remove bar | Remove"
+        .. " Debuffs 2 from this profile, with its spells. It asks first. The < before the title goes back to Debuffs.",
+        "clicked: Debuffs 2's page, empty, its own row in the list lit, the + under it now, and Remove bar on its page")
     -- A "<" before the title goes back to Debuffs: shown only on a second
     -- bar's page, with the title after it there.
     local back = page.back
@@ -1540,29 +1578,56 @@ end)()
     row.check:Click()
     Equal(H.Text(ns.BarData("debuff2").spells) .. " " .. H.Text(ns.BarData("debuff").spells), "{[1]=\"Wrath\"} {[1]=\"Moonfire\"}",
         "ticked in its list: on Debuffs 2, Debuffs as it was")
-    -- Back by the list's Debuffs item, and over again.
+    -- From another page, the + (under Debuffs 2 now) adds Debuffs 3 (a
+    -- player's idea: a third cooldown bar); its page, its own row lit.
+    w:Select("look")
+    local before = H.Note(plus) .. " | " .. tostring(S[plus].alpha)
+    plus:Click()
+    Equal(table.concat({ before, w.selected, S[w.note].text, tostring(w.nav.debuff3 and w.nav.debuff3.fill:IsShown()),
+        tostring(w.nav.debuff2.fill:IsShown()), Under(w.nav.debuff3), tostring(back:IsShown()), H.Note(back) }, " | "),
+        "Adds Debuffs 3: a third Debuffs bar with its own spells, size, options and Layout row, say to keep one spell apart from the rest."
+        .. " | 1 | debuff3 | Debuffs 3 added. Tick spells for it in the list below. | true | false | true | true"
+        .. " | Back to Debuffs.", "from the Look page: + Add a bar adds Debuffs 3 and opens its page, its own row lit, the + under it")
+    -- Both there: still there, greyed, saying why; a click says so too.
     w.nav.debuff:Click()
-    Equal(w.selected .. " " .. S[another.label].text .. " | " .. H.Note(another), "debuff Debuffs 2 > | The Debuffs 2 page: your second Debuffs bar.",
-        "back on Debuffs: the button goes to Debuffs 2 now")
+    local full = tostring(plus:IsShown()) .. " | " .. tostring(S[plus].alpha) .. " | " .. S[plus.label].text .. " | " .. H.Note(plus)
+    plus:Click()
+    Equal(full .. " | " .. w.selected .. " | " .. S[w.note].text .. " | " .. H.Keys(ns), "true | 0.45 | + Add a bar | Debuffs 2 and"
+        .. " Debuffs 3 are there already: two extra bars of a kind at most. | debuff | Debuffs 2 and Debuffs 3 are there already: two"
+        .. " extra bars of a kind at most. | cd util buff debuff debuff2 debuff3",
+        "both there: still shown, greyed, saying why; clicked anyway it says why, and stays")
+    -- Remove bar asks first (Debuffs 3's, then Debuffs 2's); the list is
+    -- laid out again each time, the + back under the last one, not greyed.
+    w.nav.debuff3:Click()
     another:Click()
-    -- Remove bar asks first.
+    w.confirm.yes:Click()
+    local gone3 = table.concat({ w.selected, H.Keys(ns), tostring(w.nav.debuff3:IsShown()), Under(w.nav.debuff2), tostring(S[plus].alpha) },
+        " ")
+    w.nav.debuff2:Click()
     another:Click()
     local confirm = w.confirm
     Equal(tostring(S[confirm.shade].shown) .. " | " .. S[confirm.dialog.title].text .. " | " .. S[confirm.dialog.detail].text .. " | "
-        .. H.Keys(ns), "true | Remove Debuffs 2? | Its spells and their settings go from this profile. You can add it again on the Debuffs"
-        .. " page. | cd util buff debuff debuff2", "Remove bar asks first")
+        .. H.Keys(ns) .. " | " .. gone3, "true | Remove Debuffs 2? | Its spells and their settings go from this profile. You can add it"
+        .. " again with + Add a bar in the list. | cd util buff debuff debuff2 | debuff cd util buff debuff debuff2 false true 1",
+        "Remove bar asks first; Debuffs 3 removed: back on Debuffs, its row gone from the list, the + under Debuffs 2, not greyed")
     confirm.yes:Click()
-    Equal(w.selected .. " | " .. S[w.note].text .. " | " .. H.Keys(ns) .. " | " .. S[another.label].text,
-        "debuff | Debuffs 2 removed, with its spells. | cd util buff debuff | + Another bar", "removed: back on Debuffs, + Another bar again")
-    -- Two extra bars already: greyed, saying why; a click says so too.
+    Equal(w.selected .. " | " .. S[w.note].text .. " | " .. H.Keys(ns) .. " | " .. Under(w.nav.debuff) .. " " .. tostring(S[plus].alpha)
+        .. " " .. tostring(another:IsShown()), "debuff | Debuffs 2 removed, with its spells. | cd util buff debuff | true 1 false",
+        "removed: back on Debuffs, the + under it again, no button on its page")
+    -- Four extra bars already: greyed, saying why; a click says so too.
     B:AddBar("buff")
     B:AddBar("cd")
+    B:AddBar("cd")
+    B:AddBar("util")
     w:Refresh()
-    Equal(tostring(S[another].alpha) .. " | " .. H.Note(another), "0.45 | You have 2 extra bars already: remove one on its page first.",
-        "two extra bars: greyed, saying why")
-    another:Click()
-    Equal(w.selected .. " | " .. S[w.note].text, "debuff | You have 2 extra bars already: remove one on its page first.",
-        "clicked anyway: it says why, and stays")
+    local empty = {}
+    for _, kind in ipairs({ "cd", "util", "buff" }) do empty[#empty + 1] = tostring(#B:Mine(kind) == 0 and w.navPlus[kind]:IsShown()) end
+    Equal(tostring(S[plus].alpha) .. " | " .. H.Note(plus) .. " | " .. table.concat(empty, " "), "0.45 | You have 4 extra bars already:"
+        .. " remove one on its page first. | true true true", "four extra bars: greyed, saying why; Cooldowns', Utility's and Buffs' +"
+        .. " lines show too, their bars empty but each with an extra bar")
+    plus:Click()
+    Equal(w.selected .. " | " .. S[w.note].text .. " | " .. H.Keys(ns), "debuff | You have 4 extra bars already: remove one on its page"
+        .. " first. | cd cd2 cd3 util util2 buff buff2 debuff", "clicked anyway: it says why, and stays")
     -- A page whose bar went (another profile): its kind's.
     w:Select("cd2")
     ns.NewProfile("Plain")
@@ -1911,6 +1976,469 @@ end)()
         before[1], before[2], before[3], before[4]
     Equal(tostring(debuff2 and debuff2.ticks ~= nil) .. " " .. tostring(buff2 and buff2.ticks ~= nil), "true false",
         "Debuffs 2's slots made with the tick count's look; Buffs 2's without")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- A third bar of a kind (a player's idea: a third cooldown bar) ------------------------------------
+-- Cooldowns 3 after Cooldowns 2: its own bar a spell can be on (one cooldown
+-- bar at a time, the four's lists keeping a spell on two), higher up the
+-- screen by default, no Swap with my form, its own settings (Glow for more
+-- procs too) kept over a reload. Cooldowns 2 removed leaves Cooldowns 3 as
+-- it was, and the next one added is Cooldowns 2 again. Utility 3 the same.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire", "Wrath", "Overpower" } } } })
+    local B = ns.Bars
+    local _, second = B:AddBar("cd")
+    local _, third, said = B:AddBar("cd")
+    B:Assign("Wrath", "cd2")
+    B:Assign("Moonfire", "cd3")
+    local cd3 = B:Get("cd3")
+    Equal(table.concat({ second, third, said, H.Keys(ns), H.Text(ns.BarData("cd").spells), H.Text(ns.BarData("cd2").spells),
+        H.Text(ns.BarData("cd3").spells), tostring(B:Find("Moonfire")), tostring(cd3.icons[1].name), tostring(InSight(cd3)),
+        H.At(B:Get("cd2")) .. ", " .. H.At(cd3), tostring(ns.CanSwap("cd3")), tostring(ns.BarData("cd3").perRow == ns.BarData("cd").perRow) },
+        " | "), "cd2 | cd3 | Cooldowns 3 added. Tick spells for it in the list below. | cd cd2 cd3 util buff debuff | {[1]=\"Overpower\"}"
+        .. " | {[1]=\"Wrath\"} | {[1]=\"Moonfire\"} | cd3 | Moonfire | true | BOTTOM 0 454, BOTTOM 0 630 | false | true",
+        "Cooldowns 2, then Cooldowns 3, each after its kind; Moonfire on Cooldowns 3 alone, laid out there, higher up the screen"
+        .. " than Cooldowns 2 by default, no Swap with my form, started with Cooldowns' icons across")
+    -- One cooldown bar at a time: onto Cooldowns 2 it comes off Cooldowns 3.
+    B:Assign("Moonfire", "cd2")
+    Equal(H.Text(ns.BarData("cd2").spells) .. " " .. H.Text(ns.BarData("cd3").spells) .. " " .. tostring(B:Find("Moonfire")),
+        "{[1]=\"Wrath\",[2]=\"Moonfire\"} {} cd2", "moved to Cooldowns 2: off Cooldowns 3")
+    B:Assign("Moonfire", "cd3")
+    -- Its own settings, kept over a reload (Glow for more procs, a size).
+    B:SetOption("cd3", "glowProcs", true)
+    B:SetOption("cd3", "size", 44)
+    ns = Start(ForeverEnhancedCooldownManagerDB)
+    B = ns.Bars
+    Equal(table.concat({ H.Keys(ns), tostring(ns.BarData("cd3").glowProcs), tostring(ns.BarData("cd3").size),
+        tostring(ns.BarData("cd2").glowProcs), H.Text(ns.BarData("cd3").spells) }, " | "),
+        "cd cd2 cd3 util buff debuff | true | 44 | false | {[1]=\"Moonfire\"}", "reloaded: Cooldowns 3 back with its list and its own settings")
+    -- Cooldowns 2 removed: Cooldowns 3 stays as it was; the next one added is Cooldowns 2 again.
+    B:RemoveBar("cd2")
+    local gap = H.Keys(ns) .. " | " .. H.Text(ns.BarData("cd3").spells) .. " | " .. tostring(B:Get("cd3").icons[1].name) .. " | "
+        .. tostring((ns.CanAddBar("cd"))) .. " " .. tostring(select(2, ns.CanAddBar("cd")))
+    local _, again = B:AddBar("cd")
+    Equal(gap .. " | " .. again .. " | " .. H.Keys(ns) .. " | " .. H.Text(ns.BarData("cd2").spells), "cd cd3 util buff debuff | {[1]=\"Moonfire\"}"
+        .. " | Moonfire | true cd2 | cd2 | cd cd2 cd3 util buff debuff | {}",
+        "Cooldowns 2 removed: Cooldowns 3 as it was; the next one added is Cooldowns 2 again, empty")
+    -- Utility 3: the same; a spell on Utility and Utility 3 (a profile made
+    -- from a string): Utility keeps it.
+    B:AddBar("util")
+    local _, util3 = B:AddBar("util")
+    B:Assign("Overpower", "util3")
+    local store = ns.ProfileLists()
+    local found = tostring(B:Find("Overpower"))
+    table.insert(store.util, "Overpower")
+    B:Rebuild()
+    Equal(table.concat({ util3, found, H.Keys(ns), H.Text(store.util), H.Text(store.util3), tostring(B:Find("Overpower")) }, " | "),
+        "util3 | util3 | cd cd2 cd3 util util2 util3 buff debuff | {[1]=\"Overpower\"} | {} | util",
+        "Utility 3 too; a spell on Utility and Utility 3: Utility keeps it, Utility 3 lets it go")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Buffs 3 and Debuffs 3: every choice an entry has there ---------------------------------------------
+-- Each its own container (you, your target). An entry's choices on them
+-- (Only when missing, Glow when missing, Others only on a hand's enchant, a
+-- trinket's buff, Count ticks, Warn at, Dim until Warn at, its own size) are
+-- kept over a reload, copied with the profile sharing no table, shared in
+-- a string where they always are (Only when missing, Warn at, sizes; the
+-- rest never) and made by an import; removing the bar takes them all.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B, P = ns.Bars, ns.ProfileShare
+    for _, kind in ipairs({ "buff", "buff", "debuff", "debuff" }) do B:AddBar(kind) end
+    B:SetAura("buff3", "Thorns", true)
+    B:SetAura("buff3", "hand:main", true)
+    B:SetAura("buff3", "trinket:1", true)
+    local taken = { B:SetOnlyWhenMissing("buff3", "Thorns", true), B:SetGlowMissing("buff3", "Thorns", true),
+        B:SetHandOthers("buff3", "hand:main", true) }
+    B:SetAura("debuff3", "Moonfire", true)
+    B:SetOption("debuff3", "showMissing", true)
+    taken[#taken + 1] = B:SetCountTicks("debuff3", "Moonfire", true)
+    taken[#taken + 1] = B:SetWarnAt("debuff3", "Moonfire", 3)
+    taken[#taken + 1] = B:SetDimUntilWarn("debuff3", "Moonfire", true)
+    taken[#taken + 1] = B:SetOwnSize("debuff3", "Moonfire", 120)
+    local function Choices(p)
+        local out = {}
+        for i, field in ipairs({ "onlyWhenMissing", "glowMissing", "handOthers", "countTicks", "warnAt", "dimUntilWarn", "iconSize" }) do
+            local sets = type(p[field]) == "table" and p[field] or {}
+            out[#out + 1] = field .. "=" .. H.Text(sets[i <= 3 and "buff3" or "debuff3"])
+        end
+        return table.concat(out, " ") .. " | " .. H.Text(p.buff3) .. " " .. H.Text(p.debuff3)
+    end
+    local function Taken()
+        local out = {}
+        for i, v in ipairs(taken) do out[i] = tostring(v) end
+        return table.concat(out, " ")
+    end
+    local want = 'onlyWhenMissing={["Thorns"]=true} glowMissing={["Thorns"]=true} handOthers={["hand:main"]=true}'
+        .. ' countTicks={["Moonfire"]=true} warnAt={["Moonfire"]=3} dimUntilWarn={["Moonfire"]=true} iconSize={["Moonfire"]=120}'
+        .. ' | {[1]="Thorns",[2]="hand:main",[3]="trinket:1"} {[1]="Moonfire"}'
+    Equal(table.concat({ Taken(), H.Keys(ns), S[B:Get("buff3").container].unit, S[B:Get("debuff3").container].unit,
+        Choices(ns.ProfileLists()) }, " | "), "true true true true true true true | cd util buff buff2 buff3 debuff debuff2 debuff3"
+        .. " | player | target | " .. want, "Buffs 3 watching you and Debuffs 3 your target, each entry's choices there taken and kept")
+    -- Over a reload, then copied.
+    ns = Start(ForeverEnhancedCooldownManagerDB)
+    B, P = ns.Bars, ns.ProfileShare
+    local reloaded = Choices(ns.ProfileLists())
+    local from = ns.ProfileLists()
+    ns.CopyProfile("Copy")
+    local copy, shared = ns.ProfileLists(), {}
+    for _, field in ipairs({ "onlyWhenMissing", "glowMissing", "handOthers", "countTicks", "warnAt", "dimUntilWarn", "iconSize" }) do
+        for _, key in ipairs({ "buff3", "debuff3" }) do
+            local a, b = from[field] and from[field][key], copy[field] and copy[field][key]
+            if a ~= nil and a == b then shared[#shared + 1] = field .. "." .. key end
+        end
+    end
+    Equal(reloaded .. " || " .. Choices(copy) .. " | " .. table.concat(shared, " ") .. "| " .. H.Keys(ns), want .. " || " .. want
+        .. " | | cd util buff buff2 buff3 debuff debuff2 debuff3", "kept over a reload; copied with the profile, sharing no table")
+    -- Shared: the bars, their lists and what strings carry; made into a profile, sharing the same string back.
+    local text = P.Export()
+    local read = P.Read(text)
+    ns.ImportProfile("Friend", read, false)
+    local friend = ns.ProfileLists()
+    Equal(table.concat({ H.Text(read.extras), tostring(read.skipped), H.Text(read.only.buff3), H.Text(read.warns.debuff3),
+        H.Text(read.sizes.debuff3), H.Text(friend.buff3), H.Text(friend.onlyWhenMissing.buff3), tostring(next(friend.handOthers.buff3 or {})),
+        tostring(next(friend.dimUntilWarn.debuff3 or {})), H.Keys(ns), tostring(P.Export() == text), tostring(#text < 2000) }, " | "),
+        "{[\"buff2\"]=true,[\"buff3\"]=true,[\"debuff2\"]=true,[\"debuff3\"]=true} | 0 | {[\"Thorns\"]=true} | {[\"Moonfire\"]=3}"
+        .. " | {[\"Moonfire\"]=120} | {[1]=\"Thorns\",[2]=\"hand:main\",[3]=\"trinket:1\"} | {[\"Thorns\"]=true} | nil | nil | cd util buff"
+        .. " buff2 buff3 debuff debuff2 debuff3 | true | true", "shared: the four extra bars, Buffs 3's list with its hand and trinket"
+        .. " entries, Only when missing, Warn at and sizes (Others only and Dim until Warn at never, as on Buffs); imported, the same"
+        .. " string back")
+    -- Removed: every choice of theirs goes with them.
+    B:RemoveBar("buff3")
+    B:RemoveBar("debuff3")
+    local store = ns.ProfileLists()
+    Equal(table.concat({ H.Keys(ns), tostring(store.buff3), tostring(store.debuff3), tostring(store.onlyWhenMissing.buff3),
+        tostring(store.warnAt and store.warnAt.debuff3), tostring(store.iconSize and store.iconSize.debuff3), H.Text(store.extraBars) }, " | "),
+        "cd util buff buff2 debuff debuff2 | nil | nil | nil | nil | nil | {[\"buff2\"]=true,[\"debuff2\"]=true}",
+        "Buffs 3 and Debuffs 3 removed: their lists and choices gone")
+    ns.UseProfile("Copy")
+    store = ns.ProfileLists()
+    Equal(table.concat({ H.Keys(ns), tostring(store.handOthers.buff3 and store.handOthers.buff3["hand:main"]),
+        tostring(store.dimUntilWarn.debuff3 and store.dimUntilWarn.debuff3.Moonfire), tostring(store.countTicks.debuff3 and store.countTicks.debuff3.Moonfire),
+        tostring(store.glowMissing.buff3 and store.glowMissing.buff3.Thorns) }, " | "),
+        "cd util buff buff2 buff3 debuff debuff2 debuff3 | true | true | true | true", "the copy still has them all")
+    -- /ccm debug names the extra bars.
+    Equal(ns.DebugReport():match("Extra bars: [^|]*"), "Extra bars: buff2, buff3, debuff2, debuff3 ", "/ccm debug lists the four")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The window's list of your bars, up to eight, with + Add a bar ------------------------------------
+-- (Squirt's pick, concept B, 13 Nov 2026.) Every bar you have is a row like
+-- the four's (its name, count and a preview of its icons), never set in,
+-- each kind's together; under a kind's last bar its + Add a bar line, once
+-- the bar has spells or an extra bar of its kind is there. No spells and no
+-- extra bar: the four exactly as always. They share the four's room (192,
+-- 28 under the list's top): as + lines and bars come, every row a little
+-- shorter with smaller icons, down to 32 high with 12 px icons (the four
+-- with a + under each); past that the rows stay so and the list scrolls in
+-- that room (Squirt's complaint was one-line rows with no previews: never
+-- again, any number of bars). The rule, Look and the rest never move and
+-- nothing reaches What's new. In a list that scrolls, the lit bar comes
+-- into sight (with its kind's + under it), the wheel scrolls it and a
+-- refresh leaves it there. An extra bar's row opens its page, lit there;
+-- another profile's extras swap in; none again: the four as always.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    local list = w.barList
+    -- The game measures the list as pinned: 192 high (the mock keeps no
+    -- sizes from anchors).
+    S[list].height = 192
+    -- The list from the top: each bar's row (its top as if unscrolled, 28
+    -- being the list's top, +height, x, its name's anchor, previews
+    -- showing) and each + line (its top, x), in order.
+    local function List()
+        local out = {}
+        for _, key in ipairs(ns.ALL_BAR_KEYS) do
+            local item = w.nav[key]
+            if item and item:IsShown() then
+                local p, label, shown = S[item].points[1], S[item.label].points[1], 0
+                for _, icon in ipairs(item.icons or {}) do
+                    if icon:IsShown() then shown = shown + 1 end
+                end
+                out[#out + 1] = { -p[3], ("%s %d+%d %d %s%d,%d %d"):format(key, 28 - p[3], S[item].height, p[2], label[1], label[2], label[3], shown) }
+            end
+        end
+        for kind, line in pairs(w.navPlus) do
+            if line:IsShown() then out[#out + 1] = { -S[line].points[1][3], ("+%s %d %d"):format(kind, 28 - S[line].points[1][3], S[line].points[1][2]) } end
+        end
+        table.sort(out, function(a, b) return a[1] < b[1] end)
+        for i, row in ipairs(out) do out[i] = row[2] end
+        return table.concat(out, ", ")
+    end
+    -- The list's view: pinned by two corners to the list on the left (its
+    -- top 28 down, its foot as far as the view goes, the thumb's room at the
+    -- right while it scrolls); then how high the view and its content are,
+    -- the content's width, the thumb, and how far it's scrolled.
+    local function View()
+        local a, b = S[list].points[1], S[list].points[2]
+        if not (a and b) then return #S[list].points .. " corners: not pinned" end
+        local content = S[list.content]
+        return ("%d %s%d,%d %s%s%d,%d | %d of %d, %d wide, thumb %s, at %d"):format(#S[list].points, a[1], a[4], a[5], b[1], b[3], b[4], b[5],
+            -b[5] - 28, content.height, content.width, tostring(S[list.thumb].shown), list:GetVerticalScroll())
+            .. (a[2] == w.navFrame and b[2] == w.navFrame and "" or " (pinned to something else)")
+    end
+    -- Every bar's row with its preview: 32 high at least, its name over its
+    -- icons (never one line), the icons 12 px at least, as many showing as
+    -- the bar has spells (nine at most). "" when all have.
+    local function Previews()
+        local wrong = {}
+        for _, key in ipairs(ns.BAR_KEYS) do
+            local item, shown = w.nav[key], 0
+            for _, icon in ipairs(item.icons) do
+                if icon:IsShown() then shown = shown + 1 end
+            end
+            local want = math.min(9, #B:Mine(key))
+            if S[item].height < 32 then wrong[#wrong + 1] = key .. " " .. S[item].height .. " high" end
+            if S[item.label].points[1][1] ~= "TOPLEFT" then wrong[#wrong + 1] = key .. " on one line" end
+            if S[item.icons[1]].width < 12 then wrong[#wrong + 1] = key .. "'s icons " .. S[item.icons[1]].width end
+            if shown ~= want then wrong[#wrong + 1] = key .. " " .. shown .. " icons of " .. want end
+        end
+        return table.concat(wrong, "; ")
+    end
+    -- Nothing in the list on anything else in it, all of it inside its
+    -- content; the view ending above the rule (224), the content all in
+    -- sight unless the list scrolls; nothing under it on anything else or
+    -- on What's new (its top 455 down the list), and Look where it always was.
+    local function Fits()
+        local inList, under, wrong = {}, {}, {}
+        for key, item in pairs(w.nav) do
+            if item:IsShown() then
+                local into = S[item].parent == list.content and inList or under
+                into[#into + 1] = { item, key }
+            end
+        end
+        for kind, line in pairs(w.navPlus) do
+            if line:IsShown() then inList[#inList + 1] = { line, "+" .. kind } end
+            if S[line].parent ~= list.content then wrong[#wrong + 1] = "+" .. kind .. " outside the list" end
+        end
+        local function Clear(parts)
+            for i, a in ipairs(parts) do
+                local top = -S[a[1]].points[1][3]
+                local bottom = top + S[a[1]].height
+                for j = i + 1, #parts do
+                    local other = -S[parts[j][1]].points[1][3]
+                    if top < other + S[parts[j][1]].height and other < bottom then wrong[#wrong + 1] = a[2] .. " on " .. parts[j][2] end
+                end
+            end
+        end
+        Clear(inList)
+        Clear(under)
+        local content, foot = S[list.content], S[list].points[2]
+        if not foot then
+            wrong[#wrong + 1] = "the list not pinned"
+            return table.concat(wrong, "; ")
+        end
+        for _, a in ipairs(inList) do
+            if -S[a[1]].points[1][3] + S[a[1]].height > content.height then wrong[#wrong + 1] = a[2] .. " past the list's end" end
+        end
+        local view, rule = -foot[5] - 28, -S[w.under[1][1]].points[1][3]
+        if 28 + view > rule then wrong[#wrong + 1] = "the list on the rule" end
+        if content.height > view and foot[4] ~= -8 then wrong[#wrong + 1] = "the list cut off, not scrolling" end
+        local news = 489 - S[w.news].points[1][3] - S[w.news].height
+        for _, a in ipairs(under) do
+            if -S[a[1]].points[1][3] + S[a[1]].height > news then wrong[#wrong + 1] = a[2] .. " on What's new" end
+        end
+        if S[w.nav.look].points[1][3] ~= -232 then wrong[#wrong + 1] = "Look moved to " .. -S[w.nav.look].points[1][3] end
+        return table.concat(wrong, "; ")
+    end
+    local function Icon(key, i)
+        local s = S[w.nav[key].icons[i]]
+        return ("%s%d,%d %d"):format(s.points[1][1], s.points[1][2], s.points[1][3], s.width)
+    end
+    -- The page walkthrough's Extra bars step on a bar's page: what it
+    -- outlines, and whether its box hangs beside that.
+    local function ExtraStep(key)
+        w:Select(key)
+        w.help:Click()
+        local box = FECMTour
+        for _ = 1, 20 do
+            if S[box.title].text == "EXTRA BARS" or S[box.next.label].text == "Done" then break end
+            box.next:Click()
+        end
+        local part = S[box.title].text == "EXTRA BARS" and S[box.outline].points[1][2] or nil
+        local beside = S[box].points[1][1] .. " " .. tostring(S[box].points[1][2] == part) .. " " .. S[box].points[1][3]
+        box.skip:Click()
+        return part, beside
+    end
+    local four = List()
+    local part, beside = ExtraStep("cd")
+    -- Pinned again a moment after the window shows (as every list that
+    -- scrolls: one pinned while the window was hidden is never placed).
+    local built = View()
+    list:ClearAllPoints()
+    for _, timer in ipairs(timers) do timer() end
+    Equal(four .. " | " .. Icon("cd", 2) .. " " .. S[w.nav.cd.count].text .. " " .. tostring(w.nav.cd2) .. " | " .. Fits() .. " | "
+        .. tostring(part == w.nav.cd) .. " " .. beside .. " | " .. built .. " | " .. tostring(View() == built),
+        "cd 28+46 0 TOPLEFT14,-9 0, util 76+46 0 TOPLEFT14,-9 0, buff 124+46 0 TOPLEFT14,-9 0, debuff 172+46 0 TOPLEFT14,-9 0 |"
+        .. " TOPLEFT30,-26 14 0 nil |  | true TOPLEFT true TOPRIGHT | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide,"
+        .. " thumb false, at 0 | true", "no spells, no extra bar: the four exactly as always, no + line, nothing made for an extra bar,"
+        .. " the list the four's 192, the list's full width, no thumb; the tour's Extra bars step points at Cooldowns in the list;"
+        .. " the list pinned again as the window shows")
+    -- Spells on Cooldowns and Debuffs: a + under each of those only; the
+    -- four rows a little shorter (39), icons 12, the + lines in their room.
+    B:Assign("Moonfire", "cd")
+    B:SetAura("debuff", "Moonfire", true)
+    w:Refresh()
+    Equal(List() .. " | " .. Icon("cd", 2) .. " " .. Icon("cd", 1) .. " | " .. Fits() .. " | " .. Previews() .. " | " .. View(),
+        "cd 28+39 0 TOPLEFT14,-7 1, +cd 69 20, util 83+39 0 TOPLEFT14,-7 0, buff 124+39 0 TOPLEFT14,-7 0, debuff 165+39 0 TOPLEFT14,-7 1,"
+        .. " +debuff 206 20 | TOPLEFT28,-22 12 TOPLEFT14,-22 12 |  |  | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide,"
+        .. " thumb false, at 0", "spells on two bars: + Add a bar under those two only, set in; every row the same, a little shorter,"
+        .. " its preview kept; all in sight, no scrolling; Look in place")
+    -- Spells on all four and one extra bar (the review's case: one-line rows
+    -- with no previews before): Cooldowns 2 a row like the others, its own
+    -- preview, at the same x and name's place as Cooldowns; the + under it,
+    -- not under Cooldowns. Every row 32 high with its 12 px icons; the list
+    -- scrolls (226 in 192), the thumb in its room at the right.
+    B:AddBar("cd")
+    B:Assign("Wrath", "cd2")
+    B:Assign("Overpower", "util")
+    B:SetAura("buff", "Thorns", true)
+    w:Select("cd2")
+    Equal(List() .. " | " .. Icon("cd2", 1) .. " " .. Icon("cd", 1) .. " " .. S[w.nav.cd2.count].text .. " " .. tostring(w.nav.cd2.fill:IsShown())
+        .. " " .. tostring(w.nav.cd.fill:IsShown()) .. " " .. H.Note(w.nav.cd2) .. " | " .. Fits() .. " | " .. Previews() .. " | " .. View(),
+        "cd 28+32 0 TOPLEFT14,-4 1, cd2 62+32 0 TOPLEFT14,-4 1, +cd 96 20, util 110+32 0 TOPLEFT14,-4 1, +util 144 20, buff 158+32 0"
+        .. " TOPLEFT14,-4 1, +buff 192 20, debuff 206+32 0 TOPLEFT14,-4 1, +debuff 240 20 | TOPLEFT14,-18 12 TOPLEFT14,-18 12 1 true false"
+        .. " Your Cooldowns 2 bar: its icons, how it shows, and your spells to tick onto it. |  |  | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT-8,-220"
+        .. " | 192 of 226, 172 wide, thumb true, at 0", "Cooldowns 2: a full row like Cooldowns (same x, no indent, its own count and"
+        .. " preview), lit on its page; the + under it now; every row keeps its preview; the list scrolls in the bars' room; Look in place")
+    -- Debuffs' page: its row and the + under it scrolled into sight (no
+    -- further); a refresh leaves it; Cooldowns' page: back to the top.
+    w:Select("debuff")
+    local debuff = list:GetVerticalScroll()
+    w:Refresh()
+    local kept = list:GetVerticalScroll()
+    w:Select("cd")
+    Equal(debuff .. " " .. kept .. " " .. list:GetVerticalScroll(), "32 32 0",
+        "a bar's page scrolls its row and + into sight in the list, a refresh leaves it there, Cooldowns' page back to the top")
+    -- The most the list holds: four extra bars and every kind's + line.
+    -- Every row alike as the four's with a + under each (no indent, its
+    -- own preview), the + lines still there; the list scrolls (328 in 192);
+    -- nothing overlaps, nothing on What's new, Look in place.
+    B:AddBar("cd")
+    B:AddBar("util")
+    B:AddBar("debuff")
+    w:Refresh()
+    local alphas = {}
+    for _, kind in ipairs(ns.BASE_BAR_KEYS) do alphas[#alphas + 1] = tostring(S[w.navPlus[kind]].alpha) end
+    part, beside = ExtraStep("cd")
+    local eight = List()
+    Equal(eight .. " | " .. Fits() .. " | " .. Previews() .. " | " .. View() .. " | " .. table.concat(alphas, " ") .. " | "
+        .. tostring(part == w.navPlus.cd) .. " " .. beside, "cd 28+32 0 TOPLEFT14,-4 1, cd2 62+32 0 TOPLEFT14,-4 1, cd3 96+32 0"
+        .. " TOPLEFT14,-4 0, +cd 130 20, util 144+32 0 TOPLEFT14,-4 1, util2 178+32 0 TOPLEFT14,-4 0, +util 212 20, buff 226+32 0"
+        .. " TOPLEFT14,-4 1, +buff 260 20, debuff 274+32 0 TOPLEFT14,-4 1, debuff2 308+32 0 TOPLEFT14,-4 0, +debuff 342 20 |  |  | 2"
+        .. " TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT-8,-220 | 192 of 328, 172 wide, thumb true, at 0 | 0.45 0.45 0.45 0.45 | true TOPLEFT true"
+        .. " TOPRIGHT", "eight bars and four + lines: every row alike, 32 high, no indent, its own preview; the + lines (greyed: four"
+        .. " in all) still under each kind; the list scrolls in the bars' room, so all fits above What's new; the tour's Extra bars"
+        .. " step points at the + under Cooldowns' bars, its box beside it")
+    -- Debuffs 2's page: its row and the + under it at the foot of the view;
+    -- the wheel scrolls up and a refresh leaves it; Cooldowns 3's row,
+    -- half out of sight above, clicked: in sight, at the top. The thumb
+    -- inside the list on the left, clear of the rows.
+    w:Select("debuff2")
+    local foot = list:GetVerticalScroll()
+    S[list].scripts.OnMouseWheel(list, 1)
+    local wheel = list:GetVerticalScroll()
+    w:Refresh()
+    local after = list:GetVerticalScroll()
+    w.nav.cd3:Click()
+    local thumb = S[list.thumb]
+    Equal(foot .. " " .. wheel .. " " .. after .. " " .. list:GetVerticalScroll() .. " | " .. w.selected .. " "
+        .. tostring(w.nav.cd3.fill:IsShown()) .. " " .. tostring(w.pages.bar:IsShown()) .. " | " .. thumb.points[1][1] .. " "
+        .. tostring(thumb.points[1][2] == list) .. " " .. thumb.points[1][3] .. " " .. thumb.points[1][4] .. " " .. thumb.width,
+        "134 90 90 68 | cd3 true true | TOPLEFT true TOPRIGHT 4 3", "Debuffs 2's row and its + scrolled into sight; the wheel"
+        .. " scrolls the list, a refresh leaves it; Cooldowns 3's row opens its page, lit, scrolled into sight; the thumb 4 right of"
+        .. " the list's 172, 3 wide: inside the list on the left (180)")
+    -- Another profile, with an extra bar of its own (Buffs 2): its list;
+    -- yours back, then that one's again, each laid out afresh.
+    local mine = ns.ProfileName()
+    ns.NewProfile("Plain")
+    w:Refresh()
+    local plain = List() .. " | " .. View()
+    B:SetAura("buff", "Thorns", true)
+    B:AddBar("buff")
+    w:Refresh()
+    local other = List() .. " | " .. View()
+    ns.UseProfile(mine)
+    w:Refresh()
+    local back = List()
+    ns.UseProfile("Plain")
+    w:Refresh()
+    Equal(plain .. " || " .. other .. " || " .. tostring(back == eight) .. " || " .. tostring(List() .. " | " .. View() == other) .. " "
+        .. Fits() .. " | " .. Previews(), "cd 28+46 0 TOPLEFT14,-9 0, util 76+46 0 TOPLEFT14,-9 0, buff 124+46 0 TOPLEFT14,-9 0,"
+        .. " debuff 172+46 0 TOPLEFT14,-9 0 | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide, thumb false, at 0 || cd"
+        .. " 28+33 0 TOPLEFT14,-4 0, util 63+33 0 TOPLEFT14,-4 0, buff 98+33 0 TOPLEFT14,-4 1, buff2 133+33 0 TOPLEFT14,-4 0, +buff 168"
+        .. " 20, debuff 182+33 0 TOPLEFT14,-4 0 | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 189, 180 wide, thumb false, at 0 ||"
+        .. " true || true  | ", "a new profile: the four as always, the list back to its full width, no thumb, at the top; Buffs 2"
+        .. " added there: its own row, the + under it, all in sight; yours: your eight again; back: Buffs 2's list again, the others'"
+        .. " rows gone")
+    -- Yours, scrolled down, then every extra removed: four rows with a +
+    -- under each (all have spells), all in sight again, back at the top at
+    -- the list's full width; then no spells: the four exactly as always.
+    ns.UseProfile(mine)
+    w:Select("debuff2")
+    local scrolled = list:GetVerticalScroll()
+    for _, key in ipairs({ "debuff2", "util2", "cd3", "cd2" }) do B:RemoveBar(key) end
+    w:Refresh()
+    local plus = scrolled .. " | " .. List() .. " | " .. Fits() .. " | " .. Previews() .. " | " .. View()
+    B:Assign("Moonfire", nil)
+    B:Assign("Overpower", nil)
+    B:SetAura("buff", "Thorns", false)
+    B:SetAura("debuff", "Moonfire", false)
+    w:Refresh()
+    Equal(plus .. " || " .. List() .. " | " .. Icon("cd", 2) .. " " .. tostring(w.nav.cd2:IsShown()) .. " | " .. Fits() .. " | " .. View(),
+        "134 | cd 28+32 0 TOPLEFT14,-4 1, +cd 62 20, util 76+32 0 TOPLEFT14,-4 1, +util 110 20, buff 124+32 0 TOPLEFT14,-4 1, +buff 158"
+        .. " 20, debuff 172+32 0 TOPLEFT14,-4 1, +debuff 206 20 |  |  | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide,"
+        .. " thumb false, at 0 || cd 28+46 0 TOPLEFT14,-9 0, util 76+46 0 TOPLEFT14,-9 0, buff 124+46 0 TOPLEFT14,-9 0, debuff 172+46 0"
+        .. " TOPLEFT14,-9 0 | TOPLEFT30,-26 14 false |  | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide, thumb false,"
+        .. " at 0", "every extra removed: four rows and four + lines, laid out again, all in sight at the list's full width, back"
+        .. " at the top; no spells: the four exactly as always, icons back to 14")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Eight bars in a layout --------------------------------------------------------------------------------
+-- Each extra bar added (third ones too) gets a row of its own under the
+-- display, last, drawn on the Layout page; moving by numbers steps through
+-- all eight; each can be taken out and put back.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B, L = ns.Bars, ns.Layout
+    L:Apply("pyramid")
+    for _, kind in ipairs({ "cd", "cd", "debuff", "debuff" }) do B:AddBar(kind) end
+    for _, key in ipairs({ "cd2", "cd3" }) do B:Assign(key == "cd2" and "Wrath" or "Moonfire", key) end
+    B:SetAura("debuff2", "Wrath", true)
+    B:SetAura("debuff3", "Moonfire", true)
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("layout")
+    local page = w.pages.layout
+    local drawn = {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if page.rows[key] and page.rows[key]:IsShown() then drawn[#drawn + 1] = S[page.rows[key].name].text end
+    end
+    local steps = {}
+    B.moving = "debuff3"
+    B:SetUnlocked(true)
+    for _ = 1, 8 do
+        w:Refresh()
+        page.move.which:Click()
+        steps[#steps + 1] = B.moving
+    end
+    B:SetUnlocked(false)
+    L:TakeOut("cd3")
+    w:Refresh()
+    local out = tostring(page.outButtons.cd3:IsShown()) .. " " .. S[page.outButtons.cd3.label].text .. " " .. table.concat(L:Rows(), " ")
+    page.outButtons.cd3:Click()
+    Equal(table.concat({ H.Text(ns.LayoutData().below), table.concat(drawn, ","), table.concat(steps, " "), out, table.concat(L:Rows(), " ") },
+        " | "), "{[1]=\"util\",[2]=\"buff\",[3]=\"debuff\",[4]=\"cd2\",[5]=\"cd3\",[6]=\"debuff2\",[7]=\"debuff3\"} | Cooldowns,Cooldowns 2,"
+        .. "Cooldowns 3,Utility,Buffs,Debuffs,Debuffs 2,Debuffs 3 | cd cd2 cd3 util buff debuff debuff2 debuff3 | true + Cooldowns 3 cd util"
+        .. " buff debuff cd2 debuff2 debuff3 | cd util buff debuff cd2 cd3 debuff2 debuff3",
+        "each extra a row of its own under the display, drawn on the Layout page; moving by numbers steps through all eight;"
+        .. " Cooldowns 3 taken out and put back")
     Equal(#printed, 0, "no errors")
 end)()
 

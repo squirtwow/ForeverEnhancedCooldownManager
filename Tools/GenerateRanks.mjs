@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70790';
+const BUILD = '1.60.1.70938';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = process.argv[2];
 assert(cache, 'Pass a cache directory');
@@ -114,6 +114,37 @@ for (const [id, [name, mask]] of OUT_OF_TREE) {
     assert(names.get(id) === name && rows.length > 0 && rows.every(row => +row.ClassMask === mask),
         `${name} (${id}): its rows changed in this build's data, so drop it from OUT_OF_TREE`);
 }
+// Spells with a class's row that no one in Forever learns (2026-11-13, an
+// audit of the Debuffs page's search after a player missed Shadow
+// Vulnerability): Curse of Idiocy, whose one row says another spell teaches
+// it (AcquireMethod 3) though no spell, talent or item does, and Enchanted
+// Flare, which only a Season of Discovery tome teaches (Tome of Enchanted
+// Flare, 237041; Forever has no runes). The Debuffs search offered Curse of
+// Idiocy to every warlock, and would offer Enchanted Flare to hunters once
+// ground auras count (below). Their rows are left out as OUT_OF_TREE's are,
+// each with the items that teach it. The build fails once a row changes or
+// something else teaches one (a talent, SpellLearnSpell, a spell's teaching
+// effect or another item), so the list goes when it isn't needed.
+const NOT_TAUGHT = new Map([[1010, ['Curse of Idiocy', 256, []]], [1221404, ['Enchanted Flare', 4, [237041]]]]);
+{
+    const talents = new Set((await table('TraitDefinition')).map(row => +row.SpellID));
+    const learned = new Set((await table('SpellLearnSpell')).map(row => +row.LearnSpellID));
+    const teachers = new Map([...NOT_TAUGHT.keys()].map(id => [id, new Set([id])]));
+    for (const row of await table('SpellEffect')) {
+        if ((+row.Effect === 36 || +row.Effect === 57) && teachers.has(+row.EffectTriggerSpell)) teachers.get(+row.EffectTriggerSpell).add(+row.SpellID);
+    }
+    const effectSpell = new Map((await table('ItemEffect')).map(row => [+row.ID, +row.SpellID]));
+    const books = new Map([...NOT_TAUGHT.keys()].map(id => [id, []]));
+    for (const row of await table('ItemXItemEffect')) {
+        for (const [id, spells] of teachers) if (spells.has(effectSpell.get(+row.ItemEffectID))) books.get(id).push(+row.ItemID);
+    }
+    for (const [id, [name, mask, items]] of NOT_TAUGHT) {
+        const rows = allSkillRows.filter(row => +row.Spell === id);
+        assert(names.get(id) === name && rows.length > 0 && rows.every(row => +row.ClassMask === mask) && !talents.has(id)
+            && !learned.has(id) && teachers.get(id).size === 1 && books.get(id).sort((a, b) => a - b).join() === items.join(),
+            `${name} (${id}): its rows changed or something else teaches it in this build's data, so drop it from NOT_TAUGHT`);
+    }
+}
 // Talents only a class's talent tree holds, with no SkillLineAbility row at
 // all (build 70790: 84 of them, every class, from a mage's Missile Barrage
 // and Fingers of Frost to a rogue's Boot Knife and Composure, a shaman's
@@ -149,7 +180,7 @@ for (const row of await table('TraitNodeXTraitNodeEntry')) {
     assert(!treeRows.has(id) || +treeRows.get(id).ClassMask === mask, `${names.get(id)} (${id}) is in two classes' trees`);
     treeRows.set(id, { Spell: String(id), ClassMask: String(mask), SkillLine: '0', AcquireMethod: '0', RaceMasks_0: '0', RaceMasks_1: '0' });
 }
-const skillRows = allSkillRows.filter(row => !OUT_OF_TREE.has(+row.Spell)).concat([...treeRows.values()]);
+const skillRows = allSkillRows.filter(row => !OUT_OF_TREE.has(+row.Spell) && !NOT_TAUGHT.has(+row.Spell)).concat([...treeRows.values()]);
 // Learnable class spells whose only SkillLineAbility rows carry no class
 // (ClassMask 0): Curse of Exhaustion (a talent, TraitDefinition), Forever's
 // four ranks of Curse of the Elements and Bane of Agony's rank 2 (from a
@@ -173,6 +204,13 @@ const skillRows = allSkillRows.filter(row => !OUT_OF_TREE.has(+row.Spell)).conca
 // the druid's, and Feral Charge (Bear), trained at 20, beside the talent's
 // Feral Charge (1238122): which of the two the spellbook shows isn't known.
 // And (build 70753) Holy Shield's rank 4 and the new talent Oath of Light.
+// And (2026-11-13, an audit of the Debuffs page's search after a player
+// missed Shadow Vulnerability) debuffs whose spells' rows carry no class, so
+// no class's search offered them: a hunter's Intimidation (the talent and its
+// stun, rows only on Pet - Generic) and Entrapment (the talent and its root,
+// on Survival), and a warlock's succubus's Seduction (Pet - Succubus). Long
+// Daze is gone from here: only Improved Pummel sets it off, which is in no
+// warrior's tree and nothing teaches, so no warrior can give it.
 const CLASSLESS = new Map([
     [18223, 256], [440892, 256], [1311676, 256], [1311677, 256], [1311680, 256], [1014, 256], // Warlock
     [20375, 2], [20915, 2], [20918, 2], [20919, 2], [20920, 2], [1042, 2], // Paladin
@@ -189,7 +227,7 @@ const CLASSLESS = new Map([
     [13750, 8], [13877, 8], [14093, 8], [14177, 8], [14183, 8], [14185, 8], [14251, 8], // Rogue
     [16166, 64], [16188, 64], [16269, 64], [17364, 64], // Shaman
     [18093, 256], [18288, 256], [18708, 256], [18788, 256], // Warlock
-    [12281, 1], [12284, 1], [12292, 1], [12323, 1], [12328, 1], [12700, 1], [12705, 1], [12809, 1], // Warrior
+    [12281, 1], [12284, 1], [12292, 1], [12323, 1], [12328, 1], [12700, 1], [12809, 1], // Warrior
     // Trainer spells (2026-11-01):
     [16979, 1024], // Druid
     [24118, 4], [24119, 4], [24120, 4], [1299332, 4], // Hunter
@@ -197,6 +235,10 @@ const CLASSLESS = new Map([
     [1239570, 2], [1328548, 2], // Paladin
     // Build 70790: Reckless Swings (15 sec, a buff of its own).
     [1329555, 1], // Warrior
+    // Debuffs (2026-11-13):
+    [19577, 4], [24394, 4], // Intimidation (the talent and its stun), Hunter
+    [19184, 4], [19185, 4], // Entrapment (the talent and its root), Hunter
+    [6358, 256], // Seduction (the succubus's), Warlock
 ]);
 for (const id of CLASSLESS.keys()) {
     const rows = skillRows.filter(row => +row.Spell === id);
@@ -211,6 +253,85 @@ const abilities = skillRows.filter(row => +row.ClassMask > 0 || CLASSLESS.has(+r
         assert.equal(names.get(pet), names.get(+row.Spell), `${names.get(+row.Spell)} (${row.Spell}) teaches a spell of another name`);
         return { ...row, Spell: String(pet) };
     });
+
+// Debuffs a talent sets off under a name of its own, with no
+// SkillLineAbility row at all, so no rule above offers them (a mage's Fire
+// Vulnerability has a row and is offered). Each stands here as a row of its
+// class, so the Layout page's search lists it: Shadow Vulnerability, from a
+// warlock's Improved Shadow Bolt (2026-11-13, a player missed it). The build
+// fails once one gets a row or stops being a debuff, so the list goes when it
+// isn't needed.
+// Then (2026-11-13, an audit of every class after that) the rest of the
+// kind, each a debuff another spell gives that has no row: a talent's proc
+// (Deep Wound, Blackout, Winter's Chill, Ignite), a stun, root or silence an
+// ability sets off under another name (Charge Stun, Intercept Stun, Seal of
+// Justice's Stun, Feral Charge, Starfire Stun), a weapon enchant's (a rogue's
+// poisons, Frostbrand Attack), a pet's (Tainted Blood Effect, Spell Lock, a
+// boar's Charge), one left on the ground or by an area the spell makes (Frost
+// and Freezing Trap, Consecration, Flare, Hurricane), Turn Evil's (the talent
+// turns Turn Undead into it) and Penance's on an enemy (not its heal's on a
+// friend). And the IDs two listed names lacked: Chilled from Frost and Ice
+// Armor, Entangling Roots from Nature's Grasp. Many were linked to their
+// spell already (ns.PASSIVE_DEBUFFS, ns.SPELL_AURAS), so a bar lit for them,
+// but no search named them. Each goes into ns.RANKS under its own name, so
+// it isn't an aura no one learns (ns.AURA_ONLY, below).
+const TALENT_DEBUFFS = new Map([
+    [7922, 1], // Charge Stun (Charge), Warrior
+    [20253, 1], [20614, 1], [20615, 1], // Intercept Stun (Intercept ranks 1 to 3), Warrior
+    [412609, 1], // Deep Wound (Deep Wounds), Warrior
+    [18498, 1], // Silenced (Improved Shield Bash), Warrior
+    [23694, 1], // Improved Hamstring (Improved Hamstring), Warrior
+    [20170, 2], // Stun (Seal of Justice), Paladin
+    [429147, 2], // Stun (Holy Wrath), Paladin
+    [20232, 2], // Judgement of Fury (judging Seal of Fury), Paladin
+    [1328374, 2], [1328373, 2], [1328372, 2], // Turn Evil (the Turn Evil talent's Turn Undead, ranks 1 to 3), Paladin
+    [1280353, 2], // Consecration (Consecration), Paladin
+    [25999, 4], // Boar Charge (a boar's Charge), Hunter
+    [1279692, 4], // Flare (Flare), Hunter
+    [19410, 4], // Improved Concussive Shot (Improved Concussive Shot), Hunter
+    [19229, 4], // Improved Wing Clip (Improved Wing Clip), Hunter
+    [465230, 4], // Entrapment (Entrapment, from a trap), Hunter
+    [1310536, 4], // Lacerating Strikes (Lacerating Strikes), Hunter
+    [3355, 4], [14308, 4], [14309, 4], // Freezing Trap (Freezing Trap ranks 1 to 3), Hunter
+    [13810, 4], // Frost Trap (Frost Trap), Hunter
+    [18425, 8], // Silenced - Kick (Improved Kick), Rogue
+    [2818, 8], [2819, 8], [11353, 8], [11354, 8], [25349, 8], // Deadly Poison to Deadly Poison V, Rogue
+    [3409, 8], [11201, 8], // Crippling Poison (Crippling Poison, Crippling Poison II), Rogue
+    [5760, 8], [8692, 8], [11398, 8], // Mind-numbing Poison to Mind-numbing Poison III, Rogue
+    [13218, 8], [13222, 8], [13223, 8], [13224, 8], // Wound Poison (Wound Poison to Wound Poison IV), Rogue
+    [15269, 16], // Blackout (Blackout), Priest
+    [15258, 16], // Shadow Weaving (Shadow Weaving), Priest
+    [402261, 16], [1240734, 16], [1240736, 16], [1316994, 16], // Penance (on an enemy, ranks 1 to 4), Priest
+    [8034, 64], [8037, 64], [10458, 64], [16352, 64], [16353, 64], // Frostbrand Attack (Frostbrand Weapon ranks 1 to 5), Shaman
+    [18469, 128], [1329552, 128], // Counterspell - Silenced (Improved Counterspell), Mage
+    [6136, 128], // Chilled (Frost Armor), Mage
+    [7321, 128], // Chilled (Ice Armor), Mage
+    [12579, 128], // Winter's Chill (Winter's Chill), Mage
+    [412538, 128], // Ignite (Ignite), Mage
+    [17794, 256], // Shadow Vulnerability (Improved Shadow Bolt), Warlock
+    [18118, 256], // Aftermath (Aftermath), Warlock
+    [1293696, 256], // Demonic Brand (Demonic Brand), Warlock
+    [24259, 256], // Spell Lock (the felhunter's Spell Lock), Warlock
+    [19479, 256], [19652, 256], [19653, 256], [19654, 256], // Tainted Blood Effect (the felhunter's Tainted Blood ranks 1 to 4), Warlock
+    [16922, 1024], // Starfire Stun (Improved Starfire), Druid
+    [19975, 1024], [19974, 1024], [19973, 1024], [19972, 1024], [19971, 1024], [19970, 1024], // Entangling Roots (Nature's Grasp ranks 1 to 6), Druid
+    [19675, 1024], // Feral Charge (Feral Charge), Druid
+    [1278965, 1024], [1278968, 1024], [1278759, 1024], // Hurricane (Hurricane ranks 1 to 3), Druid
+]);
+for (const [id, mask] of TALENT_DEBUFFS) {
+    assert(names.get(id) && !hasRow.has(id), `${names.get(id)} (${id}): drop it from TALENT_DEBUFFS`);
+    abilities.push({ Spell: String(id), ClassMask: String(mask), SkillLine: '0', AcquireMethod: '0', RaceMasks_0: '0', RaceMasks_1: '0' });
+}
+// And the debuffs CLASSLESS (above) gives a class that no one casts either
+// (2026-11-13, a review of that audit): the stun a hunter's pet gives with
+// Intimidation, and the root Entrapment gives with a trap. No one casts
+// these or TALENT_DEBUFFS' (Turn Evil's only through Turn Undead), so they
+// go on the Debuffs bar alone: listed as ns.DEBUFF_AURAS (below), a
+// cooldown bar never goes by one. Before that a Cooldowns bar took Charge
+// Stun (an icon that never cools down) and Winter's Chill by its debuff
+// (not the passive talent, which it turns away).
+const CLASSLESS_DEBUFFS = new Set([24394, 19185]);
+for (const id of CLASSLESS_DEBUFFS) assert(CLASSLESS.has(id), `${names.get(id)} (${id}): drop it from CLASSLESS_DEBUFFS`);
 
 // name -> Map(spellID -> rank)
 const groups = new Map();
@@ -227,11 +348,13 @@ for (const row of abilities) {
 
 // Active racials: every spell the client marks "Racial" (not "Racial Passive").
 let racials = 0;
+const racialIDs = new Set();
 for (const [id, sub] of subtext) {
     const name = names.get(id);
     if (sub !== 'Racial' || !name || /[\\"\n]/.test(name)) continue;
     if (!groups.has(name)) groups.set(name, new Map());
     groups.get(name).set(id, 0);
+    racialIDs.add(id);
     racials++;
 }
 
@@ -267,13 +390,33 @@ const lines = [...groups.keys()].sort().map(name => {
 // aura on an enemy (SpellEffect: Effect 6 APPLY_AURA or 129
 // APPLY_AREA_AURA_ENEMY, at an enemy target: the one you target, or enemies
 // in an area or cone). ClassMask bits name the class.
+// And (2026-11-13, an audit after a player missed Shadow Vulnerability) an
+// aura left on the ground for enemies (Effect 27 PERSISTENT_AREA_AURA at
+// ImplicitTarget 28: Explosive and Frost Trap), and one on whoever you
+// target (ImplicitTarget 25) that the game marks a debuff (SpellMisc
+// Attributes_0 0x4000000, SPELL_ATTR0_AURA_IS_DEBUFF: Mind Vision). And a
+// racial that puts an aura on an enemy (a tauren's War Stomp) goes in every
+// class's list: the search leaves it off for other races (ns.SPELL_RACES).
 const CLASSES = { 1: 'WARRIOR', 2: 'PALADIN', 4: 'HUNTER', 8: 'ROGUE', 16: 'PRIEST', 64: 'SHAMAN',
     128: 'MAGE', 256: 'WARLOCK', 1024: 'DRUID' };
 const AURA_EFFECTS = new Set([6, 129]);
 const ENEMY_TARGETS = new Set([6, 15, 16, 24, 53, 54, 104]);
+const GROUND_AURA = 27, GROUND_ENEMIES = 28, ANY_TARGET = 25, AURA_IS_DEBUFF = 0x4000000;
+// Each spell's SpellMisc row (its row for difficulty 0 when it has several)
+// and its Attributes_0 flags.
+const misc = new Map();
+for (const row of await table('SpellMisc')) {
+    const id = +row.SpellID;
+    const kept = misc.get(id);
+    if (!kept || (+row.DifficultyID === 0 && +kept.DifficultyID !== 0)) misc.set(id, row);
+}
+const flags = id => (misc.has(id) ? +misc.get(id).Attributes_0 >>> 0 : 0);
 const debuffIDs = new Set();
 for (const row of await table('SpellEffect')) {
-    if (AURA_EFFECTS.has(+row.Effect) && (ENEMY_TARGETS.has(+row.ImplicitTarget_0) || ENEMY_TARGETS.has(+row.ImplicitTarget_1))) {
+    const effect = +row.Effect, targets = [+row.ImplicitTarget_0, +row.ImplicitTarget_1];
+    if ((AURA_EFFECTS.has(effect) && targets.some(target => ENEMY_TARGETS.has(target)))
+        || (effect === GROUND_AURA && targets.includes(GROUND_ENEMIES))
+        || (effect === 6 && targets.includes(ANY_TARGET) && (flags(+row.SpellID) & AURA_IS_DEBUFF) !== 0)) {
         debuffIDs.add(+row.SpellID);
     }
 }
@@ -285,6 +428,15 @@ for (const row of abilities) {
         if (+row.ClassMask & +bit) debuffs.get(token).add(name);
     }
 }
+for (const id of racialIDs) {
+    const name = names.get(id);
+    if (groups.has(name) && debuffIDs.has(id)) for (const set of debuffs.values()) set.add(name);
+}
+for (const [id, mask] of TALENT_DEBUFFS) {
+    assert(debuffIDs.has(id), `${names.get(id)} (${id}) is no debuff: drop it from TALENT_DEBUFFS`);
+    assert(debuffs.get(CLASSES[mask]).has(names.get(id)), `${names.get(id)} (${id}) didn't reach the ${CLASSES[mask]} debuffs`);
+}
+for (const id of CLASSLESS_DEBUFFS) assert(debuffIDs.has(id), `${names.get(id)} (${id}) is no debuff: drop it from CLASSLESS_DEBUFFS`);
 const debuffLines = [...debuffs.entries()].sort().map(([token, set]) =>
     ` ${token}={${[...set].sort().map(name => JSON.stringify(name)).join(',')}},`);
 
@@ -382,15 +534,9 @@ for (const [name, rows] of [...rowsByName.entries()].sort(([a], [b]) => (a < b ?
 // so only the passive IDs are listed. A passive with a cooldown (a shaman's
 // Reincarnation, an hour) isn't listed (below): its cooldown is worth
 // tracking. The addon takes any ID in ns.RANKS that isn't listed here as
-// active, so the build fails unless every other passive one is.
-const misc = new Map();
-for (const row of await table('SpellMisc')) {
-    const id = +row.SpellID;
-    const kept = misc.get(id);
-    if (!kept || (+row.DifficultyID === 0 && +kept.DifficultyID !== 0)) misc.set(id, row);
-}
+// active, so the build fails unless every other passive one is. (SpellMisc
+// is read above, for the class debuffs.)
 const PASSIVE = 0x40, HIDDEN = 0x80; // SPELL_ATTR0_PASSIVE, SPELL_ATTR0_DO_NOT_DISPLAY
-const flags = id => (misc.has(id) ? +misc.get(id).Attributes_0 >>> 0 : 0);
 const passive = id => (flags(id) & PASSIVE) !== 0;
 const learnable = new Set(skillRows.map(row => +row.Spell));
 for (const [id, sub] of subtext) if (/^Racial/.test(sub)) learnable.add(id);
@@ -510,6 +656,18 @@ for (const [name, ids] of passives) {
             if (!gives.has(other) && !looks) continue;
             for (const bar of ['buff', 'debuff']) if (kind[bar]) link(bar, id, other);
         }
+    }
+}
+// A passive talent gives the debuffs TALENT_DEBUFFS lists under its own name
+// too, though its description doesn't name them (2026-11-13, a review of the
+// debuff audit): the Turn Evil talent (1328370) turns Turn Undead into Turn
+// Evil (1328372 to 1328374, through SpellEffect Aura 332). Unlinked, a
+// paladin whose Turn Evil is kept by the talent (the one the game says he
+// knows) was told on the Debuffs bar there was nothing to track.
+for (const [name, ids] of passives) {
+    const auras = [...(groups.get(name)?.keys() || [])].filter(id => TALENT_DEBUFFS.has(id));
+    for (const id of ids) {
+        if (auras.length > 0 && !auraLinks.debuff.has(id)) for (const aura of auras) link('debuff', id, aura);
     }
 }
 // The game marks some auras that come and go passive too: a totem's or a
@@ -707,17 +865,131 @@ const familyLines = families.map(ids => ` {${ids.join(',')}},`);
 // TraitDefinition) or one taught to a pet. No one ever knows one, so on the
 // Cooldowns or Utility bar it shows for no one (Energized, Well Fed), while
 // a pet's ability (a bat's Sonic Blast, which no Beast Training row teaches)
-// or a talent (Holy Shield) shows for whoever has it.
+// or a talent (Holy Shield) shows for whoever has it. Nor is a debuff
+// TALENT_DEBUFFS lists (2026-11-13, an audit after a player missed Shadow
+// Vulnerability): it's in ns.RANKS under its own name, so its class's
+// Debuffs search offers it, though a passive or spell already leads to it
+// (Blackout, a rogue's poisons).
 const taught = new Set(teaches.values());
 const listedIDs = new Set([...listed.values()].flatMap(ids => [...ids]));
 const auraOnly = new Set();
 for (const ids of [...auraLinks.buff.values(), ...auraLinks.debuff.values(), ...spellAuras.values(), ...families]) {
     for (const id of ids) {
-        if (!learnable.has(id) && !traitSpells.has(id) && !taught.has(id)) auraOnly.add(id);
+        if (!learnable.has(id) && !traitSpells.has(id) && !taught.has(id) && !TALENT_DEBUFFS.has(id)) auraOnly.add(id);
     }
 }
 for (const id of auraOnly) assert(!rankedIDs.has(id) && !listedIDs.has(id), `${names.get(id)} (${id}) is a spell and an aura no one learns`);
 const auraOnlyLines = [...auraOnly].sort((a, b) => a - b).map(id => ` [${id}]=true,`);
+// The debuffs ns.RANKS holds for the Debuffs bar alone, by ID: TALENT_DEBUFFS'
+// and CLASSLESS_DEBUFFS' (above), which no one casts. The addon never goes by
+// one on another bar (Spells.lua): a name with nothing else goes on the
+// Debuffs bar only, and one with a spell or talent too goes by that.
+const debuffAuras = [...TALENT_DEBUFFS.keys(), ...CLASSLESS_DEBUFFS].sort((a, b) => a - b);
+for (const id of debuffAuras) assert(rankedIDs.has(id), `${names.get(id)} (${id}) isn't in ns.RANKS`);
+const debuffAuraLines = debuffAuras.map(id => ` [${id}]=true,`);
+
+// The pets' own abilities that a class list above names, by the class whose
+// pet has them, each with the pet's spell IDs (ns.PET_SPELLS). The addon
+// (Spells.lua) looks only in your class's: a druid's Growl and a warrior's
+// Charge stay theirs.
+// First a warlock's demons' (2026-11-13, Squirt's call once the debuff audit
+// made two of them warlock names: "only show if that pet is out and it's on
+// the bar"). A demon's ability is a spell on its skill line (Pet - Imp and the
+// rest, rows with no class), not hidden or passive. Today that's the
+// succubus's Seduction (CLASSLESS gives it the class) and the felhunter's
+// Spell Lock (its silence, TALENT_DEBUFFS' 24259, carries the name): listed
+// with the felhunter's two ranks, never the silence. Any other demon ability
+// is in no class's list, so a bar already shows it only once you or your pet
+// know it. The addon shows a listed one on a cooldown bar only while you or
+// your pet know one of its IDs, so while that demon is out, and takes it on
+// whichever demon is out, by these IDs; the Debuffs bar and its search go by
+// the class list as before. The Felguard's line (2887) is left out: only a
+// rune summons it (Summon Felguard has no row; Forever has no runes). The
+// build fails once a row teaches Summon Felguard, a demon line's name
+// changes, a demon's spell gets a class, or a listed name is another class's
+// too.
+const DEMON_LINES = new Map([[188, 'Pet - Imp'], [204, 'Pet - Voidwalker'], [205, 'Pet - Succubus'], [189, 'Pet - Felhunter'],
+    [206, 'Pet - Infernal'], [207, 'Pet - Doomguard']]);
+const FELGUARD_LINE = 2887;
+const skillLines = await table('SkillLine');
+const lineNames = new Map(skillLines.map(row => [+row.ID, row.DisplayName_lang]));
+for (const [line, name] of DEMON_LINES) assert.equal(lineNames.get(line), name, `skill line ${line} isn't ${name}: check DEMON_LINES`);
+assert(lineNames.get(FELGUARD_LINE) === 'Pet - Felguard' && !allSkillRows.some(row => names.get(+row.Spell) === 'Summon Felguard'),
+    'a row teaches Summon Felguard now: put its line (2887) in DEMON_LINES');
+const demonRanks = new Map();
+for (const row of allSkillRows) {
+    const id = +row.Spell, name = names.get(id);
+    if (!DEMON_LINES.has(+row.SkillLine) || !name || /[\\"\n]/.test(name) || flags(id) & (PASSIVE | HIDDEN)) continue;
+    assert.equal(+row.ClassMask, 0, `${name} (${id}), a demon's spell, has a class`);
+    if (!demonRanks.has(name)) demonRanks.set(name, new Map());
+    const match = (subtext.get(id) || '').match(/^Rank (\d+)$/);
+    demonRanks.get(name).set(id, match ? +match[1] : 0);
+}
+const demonLines = [];
+for (const name of [...demonRanks.keys()].sort()) {
+    const classes = owners.get(name);
+    if (!classes || classes.size === 0) continue;
+    assert.deepEqual([...classes], ['WARLOCK'], `${name}, a demon's ability, is another class's name too`);
+    const ids = [...demonRanks.get(name).entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]).map(([id]) => id);
+    for (const id of ids) assert(!debuffAuras.includes(id), `${name} (${id}), a demon's spell, is a debuff no one casts`);
+    demonLines.push(`  [${JSON.stringify(name)}]={${ids.join(',')}},`);
+}
+// Then a hunter's pets' (2026-11-13, Squirt for them too: "Yea plz same as
+// lock"): every ability a Beast Training row teaches the pet (`teaching`,
+// above), not hidden or passive (not its resistances, Great Stamina or
+// Natural Armor), with the pet's own spell IDs: Growl, Bite, Cower, Dash,
+// Dive, a boar's Charge, a cat's Claw and Prowl, a wolf's Furious Howl, a
+// scorpid's Scorpid Poison, a turtle's Shell Shield, a gorilla's
+// Thunderstomp, Forever's new ones (a crab's Pinch, a fox's Trickster's
+// Dance...) and Harass, whose spells no line holds. Each pet's spell is on
+// its family's skill line (Pet - Wolf and the rest, every family's Growl and
+// Cower on Pet - Generic): a hunter pet's line is any "Pet - " line that's no
+// demon's. A name a druid or a warrior shares (Growl, Claw, Cower, Dash,
+// Prowl, Swipe; Charge) has only the pet's IDs here, and Trickster's Dance
+// the fox's (ns.RANKS holds its Beast Training spell, from CLASSLESS). Not
+// the hunter's own spells: Intimidation's rows are on Pet - Generic, but
+// it's his talent and its stun no one casts; Mend Pet and Call Pet are on
+// his own lines. The build fails once a hunter pet's line holds nothing
+// Beast Training teaches, a pet's spell is on another line or has a class or
+// is a talent, an active spell on a pet's line under a hunter's name isn't
+// taught by Beast Training (unless it's a talent or a debuff no one casts),
+// or a listed name isn't the hunter's.
+const hunterLines = new Map(skillLines.filter(row => /^Pet - /.test(row.DisplayName_lang) && +row.CategoryID === 7
+    && !DEMON_LINES.has(+row.ID) && +row.ID !== FELGUARD_LINE).map(row => [+row.ID, row.DisplayName_lang]));
+const beastTaught = new Set(skillRows.filter(teaching).map(row => teaches.get(+row.Spell)));
+for (const [line, name] of hunterLines) {
+    assert(allSkillRows.some(row => +row.SkillLine === line && beastTaught.has(+row.Spell)),
+        `${name} (${line}) holds nothing Beast Training teaches: is it a hunter pet's line?`);
+}
+const petRanks = new Map();
+for (const row of skillRows) {
+    if (!teaching(row)) continue;
+    const id = teaches.get(+row.Spell), name = names.get(id);
+    if (!name || /[\\"\n]/.test(name) || flags(id) & (PASSIVE | HIDDEN)) continue;
+    for (const own of skillRowsOf.get(id) || []) {
+        assert(hunterLines.has(+own.SkillLine) && +own.ClassMask === 0,
+            `${name} (${id}), a hunter pet's spell, is on ${lineNames.get(+own.SkillLine)} with class mask ${own.ClassMask}`);
+    }
+    assert(!traitSpells.has(id) && !debuffAuras.includes(id), `${name} (${id}), a hunter pet's spell, is a talent or a debuff no one casts`);
+    if (!petRanks.has(name)) petRanks.set(name, new Map());
+    const match = (subtext.get(id) || '').match(/^Rank (\d+)$/);
+    petRanks.get(name).set(id, match ? +match[1] : 0);
+}
+const petIDs = new Set([...petRanks.values()].flatMap(ranks => [...ranks.keys()]));
+for (const row of allSkillRows) {
+    const id = +row.Spell, name = names.get(id);
+    if (!hunterLines.has(+row.SkillLine) || !name || flags(id) & (PASSIVE | HIDDEN) || !owners.get(name)?.has('HUNTER')) continue;
+    assert(petIDs.has(id) || traitSpells.has(id) || debuffAuras.includes(id),
+        `${name} (${id}) on ${lineNames.get(+row.SkillLine)}: no Beast Training row teaches it, so it isn't listed as a pet's`);
+}
+const hunterPetLines = [];
+for (const name of [...petRanks.keys()].sort()) {
+    const classes = owners.get(name);
+    if (!classes || classes.size === 0) continue;
+    assert(classes.has('HUNTER'), `${name}, a hunter pet's ability, is only another class's name`);
+    const ids = [...petRanks.get(name).entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]).map(([id]) => id);
+    hunterPetLines.push(`  [${JSON.stringify(name)}]={${ids.join(',')}},`);
+}
 
 // Reactive abilities, for the gold edge on the bars: spells a character can
 // learn (any SkillLineAbility row, so talents like Riposte too) that can only
@@ -790,7 +1062,10 @@ const out = [
     '-- with another ID other spells lead to (Bloodrage\'s buff, a poison\'s',
     '-- debuff), by the spell\'s ID and by the aura\'s name, the auras that are',
     '-- one buff in several IDs (a totem buff\'s ranks, Well Fed from any food),',
-    '-- which of those auras no one learns as a spell, by ID,',
+    '-- which of those auras no one learns as a spell, by ID, the debuffs',
+    '-- in ns.RANKS no one casts (Charge Stun), for the Debuffs bar alone, by ID,',
+    '-- the pets\' abilities a class list names (a demon\'s Seduction, a hunter',
+    '-- pet\'s Growl), with the pet\'s own spell IDs, by class and name,',
     '-- the reactive abilities, usable only once something happens in the',
     '-- fight (Overpower, Execute), by name, and the base cooldown in seconds',
     '-- of every spell ID in ns.RANKS that has one. Do not edit.',
@@ -831,6 +1106,17 @@ const out = [
     'ns.AURA_ONLY = {',
     ...auraOnlyLines,
     '}',
+    'ns.DEBUFF_AURAS = {',
+    ...debuffAuraLines,
+    '}',
+    'ns.PET_SPELLS = {',
+    ' HUNTER={',
+    ...hunterPetLines,
+    ' },',
+    ' WARLOCK={',
+    ...demonLines,
+    ' },',
+    '}',
     'ns.REACTIVE = {',
     ...reactiveLines,
     '}',
@@ -841,4 +1127,4 @@ const out = [
 ].join('\n');
 await writeFile(join(root, 'Ranks.lua'), out);
 const debuffCount = [...debuffs.values()].reduce((sum, set) => sum + set.size, 0);
-console.log(`Ranks.lua: ${groups.size} spells, ${abilities.length} class ability rows, ${racials} racial spells, ${debuffCount} class debuffs, ${ownerLines.length} spells with their classes, ${raceLines.length} with their races, ${passiveLines.length} passive, ${auraLinks.buff.size} passives with a buff and ${auraLinks.debuff.size} with a debuff of their own, ${spellAuraLines.length} spells and ${nameAuraLines.length} names leading to an aura with another ID, ${families.length} auras in several IDs, ${auraOnly.size} auras no one learns, ${reactive.size} reactive, ${cooldownLines.length} with a cooldown.`);
+console.log(`Ranks.lua: ${groups.size} spells, ${abilities.length} class ability rows, ${racials} racial spells, ${debuffCount} class debuffs, ${ownerLines.length} spells with their classes, ${raceLines.length} with their races, ${passiveLines.length} passive, ${auraLinks.buff.size} passives with a buff and ${auraLinks.debuff.size} with a debuff of their own, ${spellAuraLines.length} spells and ${nameAuraLines.length} names leading to an aura with another ID, ${families.length} auras in several IDs, ${auraOnly.size} auras no one learns, ${debuffAuras.length} debuffs no one casts, ${demonLines.length} demon and ${hunterPetLines.length} hunter pet abilities a class list names, ${reactive.size} reactive, ${cooldownLines.length} with a cooldown.`);

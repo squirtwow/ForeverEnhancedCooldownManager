@@ -1163,14 +1163,17 @@ function H.Sane(ns, shared)
     for k in pairs(shared) do
         if not known[k] then return "an unknown key " .. tostring(k) end
     end
-    -- Extra bars: one of each kind, two at most, true each.
+    -- Extra bars: two of each kind ("2" and "3"), four at most, true each.
     if type(shared.extras) ~= "table" then return "extras" end
     local extras = 0
     for k, v in pairs(shared.extras) do
-        if not (k == "cd2" or k == "util2" or k == "buff2" or k == "debuff2") or v ~= true then return "an extra bar " .. tostring(k) end
+        local kind = type(k) == "string" and k:match("^(%a+)[23]$")
+        if not (kind == "cd" or kind == "util" or kind == "buff" or kind == "debuff") or v ~= true then
+            return "an extra bar " .. tostring(k)
+        end
         extras = extras + 1
     end
-    if extras > 2 then return "extra bars" end
+    if extras > 4 then return "extra bars" end
     if type(shared.skipped) ~= "number" or shared.skipped < 0 then return "skipped" end
     -- The bars swapping with your form: the Cooldowns and Utility bars, true each.
     if type(shared.swap) ~= "table" then return "swap" end
@@ -1182,11 +1185,11 @@ function H.Sane(ns, shared)
     local count, on, cooldown = 0, {}, {}
     for k in pairs(shared.lists) do
         if not ns.BAR_NAMES[k] then return "a list for no bar" end
-        if not (ns.EXTRA_OF[k] or shared.extras[k]) then return "a list for an extra bar it hasn't: " .. k end
+        if not (ns.EXTRAS_OF[k] or shared.extras[k]) then return "a list for an extra bar it hasn't: " .. k end
     end
     local keys = {}
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
-        if ns.EXTRA_OF[key] or shared.extras[key] then keys[#keys + 1] = key end
+        if ns.EXTRAS_OF[key] or shared.extras[key] then keys[#keys + 1] = key end
     end
     for _, key in ipairs(keys) do
         local list, seen = shared.lists[key], {}
@@ -1201,6 +1204,8 @@ function H.Sane(ns, shared)
             if v:find("^slot:") and v ~= "slot:13" and v ~= "slot:14" then return "a slot key " .. v end
             if v:find("^hand:") and v ~= "hand:main" and v ~= "hand:off" then return "a hand key " .. v end
             if v:find("^hand:") and ns.BAR_KIND[key] ~= "buff" then return "a hand off the Buffs bar: " .. key end
+            if v:find("^trinket:") and v ~= "trinket:1" and v ~= "trinket:2" then return "a trinket key " .. v end
+            if v:find("^trinket:") and ns.BAR_KIND[key] ~= "buff" then return "a trinket off the Buffs bar: " .. key end
             if v:find("^proc:") then return "a proc's pulse key on a bar: " .. key end
             -- A spell pinned to one ID: a name, # and a whole ID, nothing else.
             local pinned = v:match("^[^#@]+#([1-9]%d*)$")
@@ -1220,6 +1225,7 @@ function H.Sane(ns, shared)
             for k, v in pairs(list) do
                 if type(k) ~= "number" or not Word(v) or inForm[v] then return "an entry on a form's " .. key end
                 if v:find("^hand:") then return "a hand on a form's " .. key end
+                if v:find("^trinket:") then return "a trinket on a form's " .. key end
                 if v:find("^proc:") then return "a proc's pulse key on a form's " .. key end
                 inForm[v], on[v] = true, true
             end
@@ -1840,6 +1846,10 @@ do
     -- Share and Import.
     ns.UseProfile("Mine")
     local text = P.Export()
+    -- Dim until Warn at stays with the profile, never in a string (as Glow
+    -- while active): ticked, the very same string; an import has none.
+    B:SetDimUntilWarn("debuff", "Moonfire", true)
+    local dimmed = P.Export()
     local shared = P.Read(text)
     Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. H.Text(shared.warns) .. " | " .. P.Describe(shared),
         "|0 " .. MINE .. " | Holds 3 bar entries, with low-time warnings for 2 auras and its look and layout.",
@@ -1848,6 +1858,9 @@ do
     Equal(tostring(ok) .. " " .. ns.ProfileName() .. " " .. H.Text(db.profiles.Theirs.warnAt) .. " " .. tostring(B:WarnAt("buff", "Thorns"))
         .. " " .. H.Text(db.profiles.Mine.warnAt), "true Theirs " .. MINE .. " 600 " .. MINE,
         "imported without its look: the new profile has them, yours as it was")
+    Equal(tostring(dimmed == text) .. " " .. tostring(B:DimsUntilWarn("debuff", "Moonfire")) .. " "
+        .. tostring(db.profiles.Mine.dimUntilWarn.debuff.Moonfire), "true false true",
+        "Dim until Warn at: the same string with it ticked; imported, none; still ticked in yours")
     Equal(P.Export(), text, "and it shares the very same string back")
     P.Import("Theirs too", shared, true)
     Equal(H.Text(db.profiles["Theirs too"].warnAt), MINE, "with its look too")
@@ -1984,6 +1997,41 @@ end
         "imported without its look: all of the profile's, the look the importer's own (so its string differs)")
     Equal(#printed, 0, "no errors")
 end)()
+
+-- Third bars of a kind in strings (a player's idea: a third cooldown bar) ---------------------------------
+-- Four extra bars, Cooldowns 3 and Debuffs 3 among them, out and back sane,
+-- nothing left out, in one Discord message; imported on another account
+-- with its look, the same string back. A string naming a fifth, or Buffs 4,
+-- is read sane with those left out and counted.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    for _, kind in ipairs({ "cd", "cd", "debuff", "debuff" }) do B:AddBar(kind) end
+    B:Assign("Moonfire", "cd3")
+    B:Assign("Wrath", "cd2")
+    B:SetAura("debuff3", "Moonfire", true)
+    B:SetWarnAt("debuff3", "Moonfire", 4)
+    B:SetOption("cd3", "size", 40)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(table.concat({ H.Sane(ns, shared), tostring(shared.skipped), tostring(#text < 2000), H.Text(shared.extras), H.Text(shared.lists.cd3),
+        H.Text(shared.warns.debuff3), tostring(shared.setup.bars.cd3.size), P.Describe(shared) }, " | "),
+        ' | 0 | true | {["cd2"]=true,["cd3"]=true,["debuff2"]=true,["debuff3"]=true} | {[1]="Moonfire"} | {["Moonfire"]=4} | 40 | Holds 3 bar'
+        .. " entries, with low-time warnings for 1 aura, 4 extra bars and its look and layout.",
+        "four extra bars, two of them third ones: read back sane, nothing left out, said in one line")
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.ProfileShare.Import("With look", ns2.ProfileShare.Read(text), true)
+    Equal(table.concat(ns2.BAR_KEYS, " ") .. " | " .. ns2.BarData("cd3").size .. " " .. tostring(ns2.ProfileShare.Export() == text),
+        "cd cd2 cd3 util buff debuff debuff2 debuff3 | 40 true", "imported with its look on another account: all four, the same string back")
+    local odd = ns2.ProfileShare.Read(H.String({ l = { cd = {}, util = {}, buff = {}, debuff = {}, buff4 = { "Thorns" }, util3 = { "Wrath" } },
+        x = { cd2 = true, util2 = true, buff2 = true, debuff2 = true, util3 = true, buff4 = true } }))
+    Equal(H.Sane(ns2, odd) .. "|" .. tostring(odd.skipped) .. " " .. H.Text(odd.extras), '|4 {["buff2"]=true,["cd2"]=true,["debuff2"]=true,'
+        .. '["util2"]=true}', "a fifth extra bar (Utility 3) and Buffs 4: left out, each with its list, and counted")
+    Equal(#printed, 0, "no errors")
+end
 
 -- Keep them greyed with no target in strings --------------------------------------------------------
 -- The Debuffs bar's tick goes with the look and layout like its other
@@ -2170,6 +2218,30 @@ do
     local bad = P.Read(H.String({ l = Lists(), g = { s = {}, b = { cd = { showGCD = "yes" }, util = { showGCD = 1 } }, l = {}, k = {} } }))
     Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.showGCD) .. " " .. tostring(bad.setup.bars.util.showGCD),
         "|2 nil nil", "anything but true or false: left out, and counted")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Glow for more procs: never in a string ---------------------------------------------------------------
+-- Each cooldown bar's tick stays with the character: a string never carries
+-- it (the full profile is near Discord's 2000 letters), a string's import
+-- leaves yours as it is, and one that has it anyway is left out and counted.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:SetOption("cd", "glowProcs", true)
+    local text = P.Export()
+    local shared = P.Read(text)
+    local ok = P.Import("Glowing", shared, true)
+    Equal(table.concat({ tostring(text:find("glowProcs", 1, true)), H.Sane(ns, shared) .. "|" .. shared.skipped,
+        tostring(shared.setup.bars.cd.glowProcs), tostring(ok), tostring(ns.BarData("cd").glowProcs) }, " "), "nil |0 nil true true",
+        "not in the string; imported with its look, your own tick stays")
+    local bad = P.Read(H.String({ l = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} },
+        g = { s = {}, b = { cd = { glowProcs = true } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.glowProcs), "|1 nil",
+        "a string that has it anyway: left out, and counted")
     Equal(#printed, 0, "no errors")
 end
 
@@ -3088,6 +3160,48 @@ do
     Equal(tostring(ok and done) .. " | " .. table.concat(ns2.BarData("buff").spells, ",") .. " | " .. table.concat((ns2.Bars:Mine("buff")), ",")
         .. " | " .. tostring(ns2.Bars:OnlyWhenMissing("buff", "hand:off")) .. " " .. tostring(ns2.Bars:WarnAt("buff", "hand:main")),
         "true | hand:main,hand:off,Thorns | hand:main,hand:off,Thorns | true 600", "imported on a warlock: both hands his too, as they were")
+    Equal(ns2.ProfileShare.Export(), text, "and shared back as the very same string")
+end
+
+-- Trinket 1 and Trinket 2, shared ------------------------------------------------------------------
+-- Their keys ("trinket:1", "trinket:2") go in a string like the hands', with
+-- their Only when missing and Warn at, and come back on another account,
+-- for every class. Any other "trinket:" key is left out and counted, and so
+-- is one on a cooldown bar, Debuffs or a form's list (a spell icon with no
+-- spell). (A version before them keeps the two as names it doesn't know,
+-- shown for no one.)
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    for _, entry in ipairs({ "trinket:1", "trinket:2", "Thorns" }) do table.insert(ns.ActiveList("buff"), entry) end
+    B:Changed()
+    B:SetOnlyWhenMissing("buff", "trinket:2", true)
+    B:SetWarnAt("buff", "trinket:1", 10)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(table.concat(shared.lists.buff, ",") .. " | " .. H.Text(shared.only) .. " | " .. H.Text(shared.warns) .. " | "
+        .. shared.skipped .. " | " .. H.Sane(ns, shared) .. "|", 'trinket:1,trinket:2,Thorns | {["buff"]={["trinket:2"]=true}} | '
+        .. '{["buff"]={["trinket:1"]=10}} | 0 | |', "both trinkets in the string, with Only when missing and Warn at")
+    local odd = P.Read(H.String({ l = { cd = {}, util = {}, buff = { "trinket:1", "trinket:3", "trinket:", "trinket:01", "trinket:2" },
+        debuff = {} } }))
+    Equal(table.concat(odd.lists.buff, ",") .. " | " .. odd.skipped .. " | " .. H.Sane(ns, odd) .. "|", "trinket:1,trinket:2 | 3 | |",
+        "any other trinket key left out, and counted")
+    local wrong = P.Read(H.String({ l = { cd = { "trinket:1", "Moonfire" }, util = { "trinket:2" }, buff = { "trinket:2" },
+        debuff = { "trinket:1" } }, f = { [5] = { cd = { "trinket:1", "Maul" }, util = { "trinket:2" } } } }))
+    Equal(table.concat(wrong.lists.cd, ",") .. " | " .. table.concat(wrong.lists.util, ",") .. " | " .. table.concat(wrong.lists.buff, ",")
+        .. " | " .. table.concat(wrong.lists.debuff, ",") .. " | " .. table.concat(wrong.forms[5] and wrong.forms[5].cd or {}, ",")
+        .. " | " .. tostring(wrong.forms[5] and #wrong.forms[5].util) .. " | " .. wrong.skipped .. " | " .. H.Sane(ns, wrong) .. "|",
+        "Moonfire |  | trinket:2 |  | Maul | 0 | 5 | |", "a trinket on Cooldowns, Utility, Debuffs or a form's list: left out, and counted")
+    -- Another account, a warrior: the same entries, on his Buffs bar.
+    character = { guid = "Player-1-0078", name = "Brann", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    _G.UnitClass = function() return "Warrior", "WARRIOR" end
+    local ok, done = H.Trap(ns2.ProfileShare.Import, "Trinkets", ns2.ProfileShare.Read(text), false)
+    Equal(tostring(ok and done) .. " | " .. table.concat(ns2.BarData("buff").spells, ",") .. " | "
+        .. table.concat((ns2.Bars:Mine("buff")), ",") .. " | " .. tostring(ns2.Bars:OnlyWhenMissing("buff", "trinket:2")) .. " "
+        .. tostring(ns2.Bars:WarnAt("buff", "trinket:1")),
+        "true | trinket:1,trinket:2,Thorns | trinket:1,trinket:2,Thorns | true 10", "imported on a warrior: both trinkets his too, as they were")
     Equal(ns2.ProfileShare.Export(), text, "and shared back as the very same string")
 end
 

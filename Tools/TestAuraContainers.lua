@@ -2161,11 +2161,17 @@ end)()
     Equal(Joined(FamilyOf(8182)) .. " | " .. Joined(FamilyOf(8185)) .. " | " .. Joined(FamilyOf(10596)),
         "8182,10476,10477 | 8185,10534,10535 | 10596,10598,10599",
         "a totem's Frost, Fire and Nature Resistance too, though a hunter's pet's passives hold those names")
+    -- Build 70938 gave Morning Glory Dew a Drink of its own (1330734).
+    Equal(tostring(Has(FamilyOf(1137), 1330734)) .. " " .. tostring(data.AURA_ONLY[1330734]), "true true",
+        "Morning Glory Dew's new Drink is one icon with every other Drink")
     local only = data.AURA_ONLY
-    Equal(tostring(only[1259691] and only[1270842] and only[1248406] and only[18118]) .. " | " .. tostring(only[1264482]) .. " "
-        .. tostring(only[20925]) .. " " .. tostring(only[17767]) .. " " .. tostring(only[1310786]), "true | nil nil nil nil",
-        "auras no one learns: Energized, Well Fed, Aftermath's debuff; not a bat's Sonic Blast, nor the talents Holy Shield and"
-        .. " Sniper Shot, nor a voidwalker's Consume Shadows")
+    -- Aftermath's debuff is in ns.RANKS under its own name since 2026-11-13
+    -- (an audit of the Debuffs search), so a warlock's search offers it.
+    Equal(tostring(only[1259691] and only[1270842] and only[1248406]) .. " | " .. tostring(only[1264482]) .. " "
+        .. tostring(only[20925]) .. " " .. tostring(only[17767]) .. " " .. tostring(only[1310786]) .. " | " .. tostring(only[18118])
+        .. " " .. Joined(data.RANKS.Aftermath), "true | nil nil nil nil | nil 18118",
+        "auras no one learns: Energized, Well Fed; not a bat's Sonic Blast, nor the talents Holy Shield and"
+        .. " Sniper Shot, nor a voidwalker's Consume Shadows, nor Aftermath's debuff (a warlock's Debuffs search offers it)")
     Equal(Joined(data.RANKS.Bite) .. " | " .. Joined(data.RANKS["Furious Howl"]) .. " | " .. tostring(data.SPELL_CLASSES.Bite) .. " "
         .. tostring(data.SPELL_CLASSES.Dash) .. " | " .. tostring(data.COOLDOWNS[17261]) .. " " .. tostring(data.COOLDOWNS[17268]),
         "17253,17255,17256,17257,17258,17259,17260,17261 | 24604,24605,24603,24597 | HUNTER DRUID HUNTER | 10 nil",
@@ -2248,6 +2254,9 @@ end)()
     Equal(Lit("debuff", 2818) .. " | " .. tostring(Sp:Pin(2818, "debuff")) .. " " .. Said("debuff", "2818") .. " | " .. List("debuff")
         .. " | " .. Watched("debuff"), "g1 | nil true Added Deadly Poison to Debuffs. | Deadly Poison | g1 2818,2835,434312",
         "your Deadly Poison on the target lights it; its ID typed after goes in with it, not on an icon of its own")
+    -- (Since 2026-11-13 the debuffs are in ns.RANKS under Wound Poison too,
+    -- but no one casts one (ns.DEBUFF_AURAS), so the name is still kept by
+    -- the craft 13220, not rank 4's debuff.)
     Said("debuff", "Wound Poison")
     Equal(Custom("Wound Poison") .. " | " .. Watched("debuff") .. " | " .. Lit("debuff", 13224) .. " | " .. Lit("debuff", 13218),
         "13220 | g1 2818,2835,434312 | g2 13218,13220,13222,13223,13224 | g2 | g2", "Wound Poison by name lights for rank 4's debuff, and rank 1's")
@@ -2363,12 +2372,19 @@ end)()
     petKnows = {}
     Start("HUNTER", { useBars = true, notesSeen = "dev", everyone = "Old", custom = { Bite = { 17254 } },
         profiles = { Old = { cd = { "Bite" }, util = {}, buff = {}, debuff = {}, joins = {} } } })
-    Equal(Sp:Find("Bite").spellID .. " " .. tostring(Sp:ForMe("Bite", "cd")), "17261 true",
-        "Bite saved by its Beast Training spell: the pet's highest rank")
+    -- On a cooldown bar it shows only while a pet that knows it is out
+    -- (Squirt, 2026-11-13: "Yea plz same as lock"; it showed with no pet).
+    local away = Sp:Find("Bite").spellID .. " " .. tostring(Sp:ForMe("Bite", "cd"))
+    petKnows = { [17261] = true }
+    Equal(away .. " | " .. tostring(Sp:ForMe("Bite", "cd")), "17261 false | true",
+        "Bite saved by its Beast Training spell: the pet's highest rank, shown on Cooldowns only while the pet out knows it")
+    petKnows = {}
     -- With no pet out, Growl by name is still the pet's: the data's highest
-    -- rank with a cooldown, not a druid's first.
+    -- rank with a cooldown, not a druid's first. (Hidden till a pet that
+    -- knows it is out, which the add says: Spells.lua S:PetAway.)
     Equal(Said("util", "Growl") .. " | " .. Custom("Growl") .. " " .. Sp:Find("Growl").spellID,
-        "true Added Growl to Utility. | 14921 14921", "Growl by name with the pet away: the pet's top rank")
+        "true Added Growl to Utility. It shows while a pet that knows it is out. | 14921 14921",
+        "Growl by name with the pet away: the pet's top rank")
     -- Saved by name before (1.5.7 remembered the data's first rank: a
     -- druid's Growl and Dash, a warrior's Charge), or at a rank the pet out
     -- now has passed (Bite at rank 4): each goes by the rank the pet knows.
@@ -2383,6 +2399,50 @@ end)()
         .. " | " .. tostring(calls[14921] and calls[27685] and calls[23110] and calls[17261]) .. " "
         .. tostring(calls[6795] or calls[100] or calls[1850] or calls[17257]), "14921 27685 23110 17261 | true nil",
         "saved by a druid's or warrior's rank, or the pet's old one: the pet's own spells, and their cooldowns asked of them")
+    Equal(#printed, 0, "no errors")
+
+    -- The fox's Trickster's Dance (Squirt's call for a hunter's pets,
+    -- 2026-11-13): ns.RANKS holds the hunter's Beast Training spell
+    -- (1310617, no cooldown), ns.PET_SPELLS the fox's own (1310612, three
+    -- minutes). By name with no pet out it's remembered by the fox's and
+    -- goes by it; with the fox out its cooldown is asked of that one.
+    NAMES[1310612] = "Trickster's Dance"
+    petKnows = {}
+    Start("HUNTER")
+    local dance = Said("cd", "Trickster's Dance") .. " " .. Custom("Trickster's Dance") .. " " .. Sp:Find("Trickster's Dance").spellID
+        .. " " .. tostring(Sp:ForMe("Trickster's Dance", "cd"))
+    petKnows = { [1310612] = true }
+    B:Rebuild()
+    B:RefreshAll()
+    calls = {}
+    for _, id in ipairs(cooldownCalls) do calls[id] = true end
+    Equal(dance .. " | " .. tostring(Sp:ForMe("Trickster's Dance", "cd")) .. " " .. tostring(calls[1310612]) .. " " .. tostring(calls[1310617]),
+        "true Added Trickster's Dance to Cooldowns. It shows while a pet that knows it is out. 1310612 1310612 false | true true nil",
+        "the fox's Trickster's Dance by name: the fox's own spell, shown and its cooldown asked once the fox is out")
+    petKnows = {}
+    NAMES[1310612] = nil
+    Equal(#printed, 0, "no errors")
+
+    -- A warlock's demons' abilities (Squirt's call, 2026-11-13): on a
+    -- cooldown bar Spell Lock's cooldown is asked of the felhunter's own
+    -- spell, never of its silence (24259). Added by name with the imp out,
+    -- each is remembered by its demon's spell, and on the Debuffs bar still
+    -- lights for its debuff on the target, as before.
+    petKnows = { [19244] = true, [19647] = true }
+    Start("WARLOCK")
+    local locked = Said("cd", "Spell Lock")
+    B:RefreshAll()
+    calls = {}
+    for _, id in ipairs(cooldownCalls) do calls[id] = true end
+    locked = locked .. " " .. tostring(calls[19647]) .. " " .. tostring(calls[24259])
+    petKnows = { [3110] = true, [4511] = true }
+    Start("WARLOCK")
+    Equal(locked .. " | " .. Said("debuff", "Seduction") .. " | " .. Said("debuff", "Spell Lock") .. " | " .. Custom("Seduction") .. " "
+        .. Custom("Spell Lock") .. " | " .. Watched("debuff") .. " | " .. Lit("debuff", 6358) .. " | " .. Lit("debuff", 24259),
+        "true Added Spell Lock to Cooldowns. true nil | true Added Seduction to Debuffs. | true Added Spell Lock to Debuffs. | 6358 19647"
+        .. " | g1 6358 | g2 19647,24259 | g1 | g2", "Spell Lock's cooldown asked of the felhunter's spell; with the imp out, Seduction"
+        .. " and Spell Lock by name light for their debuffs on the Debuffs bar")
+    petKnows = {}
     Equal(#printed, 0, "no errors")
 
     -- Saved by the trap debuffs' old names (build 70291 dropped "Effect",
@@ -2669,7 +2729,8 @@ end)()
 -- function of its own: this file's main chunk has little room for more locals.)
 ;(function()
     local NAMES = { [1259691] = "Energized", [1270842] = "Energized", [1259705] = "Read Leyline", [11305] = "Sprint",
-        [19244] = "Spell Lock", [12975] = "Last Stand", [1264482] = "Sonic Blast", [20925] = "Holy Shield", [18118] = "Aftermath" }
+        [19244] = "Spell Lock", [12975] = "Last Stand", [1264482] = "Sonic Blast", [20925] = "Holy Shield", [7290] = "Soul Siphon",
+        [17767] = "Consume Shadows" }
     local ns, B, w, page, db
     -- A Skyborne druid; with knows, the game says you know your spellbook's
     -- spells (and nothing else), as it does, and your pet the spells in pet.
@@ -2794,13 +2855,15 @@ end)()
     -- Shared with a hunter and a paladin: the bat's Sonic Blast and the
     -- talent Holy Shield, kept by ID, are spells someone knows, though the
     -- data names no class for them, so a druid's Clear leaves them; a debuff
-    -- no one learns (Aftermath's), ticked on Utility before, goes.
+    -- no one learns, ticked on Utility before, goes. (Soul Siphon's 7290, which
+    -- the data links to the warlock's talent; Aftermath's debuff was this one
+    -- until 2026-11-13, when it became a warlock's, for the Debuffs search.)
     local shared = { useBars = true, notesSeen = "dev", helpSeen = true, everyone = "Old",
-        custom = { ["Sonic Blast"] = { 1264482 }, ["Holy Shield"] = { 20925 }, Aftermath = { 18118 } },
-        profiles = { Old = { cd = { "Sonic Blast" }, util = { "Holy Shield", "Aftermath" }, buff = {}, debuff = {}, joins = {} } } }
+        custom = { ["Sonic Blast"] = { 1264482 }, ["Holy Shield"] = { 20925 }, ["Soul Siphon"] = { 7290 } },
+        profiles = { Old = { cd = { "Sonic Blast" }, util = { "Holy Shield", "Soul Siphon" }, buff = {}, debuff = {}, joins = {} } } }
     Start(shared, true)
     Equal("[" .. table.concat((B:Mine("cd")), ",") .. "] [" .. table.concat(B:Leftovers("cd"), ",") .. "] ["
-        .. table.concat(B:Leftovers("util"), ",") .. "]", "[] [] [Aftermath]", "none of it the druid's; only Aftermath's debuff a leftover")
+        .. table.concat(B:Leftovers("util"), ",") .. "]", "[] [] [Soul Siphon]", "none of it the druid's; only Soul Siphon's debuff a leftover")
     w:Select("util")
     Equal(Note(page.clear), "Take every icon off Utility, and buffs or debuffs added to it that can't show there. It asks for a second"
         .. " click. (experimental)", "Clear says it takes debuffs too")
@@ -2808,30 +2871,123 @@ end)()
     page.clear:Click()
     B:Clear("cd")
     Equal(List("cd") .. " | " .. List("util") .. " | " .. Custom(), "Sonic Blast | Holy Shield | Holy Shield=20925 Sonic Blast=1264482",
-        "cleared: Aftermath's debuff gone; the hunter's Sonic Blast and the paladin's Holy Shield stay")
+        "cleared: Soul Siphon's debuff gone; the hunter's Sonic Blast and the paladin's Holy Shield stay")
     Start(shared, true, "HUNTER", { [1264482] = true })
     Equal(table.concat((B:Mine("cd")), ",") .. " " .. tostring(ns.Spells:Leftover("Sonic Blast", "cd")), "Sonic Blast false",
         "the hunter, his bat out, still has it")
 
     -- What you or your pet don't know yet still goes on the Cooldowns bar,
-    -- shown once known, as before: the felhunter's Spell Lock while a
+    -- shown once known, as before: the voidwalker's Consume Shadows while a
     -- warlock's imp is out, Last Stand before a warrior takes the talent.
-    -- The page offers each by its ID.
+    -- The page offers each by its ID. (The felhunter's Spell Lock too: its
+    -- silence is a warlock's debuff since 2026-11-13, for the Debuffs search,
+    -- so the name is a warlock's, but on a cooldown bar it still shows only
+    -- while the felhunter is out (Squirt's call, ns.PET_SPELLS). Added by
+    -- the felhunter's ID, it goes by that ID, never by the silence no one casts.)
     Start(nil, true, "WARLOCK")
     w:Select("cd")
-    Search("19244")
-    Equal(Rows("spell lock") .. " | " .. Said("cd", "19244") .. " | " .. tostring(ns.Spells:ForMe("Spell Lock", "cd")),
-        "Spell Lock (ID 19244) offered | true Added Spell Lock to Cooldowns. | false",
-        "the felhunter's Spell Lock with the imp out: offered and added, hidden until the felhunter's out")
-    Equal(Said("util", "Spell Lock") .. " | " .. List("cd") .. " | " .. List("util"), "true Added Spell Lock to Utility. |  | Spell Lock",
-        "added again by name on Utility, still hidden: it moves there")
-    Start(db, true, "WARLOCK", { [19244] = true })
-    Equal(table.concat((B:Mine("util")), ","), "Spell Lock", "the felhunter out: it shows")
+    Search("17767")
+    Equal(Rows("consume shadows") .. " | " .. Said("cd", "17767") .. " | " .. tostring(ns.Spells:ForMe("Consume Shadows", "cd"))
+        .. " | " .. Said("cd", "19244") .. " " .. tostring(ns.Spells:ForMe("Spell Lock", "cd")) .. " " .. tostring(ns.Spells:Find("Spell Lock").spellID),
+        "Consume Shadows (ID 17767) offered | true Added Consume Shadows to Cooldowns. | false | true Added Spell Lock to Cooldowns. It shows"
+        .. " while a pet that knows it is out. false 19244",
+        "the voidwalker's Consume Shadows with the imp out: offered and added, hidden until the voidwalker's out (Spell Lock too, by the"
+        .. " felhunter's ID, and its add says so)")
+    B:TakeOff("cd", "Spell Lock")
+    Equal(Said("util", "Consume Shadows") .. " | " .. List("cd") .. " | " .. List("util"),
+        "true Added Consume Shadows to Utility. |  | Consume Shadows", "added again by name on Utility, still hidden: it moves there")
+    Start(db, true, "WARLOCK", { [17767] = true })
+    Equal(table.concat((B:Mine("util")), ","), "Consume Shadows", "the voidwalker out: it shows")
     Start(nil, true, "WARRIOR")
     w:Select("cd")
     Search("12975")
     Equal(Rows("last stand") .. " | " .. Said("cd", "12975"), "Last Stand (ID 12975) offered | true Added Last Stand to Cooldowns.",
         "Last Stand before the talent's taken: offered and added")
+    Equal(#printed, 0, "no errors")
+
+    -- A pet's ability on a cooldown bar while no pet that knows it is out
+    -- (Spells.lua S:PetAway): hidden on the bar, yet still yours, so its
+    -- page lists it ticked, saying when it shows, a search finds it, Clear
+    -- shows and takes it, and adding it again says why it isn't showing. A
+    -- review of the hunter change (2026-11-13) found none of that: a hunter
+    -- who gave up his boar had its Charge stuck in the profile, with no row,
+    -- no icon and no Clear left to take it off. A warlock's Spell Lock with
+    -- the imp out the same. Another class's (the succubus's Seduction for a
+    -- hunter) stays for them; the voidwalker's Consume Shadows, which no
+    -- class list names, is as before: hidden, and Clear leaves it.
+    NAMES[14921], NAMES[27685], NAMES[19647], NAMES[6358] = "Growl", "Charge", "Spell Lock", "Seduction"
+    local function Pets(cd, custom)
+        return { useBars = true, notesSeen = "dev", helpSeen = true, everyone = "Old", custom = custom,
+            profiles = { Old = { cd = cd, util = {}, buff = {}, debuff = {}, joins = {} } } }
+    end
+    local function Hunter()
+        return Pets({ "Growl", "Charge", "Seduction" }, { Growl = { 14921 }, Charge = { 27685 }, Seduction = { 6358 } })
+    end
+    -- The list's rows holding the text, ticked or not, with what's said
+    -- after the name; "none" when there are none.
+    local function Listed(match)
+        local out = {}
+        for _, row in ipairs(page.rows) do
+            if S[row].shown and S[row.check].shown and (S[row.name].text or ""):lower():find(match, 1, true) then
+                local note = S[row.where].text or ""
+                out[#out + 1] = S[row.name].text .. (row.check:GetChecked() and " ticked" or " unticked") .. (note ~= "" and (" (" .. note .. ")") or "")
+            end
+        end
+        return #out > 0 and table.concat(out, " | ") or "none"
+    end
+    local function RowOf(name)
+        for _, row in ipairs(page.rows) do
+            if S[row].shown and S[row.check].shown and S[row.name].text == name then return row end
+        end
+    end
+    local AWAY = "shows while a pet that knows it is out"
+    Start(Hunter(), true, "HUNTER")
+    w:Select("cd")
+    Search("")
+    local listed = Listed("growl") .. " | " .. Listed("charge") .. " | " .. Listed("seduction")
+    Search("charge")
+    Equal(listed .. " | " .. Listed("charge") .. " | " .. S[page.count].text .. " | " .. tostring(S[page.clear].shown) .. " | " .. Note(page.clear)
+        .. " | " .. Said("cd", "Charge"), "Growl ticked (" .. AWAY .. ") | Charge ticked (" .. AWAY .. ") | none | Charge ticked (" .. AWAY
+        .. ") | Empty | true | Take every icon off Cooldowns, and pet abilities hidden until their pet is out. It asks for a second click."
+        .. " | true Charge is already on Cooldowns. It shows while a pet that knows it is out.",
+        "no pet out: Growl and Charge hidden on the bar, but listed ticked, saying when they show, and found by a search; Clear shows;"
+        .. " adding Charge again says why it isn't showing; the warlock's Seduction isn't listed")
+    Search("")
+    RowOf("Charge").check:Click()
+    local unticked = List("cd")
+    page.clear:Click()
+    page.clear:Click()
+    Equal(unticked .. " | " .. List("cd") .. " | " .. S[w.note].text .. " | " .. Said("cd", "Dash"),
+        "Growl,Seduction | Seduction | Cooldowns cleared. | true Added Dash to Cooldowns. It shows while a pet that knows it is out.",
+        "Charge unticked, then Clear takes Growl and leaves the warlock's Seduction; Dash added with no pet says when it shows")
+    -- A wolf out: Growl shows as usual; the boar's Charge is listed, saying
+    -- when it shows, and Clear takes both. A boar out: both show, nothing said.
+    Start(Hunter(), true, "HUNTER", { [14921] = true })
+    w:Select("cd")
+    Search("")
+    Equal(Listed("growl") .. " | " .. Listed("charge") .. " | " .. S[page.count].text .. " | " .. Said("cd", "Growl") .. " | " .. Said("cd", "Charge"),
+        "Growl ticked | Charge ticked (" .. AWAY .. ") | 1 icon, drag to reorder | true Growl is already on Cooldowns. | true Charge is already on"
+        .. " Cooldowns. It shows while a pet that knows it is out.", "a wolf out: Growl shows; the boar's Charge is listed and says why it's hidden")
+    page.clear:Click()
+    page.clear:Click()
+    Equal(List("cd"), "Seduction", "Clear takes Growl and the boar's Charge")
+    Start(Hunter(), true, "HUNTER", { [14921] = true, [27685] = true })
+    w:Select("cd")
+    Search("")
+    Equal(Listed("growl") .. " | " .. Listed("charge") .. " | " .. S[page.count].text .. " | " .. Said("cd", "Charge"),
+        "Growl ticked | Charge ticked | 2 icons, drag to reorder | true Charge is already on Cooldowns.", "a boar out: both show, as before")
+    -- A warlock with the imp out: Spell Lock the same; Consume Shadows as before.
+    Start(Pets({ "Spell Lock", "Consume Shadows" }, { ["Spell Lock"] = { 19647 }, ["Consume Shadows"] = { 17767 } }), true, "WARLOCK",
+        { [3110] = true })
+    w:Select("cd")
+    Search("")
+    Equal(Listed("spell lock") .. " | " .. Listed("consume") .. " | " .. tostring(S[page.clear].shown) .. " | " .. Said("cd", "Spell Lock"),
+        "Spell Lock ticked (" .. AWAY .. ") | none | true | true Spell Lock is already on Cooldowns. It shows while a pet that knows it is out.",
+        "the imp out: Spell Lock listed, saying when it shows; the voidwalker's Consume Shadows not listed, as before")
+    page.clear:Click()
+    page.clear:Click()
+    Equal(List("cd"), "Consume Shadows", "Clear takes Spell Lock and leaves Consume Shadows, as before")
+    NAMES[14921], NAMES[27685], NAMES[19647], NAMES[6358] = nil, nil, nil, nil
     Equal(#printed, 0, "no errors")
 
     -- Where the game can't say what you know, a buff's ID goes on the
@@ -4613,6 +4769,210 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- Dim until Warn at: an icon dark until its end is near ---------------------------------------------
+-- (A player's idea: Moonfire's icon ticking down for all 12 seconds when
+-- only its end matters.) Ticked entry by entry, off by default. With a Warn
+-- at time and missing ones greyed, the entry's edge slot (above the game's
+-- icon, its sweep and its numbers) draws, from its seconds up, the entry's
+-- own icon art darkened, two pixels wider than its spot; under its seconds
+-- the edge as before, so the icon lights up with its red countdown. Not
+-- hidden outright (the greyed spot under it would look missing). Packed,
+-- with no Warn at, Only when missing or on a weapon enchant: nothing more,
+-- the tick kept. A change in a fight waits for it to end; each rule is sent
+-- once. Turned down by the game: the edge alone, said in /ccm debug. Kept
+-- per profile (copied, repaired over a reload), gone with its entry or bar.
+;(function()
+    local before = { _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    local refuse, refuseEdge = false, false
+    -- The game's number rules (Fresh() takes them away again), turning the cover down while refuse is set,
+    -- the edge itself while refuseEdge is.
+    local function Game()
+        _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+            return { rules = {}, AddBreakpoint = function(self, rule)
+                    if refuse and rule.format:find(":100:100:", 1, true) then error("format turned down", 0) end
+                    if refuseEdge and rule.format:find("LowEdge", 1, true) then error("edge turned down", 0) end
+                    table.insert(self.rules, rule)
+                end,
+                ClearBreakpoints = function(self) self.rules, self.cleared = {}, (self.cleared or 0) + 1 end }
+        end }
+        _G.Enum.NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 }
+        _G.Enum.DurationTextBindingProperty = { RemainingDuration = 0, ElapsedDuration = 2, TotalDuration = 4 }
+    end
+    -- A rule set as text: "edge N" the edge N across, "dim ICON N" the icon darkened N across.
+    local function Rules(formatter)
+        local out = {}
+        for _, rule in ipairs(formatter.rules) do
+            local text = rule.format:gsub("|T[^:]*LowEdge:(%d+):%d+:[^|]*|t", "edge %1")
+                :gsub("|T([^:|]+):(%d+):%d+:0:0:100:100:8:92:8:92:77:77:77|t", "dim %1 %2")
+            out[#out + 1] = rule.threshold .. "=" .. text
+        end
+        return table.concat(out, " ")
+    end
+    Fresh()
+    Game()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    local bar = B:Get("debuff")
+    local box = S[bar.container]
+    local holder, w = bar.holders[1], box.slots.w1
+    local mark = holder.mark
+    local function Line() return tostring(ns.DebugReport():match("1%. Moonfire[^\n]*")) end
+    B:SetAura("debuff", "Moonfire", true)
+
+    -- Off by default; ticked without a Warn at time, or packed: nothing more.
+    local off = tostring(B:DimsUntilWarn("debuff", "Moonfire")) .. " " .. tostring(B:DimUsable("debuff", "Moonfire"))
+    Equal(table.concat({ off, tostring(B:SetDimUntilWarn("cd", "Moonfire", true)), tostring(B:SetDimUntilWarn("debuff", "Wrath", true)),
+        tostring(B:SetDimUntilWarn("debuff", "Moonfire", true)), tostring(ns.DimUntilWarn("debuff").Moonfire),
+        tostring(B:DimUsable("debuff", "Moonfire")), tostring(bar.dims[1]), Rules(mark.formatter), tostring(w.enabled) }, " | "),
+        "false false | false | false | true | true | false | nil | 0= | false",
+        "off by default; only for an entry on a Buffs or Debuffs bar; ticked with no Warn at: kept, greyed, nothing drawn")
+    B:SetWarnAt("debuff", "Moonfire", 3)
+    Equal(table.concat({ tostring(B:DimUsable("debuff", "Moonfire")), tostring(bar.dims[1]), Rules(mark.formatter), tostring(w.enabled),
+        Line():match("dim until then [^|]*$") or "none" }, " | "),
+        "false | 136096 | 0= | false | dim until then none (packed)",
+        "a Warn at time on a packed bar: still greyed, no edge slot to dim with; /ccm debug says why")
+
+    -- Missing debuffs greyed: the edge slot draws Moonfire's own icon darkened from 3 seconds up, the edge under 3.
+    B:SetOption("debuff", "showMissing", true)
+    Equal(table.concat({ tostring(B:DimUsable("debuff", "Moonfire")), Rules(mark.formatter), tostring(w.enabled),
+        tostring(w.filters.includeSpellIDs == box.slots.b1.filters.includeSpellIDs), mark.rule }, " | "),
+        "true | 0=edge 45 3=dim 136096 38 | true | true | 3:45:dim 38 136096",
+        "greyed spots: usable; the edge slot on Moonfire's own spells, its icon dark and 38 across (its 36 spot and a pixel all"
+        .. " round) from 3 seconds up, the red edge under 3")
+    Equal(mark.formatter.rules[2].format, "|T136096:38:38:0:0:100:100:8:92:8:92:77:77:77|t",
+        "the cover: Moonfire's icon, trimmed as the icons are, at under a third of its brightness")
+    Equal(tostring(Line():match("rule [^,]*, low glow [^,]*, dim until then .*$")),
+        "rule 3:45:dim 38 136096, low glow not on Debuffs, dim until then on", "/ccm debug: on")
+    Equal(tostring(ns.DebugReport():match("| dim until Warn at: [^\n]*")), "| dim until Warn at: debuff: Moonfire",
+        "/ccm debug lists what's dimmed on the Warn at line")
+    -- Applied again with nothing changed: nothing sent again. A bigger bar: both grow with the spot.
+    local cleared = mark.formatter.cleared
+    ns.BuffBar:Apply(bar)
+    local again = mark.formatter.cleared - cleared
+    B:SetOption("debuff", "size", 48)
+    Equal(again .. " | " .. Rules(mark.formatter), "0 | 0=edge 60 3=dim 136096 50", "nothing sent again; a bigger bar: 50 across")
+    B:SetOption("debuff", "size", 36)
+    -- In a fight the icons are the game's: a change waits for it to end.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetDimUntilWarn("debuff", "Moonfire", false)
+    local fight = Rules(mark.formatter)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight .. " | " .. Rules(mark.formatter) .. " | " .. tostring(bar.dims[1]) .. " | " .. tostring(Line():match("dim until then")),
+        "0=edge 45 3=dim 136096 38 | 0=edge 45 3= | nil | nil",
+        "unticked in a fight: still dimmed until it ends, then the edge alone, as before; /ccm debug no longer says it")
+    B:SetDimUntilWarn("debuff", "Moonfire", true)
+    -- Warn at Off: nothing drawn, the tick kept but greyed; back on, dimmed again.
+    B:SetWarnAt("debuff", "Moonfire", 0)
+    local noWarn = Rules(mark.formatter) .. " " .. tostring(w.enabled) .. " " .. tostring(B:DimUsable("debuff", "Moonfire")) .. " "
+        .. tostring(B:DimsUntilWarn("debuff", "Moonfire"))
+    B:SetWarnAt("debuff", "Moonfire", 5)
+    Equal(noWarn .. " | " .. Rules(mark.formatter), "0= false false true | 0=edge 45 5=dim 136096 38",
+        "Warn at Off: nothing drawn, the tick kept, greyed; 5 seconds: dark from 5 seconds up")
+    -- Joined with Wrath (Moonfire first): one cover, Moonfire's icon, on both spells; ticked on Wrath alone, the same.
+    B:SetAura("debuff", "Wrath", true)
+    B:SetJoined("debuff", 2, true)
+    local joined = Rules(mark.formatter) .. " " .. tostring(w.filters.includeSpellIDs[5176])
+    B:SetDimUntilWarn("debuff", "Moonfire", false)
+    B:SetDimUntilWarn("debuff", "Wrath", true)
+    Equal(joined .. " | " .. Rules(mark.formatter) .. " " .. tostring(B:DimUsable("debuff", "Wrath")),
+        "0=edge 45 5=dim 136096 38 true | 0=edge 45 5=dim 136096 38 true",
+        "joined: one cover in Moonfire's icon on both spells; ticked on Wrath alone (warned by Moonfire's time), the same")
+    B:SetDimUntilWarn("debuff", "Wrath", false)
+    B:SetDimUntilWarn("debuff", "Moonfire", true)
+    B:SetJoined("debuff", 2, false)
+    B:SetAura("debuff", "Wrath", false)
+
+    -- The game turning the edge itself down: no edge (rule nil, as without the tick), not blamed on the dimmed icon.
+    refuseEdge = true
+    B:SetWarnAt("debuff", "Moonfire", 4)
+    local edgeOff = tostring(mark.rule) .. " " .. tostring(mark.dimRefused) .. " " .. tostring(ns.BuffBar.dimError) .. " ["
+        .. Rules(mark.formatter) .. "] | " .. tostring(Line():match("edge [^,]*, rule [^,]*, low glow [^,]*, dim until then .*$"))
+    refuseEdge = false
+    B:SetWarnAt("debuff", "Moonfire", 5)
+    Equal(edgeOff .. " | " .. Rules(mark.formatter),
+        "nil nil nil [] | edge on, rule nil, low glow not on Debuffs, dim until then off | 0=edge 45 5=dim 136096 38",
+        "the edge itself turned down: nothing drawn, /ccm debug puts it on the edge (rule nil), not the dimmed icon; taken: dimmed")
+
+    -- The game turning the cover down: the edge alone (the icon as before), said in /ccm debug, not tried again until a change.
+    refuse = true
+    B:SetWarnAt("debuff", "Moonfire", 3)
+    local turned = Rules(mark.formatter) .. " | " .. tostring(mark.dimRefused) .. " | " .. tostring(Line():match("dim until then .*$"))
+    cleared = mark.formatter.cleared
+    ns.BuffBar:Apply(bar)
+    turned = turned .. " | " .. (mark.formatter.cleared - cleared)
+    refuse = false
+    B:SetWarnAt("debuff", "Moonfire", 5)
+    Equal(turned .. " | " .. Rules(mark.formatter) .. " " .. tostring(mark.dimRefused) .. " | " .. tostring(Line():match("dim until then .*$")),
+        "0=edge 45 3= | true | dim until then refused: format turned down | 0 | 0=edge 45 5=dim 136096 38 nil | dim until then on",
+        "turned down: the edge alone, /ccm debug says why, not tried again; at the next change taken: dimmed")
+    Equal(tostring(ns.BuffBar.dimError), "format turned down", "the first refusal kept for /ccm debug")
+
+    -- The Buffs bar: Thorns the same; not with Only when missing, nor Only show missing; not on a weapon enchant.
+    local buff = B:Get("buff")
+    local bw, bmark = S[buff.container].slots.w1, buff.holders[1].mark
+    local thorns = ns.Spells:Find("Thorns").icon
+    B:SetAura("buff", "Thorns", true)
+    B:SetOption("buff", "showMissing", true)
+    B:SetWarnAt("buff", "Thorns", 600)
+    B:SetDimUntilWarn("buff", "Thorns", true)
+    local lit = Rules(bmark.formatter) .. " " .. tostring(bw.enabled)
+    B:SetOnlyWhenMissing("buff", "Thorns", true)
+    local only = tostring(B:DimUsable("buff", "Thorns")) .. " " .. tostring(buff.dims[1]) .. " " .. tostring(bw.enabled)
+    B:SetOnlyWhenMissing("buff", "Thorns", false)
+    B:SetOption("buff", "onlyMissing", true)
+    only = only .. " " .. tostring(B:DimUsable("buff", "Thorns")) .. " " .. tostring(buff.dims[1])
+    B:SetOption("buff", "onlyMissing", false)
+    Equal(lit .. " | " .. only .. " | " .. Rules(bmark.formatter), "0=edge 45 600=dim " .. thorns .. " 38 true | false nil false false nil"
+        .. " | 0=edge 45 600=dim " .. thorns .. " 38", "Thorns on the Buffs bar dark from 10 minutes up; Only when missing or Only"
+        .. " show missing: greyed, nothing drawn; back as they go")
+    B:SetAura("buff", "hand:main", true)
+    B:SetWarnAt("buff", "hand:main", 600)
+    local hand = tostring(B:SetDimUntilWarn("buff", "hand:main", true)) .. " " .. tostring(B:DimUsable("buff", "hand:main")) .. " "
+        .. tostring(buff.dims[2]) .. " " .. tostring(S[buff.container].slots.w2.enabled)
+    B:SetAura("buff", "hand:main", false)
+    Equal(hand .. " " .. tostring(ns.DimUntilWarn("buff")["hand:main"]), "true false nil false nil",
+        "a hand's weapon enchant (the addon's own spot): kept but greyed, nothing drawn; off the bar, forgotten")
+
+    -- Kept in a copy of the profile, on its own there; over a reload, with the repair; gone with its entry.
+    local own = ns.ProfileName()
+    ns.CopyProfile("Raid")
+    local copied = tostring(B:DimsUntilWarn("debuff", "Moonfire")) .. " " .. Rules(B:Get("debuff").holders[1].mark.formatter)
+    B:SetDimUntilWarn("debuff", "Moonfire", false)
+    local db = ForeverEnhancedCooldownManagerDB
+    Equal(copied .. " | " .. tostring(db.profiles[own].dimUntilWarn.debuff.Moonfire) .. " " .. tostring(db.profiles.Raid.dimUntilWarn.debuff.Moonfire),
+        "true 0=edge 45 5=dim 136096 38 | true nil", "a copy keeps the tick, each profile its own after")
+    ns.UseProfile(own)
+    local store = db.profiles[own].dimUntilWarn
+    store.debuff.Wrath, store.buff.Thorns, store.cd = true, "yes", { Moonfire = true }
+    Fresh()
+    Game()
+    ns = Load(db)
+    B = ns.Bars
+    bar = B:Get("debuff")
+    store = db.profiles[own].dimUntilWarn
+    Equal(table.concat({ tostring(B:DimsUntilWarn("debuff", "Moonfire")), Rules(bar.holders[1].mark.formatter), tostring(store.debuff.Wrath),
+        tostring(store.buff.Thorns), tostring(store.cd) }, " "), "true 0=edge 45 5=dim 136096 38 nil nil nil",
+        "after a reload: still ticked and drawn; a name off the bar, anything but true and a cooldown bar's dropped")
+    B:SetAura("debuff", "Moonfire", false)
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(tostring(B:DimsUntilWarn("debuff", "Moonfire")) .. " " .. tostring(B:WarnAt("debuff", "Moonfire")),
+        "false nil", "taken off and put back: no longer ticked (nor warned)")
+    -- Debuffs 2: its own ticks; gone with the bar.
+    B:AddBar("debuff")
+    B:SetAura("debuff2", "Moonfire", true)
+    B:SetOption("debuff2", "showMissing", true)
+    B:SetWarnAt("debuff2", "Moonfire", 3)
+    local set = tostring(B:SetDimUntilWarn("debuff2", "Moonfire", true)) .. " " .. Rules(B:Get("debuff2").holders[1].mark.formatter) .. " "
+        .. tostring(B:DimsUntilWarn("debuff", "Moonfire"))
+    B:RemoveBar("debuff2")
+    Equal(set .. " " .. tostring(ns.ProfileLists().dimUntilWarn.debuff2), "true 0=edge 45 3=dim 136096 38 false nil",
+        "Debuffs 2: ticked and drawn on its own; removed: its ticks gone")
+    Equal(S[bar.container].late .. " " .. S[bar.container].addonCalls .. " " .. #printed, "0 0 0", "nothing made or run mid-update; no errors")
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = before[1], before[2], before[3]
+end)()
+
 -- Glow while active: a buff's icon glows while it's up ---------------------------------------------
 -- Ticked buff by buff in its own panel on a Buffs page (Buffs 2 too), off by
 -- default. Every Buffs bar icon (each fixed slot's and each packed group's,
@@ -5062,6 +5422,256 @@ end)()
             tostring(ns.DebugReport():match("1%. Thorns[^\n]*"):match("glow while active: .*$")), #printed }, " "),
             "nil nil 0 true true 0 glow while active: edge only, the game took no loop 0",
             "a game " .. (mode == "none" and "without shown animations" or "turning the loop down") .. ": the edge alone, shown with its icon")
+    end
+end)()
+
+-- Trinket 1's buff lights its spot -------------------------------------------------------------------
+-- (A player's report.) Trinket 1 on the Buffs bar with Earthstrike worn: its
+-- fixed slot is told Earthstrike's buff (25891), so the game shows its icon
+-- (with its time left) while that buff is on you and for no other buff;
+-- Warn at's edge slot watches the same buff. With no trinket worn it has no
+-- spells: its slot stays off and nothing lights it, packed or fixed, so it
+-- shows missing (its packed group, told no IDs, matches nothing either).
+;(function()
+    local before = { _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    Fresh()
+    _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+        return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end,
+            ClearBreakpoints = function(self) self.rules = {} end }
+    end }
+    _G.Enum.NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 }
+    _G.Enum.DurationTextBindingProperty = { RemainingDuration = 0, ElapsedDuration = 2, TotalDuration = 4 }
+    local itemSpell = C_Item.GetItemSpell
+    C_Item.GetItemSpell = function(id)
+        if id == 21180 then return "Earthstrike", 25891 end
+        return itemSpell(id)
+    end
+    trinket = 21180
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetOption("buff", "showMissing", true)
+    B:SetAura("buff", "trinket:1", true)
+    B:SetWarnAt("buff", "trinket:1", 3)
+    local bar = B:Get("buff")
+    local box = S[bar.container]
+    local b, w = box.slots.b1, box.slots.w1
+    box.Update({ { id = 467 } })
+    local other = tostring(S[b.button].shown)
+    box.Update({ { id = 25891 } })
+    Equal(table.concat({ other, tostring(S[b.button].shown), tostring(b.enabled), tostring(b.filters.includeSpellIDs[25891]),
+        tostring(w.enabled), tostring(w.filters.includeSpellIDs[25891]), tostring(S[w.button].shown),
+        tostring(bar.holders[1]:IsShown()), box.addonCalls, #printed }, " "),
+        "false true true true true true true true 0 0", "Earthstrike's buff lights Trinket 1's slot (not another buff), its edge slot"
+        .. " on the same buff; the game draws it all, none of the addon's code run")
+    -- No trinket worn: no spells, its slot off, nothing lights it, fixed or packed.
+    trinket = nil
+    local from = #timers
+    Fire("PLAYER_EQUIPMENT_CHANGED")
+    for i = from + 1, #timers do timers[i]() end
+    box.Update({ { id = 25891 }, { id = 467 } })
+    local fixed = tostring(b.enabled) .. " " .. tostring(S[b.button].shown) .. " " .. tostring(bar.holders[1]:IsShown())
+    B:SetOption("buff", "showMissing", false)
+    box.Update({ { id = 25891 }, { id = 467 } })
+    local lit = 0
+    for _, group in pairs(box.groups) do lit = lit + #group.active end
+    Equal(fixed .. " | " .. tostring(b.enabled) .. " " .. lit .. " | " .. #printed, "false false true | false 0 | 0",
+        "no trinket: fixed, its spot shows missing and nothing lights it; packed, no icon for it either")
+    C_Item.GetItemSpell = itemSpell
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = before[1], before[2], before[3]
+end)()
+
+-- Glow for more procs: a spell's icon glows for a proc the game doesn't light --------------------------
+-- (A player's report: Nightfall never lit Shadow Bolt.) Ticked per cooldown
+-- bar, off by default. Shadow Bolt (any rank) on a bar with it ticked gets a
+-- slot in that bar's own container for your buffs, told Shadow Trance
+-- (17941), its icon only a glow laid over Shadow Bolt's: the game's proc
+-- loop handed over (Proc glow), or the gold edge (Gold edge, or a game that
+-- won't take the loop). The game shows it only while Shadow Trance is up, in
+-- a fight too, with none of the addon's code run; it's told and styled out
+-- of a fight only, and placed by name in one. Nothing is made for a bar
+-- without such a spell. (Not shared in profile strings: TestShare.)
+
+-- A warlock's Shadow Bolt, two ranks, in the mock spellbook (after Fresh).
+-- (A global: this file's main chunk is at Lua's 200 locals.)
+function ShadowBolt()
+    table.insert(book[2].items, { name = "Shadow Bolt", subName = "Rank 1", spellID = 686, iconID = 136197 })
+    table.insert(book[2].items, { name = "Shadow Bolt", subName = "Rank 2", spellID = 695, iconID = 136197 })
+end
+
+;(function()
+    Fresh()
+    ShadowBolt()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B, A = ns.Bars, ns.IconAuras
+    B:Assign("Moonfire", "cd")
+    B:Assign("Shadow Bolt", "cd")
+    B:Assign("Wrath", "util")
+    local bar, util = B:Get("cd"), B:Get("util")
+    local made = #containers
+    -- The icon on a bar with that name.
+    local function Icon(on, name)
+        for i = 1, on.count do
+            if on.icons[i].name == name then return on.icons[i] end
+        end
+    end
+    -- Whether a glow is drawn: it and everything up to its container shown.
+    local function Drawn(active, container)
+        local frame = active.frame
+        while frame and frame ~= container do
+            if not S[frame].shown then return false end
+            frame = S[frame].parent
+        end
+        return true
+    end
+    -- Which of a glow's pieces show: the loop, then the edge's four sides.
+    local function Pieces(active)
+        local shown = { tostring(S[active.loop].shown) }
+        for _, strip in ipairs(active.strips) do shown[#shown + 1] = tostring(S[strip].shown) end
+        return table.concat(shown, "/")
+    end
+
+    -- The data: every Shadow Bolt rank Shadow Trance touches, from Ranks.lua.
+    Equal(table.concat(ns.RANKS["Shadow Bolt"], ",") .. " " .. A.PROC_LIGHTS[1].spell .. " " .. table.concat(A.PROC_LIGHTS[1].procs, ","),
+        "686,695,705,1088,1106,7641,11659,11660,11661,25307 Shadow Bolt 17941", "Shadow Trance lights Shadow Bolt, every rank")
+    -- Off by default: nothing made, nothing said.
+    Equal(table.concat({ tostring(ns.BarData("cd").glowProcs), tostring(bar.procGlow), #containers - made, tostring(A:GlowReport(bar)),
+        tostring(bar.holds) }, " "), "false nil 0 nil nil", "off by default: nothing made, nothing in /ccm debug")
+    -- Ticked on a bar with no such spell (Utility: Wrath): still nothing made.
+    B:SetOption("util", "glowProcs", true)
+    Equal(tostring(util.procGlow) .. " " .. (#containers - made) .. " |" .. tostring(A:GlowReport(util)),
+        "nil 0 |  glow for more procs: no spell on this bar has one", "ticked with no such spell on the bar: nothing made, debug says why")
+
+    -- Ticked on Cooldowns: its own container for your buffs, over the buff
+    -- and debuff times' (bar + 7), the bar held; one slot, told Shadow
+    -- Trance, its icon over Shadow Bolt's, given nothing of the buff's own,
+    -- the glow inside it shown, the loop alone (Proc glow) round the icon,
+    -- handed to the game once.
+    B:SetOption("cd", "glowProcs", true)
+    local glow = bar.procGlow
+    local box = S[glow.container]
+    local slot = box.slots.g1
+    local active = glow.slots[1].active
+    local bolt = Icon(bar, "Shadow Bolt")
+    local ids = 0
+    for _ in pairs(slot.filters.includeSpellIDs) do ids = ids + 1 end
+    Equal(table.concat({ #containers - made, tostring(box.unit), tostring(Last(glow.container, "SetFrameLevel")),
+        tostring(Last(glow.container, "EnableMouse")), tostring(Last(glow.container, "SetEditModePreviewEnabled")), tostring(bar.holds),
+        tostring(slot.filter), tostring(slot.enabled), tostring(slot.filters.includeSpellIDs[17941]), ids,
+        tostring(slot.filters.isFromPlayerOrPlayerPet), tostring(box.slots.g2), tostring(Last(glow.slots[1].anchor, "SetAllPoints") == bolt),
+        tostring(next(slot.supplied)), tostring(S[active.frame].shown), Pieces(active), ("%.1f"):format(S[active.loop].width),
+        #S[slot.button].shownAnimations, tostring(S[slot.button].shown) }, " "),
+        "1 player 8 false false true HELPFUL true true 1 nil nil true nil true true/false/false/false/false 50.4 1 false",
+        "ticked: a container for your buffs, one slot told Shadow Trance, over Shadow Bolt's icon, only the loop, handed over")
+
+    -- The game shows it only while Shadow Trance is up (not Clearcasting),
+    -- the loop playing; it goes with the buff. None of the addon's code run.
+    box.Update({ { id = 16870 } })
+    local other = tostring(S[slot.button].shown)
+    box.Update({ { id = 16870 }, { id = 17941 } })
+    local loop = S[slot.button].shownAnimations[1]
+    local up = table.concat({ tostring(S[slot.button].shown), tostring(Drawn(active, glow.container)), S[loop].plays, tostring(S[loop].playing) }, " ")
+    box.Update({ { id = 16870 } })
+    Equal(other .. " | " .. up .. " | " .. tostring(S[slot.button].shown) .. " " .. tostring(S[loop].playing) .. " | " .. box.addonCalls
+        .. " " .. box.late, "false | true true 1 true | false false | 0 0",
+        "lit only while Shadow Trance is up, the loop playing; gone with it; none of the addon's code run")
+    Equal(tostring(A:GlowReport(bar)) .. " | " .. tostring(ns.DebugReport():find(A:GlowReport(bar), 1, true) ~= nil),
+        "  glow for more procs: Shadow Bolt:17941, loop | true", "/ccm debug: what it watches and how it glows")
+
+    -- The Look page's Ready glow: Gold edge, the edge alone; Proc glow, the loop again.
+    ns.Set("readyGlow", "edge")
+    B:ApplyGlow()
+    local edge = Pieces(active) .. " " .. tostring(A:GlowReport(bar):match("[^,]*$"))
+    ns.Set("readyGlow", "proc")
+    B:ApplyGlow()
+    Equal(edge .. " | " .. Pieces(active), "false/true/true/true/true  edge (Ready glow) | true/false/false/false/false",
+        "Gold edge: the edge alone; Proc glow: the loop alone")
+
+    -- In a fight: Shadow Bolt moved to the front, the bar's icons bigger and
+    -- Gold edge picked. The glow follows Shadow Bolt at once (by name); its
+    -- look and size wait for the fight to end, with no container calls; the
+    -- game lights it as ever.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local calls = containerCallsInCombat
+    local spells = ns.BarData("cd").spells
+    spells[1], spells[2] = spells[2], spells[1]
+    B:Relayout("cd")
+    B:SetOption("cd", "size", 45)
+    ns.Set("readyGlow", "edge")
+    B:ApplyGlow()
+    box.Update({ { id = 17941 } })
+    local fight = table.concat({ tostring(bar.icons[1].name), tostring(Last(glow.slots[1].anchor, "SetAllPoints") == bar.icons[1]),
+        Pieces(active), ("%.1f"):format(S[active.loop].width), tostring(bar.glowPending), tostring(S[slot.button].shown),
+        containerCallsInCombat - calls, box.addonCalls }, " ")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight .. " | " .. Pieces(active) .. " " .. ("%.1f"):format(S[active.loop].width) .. " " .. tostring(bar.glowPending),
+        "Shadow Bolt true true/false/false/false/false 50.4 true true 0 0 | false/true/true/true/true 63.0 nil",
+        "in a fight: the glow follows Shadow Bolt to the front at once, lit by the game; its look and size wait for the fight's end")
+    ns.Set("readyGlow", "proc")
+    B:ApplyGlow()
+    B:SetOption("cd", "size", 36)
+
+    -- A fixed rank (Shadow Bolt rank 1 on Utility, ticked there): its own
+    -- container and slot, over the rank's icon.
+    B:Assign("Shadow Bolt@1", "util")
+    local second = util.procGlow
+    local rank = second and S[second.container].slots.g1
+    if rank then S[second.container].Update({ { id = 17941 } }) end
+    Equal(table.concat({ tostring(second ~= nil and second ~= glow), tostring(rank and rank.enabled),
+        tostring(rank and rank.filters.includeSpellIDs[17941]),
+        tostring(rank and Last(second.slots[1].anchor, "SetAllPoints") == Icon(util, "Shadow Bolt@1")), tostring(rank and S[rank.button].shown),
+        #containers - made }, " "), "true true true true true 2", "a fixed rank lights too: Utility's own container, over its icon")
+
+    -- Unticked: its slot switched off, so nothing lights; the container kept.
+    B:SetOption("cd", "glowProcs", false)
+    box.Update({ { id = 17941 } })
+    local off = tostring(slot.enabled) .. " " .. tostring(S[slot.button].shown) .. " " .. tostring(A:GlowReport(bar))
+    B:SetOption("cd", "glowProcs", true)
+    box.Update({ { id = 17941 } })
+    local again = tostring(slot.enabled) .. " " .. tostring(S[slot.button].shown)
+    -- Shadow Bolt taken off the bar: switched off too.
+    B:Assign("Shadow Bolt", nil)
+    box.Update({ { id = 17941 } })
+    Equal(off .. " | " .. again .. " | " .. tostring(slot.enabled) .. " " .. tostring(S[slot.button].shown) .. " " .. (#containers - made)
+        .. " |" .. tostring(A:GlowReport(bar)), "false false nil | true true | false false 2 |  glow for more procs: no spell on this bar has one",
+        "unticked or Shadow Bolt taken off: its slot off, nothing lit; ticked again, back; the container kept")
+
+    -- Over a reload: kept, made again with the bar.
+    B:Assign("Shadow Bolt", "cd")
+    local db = ForeverEnhancedCooldownManagerDB
+    Fresh()
+    ShadowBolt()
+    ns = Load(db)
+    B, A = ns.Bars, ns.IconAuras
+    bar = B:Get("cd")
+    glow = bar.procGlow
+    slot = glow and S[glow.container].slots.g1
+    Equal(table.concat({ tostring(ns.BarData("cd").glowProcs), tostring(slot and slot.enabled), tostring(slot and slot.filters.includeSpellIDs[17941]),
+        tostring(Last(glow.slots[1].anchor, "SetAllPoints") == Icon(bar, "Shadow Bolt")), #printed }, " "), "true true true true 0",
+        "after a reload: still ticked, made again over Shadow Bolt; no errors")
+end)()
+
+-- Glow for more procs where the game won't take the loop: the gold edge ------------------------------
+;(function()
+    for _, mode in ipairs({ "none", "refuse" }) do
+        Fresh()
+        ShownAnimations = mode
+        ShadowBolt()
+        local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+        local B = ns.Bars
+        B:Assign("Shadow Bolt", "cd")
+        B:SetOption("cd", "glowProcs", true)
+        local bar = B:Get("cd")
+        local box = S[bar.procGlow.container]
+        local active = bar.procGlow.slots[1].active
+        box.Update({ { id = 17941 } })
+        local strips = 0
+        for _, strip in ipairs(active.strips) do strips = strips + (S[strip].shown and 1 or 0) end
+        Equal(table.concat({ tostring(active.loop), #S[box.slots.g1.button].shownAnimations, tostring(S[active.frame].shown), strips,
+            tostring(S[box.slots.g1.button].shown), box.addonCalls, tostring(ns.IconAuras:GlowReport(bar):match("17941, (.*)$")), #printed }, " "),
+            "nil 0 true 4 true 0 edge only, the game took no loop 0",
+            "a game " .. (mode == "none" and "without shown animations" or "turning the loop down") .. ": the gold edge, shown with its icon")
     end
 end)()
 

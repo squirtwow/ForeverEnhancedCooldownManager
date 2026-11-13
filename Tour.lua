@@ -643,18 +643,20 @@ local NEWS = {
         version = "1.10.0",
         page = "cd",
         -- On the first bars' pages: an extra bar's page has Remove bar instead.
-        when = function() return ns.EXTRA_OF[ShownBar()] ~= nil end,
+        when = function() return ns.EXTRAS_OF[ShownBar()] ~= nil end,
         title = "Extra bars",
-        text = "Once this bar has a spell, + Another bar adds a second bar of its kind, with its own spells, size and options"
-            .. " and its own row on the Layout page.",
-        -- The button beside Clear, or the tray while the button waits for a
-        -- spell; the box under it at its right end.
+        text = "Once this bar has a spell, + Add a bar in the list on the left adds another bar of its kind, with its own"
+            .. " spells, size and options and its own row on the Layout page.",
+        -- The list's + Add a bar line under this kind's bars (Window.lua), or
+        -- this bar's own row there while the line waits for a spell; the box
+        -- beside it.
         target = function(w)
-            local page = w.pages.bar
-            return page.another:IsShown() and page.another or page.tray
+            local bar = ShownBar()
+            local line = w.navPlus and w.navPlus[bar]
+            if line and line:IsShown() then return line end
+            return w.nav[bar]
         end,
-        side = "below",
-        align = "end",
+        side = "right",
     },
 }
 
