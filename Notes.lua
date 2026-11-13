@@ -10,6 +10,28 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.12",
+        sections = {
+            { "Added", {
+                "Main/Off hand enchant: Others only, so a stone can't hide a missing oil.",
+                "Dim until Warn at: an icon stays dark until near its end.",
+                "Trinket 1 and Trinket 2 on Buffs: your trinket's buff and its time.",
+                "Glow for more procs: Shadow Bolt glows while Nightfall's proc is up.",
+                "Four extra bars now, two of each kind.",
+            } },
+            { "Changed", {
+                "Pet abilities on cooldown bars only show while that pet is out.",
+                "Extra bars now show like the others, with + Add a bar.",
+            } },
+            { "Fixed", {
+                "Weapon enchants: a stone and an oil on one weapon are both seen.",
+                "Debuff search: added 48 missing debuffs.",
+                "Swap with my form: Fear Ward and Confounding Flash stay in Shadowform.",
+                "Morning Glory Dew's new Drink shows with your other Drink buffs.",
+            } },
+        },
+    },
+    {
         version = "1.10.11",
         sections = {
             { "Added", {

@@ -120,8 +120,9 @@ EraUI.
 - Weapon enchants, poisons and totems: enchants and rogue poisons light on your
   Buffs bar while they're on your weapon, with their time left; totem icons
   light for their buff
-- Extra bars: + Another bar adds a second Cooldowns, Utility, Buffs or Debuffs
-  bar, each with its own spells, size and options (experimental)
+- Extra bars: + Add a bar in the list adds up to four more Cooldowns, Utility,
+  Buffs or Debuffs bars, two of each kind, each with its own spells, size and
+  options
 - An icon's own settings: click an icon on a bar's page for its font, size,
   ticks and Warn at (experimental)
 - Move your bars by numbers on the Layout page (experimental)
