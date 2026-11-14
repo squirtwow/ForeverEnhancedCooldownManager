@@ -162,7 +162,7 @@ ns.DEFAULTS = {
     pulseBorder = "thin", -- a dark edge round it: none, thin or thick
     pulseShadow = true, -- and a soft shadow
     pulseItems = true, -- your trinkets, and items on your Cooldowns and Utility bars, are listed too
-    pulseProcs = false, -- your class's procs are listed too, each pulsing as it lands (experimental)
+    pulseProcs = false, -- your class's procs are listed too, each pulsing as it lands
     pulseX = 0, -- where it sits: from the middle of the screen
     pulseY = 0,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
@@ -465,24 +465,23 @@ for _, key in ipairs(ns.COLOUR_SETTINGS) do ns.SHARE_LOOK[#ns.SHARE_LOOK + 1] = 
 -- string won't undo that. In a string each is its letter, which keeps it
 -- short enough for Discord: never change a letter or use one again.
 -- classes: switched on for everyone (it's every character's), but only
--- named for these. experimental: named with a quiet "(experimental)", as
--- its own tick says.
+-- named for these.
 ns.SHARE_PARTS = {
     { key = "useBars", code = "u", name = "Your bars" },
     { key = "prdCombo", code = "c", name = "Combo points", classes = { ROGUE = true, DRUID = true } },
-    { key = "prdEnergy", code = "e", name = "Energy bar in other forms", classes = { DRUID = true }, experimental = true },
+    { key = "prdEnergy", code = "e", name = "Energy bar in other forms", classes = { DRUID = true } },
     { key = "prdText", code = "t", name = "Health and power text" },
     { key = "keybinds", code = "k", name = "Keybinds on icons" },
     { key = "castBar", code = "b", name = "Cast bar" },
     { key = "swingTimer", code = "s", name = "Swing timer" },
-    { key = "castBatch", code = "h", name = "Crafting batch time", experimental = true },
+    { key = "castBatch", code = "h", name = "Crafting batch time" },
     { key = "castTicks", code = "m", name = "Cast bar tick marks" },
     { key = "castLatency", code = "l", name = "Cast bar latency" },
     { key = "pullTimer", code = "r", name = "Pull countdown" },
-    { key = "raidWarnings", code = "w", name = "Raid warnings", experimental = true },
-    { key = "bossCasts", code = "o", name = "Boss cast bars", experimental = true },
+    { key = "raidWarnings", code = "w", name = "Raid warnings" },
+    { key = "bossCasts", code = "o", name = "Boss cast bars" },
     { key = "pulse", code = "p", name = "Cooldown pulse" },
-    { key = "pulseProcs", code = "q", name = "Proc pulses", experimental = true },
+    { key = "pulseProcs", code = "q", name = "Proc pulses" },
 }
 
 -- Bars: each bar lists spells by name, so the highest known rank is

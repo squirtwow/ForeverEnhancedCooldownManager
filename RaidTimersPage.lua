@@ -14,7 +14,6 @@ local SIZE_LABEL = 84 -- and before a size slider's track
 local SIZE_STEP = 5
 local PULL_SECONDS = 12 -- the preview's countdown bar runs this long, then starts again
 local CAST_SECONDS = 2.5 -- and its boss cast
-local UNTESTED = " (experimental)"
 local IN_A_FIGHT = "Edit Mode can't open in a fight. Try again once it's over."
 local AGAIN = "Click Edit Mode again to open it, or type /editmode."
 
@@ -289,7 +288,7 @@ function ns.BuildRaidTimersPage(window, page, width)
         "How big the countdown's big numbers are: 100 is Blizzard's size. They grow round their middle.", PULL_OFF)
 
     -- The boss frames' cast bars, and Edit Mode beside them to see them.
-    local bossTick = Tick("Boss cast bars" .. UNTESTED, "bossCasts", 0, -134,
+    local bossTick = Tick("Boss cast bars", "bossCasts", 0, -134,
         "The cast bars on Blizzard's boss frames, in the Look page's design, texture and font.")
     local editMode = T:Button(options, "Edit Mode", 76, 18)
     editMode:SetPoint("LEFT", bossTick, "RIGHT", 10, 0)
@@ -307,7 +306,7 @@ function ns.BuildRaidTimersPage(window, page, width)
     page.bossNote, page.editMode = bossNote, editMode
 
     -- Raid warnings and boss emotes.
-    local warningTick = Tick("Raid warnings and boss emotes" .. UNTESTED, "raidWarnings", COLUMN, -4,
+    local warningTick = Tick("Raid warnings and boss emotes", "raidWarnings", COLUMN, -4,
         "The big text at the top of your screen: raid warnings and what bosses say and whisper. Blizzard still places and fades it.")
     -- Each font's name in its own face, in a list from one box (Window.lua's FontChoice).
     Label("Font", COLUMN, -28)

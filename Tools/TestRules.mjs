@@ -9,8 +9,8 @@
 // never reads one's times, only whether it's on hold) and never takes the
 // mouse but for the box that moves it. And the pulse's link with Forever
 // Enhanced Cooldown Pulse: one shared global, made only when missing, its
-// code the same as that addon's Link.lua when it's beside this one. And
-// untested options marked the one quiet "(experimental)" way.
+// code the same as that addon's Link.lua when it's beside this one. And no
+// option marked experimental.
 // Run with: node --test Tools/TestRules.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -564,24 +564,19 @@ test('every function the addon defines is used, or says it is for the tests', ()
   assert.match(code['RaidTimers.lua'], /ForeverEnhancedCooldownManagerAPI = setmetatable\(\{\}, \{\s*__index = api,/, 'api is the public API');
 });
 
-// Untested options are marked one quiet way (the user's call, 2026-10-11, and
-// for the older labels 2026-10-17): " (experimental)" at the end of a label
-// or hover, or a lowercase "experimental" beside a heading. Never the old
-// "Needs testing" in any case, nor a capital "Experimental". What's new
-// (Notes.lua) keeps released versions' lines word for word, as history; its
-// lines waiting for a version number follow the rule.
-test('untested options are marked the quiet way, never "Needs testing"', () => {
+// No option is marked experimental (Squirt's call, 2026-11-14: he tries each
+// new one in game right away; new options still start off). Not
+// "(experimental)" after a label or hover, not the lowercase word beside a
+// heading, and never the old "Needs testing", in any case. Comments can say
+// it. What's new (Notes.lua) keeps released versions' lines word for word, as
+// history; its lines waiting for a version number follow the rule.
+test('no option is marked experimental or "Needs testing"', () => {
   const shipped = files.filter(name => name !== 'Notes.lua');
-  const loud = text => /needs testing/i.test(text) || /Experimental|EXPERIMENTAL/.test(text);
-  assert.deepEqual(shipped.filter(name => loud(code[name])), [], 'the old wording, or a loud one');
+  const marked = text => /needs testing|experimental/i.test(text);
+  assert.deepEqual(shipped.filter(name => marked(code[name])), [], 'an option marked experimental, or the old wording');
   const unreleased = code['Notes.lua'].split(/version = "/).filter(part => part.startsWith('Unreleased'));
-  assert.deepEqual(unreleased.filter(loud), [], "What's new for the next update");
-  for (const [name, pattern] of [['Window.lua', /local UNTESTED = " \(experimental\)"/], ['ProfileMenu.lua', /local UNTESTED = " \(experimental\)"/],
-    ['ProfileMenu.lua', /roleTesting:SetText\("experimental"\)/], ['RaidTimersPage.lua', /local UNTESTED = " \(experimental\)"/],
-    ['ProfileShare.lua', /"Also use its look and layout \(experimental\)"/], ['PulsePage.lua', /row\.bags and " \(experimental\)"/],
-    ['BarPage.lua', /can't show there", " \(experimental\)"/]]) {
-    assert.ok(pattern.test(code[name]), `${name}: the quiet word`);
-  }
+  assert.deepEqual(unreleased.filter(marked), [], "What's new for the next update");
+  assert.deepEqual(where(/\bUNTESTED\b|\broleTesting\b/), [], 'no label kept for untested options, no tag beside the Roles heading');
 });
 
 // The update notices (SquirtVersions.lua) are one file shared by Squirt's

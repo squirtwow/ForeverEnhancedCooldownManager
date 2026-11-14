@@ -1146,9 +1146,8 @@ end
 
 -- What a string read by P.Read switches on for you with its look and
 -- layout: each part it has on that's off here and can run now, in order, as
--- { key, name, shown }. The name has "(experimental)" where its tick says
--- so; shown is false for a part your class doesn't use (switched on all the
--- same, as it's every character's, but not named).
+-- { key, name, shown }. shown is false for a part your class doesn't use
+-- (switched on all the same, as it's every character's, but not named).
 function P.WouldTurnOn(shared)
     local setup = type(shared) == "table" and type(shared.setup) == "table" and shared.setup or {}
     local parts = type(setup.parts) == "table" and setup.parts or {}
@@ -1156,7 +1155,7 @@ function P.WouldTurnOn(shared)
     for _, part in ipairs(ns.SHARE_PARTS) do
         local key = part.key
         if parts[key] == true and ns.GetSaved(key) ~= true and not CantRun(key) then
-            list[#list + 1] = { key = key, name = part.name .. (part.experimental and " (experimental)" or ""),
+            list[#list + 1] = { key = key, name = part.name,
                 shown = not part.classes or (class ~= nil and part.classes[class] == true) }
         end
     end
@@ -1335,7 +1334,7 @@ function P.BuildBox(window)
     local lookNote = T:Text(box, "GameFontHighlightSmall", T.MUTED)
     lookNote:SetPoint("TOPLEFT", 32, -180)
     lookNote:SetWidth(INNER - 18)
-    local look = T:Check(box, "Also use its look and layout (experimental)", function(self)
+    local look = T:Check(box, "Also use its look and layout", function(self)
         lookNote:SetText(self:GetChecked() and LOOK_ON or LOOK_OFF)
     end)
     look:SetPoint("TOPLEFT", 14, -160)

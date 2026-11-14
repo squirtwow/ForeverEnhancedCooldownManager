@@ -2813,9 +2813,9 @@ do
     Paste(text)
 
     -- Its look ticked: asked first; Cancel changes nothing.
-    Equal(S[box.look.text].text .. " | " .. tostring(rawget(box.look, "hint")), "Also use its look and layout (experimental) | Its bar"
+    Equal(S[box.look.text].text .. " | " .. tostring(rawget(box.look, "hint")), "Also use its look and layout | Its bar"
         .. " sizes, spots, layout and look in place of yours, on every character, and anything it has switched on comes on too."
-        .. " It asks first.", "the tick quietly says it's experimental")
+        .. " It asks first.", "the tick says what it does, not marked experimental")
     box.look:Click()
     Equal(S[box.lookNote].text, P.LOOK_ON, "ticked, it says what changes")
     local count = #ns.ProfileNames()
@@ -3361,7 +3361,7 @@ do
         "on for the account, named for no one who can't use them; proc pulses the game can't show left off")
 
     -- Every part at once, a druid with the longest name: each named in the
-    -- question (the experimental ones say so); the line after still fits the
+    -- question (none marked experimental); the line after still fits the
     -- footer's two lines (560 wide, at most 5.6 a letter).
     character = { guid = "Player-1-0102", name = "Bram", realm = "Zephras" }
     local ns7 = Start({ notesSeen = "dev", helpSeen = true })
@@ -3369,14 +3369,14 @@ do
     local all = ns7.ProfileShare.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "ucetkbshmlrwopq" } }))
     asked = ns7.ProfileShare.LookQuestion(all)
     ok, message = ns7.ProfileShare.Import(("N"):rep(ns7.PROFILE_MAX), all, true)
-    local _, experimental = asked:gsub("%(experimental%)", "")
+    local _, experimental = asked:gsub("experimental", "")
     Equal(tostring(ok) .. " " .. experimental .. " " .. tostring(#message * 5.6 <= 2 * 560) .. " | " .. asked,
-        "true 5 true | Your bar sizes, spots, layout and look change to the shared ones, on every character. It also turns on Combo"
-        .. " points, Energy bar in other forms (experimental), Health and power text, Keybinds on icons, Cast bar, Swing timer, Crafting"
-        .. " batch time (experimental), Cast bar tick marks, Cast bar latency, Pull countdown, Raid warnings (experimental), Boss cast"
-        .. " bars (experimental), Cooldown pulse and Proc pulses (experimental). Your own bars come on in place of Blizzard's Cooldown"
+        "true 0 true | Your bar sizes, spots, layout and look change to the shared ones, on every character. It also turns on Combo"
+        .. " points, Energy bar in other forms, Health and power text, Keybinds on icons, Cast bar, Swing timer, Crafting"
+        .. " batch time, Cast bar tick marks, Cast bar latency, Pull countdown, Raid warnings, Boss cast"
+        .. " bars, Cooldown pulse and Proc pulses. Your own bars come on in place of Blizzard's Cooldown"
         .. " Manager, which turns off (reload after). To keep a copy of yours, Share it first.",
-        "all fifteen named before, five quietly experimental; the line after fits the footer (" .. #message .. " letters)")
+        "all fifteen named before, none marked experimental; the line after fits the footer (" .. #message .. " letters)")
     -- In a fight nothing switches (an import is refused there).
     character = { guid = "Player-1-0100", name = "Pell", realm = "Zephras" }
     local ns5 = Start({ notesSeen = "dev", helpSeen = true })

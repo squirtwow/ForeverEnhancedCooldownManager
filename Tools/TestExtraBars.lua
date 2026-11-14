@@ -1743,7 +1743,7 @@ end)()
     panel.iconSize:Choose(125)
     Equal(ticked .. " | " .. tostring(ns.OwnSize("cd", "Wrath")) .. " " .. S[panel.iconSize.value].text .. " " .. S[B:Get("cd").icons[2]].width
         .. " " .. S[panel.preview].width .. " | " .. H.Note(panel.iconSize), "100 true 36 | 125 125% 45 45 | How big this icon is: 100% is"
-        .. " the bar's Icon size. The rest of the bar makes room for it. (experimental)",
+        .. " the bar's Icon size. The rest of the bar makes room for it.",
         "ticked: the bar's size to start; 125%: Wrath and the preview 45 across")
     panel.defaults:Click()
     Equal(tostring(ns.OwnSize("cd", "Wrath")) .. " " .. tostring(panel.ownIcon:GetChecked()) .. " " .. S[B:Get("cd").icons[2]].width,
@@ -1758,7 +1758,7 @@ end)()
     B:SetOption("debuff", "showMissing", true)
     w:Refresh()
     Equal(tostring(panel.ownIcon.usable) .. " | " .. H.Note(panel.ownIcon), "true | Gives this icon a size of its own on Debuffs, in"
-        .. " place of the bar's Icon size. (experimental)", "fixed spots: usable")
+        .. " place of the bar's Icon size.", "fixed spots: usable")
     Equal(#printed, 0, "no errors")
 end)()
 

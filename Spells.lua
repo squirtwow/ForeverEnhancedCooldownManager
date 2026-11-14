@@ -366,7 +366,7 @@ for _, hand in ipairs(HANDS) do S.HAND_KEYS[hand.key] = true end
 local function AddHands()
     for _, hand in ipairs(HANDS) do
         Add({ key = hand.key, name = hand.name, kind = "enchant", line = S.LINES.weapons, hand = hand.slot, known = {},
-            byRank = {}, rank = 0, icon = hand.icon, rankText = "(experimental)" })
+            byRank = {}, rank = 0, icon = hand.icon, rankText = "" })
     end
 end
 

@@ -2834,14 +2834,14 @@ end)()
     w:Select("util")
     Equal(S[page.count].text .. " | " .. tostring(S[page.clear].shown) .. " | " .. Note(page.clear),
         "Empty | true | Take every icon off Utility, and buffs or debuffs added to it that can't show there. It asks for a second"
-        .. " click. (experimental)", "nothing of yours on Utility, but Clear shows, and says what it takes")
+        .. " click.", "nothing of yours on Utility, but Clear shows, and says what it takes")
     page.clear:Click()
     page.clear:Click()
     Equal(List("util") .. " | " .. S[w.note].text .. " | " .. tostring(S[page.clear].shown), " | Utility cleared. | false",
         "cleared: the pinned Energized gone, and the button with it")
     w:Select("cd")
     Equal(Note(page.clear), "Take every icon off Cooldowns, and buffs or debuffs added to it that can't show there. It asks for a"
-        .. " second click. (experimental)", "the Cooldowns page's Clear says so too")
+        .. " second click.", "the Cooldowns page's Clear says so too")
     page.clear:Click()
     page.clear:Click()
     Equal(List("cd") .. " | " .. List("buff") .. " | " .. Custom(), "Sprint | Energized | Energized=1259691 Sprint=11305",
@@ -2866,7 +2866,7 @@ end)()
         .. table.concat(B:Leftovers("util"), ",") .. "]", "[] [] [Soul Siphon]", "none of it the druid's; only Soul Siphon's debuff a leftover")
     w:Select("util")
     Equal(Note(page.clear), "Take every icon off Utility, and buffs or debuffs added to it that can't show there. It asks for a second"
-        .. " click. (experimental)", "Clear says it takes debuffs too")
+        .. " click.", "Clear says it takes debuffs too")
     page.clear:Click()
     page.clear:Click()
     B:Clear("cd")

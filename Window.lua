@@ -68,7 +68,6 @@ local TEXTURE_NOTES = {
     skills = "The game's skill bar, from the character sheet",
 }
 local TEXTURE_USE = " on your cast bar, swing timer and combo points, and the restyled Tracked Bars and resource display."
-local UNTESTED = " (experimental)" -- on every choice but today's look
 local DARK_LABEL = 66 -- room for the Darkness slider's label before its track
 -- Ready glow's choices at the foot, and room for its label before them
 -- (about seven units a letter in the game: "Ready glow" needs about 70).
@@ -615,9 +614,9 @@ local FORMAT_NOTES = {
     value = "What you have now, like 4,321.",
     both = "What you have now and the most you can have, like 4,321 / 5,120.",
     percent = "As a percent, like 84%.",
-    bare = "As a percent with no % sign, like 84. Full shows 100. (experimental)",
-    heals = "Heals on their way to you, like +1200. Blank while none are coming. (experimental)",
-    absorbs = "Shields on you, like (850) from Power Word: Shield. Blank while you have none. (experimental)",
+    bare = "As a percent with no % sign, like 84. Full shows 100.",
+    heals = "Heals on their way to you, like +1200. Blank while none are coming.",
+    absorbs = "Shields on you, like (850) from Power Word: Shield. Blank while you have none.",
 }
 local NUMBER_NOTES = {
     full = "Numbers in full, like 4,321.",
@@ -1025,7 +1024,7 @@ local function CountdownRows(window, dialog, Changed)
     end)
     for _, button in ipairs(format.buttons) do
         window:Hint(button, button.key == "game" and "The countdown as the game writes it, like 2:52, as it's always been."
-            or "Whole minutes, then seconds under a minute: 3m, 2m, 1m, then 59s. On your bars and Blizzard's icons. (experimental)")
+            or "Whole minutes, then seconds under a minute: 3m, 2m, 1m, then 59s. On your bars and Blizzard's icons.")
     end
     return size, colourLabel, colour, spot, format
 end
@@ -1042,7 +1041,7 @@ local function IconsRow(window, dialog, Changed)
     for _, button in ipairs(style.buttons) do
         window:Hint(button, button.key == "square" and "Square icons with no frame, as your bars have always looked."
             or ("Your bars' icons drawn like Blizzard's Cooldown Manager: rounded, in its frame, with its swipe and range"
-                .. " shadow. Its own rows sit 4 closer. (experimental)"))
+                .. " shadow. Its own rows sit 4 closer."))
     end
     return style
 end
@@ -1809,7 +1808,7 @@ local function BuildLook(window, page, width)
     -- Druids only: their energy in other forms, beside the extra mana bar's
     -- tick (both their form bars on one row) and clear of Thick edges.
     local energyTick = Choice("Show energy bar in other forms", "prdEnergy", -160,
-        "Your energy under the display in caster, bear and your other forms. In cat form it's your main bar as usual. (experimental)",
+        "Your energy under the display in caster, bear and your other forms. In cat form it's your main bar as usual.",
         function() if ns.Resource then ns.Resource:Apply() end end, 176)
     local _, myClass = UnitClass("player")
     energyTick:SetShown(myClass == "DRUID")
@@ -1842,7 +1841,7 @@ local function BuildLook(window, page, width)
         Rekey, KEYS_X)
     -- Blizzard's icons keyed with the look off, on the tick's own row.
     local keysPlain = Choice("Blizzard look", "keybindsPlain", -2,
-        "Keys on Blizzard's Cooldown Manager icons too, with Apply this look to the Cooldown Manager off: Blizzard's own look stays. (experimental)",
+        "Keys on Blizzard's Cooldown Manager icons too, with Apply this look to the Cooldown Manager off: Blizzard's own look stays.",
         KeyLook, KEYS_X + 150)
     local placeItems = {}
     for _, key in ipairs(ns.KEYBIND_POSITIONS) do
@@ -1897,12 +1896,10 @@ local function BuildLook(window, page, width)
     fontLabel:SetPoint("TOPLEFT", KEYS_X, -92)
     fontLabel:SetText("Font")
     -- Each font's name in its own face, in a list from one box (FontChoice).
-    -- Friz Quadrata the one seen in game (the default's Game font where the
-    -- game is in Chinese, Korean or Russian, not yet seen there).
     local font = FontChoice(window, options, inner - FACES_X, {
         keys = ns.FONT_KEYS,
         name = function(key) return ns.FONT_NAMES[key] end,
-        note = function(key) return FONT_NOTES[key] .. FONT_USE .. (key ~= "friz" and UNTESTED or "") end,
+        note = function(key) return FONT_NOTES[key] .. FONT_USE end,
         pick = function(key)
             ns.Set("font", key)
             Refont()
@@ -1927,7 +1924,7 @@ local function BuildLook(window, page, width)
         swatch.fill:SetPoint("TOPLEFT", 1, -1)
         swatch.fill:SetPoint("BOTTOMRIGHT", -1, 1)
         swatch.fill:SetTexture(ns.Style.BAR_TEXTURES[key])
-        window:Hint(swatch, TEXTURE_NOTES[key] .. TEXTURE_USE .. (key ~= ns.DEFAULTS.barTexture and UNTESTED or ""))
+        window:Hint(swatch, TEXTURE_NOTES[key] .. TEXTURE_USE)
         fills[i] = swatch
     end
     local fillChosen = T:Text(options, "GameFontHighlightSmall", T.MUTED)
@@ -2349,7 +2346,7 @@ local function BuildGeneral(window, page)
         ns.Set("noWhatsNew", self:GetChecked())
     end)
     noNews:SetPoint("TOPLEFT", 300, -196)
-    window:Hint(noNews, "What's new stops opening by itself after an update. The What's new button and /ccm new still show it. (experimental)")
+    window:Hint(noNews, "What's new stops opening by itself after an update. The What's new button and /ccm new still show it.")
     window.noWhatsNew = noNews
     Detail(page, "Versions are swapped with your guild, your group, players nearby and a hidden chat channel.", 34, -216)
 

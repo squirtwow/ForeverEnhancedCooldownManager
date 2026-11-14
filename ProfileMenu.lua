@@ -23,7 +23,6 @@ local TREE_CHOICE = 156
 local TREE_WIDTHS = { tank = 32, healer = 45, damage = 45, none = 32 }
 local TICK_ROW = 24 -- the Switch with my talents tick's own row, under the role buttons
 local PLACES_ROW = 22 -- the Positions per profile tick's own row, under Use on all characters
-local UNTESTED = " (experimental)" -- the roles and talents, until they're seen in game
 
 local function Users(name)
     if ns.OnAll(name) then return "all characters" end
@@ -255,12 +254,6 @@ function ns.BuildProfileMenu(window, header, anchor)
     -- Placed now as for one profile, then moved on refresh (as the box above).
     local roleHeading = T:Heading(panel, "Roles")
     roleHeading:SetPoint("TOPLEFT", 10, -194)
-    -- In plain sight beside the heading until the roles and talents are seen
-    -- working in game (the user's call, 2026-10-08), not only on hover. The
-    -- quiet lowercase word, as beside Health and power text's panel title.
-    local roleTesting = T:Text(panel, "GameFontHighlightSmall", T.MUTED)
-    roleTesting:SetText("experimental")
-    roleTesting:SetPoint("LEFT", roleHeading, "RIGHT", 8, 0)
     local function UseRole(role)
         local ok, message = ns.UseRole(role)
         window:Say(message)
@@ -285,15 +278,15 @@ function ns.BuildProfileMenu(window, header, anchor)
     local function RoleNote(role)
         local word, name = ns.ROLE_NAMES[role], ns.RoleProfile(role)
         if name and name == ns.ProfileName() then
-            return ("You're on %s, your %s profile."):format(name, word) .. UNTESTED
+            return ("You're on %s, your %s profile."):format(name, word)
         elseif name then
-            return ("Switch to %s, your %s profile. Right-click to save your lists over it."):format(name, word) .. UNTESTED
+            return ("Switch to %s, your %s profile. Right-click to save your lists over it."):format(name, word)
         end
         -- Named as it will be made ("Druid Tank"), while your class is known.
         local made = ns.RoleName(role)
         return (made and ("Save your lists as %s and switch to it."):format(made)
             or ("Save your lists as your %s profile and switch to it."):format(word))
-            .. " Right-click to save them without switching." .. UNTESTED
+            .. " Right-click to save them without switching."
     end
     local roleButtons = {}
     for i, role in ipairs(ns.ROLE_KEYS) do
@@ -307,19 +300,17 @@ function ns.BuildProfileMenu(window, header, anchor)
         window:Hint(roleButton, function() return RoleNote(role) end)
         roleButtons[role] = roleButton
     end
-    window.roleHeading, window.roleButtons, window.roleTesting = roleHeading, roleButtons, roleTesting
+    window.roleHeading, window.roleButtons = roleHeading, roleButtons
 
-    -- Switch with my talents, on its own row under the role buttons (the
-    -- heading's row holds the experimental tag), and while it's ticked each
-    -- talent tree under it with its points and its role, or None (it never
-    -- switches); under them what the talents last did.
+    -- Switch with my talents, on its own row under the role buttons, and
+    -- while it's ticked each talent tree under it with its points and its
+    -- role, or None (it never switches); under them what the talents last did.
     local talents = T:Check(panel, "Switch with my talents", function(self)
         window:Say(ns.SetTalentSwitch(self:GetChecked()))
         window:Refresh()
     end)
     talents:SetPoint("TOPLEFT", 10, -236)
-    window:Hint(talents, "When another talent tree takes the lead in points, switch to its role's profile, after any fight."
-        .. UNTESTED)
+    window:Hint(talents, "When another talent tree takes the lead in points, switch to its role's profile, after any fight.")
     local roleItems = {}
     for _, role in ipairs(ns.TREE_ROLE_KEYS) do
         roleItems[#roleItems + 1] = { key = role, label = ns.TREE_ROLE_NAMES[role], width = TREE_WIDTHS[role] }
@@ -337,9 +328,9 @@ function ns.BuildProfileMenu(window, header, anchor)
             window:Hint(choice, function()
                 local tree = row.tree and row.tree.name or "this tree"
                 if choice.key == "none" then
-                    return ("When %s takes the lead in points, don't switch: click a role yourself."):format(tree) .. UNTESTED
+                    return ("When %s takes the lead in points, don't switch: click a role yourself."):format(tree)
                 end
-                return ("When %s takes the lead in points, switch to your %s profile."):format(tree, ns.ROLE_NAMES[choice.key]) .. UNTESTED
+                return ("When %s takes the lead in points, switch to your %s profile."):format(tree, ns.ROLE_NAMES[choice.key])
             end)
         end
         treeRows[i] = row

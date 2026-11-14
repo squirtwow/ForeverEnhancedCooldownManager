@@ -86,7 +86,7 @@ local function MoveStrip(window, box)
         B.moving = ns.BAR_KEYS[at % #ns.BAR_KEYS + 1]
         window:Refresh()
     end)
-    window:Hint(which, "The bar the numbers and arrows move: the one you last dragged. Click for the next. (experimental)")
+    window:Hint(which, "The bar the numbers and arrows move: the one you last dragged. Click for the next.")
     move.which = which
     -- x, then y: what it says, and its box.
     local inputs, x = {}, 88

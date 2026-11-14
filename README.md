@@ -50,8 +50,7 @@ EraUI.
   default)
 - Combo points under your energy bar for rogues and druids in cat form, which
   Forever's display leaves out (off by default)
-- Druids: your energy bar under it in your other forms too (off by default,
-  experimental)
+- Druids: your energy bar under it in your other forms too (off by default)
 - Your own cast bar right under it, with the spell's icon, name and time left
   (off by default)
 - Tick marks on channelled spells, like Drain Life or Arcane Missiles, where
@@ -83,7 +82,7 @@ EraUI.
 - Debuffs bar: your own debuffs on your target, with a search that lists your
   class's debuffs. It can show your debuffs on you too (off by default), and
   Keep them greyed with no target keeps your tracked debuffs faded with nothing
-  targeted (off by default, experimental)
+  targeted (off by default)
 - One icon for one-at-a-time spells: Seals, Auras and Aspects on the Buffs bar,
   and Curses, Banes, Stings and Judgements on the Debuffs bar, share one icon
   that lights up as whichever is up. Right-click one to pick which shows greyed
@@ -116,7 +115,7 @@ EraUI.
   default)
 - Your choice of font and bar texture on the Look page. Game font shows
   Chinese, Korean and Russian names, and is picked for you if your game is in
-  one (experimental)
+  one
 - Weapon enchants, poisons and totems: enchants and rogue poisons light on your
   Buffs bar while they're on your weapon, with their time left; totem icons
   light for their buff
@@ -124,8 +123,8 @@ EraUI.
   Buffs or Debuffs bars, two of each kind, each with its own spells, size and
   options
 - An icon's own settings: click an icon on a bar's page for its font, size,
-  ticks and Warn at (experimental)
-- Move your bars by numbers on the Layout page (experimental)
+  ticks and Warn at
+- Move your bars by numbers on the Layout page
 
 ## Layouts
 - One click stacks your bars around your Personal Resource Display: Pyramid,

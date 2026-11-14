@@ -152,7 +152,7 @@ function ns.BuildCastBarPage(window, page, width)
         Changed()
     end)
     free:SetPoint("TOPLEFT", 300, -82)
-    window:Hint(free, "Your cast bar and swing timer leave the resource display. Drag the blue box while this page is open or your bars are unlocked. (experimental)")
+    window:Hint(free, "Your cast bar and swing timer leave the resource display. Drag the blue box while this page is open or your bars are unlocked.")
     page.free = free
 
     -- Or just where Blizzard's own cast bar is, beside it: one or the other.
@@ -218,7 +218,7 @@ function ns.BuildCastBarPage(window, page, width)
     -- and, while they're on, their colour, style and width under them.
     local RIGHT = 300
     local batch = Tick("Crafting: time left for the batch", "castBatch", -114,
-        "With Create All or a number of crafts, the bar shows which one you're on, like 4 / 133, and the time left for them all. (experimental)")
+        "With Create All or a number of crafts, the bar shows which one you're on, like 4 / 133, and the time left for them all.")
     batch:ClearAllPoints()
     batch:SetPoint("TOPLEFT", RIGHT, -114)
     local marks = Tick("Tick marks on channelled spells", "castTicks", -146,

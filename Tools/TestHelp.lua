@@ -1999,7 +1999,7 @@ end)()
 -- The Cooldown pulse page with Procs too -----------------------------------------------------------
 -- Its tick right under Trinkets and potions too, Master volume moved under
 -- it, the options 156 tall: everything clear of the next control. Its hover
--- note quietly experimental, or greyed with why on a game without the
+-- note saying what it does, or greyed with why on a game without the
 -- containers; the list's Procs header, a proc row's tick and switch, each
 -- note within two lines of the footer; the title row's longest with procs.
 ;(function()
@@ -2028,9 +2028,9 @@ end)()
     Equal(tostring(header ~= nil) .. " " .. #rows .. " " .. S[first.name].text .. " | " .. Note(page.procs) .. " | " .. Note(first.check) .. " | "
         .. Note(rows[2].check) .. " | " .. Note(first.style.buttons[2]),
         "true 2 Clearcasting | Your class's procs, like Clearcasting or Missile Barrage: a pulse the moment one lands, in a fight too. Procs pulse"
-        .. " without a sound. (experimental) | Untick to leave Clearcasting out. | Tick to pulse when Nature's Grace lands. (experimental) |"
+        .. " without a sound. | Untick to leave Clearcasting out. | Tick to pulse when Nature's Grace lands. |"
         .. " Clearcasting pulses Quick. Click for Long. Each style has its own size and time, set under Edit above. Procs pulse without a sound.",
-        "a Procs header and the druid's two named procs; the tick, a row's tick and its switch say what they do, quietly experimental")
+        "a Procs header and the druid's two named procs; the tick, a row's tick and its switch say what they do, not marked experimental")
     clear = Fits(Note(page.procs)) and Fits(Note(rows[2].check)) and Fits(Note(first.style.buttons[2]))
     Equal(tostring(clear), "true", "each note within two lines of the footer")
     -- A game without the containers: greyed, saying why.
@@ -2101,9 +2101,9 @@ end)()
         .. " | " .. Note(energyTick) .. " | " .. S[w.repeatMana.text].text .. " | " .. Note(w.repeatMana) .. " | "
         .. tostring(energyLeft > manaRight and math.abs(energyTop - manaTop) <= 1 and energyRight < thickLeft),
         "true false Show energy bar in other forms | Your energy under the display in caster, bear and your other forms. In cat"
-        .. " form it's your main bar as usual. (experimental) | Tidy extra mana bar | The second mana bar some specs get, under"
+        .. " form it's your main bar as usual. | Tidy extra mana bar | The second mana bar some specs get, under"
         .. " your main bar: hidden in caster form, half size in forms. | true",
-        "for a druid, the energy tick, off by default, its note quietly experimental, beside the extra mana bar's shorter tick and"
+        "for a druid, the energy tick, off by default, its note not marked experimental, beside the extra mana bar's shorter tick and"
         .. " level with it, clear of Thick edges")
 
     setUp:Click()
@@ -2256,7 +2256,7 @@ end)()
         "the energy bar ticked: Energy too, a pair at its ends")
     Check("energy left and right")
     -- Percent (no sign), a player's idea: the percent with no % after it
-    -- (full shows 100), saying so, quietly experimental, the row's five
+    -- (full shows 100), saying so, not marked experimental, the row's five
     -- choices each sized by its name, the row inside the panel.
     Pick("prdEnergyRight", "bare")
     local bare, widths = nil, {}
@@ -2266,13 +2266,13 @@ end)()
     end
     Equal(ns.Get("prdEnergyRight") .. " " .. Preview(preview.energy) .. " | " .. S[bare.label].text .. " | " .. Note(bare) .. " | "
         .. table.concat(widths, ", "), 'bare "" | 80 | 80 | Percent (no sign) | As a percent with no % sign, like 84. Full shows 100.'
-        .. " (experimental) | none 49, value 56, both 99, percent 70, bare 141",
-        "Percent (no sign): the number with no % sign, its note quietly experimental, each choice as wide as its name needs")
+        .. " | none 49, value 56, both 99, percent 70, bare 141",
+        "Percent (no sign): the number with no % sign, its note not marked experimental, each choice as wide as its name needs")
     Check("percent with no sign")
     Pick("prdEnergyRight", "percent")
     -- Incoming heals and Absorbs, a player's idea: at the health bar's ends
     -- only (the middle always shows something, and the other bars have no
-    -- heals), each saying what it shows, quietly experimental, in a row as
+    -- heals), each saying what it shows, not marked experimental, in a row as
     -- wide as the others, each choice as wide as its name needs; the
     -- preview's sample numbers through the game's own calls, which leave
     -- each blank at 0 (whole numbers, no commas).
@@ -2297,10 +2297,10 @@ end)()
             .. " | " .. absorbsNote .. " | " .. tostring(Fit.Wide(healsNote, "GameFontHighlightSmall") <= 2 * S[w.note].width
             and Fit.Wide(absorbsNote, "GameFontHighlightSmall") <= 2 * S[w.note].width) .. " " .. math.floor(S[left].width),
             'heals absorbs heals absorbs | "" | +1200 | (850) | None, Value, Value / max, Percent, Percent (no sign), Incoming heals,'
-            .. " Absorbs | 34 38 68 48 97 82 48 | Heals on their way to you, like +1200. Blank while none are coming. (experimental) |"
-            .. " Shields on you, like (850) from Power Word: Shield. Blank while you have none. (experimental) | true 420",
+            .. " Absorbs | 34 38 68 48 97 82 48 | Heals on their way to you, like +1200. Blank while none are coming. |"
+            .. " Shields on you, like (850) from Power Word: Shield. Blank while you have none. | true 420",
             "Incoming heals and Absorbs at the health bar's ends: +1200 and (850) on the preview, each choice sized by its name,"
-            .. " each saying what it shows in two lines of the footer at most, quietly experimental")
+            .. " each saying what it shows in two lines of the footer at most, not marked experimental")
         Check("heals and absorbs")
         -- Not in the middle, and not on the other bars.
         local function Keys(row)
@@ -2748,7 +2748,7 @@ end)()
     Equal(tostring(ns.Get("updateNotice")) .. " " .. tostring(notices:Wanted()), "true true", "ticked again: back")
     -- No What's new pop-up: beside it, off from the start, and saved.
     Equal(tostring(w.noWhatsNew:IsVisible()) .. " " .. tostring(w.noWhatsNew:GetChecked()) .. " " .. S[w.noWhatsNew.text].text .. " | " .. Note(w.noWhatsNew),
-        "true false No What's new pop-up | What's new stops opening by itself after an update. The What's new button and /ccm new still show it. (experimental)",
+        "true false No What's new pop-up | What's new stops opening by itself after an update. The What's new button and /ccm new still show it.",
         "No What's new pop-up: the tick, off, its note")
     w.noWhatsNew:Click()
     Equal(tostring(ns.Get("noWhatsNew")) .. " " .. tostring(ForeverEnhancedCooldownManagerDB.noWhatsNew), "true true", "ticked: saved")
@@ -3227,7 +3227,7 @@ end)()
         "the defaults: square icons, black at 30%, 100% white numbers in the middle, no edge line (its colour greyed), Defaults greyed")
 
     -- Icons (a player's idea: Blizzard's look with Swap with my form): the
-    -- first row, Square as always or Blizzard, its own hover quietly
+    -- first row, Square as always or Blizzard, neither hover marked
     -- experimental, each fitting two lines of the footer. Blizzard draws
     -- your icons and the preview's like Blizzard's at once; Square puts them
     -- back exactly; the panel fits either way.
@@ -3241,8 +3241,8 @@ end)()
         Equal(S[square.label].text .. "/" .. S[blizzard.label].text .. " " .. tostring(rowBottom <= swipeTop and rowTop > 0) .. " "
             .. tostring(fits) .. " | " .. Note(square) .. " | " .. Note(blizzard),
             "Square/Blizzard true true | Square icons with no frame, as your bars have always looked. | Your bars' icons drawn like"
-            .. " Blizzard's Cooldown Manager: rounded, in its frame, with its swipe and range shadow. Its own rows sit 4 closer."
-            .. " (experimental)", "the first row, above the swipe: Square, then Blizzard, only its hover experimental and saying"
+            .. " Blizzard's Cooldown Manager: rounded, in its frame, with its swipe and range shadow. Its own rows sit 4 closer.",
+            "the first row, above the swipe: Square, then Blizzard, neither hover marked experimental, Blizzard's saying"
             .. " Blizzard's rows sit closer (Border and Shadow say they skip them), both two lines at most")
         local quiet, note
         for _, obj in ipairs(objects) do
@@ -3367,8 +3367,8 @@ end)()
         Equal(format.selected .. " | " .. Note(format.buttons[1]) .. " | " .. Note(format.buttons[2]) .. " | "
             .. S[format.buttons[1].label].text .. " / " .. S[format.buttons[2].label].text .. " | " .. Text(icon.cooldown) .. " " .. makes,
             "game | The countdown as the game writes it, like 2:52, as it's always been. | Whole minutes, then seconds under a minute:"
-            .. " 3m, 2m, 1m, then 59s. On your bars and Blizzard's icons. (experimental) | Game (2:52) / Minutes, then seconds (3m, 59s)"
-            .. " | - - 0", "Text: the game's own to start with, nothing set on any cooldown; minutes then seconds quietly experimental")
+            .. " 3m, 2m, 1m, then 59s. On your bars and Blizzard's icons. | Game (2:52) / Minutes, then seconds (3m, 59s)"
+            .. " | - - 0", "Text: the game's own to start with, nothing set on any cooldown; minutes then seconds not marked experimental")
         S[format.buttons[2]].scripts.OnClick(format.buttons[2])
         Equal(ns.Get("countdownFormat") .. " " .. format.selected .. " | " .. Text(icon.cooldown) .. " | " .. Text(first.cooldown) .. " | "
             .. makes .. " " .. table.concat(calls, ", "), "minutes minutes | minutes 60 | minutes 60 | 1 SetDefaultAbbreviation 2,"
@@ -3446,8 +3446,8 @@ end)()
 -- and its own size (a tick, then a percent); and on the Buffs and Debuffs
 -- pages its own ticks from the spell list. Nothing changes until picked;
 -- each change shows at once on your icons and the preview, is kept by entry
--- in the profile (over a reload too), and every hover of the new choices
--- is quietly experimental. Defaults puts its look back. It fits in every
+-- in the profile (over a reload too), and no hover of the new choices is
+-- marked experimental. Defaults puts its look back. It fits in every
 -- state, and goes with another page, the window or its entry; with a spell
 -- held, a click drops it on the bar as before.
 
@@ -3514,24 +3514,24 @@ end)()
     Equal(tostring(B:ShowsReagents("Moonfire")) .. " " .. tostring(ns.SpellLook("Moonfire")) .. " [" .. tostring(S[icon.count].text) .. "]", "false nil []", "unticked: gone, nothing kept")
     _G.C_Spell.IsConsumableSpell, _G.C_Spell.GetSpellCastCount = nil, nil
     panel:Refresh()
-    -- Each choice says what it does; the new ones quietly experimental.
+    -- Each choice says what it does; none marked experimental.
     panel.font:Click()
     local notes = { Note(panel.font), Note(panel.font.buttons[1]), Note(panel.font.buttons[7]), Note(panel.own), Note(panel.size),
         Note(panel.defaults), Note(panel.done) }
     local rows = {}
     for i, row in ipairs(panel.font.buttons) do rows[i] = S[row.label].text end
     panel.font:Click()
-    Equal(table.concat(notes, " | "), "This spell's countdown font: the Look page's, or one of its own. Click for the fonts. (experimental) | The"
+    Equal(table.concat(notes, " | "), "This spell's countdown font: the Look page's, or one of its own. Click for the fonts. | The"
         .. " Look page's font, now Friz Quadrata. | Barlow Semi Condensed, narrow like road signs, just for this spell's countdown. | Gives"
-        .. " this spell's countdown a size of its own, in place of Icon details' Size on the Look page. (experimental) | Tick Its own first:"
+        .. " this spell's countdown a size of its own, in place of Icon details' Size on the Look page. | Tick Its own first:"
         .. " until then it's Icon details' Size. | This spell's countdown back in the Look page's font and size, and its icon at the"
         .. " bar's size. Its ticks stay as they are. | Close this panel. Every choice is kept as you make it.",
-        "each says what it does; the font and size quietly experimental")
+        "each says what it does; the font and size not marked experimental")
     -- Its icon's own size, in the row under (an icon's own size: a player's
-    -- idea): off at first, saying what it does, quietly experimental.
+    -- idea): off at first, saying what it does, not marked experimental.
     Equal(table.concat({ tostring(panel.ownIcon:GetChecked()), S[panel.iconSize.value].text, tostring(panel.iconSize.usable),
         tostring(panel.ownIcon.usable), Note(panel.ownIcon), Note(panel.iconSize) }, " | "), "false | 100% | false | true | Gives this"
-        .. " icon a size of its own on Cooldowns, in place of the bar's Icon size. (experimental) | Tick Its own first: until then"
+        .. " icon a size of its own on Cooldowns, in place of the bar's Icon size. | Tick Its own first: until then"
         .. " it's the bar's Icon size.", "Icon size: off at first, the bar's size, saying what it does")
     Equal(table.concat(rows, ", "), "Look page, Friz Quadrata, Arial Narrow, Morpheus, Skurri, Game font, Barlow Semi Condensed,"
         .. " Saira Semi Condensed, Fira Sans Condensed", "the Look page's font first, then every font")
@@ -3549,7 +3549,7 @@ end)()
     Equal(ticked .. " | " .. ns.Style:LookKey(ns.SpellLook("Moonfire")) .. " " .. Font(cd.icons[1].cooldown) .. " " .. Font(preview.cooldown)
         .. " " .. S[panel.size.value].text .. " | " .. Note(panel.size), "barlow/100 true FECMFontbarlow18 | barlow/150 FECMFontbarlow27"
         .. " FECMFontbarlow27 150% | How big this spell's countdown is: 100% is about half the icon. In the middle it still moves clear of a"
-        .. " keybind. (experimental)", "its own size: the Look page's to start, then 150% on its icon and the preview")
+        .. " keybind.", "its own size: the Look page's to start, then 150% on its icon and the preview")
     Check(panel, "Cooldowns, Barlow at 150%")
     Equal(ns.DebugReport():match("Own countdowns: [^\n]*"), "Own countdowns: Moonfire (barlow, 150%)", "/ccm debug lists it")
     -- Unticked: the Look page's size again, its font kept.
@@ -3613,22 +3613,22 @@ end)()
     Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. tostring(panel.ticks:GetChecked()), "false false",
         "and from its row: the panel follows")
     -- Warn at (a player's idea: Siphon Life with 3 seconds left): Off, then
-    -- each time, in a row under the size; each says what it does, the times
-    -- quietly experimental. Packed, only the numbers; with missing debuffs
+    -- each time, in a row under the size; each says what it does, none
+    -- marked experimental. Packed, only the numbers; with missing debuffs
     -- greyed, the edge too.
     local warnLabels = {}
     for i, button in ipairs(panel.warn.buttons) do warnLabels[i] = S[button.label].text end
     Equal(table.concat(warnLabels, " ") .. " | " .. tostring(panel.warn:IsVisible()) .. " " .. tostring(panel.warn.selected) .. " "
         .. S[panel.warnLabel].text .. " " .. tostring(S[panel.warn].alpha) .. " | " .. Note(panel.warn.buttons[1]) .. " | "
         .. Note(panel.warn.buttons[2]), "Off 3s 5s 10s 30s 1m 5m 10m | true 0 Warn at 1 | No warning: its countdown stays as it is. | Its"
-        .. " countdown turns red with 3 seconds left. Tick Show missing debuffs greyed for a red edge round its icon too. (experimental)",
+        .. " countdown turns red with 3 seconds left. Tick Show missing debuffs greyed for a red edge round its icon too.",
         "Warn at: Off picked, eight choices, each saying what it does; packed: the numbers only, and how to get the edge")
     panel.warn.buttons[2]:Click()
     Equal(tostring(B:WarnAt("debuff", "Moonfire")) .. " " .. tostring(panel.warn.selected) .. " " .. tostring(S[panel].shown),
         "3 3 true", "3s: kept for Moonfire on the Debuffs bar, picked, the panel still open")
     B:SetOption("debuff", "showMissing", true)
     w:Refresh()
-    Equal(Note(panel.warn.buttons[7]), "Its countdown turns red with 5 minutes left, with a red edge round its icon. (experimental)",
+    Equal(Note(panel.warn.buttons[7]), "Its countdown turns red with 5 minutes left, with a red edge round its icon.",
         "with missing debuffs greyed: the edge too (no glow on the Debuffs bar)")
     Check(panel, "Debuffs, Warn at")
     Equal(ns.DebugReport():match("Warn at: [^|]*"), "Warn at: debuff: Moonfire 3s ", "/ccm debug lists it")
@@ -3752,14 +3752,14 @@ end)()
     B:SetOption("buff", "showMissing", true)
     w:Refresh()
     Equal(tostring(S[panel.warn].alpha) .. " | " .. Note(panel.warn.buttons[8]), "1 | Its countdown turns red with 10 minutes left, with"
-        .. " a red edge round its icon. Out of combat its icon glows too. (experimental)", "unticked, with missing buffs greyed: the"
+        .. " a red edge round its icon. Out of combat its icon glows too.", "unticked, with missing buffs greyed: the"
         .. " edge, and out of combat a glow (your own buffs)")
     -- A hand's weapon enchant: its spot is the addon's own, so no red edge.
     B:SetAura("buff", "hand:main", true)
     w:Refresh()
     bp.icons[2]:Click()
     Equal(S[panel.title].text .. " " .. S[panel.quiet].text .. " | " .. Note(panel.warn.buttons[8]), "MAIN HAND ENCHANT on Buffs | Its"
-        .. " countdown turns red with 10 minutes left. Out of combat its icon glows too. (experimental)",
+        .. " countdown turns red with 10 minutes left. Out of combat its icon glows too.",
         "Main hand enchant: the countdown and the glow, no edge")
     Equal(tostring(panel.active.usable) .. " | " .. Note(panel.active), "false | Not for a weapon enchant: only a buff's icon can glow"
         .. " while it's up.", "Main hand enchant: Glow while active greyed, saying why")
@@ -3905,7 +3905,7 @@ end)()
 
 -- Ticked only on a bar page's spell list -----------------------------------------------------------
 -- A player's idea: a tick listing only the spells on this page's bar, so
--- their own ticks are quick to reach. Off by default, quietly experimental;
+-- their own ticks are quick to reach. Off by default, not marked experimental;
 -- after Show items and Show all ranks on the Cooldowns and Utility pages,
 -- beside the search on Buffs and Debuffs (which have neither), clear of
 -- them all. Other spells from a search don't show (none is on the bar); a
@@ -3931,8 +3931,8 @@ end)()
     local p = S[tick].points[1]
     Equal(tostring(tick:IsVisible()) .. " " .. tostring(tick:GetChecked()) .. " " .. S[tick.text].text .. " " .. tostring(p[2] == bp.showRanks)
         .. " " .. p[1] .. " " .. p[3] .. " " .. p[4] .. " | " .. Note(tick) .. " | " .. Fit.Problems(bp),
-        "true false Ticked only true LEFT RIGHT 14 | Lists only the spells on this bar, with their own ticks. (experimental) | ",
-        "off by default, after Show all ranks, saying what it does, quietly experimental; the page's pieces all clear")
+        "true false Ticked only true LEFT RIGHT 14 | Lists only the spells on this bar, with their own ticks. | ",
+        "off by default, after Show all ranks, saying what it does, not marked experimental; the page's pieces all clear")
     tick:Click()
     Equal(tostring(ns.Get("listTicked")) .. " " .. tostring(tick:GetChecked()) .. " | " .. Listed(), "true true | [BALANCE], Moonfire, Wrath",
         "ticked: only Moonfire and Wrath, the spells on Cooldowns, under their heading")
@@ -3988,9 +3988,9 @@ end)()
         .. " | " .. Fit.Problems(page), "true false true Cooldowns true | ",
         "unlocked: the numbers in the drag hint's place, for Cooldowns, where it is in its layout; every piece clear")
     Equal(Note(move.which) .. " | " .. Note(move.x) .. " | " .. Note(move.arrows[1]), "The bar the numbers and arrows move: the one you"
-        .. " last dragged. Click for the next. (experimental) | How far the bar is right of the middle of your screen, in pixels (left of"
+        .. " last dragged. Click for the next. | How far the bar is right of the middle of your screen, in pixels (left of"
         .. " it is minus). Type a number, then Enter. | Moves the bar 1 pixel left, or 10 with Shift held. Out of combat only.",
-        "each says what it does, quietly experimental")
+        "each says what it does, not marked experimental")
     -- A pixel right: out of its layout, as a drag would.
     move.arrows[2]:Click()
     local x, y = B:BarPlace("cd")

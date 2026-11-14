@@ -679,6 +679,16 @@ for name, imbue in pairs(IMBUES) do
 end
 -- (The spell lists give these a section of their own: Spells.lua.)
 ns.WEAPON_ENCHANTS = ENCHANTS
+-- Your class's own enchants (a warlock's stones, a rogue's poisons, a
+-- shaman's weapons), not a scroll's imbue: a hand entry ticked Others only
+-- leaves these out even with no entry of their own on the bar (a player's
+-- report: a Spellstone still hid a missing oil). Every ID of theirs, true each.
+local OWN_ENCHANTS = {}
+for name, list in pairs(ENCHANTS) do
+    if not IMBUES[name] then
+        for _, id in ipairs(list) do OWN_ENCHANTS[id] = true end
+    end
+end
 
 -- Main hand enchant and Off hand enchant (Spells.lua: entry.hand, the slot):
 -- lit while anything at all is on that hand for a time (an oil, a stone, a
@@ -823,17 +833,26 @@ local ENCHANT_SOURCES = {
     { function() return type(C_Item) == "table" and C_Item.GetWeaponEnchantInfo end, function(api, slot)
         local list = api(HANDS[slot])
         if not Open(list) or type(list) ~= "table" then return nil end
-        local found = {}
+        -- (A player's report, a Spellstone and an oil on one weapon: one the
+        -- game won't say about no longer loses the other with it; and an
+        -- imbue with no timer, read as 0 left, isn't taken as run out.)
+        local found, held = {}, false
         for _, each in pairs(list) do
             local has, kind = each.hasEnchant, each.enchantType
-            if not (Open(has) and Open(kind)) then return nil end
-            if has == true and kind ~= PERMANENT then
+            if not (Open(has) and Open(kind)) then
+                held = true
+            elseif has == true and kind ~= PERMANENT then
                 local id, ms = each.enchantID, each.timeLeft
-                if not (Open(id) and Open(ms)) or type(id) ~= "number" then return nil end
-                found[#found + 1] = { id, type(ms) == "number" and ms / 1000 or nil }
+                if not (Open(id) and Open(ms)) or type(id) ~= "number" then
+                    held = true
+                else
+                    found[#found + 1] = { id, type(ms) == "number" and ms > 0 and ms / 1000 or nil }
+                end
             end
         end
-        return found[1] and found or false
+        if found[1] then return found, held end
+        if held then return nil end
+        return false
     end },
     { function() return GetWeaponEnchantInfo end, function(api, slot)
         local values, at = { api() }, slot == 16 and 0 or 4
@@ -847,14 +866,16 @@ local ENCHANT_SOURCES = {
 
 -- A hand's enchants, each with its seconds left, from every way that names
 -- one (each enchant once, as the first way to name it says); false only when
--- one said none and none held back; nil when the game won't say.
+-- one said none and none held back; nil when the game won't say. Second:
+-- whether some way held one back, so one read before may still be on.
 local function ReadHand(slot)
     local none, held, found, seen = false, false, nil, {}
     for _, source in ipairs(ENCHANT_SOURCES) do
         local api = source[1]()
         if api then
-            local ok, list = pcall(source[2], api, slot)
+            local ok, list, partly = pcall(source[2], api, slot)
             if ok and type(list) == "table" then
+                if partly then held = true end
                 for _, each in ipairs(list) do
                     if not seen[each[1]] then
                         seen[each[1]] = true
@@ -869,7 +890,7 @@ local function ReadHand(slot)
             end
         end
     end
-    if found then return found end
+    if found then return found, held end
     if none and not held then return false end
     return nil
 end
@@ -898,11 +919,11 @@ end
 function F:ReadEnchants()
     local now = GetTime()
     for slot in pairs(HANDS) do
-        local list = ReadHand(slot)
+        local list, held = ReadHand(slot)
         if list == false then
             hands[slot] = false
         elseif list then
-            local was, kept = {}, {}
+            local was, kept, named = {}, {}, {}
             for _, old in ipairs(hands[slot] or {}) do was[old.id] = old end
             for _, each in ipairs(list) do
                 local id, left = each[1], each[2]
@@ -910,7 +931,15 @@ function F:ReadEnchants()
                 if not old or (old.ends == nil) ~= (ends == nil) or (ends and math.abs(old.ends - ends) > 2) then
                     old = { id = id, ends = ends, total = left }
                 end
+                named[id] = true
                 kept[#kept + 1] = old
+            end
+            -- (One the game held back this time keeps what it was, still
+            -- running down, as a whole hand held back does.)
+            if held then
+                for _, old in ipairs(hands[slot] or {}) do
+                    if not named[old.id] and (not old.ends or old.ends > now) then kept[#kept + 1] = old end
+                end
             end
             hands[slot] = kept
         end
@@ -924,7 +953,7 @@ end
 -- long it had when read, which it is and on which hand. bare: an entry of
 -- hands alone (ids.handsOnly) with no weapon in any of them, so nothing's
 -- missing. ids.skip: a hand entry ticked Others only, which an enchant with
--- an entry of its own on the bar doesn't light.
+-- an entry of its own on the bar, or one of your class's own, doesn't light.
 local function EnchantOn(ids)
     local now, on, ends, total, id, at = GetTime(), false, nil, nil, nil, nil
     local bare, skip = ids.handsOnly == true, ids.skip
@@ -1383,9 +1412,10 @@ function F:Layout(bar, data)
     local fit = packed and BASE or size
     local weapons = ns.BAR_KIND[bar.key] == "buff"
     -- Others only, on a hand entry: every named weapon enchant on the bar,
-    -- which that entry leaves to its own (one table, filled as the bar is read).
+    -- which that entry leaves to its own (one table, filled as the bar is read),
+    -- and your class's own enchants, on the bar or not (OWN_ENCHANTS).
     local others = weapons and ns.HandOthers(bar.key) or {}
-    local namedOnBar = {}
+    local namedOnBar = setmetatable({}, { __index = OWN_ENCHANTS })
     for _, group in ipairs(ns.Bars:Units(bar.key)) do
         local ids, entry, picked, glow, yours, only = {}, nil, nil, false, {}, false
         local active = false -- (any of yours in it ticked Glow while active)

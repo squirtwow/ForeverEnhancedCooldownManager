@@ -1113,6 +1113,45 @@ Equal(S[moon].alpha, .4, "and dimmed once Edit Mode closes")
 B:SetOption("cd", "whenReady", "show")
 Equal(S[moon].alpha, 1, "Show: in full again")
 
+-- A wand shooting hands spells sitting ready a short wait each shot (a
+-- player's report: hidden ready icons flashed up). While it shoots, an icon
+-- keeps what it showed; its own cooldown running out still turns it ready;
+-- all are read again as it stops. A bow is read as ever.
+do
+    B:SetOption("cd", "whenReady", "hide")
+    local icon = cd.icons[2]
+    active = false
+    B:RefreshAll()
+    Equal(S[icon].alpha, 0, "wand: hidden while ready before it shoots")
+    RangedWorn = 5240
+    Fire("START_AUTOREPEAT_SPELL")
+    active = true -- the shot's wait
+    Fire("SPELL_UPDATE_COOLDOWN")
+    NextFrame()
+    Equal(S[icon].alpha, 0, "wand: a shot's wait never shows a ready spell")
+    Fire("STOP_AUTOREPEAT_SPELL")
+    NextFrame()
+    Equal(S[icon].alpha, 1, "wand stopped: read again (a spell cast to stop it shows its cooldown)")
+    Fire("START_AUTOREPEAT_SPELL")
+    S[icon.cooldown].scripts.OnCooldownDone(icon.cooldown)
+    NextFrame()
+    Equal(S[icon].alpha .. " " .. tostring(S[icon.texture].desaturated), "0 false",
+        "wand: a spell's own cooldown ending while it shoots turns it ready")
+    Fire("STOP_AUTOREPEAT_SPELL")
+    RangedWorn = 2504
+    active = false
+    B:RefreshAll()
+    Fire("START_AUTOREPEAT_SPELL")
+    active = true
+    Fire("SPELL_UPDATE_COOLDOWN")
+    NextFrame()
+    Equal(S[icon].alpha, 1, "a bow's Auto Shot: cooldowns read as ever")
+    Fire("STOP_AUTOREPEAT_SPELL")
+    RangedWorn, active = nil, false
+    B:SetOption("cd", "whenReady", "show")
+    Equal(S[moon].alpha, 1, "wand: Show again after")
+end
+
 -- On cooldown: the other way round, each icon in full, dimmed or hidden
 -- while it cools down (the global cooldown left out, as for the grey), by
 -- the same secret state handed on as it is.
@@ -1947,8 +1986,8 @@ Equal(ListRow("Moonfire").check:GetChecked(), true, "spells on the bar are ticke
     greyed:Click()
     Equal(tostring(ns.BarData("debuff").showMissing) .. " " .. tostring(tick.usable) .. " " .. S[tick].alpha .. " | " .. Note(tick),
         "true true 1 | Missing debuffs stay greyed in their spots with no enemy targeted, instead of hiding."
-        .. " Out of combat Fade or Hide still applies. (experimental)",
-        "usable once it's ticked, saying what it does, that Out of combat still applies, and that it's experimental")
+        .. " Out of combat Fade or Hide still applies.",
+        "usable once it's ticked, saying what it does and that Out of combat still applies, not marked experimental")
     tick:Click()
     Equal(tostring(ns.BarData("debuff").greyedNoTarget) .. " " .. tostring(tick:GetChecked()) .. " | " .. Note(greyed),
         "true true | Debuffs missing from your target show greyed in their spot, instead of hidden, with an enemy targeted or not.",
@@ -3191,7 +3230,7 @@ do
     Equal(there .. " " .. tostring(dim.usable), "true true false", "On cooldown's Dim or the tick make it usable; neither, greyed")
     B:SetOption("cd", "dimOpacity", 40)
     -- Show the global cooldown, under Dimmed icons: off unless ticked, each
-    -- bar its own, marked experimental. Ticked, that bar's spell icons get
+    -- bar its own, not marked experimental. Ticked, that bar's spell icons get
     -- the sweep; unticked, it's cleared. (Its own function: this chunk is at
     -- Lua's 200 locals. The mock game's cooldown with the global one
     -- counted is the same answer as without.)
@@ -3201,8 +3240,8 @@ do
         local at = S[gcdTick].points[1]
         Equal(tostring(S[gcdTick].shown) .. " " .. S[gcdTick.text].text .. " " .. tostring(gcdTick:GetChecked()) .. " "
             .. table.concat(at, " ", 1, 3) .. " " .. tostring(ns.BarData("cd").showGCD),
-            "true Show the global cooldown (experimental) false TOPLEFT 0 -173 false",
-            "Show the global cooldown under Dimmed icons, off, marked the quiet way")
+            "true Show the global cooldown false TOPLEFT 0 -173 false",
+            "Show the global cooldown under Dimmed icons, off, not marked experimental")
         S[gcdTick].scripts.OnEnter(gcdTick)
         Equal(S[w.note].text, "After each cast, this bar's icons show the global cooldown's swipe, like your action bars."
             .. " An icon cooling down keeps showing its own cooldown.", "its note says what it does")
@@ -5697,7 +5736,7 @@ end)()
 end)()
 
 -- Main hand enchant and Off hand enchant: an entry for each hand, for every
--- class, first under Weapon enchants and only for the Buffs bar, marked
+-- class, first under Weapon enchants and only for the Buffs bar, not marked
 -- experimental. Each lights while anything at all is on its hand for a time
 -- (an oil, a stone, a poison, one the addon doesn't know), with its time
 -- left, and shows which: that enchant's icon and name (the weapon's own
@@ -5742,8 +5781,8 @@ end)()
     w:Select("buff")
     local row = Row("hand:main")
     Equal(tostring(row ~= nil) .. " | " .. tostring(row and S[row.rank].text) .. " | " .. tostring(row and row.check.hint(row.check)),
-        "true | (experimental) | Put Main hand enchant on Buffs. It lights while that hand has an oil, stone, poison or imbue on,"
-        .. " and shows which. (experimental)", "listed on Buffs, quietly marked experimental, saying what it does")
+        "true |  | Put Main hand enchant on Buffs. It lights while that hand has an oil, stone, poison or imbue on,"
+        .. " and shows which.", "listed on Buffs, not marked experimental, saying what it does")
     row.check:Click()
     Row("hand:off").check:Click()
     Equal(List("buff") .. " | " .. tostring(ns.CustomSpells()["Main hand enchant"]), "hand:main,hand:off | nil",
@@ -6023,6 +6062,59 @@ end)()
     Change()
     Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. tostring(ns.HandOthers("buff")["hand:main"]),
         "Instant Poison true nil", "unticked again: as before")
+    -- (A player's report, a Spellstone and an oil.) The second way alone: an
+    -- imbue with no timer (0 left) is on, not run out; one the game won't say
+    -- about keeps what it was and no longer loses the oil with it.
+    local hidden, plain, stoneLeft = {}, issecretvalue, 0
+    _G.issecretvalue = function(v) return rawequal(v, hidden) or plain(v) end
+    C_Item.GetWeaponEnchantInfo = function(hand)
+        local list = {}
+        for _, id in ipairs(hand == 0 and listed or {}) do
+            local stone = id == 8061 or id == hidden
+            list[#list + 1] = { hasEnchant = true, enchantType = stone and 3 or 2, enchantID = id,
+                timeLeft = stone and stoneLeft or 600 * 1000 }
+        end
+        return list
+    end
+    _G.C_PaperDollInfo = nil
+    onHand[16] = nil
+    listed = { 8061 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit), "Major Spellstone true", "an imbue read with 0 left: on, with no timer")
+    stoneLeft = 300 * 1000
+    Change()
+    listed = { hidden, 2628 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. ("%d"):format(ns.BuffBar:NextEnchantEnd() or -1),
+        "Major Spellstone true 300", "the stone held back: kept (still the sooner), the oil read beside it")
+    listed = { 8061, 2628 }
+    stoneLeft = 900 * 1000
+    Change()
+    Equal(S[main.label].text .. " " .. ("%d"):format(ns.BuffBar:NextEnchantEnd() or -1), "Brilliant Wizard Oil 600",
+        "both told again: the oil the sooner")
+    -- (The same player: still hidden.) Others only also leaves your class's
+    -- own enchants out with no entry of theirs on the bar, so a Spellstone
+    -- alone shows the oil missing; a scroll's imbue still lights it.
+    B:SetHandOthers("buff", "hand:main", true)
+    main = B:Get("buff").holders[1]
+    listed = { 8061 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. Glows(main), "Main hand enchant false true",
+        "ticked, the Spellstone not on the bar: it doesn't light the main hand, missing, glowing")
+    listed = { 8061, 2628 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit) .. " " .. Glows(main), "Brilliant Wizard Oil true false",
+        "the oil on too: lit as the oil")
+    listed = { 8061, 8713 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit), "Imbue Flame true", "a scroll's imbue still counts")
+    B:SetHandOthers("buff", "hand:main", false)
+    main = B:Get("buff").holders[1]
+    listed = { 8061 }
+    Change()
+    Equal(S[main.label].text .. " " .. tostring(main.enchantLit), "Major Spellstone true", "unticked: the Spellstone lights it, as before")
+    _G.issecretvalue = plain
+    _G.C_PaperDollInfo = paperDoll
     C_Item.GetWeaponEnchantInfo = enchantInfo
     onHand[16] = nil
     Change()
@@ -7461,11 +7553,11 @@ Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
         "the list open under its box, which shows the font in use in its face; the shipped ones from the addon's own folder")
     Hover(font.buttons[6], "OnEnter")
     Equal(S[w.note].text, "Barlow Semi Condensed, narrow like road signs, for countdowns, counts, keys and names on icons, and the text"
-        .. " on your cast bar and Tracked Bars. (experimental)", "a shipped font says what it is, quietly experimental")
+        .. " on your cast bar and Tracked Bars.", "a shipped font says what it is, not marked experimental")
     Hover(font.buttons[6], "OnLeave")
     Hover(font.buttons[5], "OnEnter")
     Equal(S[w.note].text, "Game font, your game's own, for names in any language, for countdowns, counts, keys and names on icons, and the"
-        .. " text on your cast bar and Tracked Bars. (experimental)", "Game font says what it's for, quietly experimental")
+        .. " text on your cast bar and Tracked Bars.", "Game font says what it's for, not marked experimental")
     Hover(font.buttons[5], "OnLeave")
     -- Every font's and texture's note fits the footer's two lines (about 6.5
     -- units a letter in the small font).
@@ -7516,10 +7608,10 @@ Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
     Equal(tostring(fp[2] < fl and fp[3] == ft and fp[2] + S[w.faces].width == fr and fp[3] - S[w.faces].height == tb),
         "true", "one part round both rows and their labels, for the tour")
 
-    -- Each says what it's for on hover; all but today's look are quietly experimental.
+    -- Each says what it's for on hover; none is marked experimental.
     Hover(font.buttons[2], "OnEnter")
     Equal(S[w.note].text, "Arial Narrow, plain and narrow, for countdowns, counts, keys and names on icons, and the text on your cast bar"
-        .. " and Tracked Bars. (experimental)", "each font says what it's for")
+        .. " and Tracked Bars.", "each font says what it's for")
     Hover(font.buttons[2], "OnLeave")
     Hover(font.buttons[1], "OnEnter")
     Equal(tostring(S[w.note].text:find("Friz Quadrata, the game's own font", 1, true) == 1)
@@ -7528,7 +7620,7 @@ Equal(Last(FECMFont18, "SetShadowOffset", 1), 0, "no drop shadow")
     Hover(font.buttons[1], "OnLeave")
     Hover(fills[2], "OnEnter")
     Equal(S[w.note].text, "The game's classic unit frame bar on your cast bar, swing timer and combo points, and the restyled Tracked Bars"
-        .. " and resource display. (experimental)", "each texture says where it goes")
+        .. " and resource display.", "each texture says where it goes")
     Hover(fills[2], "OnLeave")
 
     -- A font picked: every font made so far takes it at once, so the text in

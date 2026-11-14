@@ -293,7 +293,7 @@ local function BuildOptions(window, page, inner)
     page.procs = Tick("Procs too", "pulseProcs", COLUMN, -116, function()
         if not P:CanProcs() then return "Your game can't show proc pulses." end
         return "Your class's procs, like Clearcasting or Missile Barrage: a pulse the moment one lands, in a fight too."
-            .. " Procs pulse without a sound. (experimental)"
+            .. " Procs pulse without a sound."
     end)
     page.volume = Tick("Play at Master volume", "pulseMaster", COLUMN, -138,
         "Plays the sound at your Master volume, so you hear it with Sound Effects down or off. Your sound settings don't change.")
@@ -345,12 +345,11 @@ local function BuildList(window, page, inner)
         row.check:SetPoint("LEFT", 4, 0)
         -- The whole row clicks its tick, as on the bar pages, up to its switch.
         row.check:SetHitRectInsets(-4, -(listWidth - 20 - SWITCH - 12), -(ROW - 16) / 2, -(ROW - 16) / 2)
-        -- Items listed from your bags, and procs, aren't seen pulsing in game yet.
         window:Hint(row.check, function()
             local name = row.name:GetText() or ""
             if row.check:GetChecked() then return "Untick to leave " .. name .. " out." end
-            if row.proc then return "Tick to pulse when " .. name .. " lands. (experimental)" end
-            return "Tick to pulse when " .. name .. " is ready." .. (row.bags and " (experimental)" or "")
+            if row.proc then return "Tick to pulse when " .. name .. " lands." end
+            return "Tick to pulse when " .. name .. " is ready."
         end)
         -- Quick or Long, on the right; its cooldown just before it. A proc's
         -- pulse is the game's, so it's told the new style too.
@@ -405,7 +404,7 @@ local function BuildList(window, page, inner)
             row.header:SetText(text:upper())
             row.header:Show()
             for _, part in ipairs({ row.check, row.icon, row.name, row.long, row.style }) do part:Hide() end
-            row.key, row.item, row.bags, row.proc = nil, nil, nil, nil
+            row.key, row.item, row.proc = nil, nil, nil
             row:Show()
             y = y + HEADER_ROW
         end
@@ -417,7 +416,6 @@ local function BuildList(window, page, inner)
             row:SetPoint("TOPLEFT", 0, -y)
             row.header:Hide()
             row.key, row.item, row.proc = entry.key, item, proc
-            row.bags = item and not (entry.slot or entry.bar) or nil
             row.icon:SetTexture(entry.icon or 134400)
             row.name:SetText(entry.name)
             row.long:SetText(long)

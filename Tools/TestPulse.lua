@@ -1711,17 +1711,17 @@ do
     Equal(Rows(page):match("ITEMS.*"), "ITEMS | [x] Trinket 1: Lucky Charm trinket Quick | [x] Healing Potions on your bars Quick"
         .. " | [ ] Mana Potions in your bags Quick | [ ] Hearthstone in your bags Quick",
         "potions you carry and bag items with a use, listed from your bags, unticked")
-    -- Items listed from your bags aren't seen pulsing in game yet: their
-    -- ticks say so. Trinkets and items on your bars have been.
+    -- Items listed from your bags, trinkets and items on your bars: each
+    -- tick says what it does, none marked experimental.
     do
         local trinketRow, barRow = RowFor(page, "slot:13"), RowFor(page, "family:healing")
         trinketRow.check:SetChecked(false)
         barRow.check:SetChecked(false)
         Equal(Note(RowFor(page, "item:6948").check) .. " | " .. Note(RowFor(page, "family:mana").check) .. " | "
             .. Note(trinketRow.check) .. " | " .. Note(barRow.check),
-            "Tick to pulse when Hearthstone is ready. (experimental) | Tick to pulse when Mana Potions is ready. (experimental)"
+            "Tick to pulse when Hearthstone is ready. | Tick to pulse when Mana Potions is ready."
             .. " | Tick to pulse when Trinket 1: Lucky Charm is ready. | Tick to pulse when Healing Potions is ready.",
-            "items from your bags are quietly experimental on their ticks, trinkets and items on your bars aren't")
+            "items from your bags, trinkets and items on your bars: none marked experimental on their ticks")
         trinketRow.check:SetChecked(true)
         barRow.check:SetChecked(true)
     end
@@ -3430,8 +3430,8 @@ end)()
     Equal(tostring(lns.Get("pulseProcs")) .. " " .. tostring(page.procs.checked) .. " " .. tostring(page.procs.usable) .. " " .. #containers
         .. " " .. tostring(Rows(page):find("PROCS", 1, true)) .. " | " .. S[page.procs.text].text .. " | " .. Note(page.procs),
         "false false true 0 nil | Procs too | Your class's procs, like Clearcasting or Missile Barrage: a pulse the moment one lands, in a"
-        .. " fight too. Procs pulse without a sound. (experimental)",
-        "off by default: its tick free, saying what it does, quietly experimental; no container made, no Procs in the list")
+        .. " fight too. Procs pulse without a sound.",
+        "off by default: its tick free, saying what it does, not marked experimental; no container made, no Procs in the list")
     local function Spot(control) local p = S[control].points[1]; return p[1] .. " " .. p[2] .. " " .. p[3] end
     Equal(Spot(page.items) .. " | " .. Spot(page.procs) .. " | " .. Spot(page.volume) .. " | " .. S[page.options].height,
         "TOPLEFT 312 -94 | TOPLEFT 312 -116 | TOPLEFT 312 -138 | 156", "right under Trinkets and potions too, Master volume moved down, the options taller")
@@ -3446,7 +3446,7 @@ end)()
         "ticked on: the mage's procs under the spells, by name, each keyed by its first buff's ID with its icon, unticked and Quick; still no container")
     local barrage = RowFor(page, "proc:400589")
     Equal(S[barrage.long].text .. "| " .. Note(barrage.check) .. " | " .. Note(barrage.style.buttons[2]),
-        "| Tick to pulse when Missile Barrage lands. (experimental) | Once ticked, Missile Barrage pulses Quick. Click for Long. Each style has"
+        "| Tick to pulse when Missile Barrage lands. | Once ticked, Missile Barrage pulses Quick. Click for Long. Each style has"
         .. " its own size and time, set under Edit above. Procs pulse without a sound.",
         "no cooldown beside it; its tick and switch say what they do, a proc's style without a sound")
 

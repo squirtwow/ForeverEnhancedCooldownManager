@@ -1079,15 +1079,16 @@ local page = w.pages.raid
 Equal(tostring(S[page].shown) .. " " .. tostring(S[w.pages.look].shown) .. " " .. tostring(S[w.nav.raid.fill].shown),
     "true false true", "clicked: its page, and it's the one highlighted")
 
--- Everything off at first. The countdown, tested in game, isn't labelled; the
--- other two parts quietly say they're experimental (never the old wording).
+-- Everything off at first. None is labelled experimental (no option is any
+-- more), nor with the old wording.
 Equal(tostring(ns.Get("pullTimer")) .. " " .. tostring(ns.Get("raidWarnings")) .. " " .. tostring(ns.Get("bossCasts")),
     "false false false", "every part off by default")
+Equal(S[page.warningTick.text].text .. " | " .. S[page.bossTick.text].text, "Raid warnings and boss emotes | Boss cast bars",
+    "the two parts named plainly")
 for _, tick in ipairs({ page.pullTick, page.warningTick, page.bossTick }) do
-    local untested, label = tick ~= page.pullTick, S[tick.text].text
-    Equal(tick.checked == false and (label:find(" (experimental)", 1, true) ~= nil) == untested
-        and not label:find("testing", 1, true), true,
-        label .. ": unticked, " .. (untested and "labelled experimental" or "not labelled experimental"))
+    local label = S[tick.text].text
+    Equal(tick.checked == false and not label:find("experimental", 1, true) and not label:find("testing", 1, true), true,
+        label .. ": unticked, not labelled experimental")
 end
 Equal(S[page.status].text:find("Tick one", 1, true) ~= nil, true, "the title row says how to start")
 Equal(S[page.pull].alpha .. " " .. S[page.warnings].alpha .. " " .. S[page.boss].alpha, "0.35 0.35 0.35",

@@ -238,7 +238,10 @@ local function NewIcon(bar)
     icon.cooldown:SetDrawBling(false)
     -- Events arrive when a cooldown starts, not when it ends; this catches the
     -- end, so the icon ungreys (and dims, hides or shows again, as chosen) on time.
-    icon.cooldown:SetScript("OnCooldownDone", function() cooling = true end)
+    icon.cooldown:SetScript("OnCooldownDone", function()
+        icon.ended = true -- its own cooldown ran out (SpellCooldown, while a wand shoots)
+        cooling = true
+    end)
     -- Item counts and the keybind sit above the sweep.
     local top = CreateFrame("Frame", nil, icon)
     top:SetAllPoints()
@@ -435,8 +438,35 @@ end
 -- the grey), so a cast never dims or hides the rest for a moment; a spell
 -- with charges cools down, as the game says, only with none left. With
 -- Show the global cooldown ticked, it's on a sweep of its own (Global).
+--
+-- Shooting a wand, each shot hands spells sitting ready a short wait of their
+-- own (not the global cooldown, so it isn't left out), and a bar hiding its
+-- ready icons flashed them up with every shot (a player's report). So while
+-- a wand shoots, a spell icon keeps what it showed: one whose own cooldown
+-- runs out meanwhile turns ready, and all are read again as the shooting
+-- stops. A spell new to its icon is read as ever. Only a wand: a hunter's
+-- Auto Shot runs all fight, among real cooldowns.
+local RANGED_SLOT, WEAPON, WAND = 18, 2, 19 -- the slot; the item class and subclass
+local wanding = false
+
+local function WandWorn()
+    local id = GetInventoryItemID("player", RANGED_SLOT)
+    if not (Open(id) and id and C_Item and C_Item.GetItemInfoInstant) then return false end
+    local _, _, _, _, _, class, subclass = C_Item.GetItemInfoInstant(id)
+    return Open(class) and Open(subclass) and class == WEAPON and subclass == WAND
+end
+
 local function SpellCooldown(icon, data)
     local id = icon.spellID
+    if wanding and icon.readID == id then
+        if not icon.ended then return end
+        icon.ended = nil
+        icon.texture:SetDesaturated(false)
+        local _, ready = Alphas(data, icon.cantCast)
+        Alpha(icon, ready)
+        return
+    end
+    icon.readID, icon.ended = id, nil
     local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(id, true)
     local active = false
     if duration then
@@ -3260,6 +3290,12 @@ local function OnEvent(_, event, arg)
     elseif event == "SPELL_UPDATE_COOLDOWN" or event == "BAG_UPDATE_COOLDOWN" then
         -- A cooldown started (or the global cooldown, with every cast).
         cooling = true
+    elseif event == "START_AUTOREPEAT_SPELL" then
+        -- A wand shooting: its shots' waits are passed over (SpellCooldown).
+        wanding = WandWorn()
+    elseif event == "STOP_AUTOREPEAT_SPELL" then
+        -- Read again now: a spell cast to stop the wand shows its cooldown.
+        if wanding then wanding, cooling = false, true end
     else
         if event == "PLAYER_TARGET_CHANGED" then
             -- Each Debuffs bar, and the buff and debuff times on each
@@ -3406,11 +3442,14 @@ local function Switch()
         -- A weapon enchant going on or off (each event the game lacks is left out).
         pcall(driver.RegisterUnitEvent, driver, "UNIT_INVENTORY_CHANGED", "player")
         pcall(driver.RegisterEvent, driver, "WEAPON_ENCHANT_CHANGED")
+        -- A wand starting and stopping (SpellCooldown).
+        pcall(driver.RegisterEvent, driver, "START_AUTOREPEAT_SPELL")
+        pcall(driver.RegisterEvent, driver, "STOP_AUTOREPEAT_SPELL")
         driver:SetScript("OnUpdate", Tick)
     else
         driver:UnregisterAllEvents()
         driver:SetScript("OnUpdate", nil)
-        hearing, checking, forming, shifting = false, false, false, false
+        hearing, checking, forming, shifting, wanding = false, false, false, false, false
     end
 end
 

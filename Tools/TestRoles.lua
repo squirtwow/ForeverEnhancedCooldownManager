@@ -1205,13 +1205,13 @@ do
     w.profileButton:Click()
     Equal(R.Looks(ns, w), "tank greyed, healer plain, damage lit", "Damage lit now, Healer plain")
 
-    -- Each says what it does, and that it's experimental.
+    -- Each says what it does (not marked experimental).
     local notes = {}
     for _, role in ipairs(ns.ROLE_KEYS) do notes[#notes + 1] = buttons[role].hint(buttons[role]) end
     Equal(table.concat(notes, " | "), "Save your lists as Druid Tank and switch to it. Right-click to save them without"
-        .. " switching. (experimental) | Switch to Druid Healer, your Healer profile. Right-click to save your lists over it."
-        .. " (experimental) | You're on Druid Damage, your Damage profile. (experimental)",
-        "each role's note in the footer: what a click and a right-click do (naming the profile a first click makes), quietly experimental")
+        .. " switching. | Switch to Druid Healer, your Healer profile. Right-click to save your lists over it."
+        .. " | You're on Druid Damage, your Damage profile.",
+        "each role's note in the footer: what a click and a right-click do (naming the profile a first click makes), not marked experimental")
     S[buttons.tank].scripts.OnEnter(buttons.tank)
     Equal(S[w.note].text:find("Save your lists as Druid Tank", 1, true) ~= nil, true, "shown in the footer on hover")
     S[buttons.tank].scripts.OnLeave(buttons.tank)
@@ -1528,9 +1528,9 @@ do
     Equal(R.Listening("TRAIT_CONFIG_UPDATED") .. " " .. R.Listening("PLAYER_TALENT_UPDATE") .. " " .. R.Listening("ACTIVE_TALENT_GROUP_CHANGED")
         .. " " .. R.Listening("TRAIT_CONFIG_LIST_UPDATED"), "1 1 1 1", "ticked: listening for talent changes")
     Equal(tostring(rawget(w.talentTick, "hint")), "When another talent tree takes the lead in points, switch to its role's profile,"
-        .. " after any fight. (experimental)", "the tick's note, quietly experimental")
+        .. " after any fight.", "the tick's note, not marked experimental")
     local choice = w.treeRows[3].choice.buttons[1]
-    Equal(choice.hint(choice), "When Restoration takes the lead in points, switch to your Tank profile. (experimental)", "each choice's note")
+    Equal(choice.hint(choice), "When Restoration takes the lead in points, switch to your Tank profile.", "each choice's note")
 
     -- A respec that changes the main tree: switched to its role's profile.
     R.Points({ [101] = 31, [103] = 5 })
@@ -1745,8 +1745,8 @@ do
         "Tank=tank Healer=healer Damage=damage None=none | Balance 0 damage, Feral Combat 0 none, Restoration 31 healer | 103",
         "each tree has four choices, None last; a druid's Feral Combat starts on None (Restoration noted at login)")
     local none = w.treeRows[2].choice.buttons[4]
-    Equal(none.hint(none), "When Feral Combat takes the lead in points, don't switch: click a role yourself. (experimental)",
-        "None's note says what it does, quietly experimental")
+    Equal(none.hint(none), "When Feral Combat takes the lead in points, don't switch: click a role yourself.",
+        "None's note says what it does, not marked experimental")
 
     -- Balance takes the lead: switched to Damage and said, as before.
     R.Points({ [101] = 31 })
@@ -1970,22 +1970,22 @@ do
     -- 7 since Positions per profile took a row under Use on all characters.
     Equal(unticked .. " " .. tostring(ticked < unticked and ticked >= 4), "7 true",
         "the list shows 7 profiles unticked, a few fewer (" .. ticked .. ") with the trees and note, and still scrolls to the rest")
-    -- Every new control in the menu says what it does, and that it's experimental.
+    -- Every new control in the menu says what it does, none marked experimental.
     local missing = {}
+    local function Plain(note) return type(note) == "string" and note ~= "" and not note:find("experimental", 1, true) end
     for _, role in ipairs(ns.ROLE_KEYS) do
         local hint = w.roleButtons[role].hint
-        if type(hint) ~= "function" or not hint(w.roleButtons[role]):find("(experimental)", 1, true) then missing[#missing + 1] = role end
+        if type(hint) ~= "function" or not Plain(hint(w.roleButtons[role])) then missing[#missing + 1] = role end
     end
-    local tickHint = rawget(w.talentTick, "hint")
-    if not (tickHint and tickHint:find("(experimental)", 1, true)) then missing[#missing + 1] = "tick" end
+    if not Plain(rawget(w.talentTick, "hint")) then missing[#missing + 1] = "tick" end
     for i, row in ipairs(w.treeRows) do
         for _, choice in ipairs(row.choice.buttons) do
-            if type(choice.hint) ~= "function" or not choice.hint(choice):find("(experimental)", 1, true) then
+            if type(choice.hint) ~= "function" or not Plain(choice.hint(choice)) then
                 missing[#missing + 1] = "tree " .. i .. " " .. choice.key
             end
         end
     end
-    Equal(table.concat(missing, ", "), "", "each role, the tick and each tree's choices have a note, quietly experimental")
+    Equal(table.concat(missing, ", "), "", "each role, the tick and each tree's choices have a note, none marked experimental")
     -- Words fit: about 7.5 units a letter, 6.5 in the small font (as Tools/TestHelp.lua counts).
     local function Wide(text, small) return #text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") * (small and 6.5 or 7.5) end
     local fits = {}
@@ -2012,10 +2012,15 @@ do
         "the tick clear of the Roles heading, each tree's name and points clear of its four choices, the choices' words in their room")
     local tickAt, headingAt = S[w.talentTick].points[1], S[w.roleHeading].points[1]
     Equal(tickAt[1] .. " " .. tickAt[2] .. " " .. (tickAt[3] - headingAt[3]), "TOPLEFT 10 -42",
-        "the tick on its own row under the role buttons (the heading's row holds the experimental tag)")
-    local tag = w.roleTesting
-    Equal(tostring(tag ~= nil) .. " " .. S[tag].text .. " " .. tostring(S[tag].points[1][2] == w.roleHeading), "true experimental true",
-        "the quiet lowercase experimental in plain sight beside the Roles heading")
+        "the tick on its own row under the role buttons")
+    -- Nothing beside the Roles heading: the experimental tag is gone.
+    local beside = {}
+    for _, made in ipairs(objects) do
+        local at = S[made].points[1]
+        if S[made].kind == "FontString" and at and at[2] == w.roleHeading then beside[#beside + 1] = tostring(S[made].text) end
+    end
+    Equal(tostring(rawget(w, "roleTesting")) .. " | " .. table.concat(beside, ", "), "nil | ",
+        "no experimental tag beside the Roles heading")
     w:Hide()
 
     -- The ? over the open menu, and the tour's Profiles step, mention the roles.

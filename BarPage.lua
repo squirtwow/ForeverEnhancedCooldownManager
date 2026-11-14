@@ -122,7 +122,6 @@ local PANEL_TIME = 75 -- the preview's cooldown, round and round: past a minute,
 local PANEL_NOTE = "On every bar it's on, and on Blizzard's icon for it while the look is on the Cooldown Manager."
 local PANEL_AURAS = " The Buffs and Debuffs bars change once you're out of combat."
 local PANEL_OFF = " Show countdown numbers is off on this bar."
-local UNTESTED = " (experimental)"
 
 -- The preview's icon, in the middle of its tray, its cooldown starting
 -- again as it ends while the panel shows.
@@ -183,7 +182,7 @@ local function PanelFont(window, dialog, shade, Changed)
             ns.Bars:SetSpellLook(shade.name, "font", key ~= "look" and key or nil)
             Changed()
         end,
-        about = "This spell's countdown font: the Look page's, or one of its own. Click for the fonts." .. UNTESTED,
+        about = "This spell's countdown font: the Look page's, or one of its own. Click for the fonts.",
     })
 end
 
@@ -195,8 +194,7 @@ local function PanelSize(window, dialog, shade, Changed)
         ns.Bars:SetSpellLook(shade.name, "size", value)
         Changed()
     end)
-    window:Hint(own, "Gives this spell's countdown a size of its own, in place of Icon details' Size on the Look page."
-        .. UNTESTED)
+    window:Hint(own, "Gives this spell's countdown a size of its own, in place of Icon details' Size on the Look page.")
     local size = T:Slider(dialog, "", ns.COUNTDOWN_SIZE, 5, PANEL.width - 16 - PANEL.at - PANEL.own, function(value)
         if ns.SpellLook(shade.name) and ns.SpellLook(shade.name).size then
             ns.Bars:SetSpellLook(shade.name, "size", value)
@@ -212,7 +210,7 @@ local function PanelSize(window, dialog, shade, Changed)
     window:Hint(size, function()
         if not own:GetChecked() then return "Tick Its own first: until then it's Icon details' Size." end
         return "How big this spell's countdown is: 100% is about half the icon. In the middle it still moves clear of a"
-            .. " keybind." .. UNTESTED
+            .. " keybind."
     end)
     return own, size
 end
@@ -235,7 +233,7 @@ local function PanelIconSize(window, dialog, shade, Changed)
     end)
     window:Hint(own, function()
         if not B:OwnSizeUsable(shade.bar) then return PackedNote(shade.bar) end
-        return "Gives this icon a size of its own on " .. ns.BAR_NAMES[shade.bar] .. ", in place of the bar's Icon size." .. UNTESTED
+        return "Gives this icon a size of its own on " .. ns.BAR_NAMES[shade.bar] .. ", in place of the bar's Icon size."
     end)
     local size = T:Slider(dialog, "", ns.ICON_SIZE, 5, PANEL.width - 16 - PANEL.at - PANEL.own, function(value)
         if ns.OwnSize(shade.bar, shade.name) then
@@ -252,7 +250,7 @@ local function PanelIconSize(window, dialog, shade, Changed)
     window:Hint(size, function()
         if not B:OwnSizeUsable(shade.bar) then return PackedNote(shade.bar) end
         if not own:GetChecked() then return "Tick Its own first: until then it's the bar's Icon size." end
-        return "How big this icon is: 100% is the bar's Icon size. The rest of the bar makes room for it." .. UNTESTED
+        return "How big this icon is: 100% is the bar's Icon size. The rest of the bar makes room for it."
     end)
     return own, size
 end
@@ -293,7 +291,7 @@ local function PanelTicks(window, dialog, shade, Changed)
         B:SetHandOthers(shade.bar, shade.name, self:GetChecked())
         Changed()
     end)
-    window:Hint(others, "Only lights for an enchant without its own icon on this bar, so a stone there can't hide a missing oil.")
+    window:Hint(others, "Only lights for an oil, a sharpening stone or a scroll's imbue, never your own Spellstone, poison or shaman weapon, so those can't hide a missing oil.")
     return glow, only, ticks, active, reagents, others
 end
 
@@ -353,7 +351,7 @@ local function WarnNote(bar, name, seconds)
     else
         text = text .. ". Tick Show missing " .. (buff and "buffs" or "debuffs") .. " greyed for a red edge round its icon too"
     end
-    return text .. "." .. UNTESTED
+    return text .. "."
 end
 
 local function PanelWarn(window, dialog, shade)
@@ -656,16 +654,16 @@ function ns.BuildBarPage(window, page, width)
         local name = ns.BAR_NAMES[state.bar]
         -- Buffs or debuffs added before they were turned away, which show
         -- there for no one, go too (B:Leftovers): said only while there are any.
-        local also, untested = "", ""
+        local also = ""
         if #B:Leftovers(state.bar) > 0 then
-            also, untested = ", and buffs or debuffs added to it that can't show there", " (experimental)"
+            also = ", and buffs or debuffs added to it that can't show there"
         end
         -- So do your pet's abilities hidden till their pet is out (B:Waiting).
         if #B:Waiting(state.bar) > 0 then
             also = also .. ", and pet abilities hidden until their pet is out"
         end
-        return state.armed == state.bar and ("Click again to take every icon off " .. name .. also .. "." .. untested)
-            or ("Take every icon off " .. name .. also .. ". It asks for a second click." .. untested)
+        return state.armed == state.bar and ("Click again to take every icon off " .. name .. also .. ".")
+            or ("Take every icon off " .. name .. also .. ". It asks for a second click.")
     end)
     page.clear = clear
 
@@ -993,7 +991,7 @@ function ns.BuildBarPage(window, page, width)
             return "Tick Show missing debuffs greyed first: this keeps those greyed spots with no target."
         end
         return "Missing debuffs stay greyed in their spots with no enemy targeted, instead of hiding."
-            .. " Out of combat Fade or Hide still applies. (experimental)"
+            .. " Out of combat Fade or Hide still applies."
     end, 0)
     -- The Buffs bar only: each buff only while it's not on you, under the
     -- sliders. Not on the Debuffs bar: your target's debuffs change in a
@@ -1190,7 +1188,7 @@ function ns.BuildBarPage(window, page, width)
     onCooldown.part = cooldownPart
     -- And under that, the cooldown bars only: the global cooldown's swipe on
     -- the icons after each cast, each bar its own, off unless ticked.
-    local showGCD = Option("Show the global cooldown (experimental)", "showGCD", -173,
+    local showGCD = Option("Show the global cooldown", "showGCD", -173,
         "After each cast, this bar's icons show the global cooldown's swipe, like your action bars."
             .. " An icon cooling down keeps showing its own cooldown.", 0)
     -- And beside it, the cooldown bars only (a player's report: Nightfall
@@ -1310,7 +1308,7 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end)
     ticked:SetPoint("LEFT", showRanks, "RIGHT", 14, 0)
-    window:Hint(ticked, "Lists only the spells on this bar, with their own ticks. (experimental)")
+    window:Hint(ticked, "Lists only the spells on this bar, with their own ticks.")
     page.showItems, page.showRanks, page.ticked = showItems, showRanks, ticked
     -- How the list shows ranks, on a line of its own under the search: too
     -- long to fit beside it with the two ticks.
@@ -1385,8 +1383,7 @@ function ns.BuildBarPage(window, page, width)
             local family = (entry and entry.kind == "family"
                 and " One icon for the best one you carry, switching as your bags change." or "")
                 .. (entry and entry.kind == "shards" and " It counts how many you carry." or "")
-                .. (entry and entry.hand and " It lights while that hand has an oil, stone, poison or imbue on, and shows which."
-                    .. UNTESTED or "")
+                .. (entry and entry.hand and " It lights while that hand has an oil, stone, poison or imbue on, and shows which." or "")
                 .. trinket
                 .. (row.spell and B:CarryNote(row.spell) or "")
             local on = not ns.AURA_BARS[state.bar] and row.spell and B:Find(row.spell)
