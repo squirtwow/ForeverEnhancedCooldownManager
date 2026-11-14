@@ -10,6 +10,19 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.13",
+        sections = {
+            { "Changed", {
+                "Options no longer say experimental.",
+            } },
+            { "Fixed", {
+                "Wand shots no longer flash up icons hidden while ready.",
+                "Spellstone and an oil on one weapon are both read reliably.",
+                "Others only now ignores your own stones, poisons and shaman weapons.",
+            } },
+        },
+    },
+    {
         version = "1.10.12",
         sections = {
             { "Added", {
