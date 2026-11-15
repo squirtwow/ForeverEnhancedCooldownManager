@@ -1740,6 +1740,78 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Key press glow: each frame only asks the buttons watched, and sets nothing until one changes -------
+-- (Squirt's yes, 15 Nov 2026.) Off (the default), no button is looked up as
+-- the keys are worked out and nothing runs every frame for it. Ticked, the
+-- addon's own frame asks each watched button its state once a frame, in a
+-- fight too, and the border is made and shown only as a key goes down,
+-- hidden only as it comes up.
+
+do
+    local ns = Start({ notesSeen = "dev", useBars = true, keybinds = true })
+    local B, K = ns.Bars, ns.Keybinds
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "cd")
+    local moon = B:Get("cd").icons[1]
+    actionSlots[1], keyOf.ACTIONBUTTON1 = { "spell", 8924 }, "1"
+    actionSlots[2], keyOf.ACTIONBUTTON2 = { "spell", 5176 }, "2"
+    local states, asked = {}, 0
+    local function Button()
+        local button = setmetatable({}, { __index = function(_, key)
+            if key == "GetButtonState" then
+                return function(self)
+                    asked = asked + 1
+                    return states[self]
+                end
+            end
+        end, __newindex = function(_, key) error("the addon wrote " .. tostring(key) .. " on a bar button") end })
+        states[button] = "NORMAL"
+        return button
+    end
+    _G.ActionButton1, _G.ActionButton2 = Button(), Button()
+    K:Update()
+    NextFrame(ns)
+    -- Off: the keys worked out with no button looked up; nothing every frame.
+    local _, addon = Measure(function() K:Update() end)
+    Equal(Counts(addon, "ButtonsForEntry", "FindButtons", "Watch") .. " " .. tostring(B.pressDriver) .. " " .. asked, "0 0 0 nil 0",
+        "off (the default): no button looked up as the keys are read, no frame made for it, none asked")
+    ns.Set("keyPressGlow", true)
+    K:Update()
+    B:ApplyKeyPress()
+    local driver = B.pressDriver
+    local run = S[driver].scripts.OnUpdate
+    local function Second() for _ = 1, 60 do run(driver, 1 / 60) end end
+    lockdown = true
+    local game
+    game, addon = Measure(Second)
+    io.write("Key press glow (2 icons watched):\n")
+    Note("a second of frames, nothing held", game)
+    local SETS = { "CreateTexture", "SetColorTexture", "SetShown", "Show", "Hide", "SetPoint", "ClearAllPoints", "SetHeight", "SetWidth" }
+    Equal(asked .. " " .. Counts(game, table.unpack(SETS)) .. " " .. Counts(addon, "Held", "Light"), "120 0 0 0 0 0 0 0 0 0 120 120",
+        "a second, nothing held, in a fight: each button asked once a frame (each icon's once), nothing made or set")
+    states[ActionButton1] = "PUSHED"
+    asked = 0
+    game = Measure(Second)
+    Note("a second of frames, a key held down", game)
+    Equal(asked .. " " .. Counts(game, table.unpack(SETS)), "120 4 4 4 0 4 8 4 2 2",
+        "held: the border made once (four sides, each placed), shown once, nothing set again while it stays held")
+    game = Measure(Second)
+    Equal(Counts(game, table.unpack(SETS)), "0 0 0 0 0 0 0 0 0", "still held: nothing set")
+    states[ActionButton1] = "NORMAL"
+    game = Measure(Second)
+    Note("a second of frames, the key let go", game)
+    Equal(Counts(game, table.unpack(SETS)) .. " " .. tostring(moon.pressLit), "0 0 4 0 0 0 0 0 0 false", "let go: hidden once, nothing else")
+    lockdown = false
+    -- Unticked: no OnUpdate at all, nothing asked.
+    ns.Set("keyPressGlow", false)
+    K:Update()
+    B:ApplyKeyPress()
+    asked = 0
+    Equal(tostring(S[driver].scripts.OnUpdate) .. " " .. asked, "nil 0", "unticked: the OnUpdate taken off")
+    _G.ActionButton1, _G.ActionButton2 = nil, nil
+    Equal(#printed, 0, "no errors")
+end
+
 -- Only show missing: your buffs read as they change, once a frame, never in a fight -------------------
 
 do
@@ -1915,6 +1987,96 @@ do
     share = .8 * (1 - math.cos(4.1 % 2.4 / 2.4 * 2 * math.pi)) / 2
     Equal(("%.3f"):format(S[w.help].border[3]), ("%.3f"):format(from[3] + (teal[3] - from[3]) * share), "a new accent: followed at once")
     w:Hide()
+    Equal(#printed, 0, "no errors")
+end
+
+-- Show the trap I last laid: your casts heard only while it's ticked ---------------------------------
+-- (Squirt, 15 Nov 2026.) With no trap icon ticked your casts aren't heard
+-- at all. Ticked, a cast of anything but a trap only asks whether its spell
+-- ID is secret, and sets nothing; so does a secret ID or the trap laid last
+-- again. A new trap laid sets the ticked icon's picture and name once each,
+-- at once, and nothing else.
+
+do
+    local ns = Start({ notesSeen = "dev", useBars = true })
+    local B = ns.Bars
+    table.insert(book[1].items, { name = "Freezing Trap", subName = "Rank 1", spellID = 1499, iconID = 135834 })
+    table.insert(book[1].items, { name = "Frost Trap", subName = "Rank 1", spellID = 13809, iconID = 135840 })
+    ns.Spells:Stale()
+    for _, name in ipairs({ "Moonfire", "Freezing Trap", "Frost Trap" }) do B:Assign(name, "cd") end
+    NextFrame(ns)
+    local function Lay(id) Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3-0-0-0-0-0", id) end
+    io.write("Show the trap I last laid (Moonfire and two traps on Cooldowns, one ticked):\n")
+    Equal(tostring(S[B.driver].events.UNIT_SPELLCAST_SUCCEEDED), "nil", "none ticked: your casts not heard")
+    B:SetLastTrap("cd", "Freezing Trap", true)
+    NextFrame(ns)
+    local trap = B:Get("cd").icons[2]
+    local game = Measure(function()
+        Lay(5176)
+        NextFrame(ns)
+    end)
+    Note("a cast of Wrath, and the next frame", game)
+    Equal(tostring(S[B.driver].events.UNIT_SPELLCAST_SUCCEEDED) .. " " .. Counts(game, "issecretvalue") .. " " .. game.all, "true 1 1",
+        "ticked: casts heard; one that isn't a trap only asks whether its ID is secret, and sets nothing")
+    game = Measure(function() Lay(SECRET) end)
+    Equal(Counts(game, "issecretvalue") .. " " .. game.all, "1 1", "a secret spell ID: asked, nothing else")
+    game = Measure(function() Lay(13809) end)
+    Note("Frost Trap laid", game)
+    Equal(Counts(game, "SetTexture", "SetText") .. " " .. game.all .. " " .. S[trap.texture].texture .. " " .. S[trap.label].text,
+        "1 1 3 135840 Frost Trap", "a new trap laid: the ticked icon's picture and name set once each, nothing else")
+    game = Measure(function() Lay(13809) end)
+    Equal(game.all, 1, "the same trap laid again: nothing set")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Count ticks on a cooldown icon: nothing per frame, nothing heard -----------------------------------
+-- (Squirt, 14 Nov 2026.) The game draws the count in a slot of the bar's
+-- own debuff container, so ticked or not, frames going by ask the game
+-- nothing more, in a fight or out, and no event is heard for it. With none
+-- ticked no count slot is made. In a fight a relayout only moves the
+-- count's anchor (the addon's own frame), never the game's icon.
+
+do
+    local ns = Start({ notesSeen = "dev", useBars = true })
+    local B = ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "cd")
+    B:SetOption("cd", "showAuras", true)
+    NextFrame(ns)
+    local cd = B:Get("cd")
+    local function Events()
+        local list = {}
+        for event in pairs(S[B.driver].events) do list[#list + 1] = event end
+        table.sort(list)
+        return table.concat(list, ",")
+    end
+    local function Relayout()
+        lockdown = true
+        local game = Measure(function() ns.IconAuras:Layout(cd, ns.BarData("cd")) end)
+        lockdown = false
+        return game
+    end
+    io.write("Count ticks (Moonfire and Wrath on Cooldowns, buff and debuff times shown):\n")
+    local heard, idle, fight = Events(), Measure(function() Frames(ns, 10, .1) end), Relayout()
+    Note("ten frames, none counting", idle)
+    Equal(tostring(cd.tickSlots), "nil", "none ticked: no count slot made")
+    B:SetCountTicks("cd", "Moonfire", true)
+    NextFrame(ns)
+    local counting = Measure(function() Frames(ns, 10, .1) end)
+    Note("ten frames, Moonfire counting", counting)
+    lockdown = true
+    Fire("PLAYER_REGEN_DISABLED")
+    local inFight = Measure(function() Frames(ns, 10, .1) end)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    local moved = Relayout()
+    Note("a relayout in a fight, Moonfire counting", moved)
+    local asked = { "InCombatLockdown", "IsShown", "ClearAllPoints", "SetAllPoints", "SetFontObject", "SetTextColor", "SetShown" }
+    Equal(table.concat({ tostring(#cd.tickSlots), tostring(Events() == heard), tostring(counting.all == idle.all),
+        tostring(inFight.all <= idle.all), tostring(moved.all - fight.all), Counts(moved, table.unpack(asked)) .. " / "
+        .. Counts(fight, table.unpack(asked)) }, " "), "1 true true true 4 5 3 3 3 0 0 0 / 4 2 2 2 0 0 0",
+        "one count slot; nothing more heard; frames ask nothing more, in a fight or out; a relayout in a fight asks only one"
+        .. " more of each: whether it's one, Moonfire's icon shown, the count's anchor moved there; the game's icon never touched")
     Equal(#printed, 0, "no errors")
 end
 

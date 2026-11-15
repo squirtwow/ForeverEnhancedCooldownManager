@@ -6,8 +6,9 @@
 -- slot for an aura on you and one for a debuff on your target, laid over it.
 -- The container is only told which spell IDs to watch out of combat; a change
 -- made in a fight waits for it to end. Nothing of Blizzard's is touched. Off
--- until a bar's "Show buff and debuff time" is ticked. The same way, a
--- spell's icon can glow for a proc the game doesn't light (Glow for more
+-- until a bar's "Show buff and debuff time" is ticked. With it, a spell's
+-- icon can count its debuff's ticks too (Count ticks, below). The same way,
+-- a spell's icon can glow for a proc the game doesn't light (Glow for more
 -- procs, below).
 local _, ns = ...
 
@@ -182,6 +183,147 @@ local function IDs(icon)
     return set, sorted
 end
 
+-- Count ticks -------------------------------------------------------------------------
+-- (Squirt, 14 Nov 2026, in the Shaman preset review: Flame Shock's ticks on
+-- its Cooldowns icon, as the preset hides the Debuffs bar.) A spell on a
+-- Cooldowns or Utility bar (an extra one too) ticked Count ticks in its own
+-- panel counts its debuff's ticks on its icon while the icon shows that
+-- debuff's time on your target. The debuff's time is secret in a fight, so
+-- the game counts, as on the Debuffs bar (Buffs.lua TickCount): one more
+-- slot on the bar's debuff container for each such icon (k1, k2 ...), told
+-- the same spells as the icon's debuff time, so it shows just while that
+-- does. Its icon holds only the count: the debuff's time so far over its
+-- pace, through a rule set out of a fight. Where it sits, its size and
+-- colour are the bar's own tick count settings (its page). Nothing is made
+-- for a bar with none ticked, and none is told a spell while Show buff and
+-- debuff time is off.
+local TARGET = SIDES[2] -- (the debuff side)
+
+-- The icons counting now, in order, each name once: its name, its pace and
+-- its debuff's spell IDs (as IDs gives them, and joined for comparing).
+local function Counted(bar)
+    local counted, seen, B = {}, {}, ns.Bars
+    for i = 1, bar.count or 0 do
+        local icon = bar.icons[i]
+        local pace = icon and not seen[icon.name] and B:CountsTicks(bar.key, icon.name) and B:TickPace(icon.name)
+        local ids, sorted
+        if pace then ids, sorted = IDs(icon) end
+        if ids then
+            seen[icon.name] = true
+            counted[#counted + 1] = { name = icon.name, pace = pace, ids = ids, sorted = table.concat(sorted, ",") }
+        end
+    end
+    return counted
+end
+
+-- A count slot's icon, made as the slot is added (and never later: Buffs.lua
+-- F.Add and F.Guard): over its anchor, taking no mouse, holding only the
+-- count, on a layer above the debuff time's icon, its sweep and its numbers.
+local function TickLook(slot)
+    return function(button)
+        button:EnableMouse(false)
+        button:SetAllPoints(slot.anchor)
+        local top = CreateFrame("Frame", nil, button)
+        top:SetAllPoints()
+        top:SetFrameLevel(button:GetFrameLevel() + 5)
+        slot.ticks = ns.BuffBar.TickCount(button, top)
+    end
+end
+
+-- Count slot i ("k1", "k2" ...), made the first time it's wanted: its anchor
+-- (the addon's own frame, out of sight until placed), then the slot,
+-- switched off until it's told its spell.
+local function TickSlot(bar, i)
+    if bar.tickSlots[i] then return bar.tickSlots[i] end
+    local slot = { key = "k" .. i }
+    local anchor = CreateFrame("Frame", nil, bar)
+    anchor:EnableMouse(false)
+    anchor:SetSize(1, 1)
+    anchor:SetPoint("CENTER", UIParent, "BOTTOMLEFT", AWAY, AWAY)
+    slot.anchor = anchor
+    bar.tickSlots[i] = slot
+    local container = bar.auraContainers[TARGET.key]
+    ns.BuffBar.Add(container, "AddAuraSlot", slot.key, TARGET.filter, { initializeFrame = ns.BuffBar.Guard(TickLook(slot)) })
+    container:SetAuraSlotEnabled(slot.key, false)
+    return slot
+end
+
+-- Tells the count slots which spell each counts (on: the bar shows buff and
+-- debuff times), making what's needed. Never in a fight (A:Apply); only
+-- what changed is sent.
+local function ApplyTicks(bar, on)
+    local counted = on and Counted(bar) or {}
+    if not bar.tickSlots and #counted == 0 then return end
+    bar.tickSlots, bar.tickApplied = bar.tickSlots or {}, bar.tickApplied or {}
+    for i = 1, #counted do TickSlot(bar, i) end
+    local container = bar.auraContainers[TARGET.key]
+    for i, slot in ipairs(bar.tickSlots) do
+        local want = counted[i]
+        local signature = want and (want.name .. ":" .. want.sorted) or ""
+        if bar.tickApplied[i] ~= signature then
+            bar.tickApplied[i] = signature
+            if want then
+                container:SetAuraSlotCandidateFilters(slot.key, { includeSpellIDs = want.ids, isFromPlayerOrPlayerPet = true })
+                container:SetAuraSlotEnabled(slot.key, true)
+            else
+                container:SetAuraSlotEnabled(slot.key, false)
+            end
+        end
+        slot.name, slot.pace = want and want.name or nil, want and want.pace or nil
+    end
+end
+
+-- Each count slot over the icon of the spell it was told about, found by
+-- name, as the debuff times are (the addon's own frames: fine in a fight).
+-- Its count set going at its pace and drawn as the bar's page says out of
+-- a fight only, as the icons are the game's: one changed in a fight waits
+-- for it to end.
+local function PlaceTicks(bar, data)
+    if not bar.tickSlots then return end
+    local fight, base = InCombatLockdown(), ns.IconSize(data)
+    for _, slot in ipairs(bar.tickSlots) do
+        local target
+        for j = 1, slot.name and bar.count or 0 do
+            local icon = bar.icons[j]
+            if icon and icon.name == slot.name and icon:IsShown() then
+                target = icon
+                break
+            end
+        end
+        local anchor = slot.anchor
+        anchor:ClearAllPoints()
+        if target then
+            anchor:SetAllPoints(target)
+        else
+            anchor:SetSize(1, 1)
+            anchor:SetPoint("CENTER", UIParent, "BOTTOMLEFT", AWAY, AWAY)
+        end
+        -- Its numbers sized for the icon it sits over (its own size, else the bar's).
+        local pace, size = target and slot.pace or nil, target and target.size or base
+        local drawn = pace and (pace .. ":" .. size) or ""
+        if slot.ticks and fight then
+            if slot.drawn ~= drawn then bar.auraPending = true end
+        elseif slot.ticks then
+            ns.BuffBar.SetCount(slot.ticks, pace, nil, data, size)
+            slot.drawn = drawn
+        end
+    end
+end
+
+-- For /ccm debug: an icon's Count ticks, while ticked: its pace and its
+-- count's slot, or why it has none.
+function A:TickReport(bar, name)
+    local B = ns.Bars
+    if not (bar and B:CountsTicks(bar.key, name)) then return "" end
+    local how = not self:On(bar) and "Show buff and debuff time is off" or "no slot yet"
+    for _, slot in ipairs(self:On(bar) and bar.tickSlots or {}) do
+        if slot.name == name then
+            how = slot.ticks and ("slot " .. slot.key .. ", rule " .. tostring(slot.ticks.rule)) or "the game can't draw it"
+        end
+    end
+    return " | counts ticks every " .. tostring(B:TickPace(name)) .. " s: " .. how .. (bar.auraPending and ", waiting for the fight to end" or "")
+end
+
 -- Each slot sits over the icon of the spell it was told about, found by name,
 -- so icons moving in a fight (an item running out) never put a time on the
 -- wrong spell. The addon's own frames only: fine in combat. Its numbers
@@ -224,6 +366,8 @@ local function Place(bar, data)
             end
         end
     end
+    -- And the counts of the icons counting their ticks.
+    PlaceTicks(bar, data)
 end
 
 -- Tells the containers which spell goes in which place. Never in combat;
@@ -257,6 +401,8 @@ function A:Apply(bar)
             end
         end
     end
+    -- And which spell each count slot counts (Count ticks).
+    ApplyTicks(bar, on)
     Place(bar, bar.data)
 end
 

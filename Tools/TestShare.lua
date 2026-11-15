@@ -1159,7 +1159,7 @@ function H.Sane(ns, shared)
     local function ID(v) return type(v) == "number" and v == math.floor(v) and v >= 1 and v <= 2147483647 end
     local known = { lists = true, forms = true, swap = true, joins = true, only = true, pick = true, style = true, added = true,
         looks = true, warns = true, setup = true, count = true, picks = true, skipped = true, name = true, version = true,
-        extras = true, sizes = true }
+        extras = true, sizes = true, traps = true, options = true, glowSize = true }
     for k in pairs(shared) do
         if not known[k] then return "an unknown key " .. tostring(k) end
     end
@@ -1272,12 +1272,14 @@ function H.Sane(ns, shared)
     local fonts, looks = {}, 0
     for _, key in ipairs(ns.FONT_KEYS) do fonts[key] = true end
     for name, look in pairs(shared.looks) do
-        if not on[name] or type(look) ~= "table" or not (look.font or look.size) then return "a look " .. tostring(name) end
+        if not on[name] or type(look) ~= "table" or not (look.font or look.size or look.reagents) then return "a look " .. tostring(name) end
         for field, v in pairs(look) do
             if field == "font" then
                 if not fonts[v] then return "a look's font" end
             elseif field == "size" then
                 if not (type(v) == "number" and v == math.floor(v) and v >= 50 and v <= 150) then return "a look's size" end
+            elseif field == "reagents" then
+                if v ~= true then return "a look's reagents" end
             else
                 return "a look's " .. tostring(field)
             end
@@ -1314,6 +1316,51 @@ function H.Sane(ns, shared)
             end
         end
     end
+    -- Show the trap I last laid: a Cooldowns or Utility bar it has (an
+    -- extra one too), traps on that bar's lists (a form's too), true each.
+    if type(shared.traps) ~= "table" then return "traps" end
+    local trapNames = { ["Freezing Trap"] = true, ["Immolation Trap"] = true, ["Frost Trap"] = true, ["Explosive Trap"] = true }
+    for key, set in pairs(shared.traps) do
+        if ns.AURA_BARS[key] or not shared.lists[key] or type(set) ~= "table" then return "traps on " .. tostring(key) end
+        local listed = {}
+        for _, v in ipairs(shared.lists[key]) do listed[v] = true end
+        for _, lists in pairs(shared.forms) do
+            for _, v in ipairs(lists[key] or {}) do listed[v] = true end
+        end
+        for name, v in pairs(set) do
+            if v ~= true or not listed[name] or not trapNames[name:match("^[^@#]+")] then return "a trap " .. tostring(name) end
+        end
+    end
+    -- Each entry's own ticks: only the six carried, each on a bar of a kind
+    -- that has it, names on that bar's lists (a form's too), true each;
+    -- Count ticks only for one that ticks, Others only for a hand's enchant.
+    if type(shared.options) ~= "table" then return "options" end
+    local kinds = { countTicks = { debuff = true, cd = true, util = true }, glowMissing = { buff = true, debuff = true },
+        glowActive = { buff = true }, handOthers = { buff = true }, dimUntilWarn = { buff = true, debuff = true },
+        missingPicks = { buff = true, debuff = true } }
+    for field, sets in pairs(shared.options) do
+        if not kinds[field] or type(sets) ~= "table" then return "an option " .. tostring(field) end
+        for key, set in pairs(sets) do
+            local kind = type(key) == "string" and key:match("^(%a+)%d?$")
+            if not (kind and kinds[field][kind]) or not shared.lists[key] or type(set) ~= "table" then
+                return field .. " on " .. tostring(key)
+            end
+            local listed = {}
+            for _, v in ipairs(shared.lists[key]) do listed[v] = true end
+            for _, lists in pairs(shared.forms) do
+                for _, v in ipairs(lists[key] or {}) do listed[v] = true end
+            end
+            for name, v in pairs(set) do
+                if v ~= true or not listed[name] then return field .. " " .. tostring(name) end
+                if field == "countTicks" and not ns.TICK_PERIODS[name:match("^[^@#]+")] then return "ticks counted for " .. name end
+                if field == "handOthers" and name ~= "hand:main" and name ~= "hand:off" then return "others only on " .. name end
+            end
+        end
+    end
+    local glow = shared.glowSize
+    if glow ~= nil and not (type(glow) == "number" and glow == math.floor(glow) and glow >= 50 and glow <= 150 and glow ~= 100) then
+        return "a glow size"
+    end
     local setup = shared.setup
     if setup == nil then return "" end
     local share = {}
@@ -1329,6 +1376,10 @@ function H.Sane(ns, shared)
             if not fields[field] then return "a bar setting " .. tostring(field) end
             if (field == "x" or field == "y") and not (type(v) == "number" and math.abs(v) < 4000) then return "a spot" end
             if field == "size" and not (type(v) == "number" and v >= 20 and v <= 64) then return "a size" end
+            -- Glow for more procs: a cooldown bar's, true or false.
+            if field == "glowProcs" and (type(v) ~= "boolean" or key:find("^buff") or key:find("^debuff")) then
+                return "glow for more procs on " .. key
+            end
         end
     end
     local layoutKeys = { on = true, preset = true, base = true, left = true, right = true, gap = true, spacing = true,
@@ -1358,6 +1409,20 @@ function H.Sane(ns, shared)
     for _, part in ipairs(ns.SHARE_PARTS) do known[part.key] = true end
     for key, v in pairs(setup.parts or {}) do
         if not known[key] or v ~= true then return "a part " .. tostring(key) end
+    end
+    -- What a string from its version says nothing of (yours stay): settings
+    -- strings carry, true each; or nil.
+    if setup.keep ~= nil then
+        if type(setup.keep) ~= "table" then return "keep" end
+        for key, v in pairs(setup.keep.look or {}) do
+            if not share[key] or v ~= true then return "a look setting kept " .. tostring(key) end
+        end
+        for key, bar in pairs(setup.keep.bars or {}) do
+            if not ns.BAR_NAMES[key] or type(bar) ~= "table" then return "a bar kept " .. tostring(key) end
+            for field, v in pairs(bar) do
+                if not fields[field] or v ~= true then return "a bar setting kept " .. tostring(field) end
+            end
+        end
     end
     return ""
 end
@@ -1423,8 +1488,8 @@ H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "listItems", "listRanks", "
     "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew",
     "keybindsPlain" }
 -- Every part a string can switch on, in order, with its letter.
-H.PARTS = "useBars=u prdCombo=c prdEnergy=e prdText=t keybinds=k castBar=b swingTimer=s castBatch=h castTicks=m castLatency=l"
-    .. " pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q"
+H.PARTS = "useBars=u prdCombo=c prdEnergy=e prdText=t keybinds=k keyPressGlow=g castBar=b swingTimer=s castBatch=h castTicks=m"
+    .. " castLatency=l pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q"
 
 -- Every setting is either shared or kept out, on purpose -------------------------------------------
 -- A setting added later must be put on one side or the other.
@@ -1461,8 +1526,22 @@ do
     end
     Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
         .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,showGCD,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,"
-        .. "tickFrom,tickEdge,tickCustom",
+        .. "tickFrom,tickEdge,tickCustom,glowProcs",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
+    -- Every bar setting a bar keeps is shared (ns.BarData), Glow for more
+    -- procs too since 15 Nov 2026: none left behind.
+    local data, kept = ns.BarData("cd"), {}
+    for field in pairs(data) do
+        local found = false
+        for _, f in ipairs(ns.SHARE_BAR_FIELDS) do found = found or f == field end
+        if not found then kept[#kept + 1] = field end
+    end
+    table.sort(kept)
+    Equal(table.concat(kept, ","), "", "every setting a bar keeps goes with the look and layout")
+    -- Glow for more procs: a plain true or false.
+    local procChecks = {}
+    for _, value in ipairs({ true, false, "true", 1 }) do procChecks[#procChecks + 1] = tostring(barChecks.glowProcs(value)) end
+    Equal(table.concat(procChecks, " "), "true true false false", "Glow for more procs is true or false")
     -- Show the global cooldown: a plain true or false, false left out.
     local gcdChecks = {}
     for _, value in ipairs({ true, false, "true", 1 }) do gcdChecks[#gcdChecks + 1] = tostring(barChecks.showGCD(value)) end
@@ -1846,8 +1925,8 @@ do
     -- Share and Import.
     ns.UseProfile("Mine")
     local text = P.Export()
-    -- Dim until Warn at stays with the profile, never in a string (as Glow
-    -- while active): ticked, the very same string; an import has none.
+    -- Dim until Warn at goes with the profile too (d, since 15 Nov 2026):
+    -- ticked, the string carries it; an import from one without has none.
     B:SetDimUntilWarn("debuff", "Moonfire", true)
     local dimmed = P.Export()
     local shared = P.Read(text)
@@ -1859,9 +1938,14 @@ do
         .. " " .. H.Text(db.profiles.Mine.warnAt), "true Theirs " .. MINE .. " 600 " .. MINE,
         "imported without its look: the new profile has them, yours as it was")
     Equal(tostring(dimmed == text) .. " " .. tostring(B:DimsUntilWarn("debuff", "Moonfire")) .. " "
-        .. tostring(db.profiles.Mine.dimUntilWarn.debuff.Moonfire), "true false true",
-        "Dim until Warn at: the same string with it ticked; imported, none; still ticked in yours")
+        .. tostring(db.profiles.Mine.dimUntilWarn.debuff.Moonfire), "false false true",
+        "Dim until Warn at: a string of its own with it ticked; imported from the one without, none; still ticked in yours")
     Equal(P.Export(), text, "and it shares the very same string back")
+    local fromDimmed = P.Read(dimmed)
+    P.Import("Dimmed", fromDimmed, false)
+    Equal(H.Text(fromDimmed.options.dimUntilWarn) .. " " .. fromDimmed.skipped .. " " .. tostring(B:DimsUntilWarn("debuff", "Moonfire"))
+        .. " " .. tostring(P.Export() == dimmed), '{["debuff"]={["Moonfire"]=true}} 0 true true',
+        "the string with it ticked: imported, ticked in the new profile too, the same string back")
     P.Import("Theirs too", shared, true)
     Equal(H.Text(db.profiles["Theirs too"].warnAt), MINE, "with its look too")
     local function Lists() return { cd = {}, util = {}, buff = { "Thorns" }, debuff = { "Moonfire" } } end
@@ -1877,6 +1961,427 @@ do
     Equal(H.Sane(ns, wrong) .. "|" .. wrong.skipped .. " " .. H.Text(wrong.warns), "|1 {}", "not a table: left out, and counted")
     Equal(#printed, 0, "no errors")
 end
+
+-- Show the trap I last laid in profiles and strings --------------------------------------------------
+-- (Squirt, 15 Nov 2026: "thatll need to be enabled for the traps to swap",
+-- of the Hunter preset, which goes out as a string.) A trap's tick on a
+-- Cooldowns or Utility bar goes with the profile (bar -> name -> true):
+-- kept at load only for a cooldown bar's entries on its lists, copied with
+-- Copy sharing nothing, and carried in shared strings (r): out and back
+-- into a new profile, said in what a string holds; unticked, a string has
+-- none; odd ones in a string left out and counted.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local saved = { notesSeen = "dev", helpSeen = true, useBars = true, chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Freezing Trap", "Moonfire" }, util = { "Frost Trap" }, buff = {}, debuff = { "Frost Trap" },
+            lastTrap = { cd = { ["Freezing Trap"] = true, Moonfire = "yes", Gone = true }, debuff = { ["Frost Trap"] = true } } },
+        Old = { cd = { "Freezing Trap" }, util = {}, buff = {}, debuff = {} } } }
+    local ns = Start(saved)
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    local MINE = '{["cd"]={["Freezing Trap"]=true}}'
+    Equal(ns.ProfileName() .. " " .. H.Text(db.profiles.Mine.lastTrap) .. " " .. tostring(db.profiles.Old.lastTrap),
+        "Mine " .. MINE .. " nil", "loaded: only a cooldown bar's entries on its lists, true each; a profile from before keeps no table")
+    -- Copy: the new profile has it, sharing nothing with yours.
+    ns.CopyProfile("Copy")
+    local copy, mine = db.profiles.Copy.lastTrap, db.profiles.Mine.lastTrap
+    Equal(ns.ProfileName() .. " " .. H.Text(copy) .. " " .. tostring(copy ~= mine and copy.cd ~= mine.cd), "Copy " .. MINE .. " true",
+        "Copy carries it, sharing nothing")
+    B:SetLastTrap("util", "Frost Trap", true)
+    Equal(H.Text(copy) .. " " .. H.Text(mine), '{["cd"]={["Freezing Trap"]=true},["util"]={["Frost Trap"]=true}} ' .. MINE,
+        "a tick on the copy leaves the profile it came from as it was")
+    -- In a string: unticked, none; ticked, carried, and said.
+    ns.UseProfile("Mine")
+    B:SetLastTrap("cd", "Freezing Trap", false)
+    local plain = P.Export()
+    B:SetLastTrap("cd", "Freezing Trap", true)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(table.concat({ H.Text(P.Read(plain).traps), tostring(plain == text), H.Text(shared.traps), H.Sane(ns, shared) .. "|" .. shared.skipped,
+        P.Describe(shared) }, " | "), "{} | false | " .. MINE .. " | |0 | Holds 4 bar entries, with the trap you last laid shown on 1 icon"
+        .. " and its look and layout.", "unticked: none in the string; ticked: carried, and said in what it holds")
+    -- Imported: the new profile has it ticked, as yours does, and shares the
+    -- same string back.
+    P.Import("Theirs", shared, true)
+    Equal(ns.ProfileName() .. " " .. H.Text(db.profiles.Theirs.lastTrap) .. " " .. tostring(B:ShowsLastTrap("cd", "Freezing Trap")) .. " "
+        .. H.Text(db.profiles.Mine.lastTrap) .. " " .. tostring(P.Export() == text), "Theirs " .. MINE .. " true " .. MINE .. " true",
+        "imported: ticked in the new profile too; yours as it was; the same string back")
+    -- Odd ones left out, each counted: a spell that isn't a trap, traps not
+    -- on that bar's lists, not true, the Debuffs bar's, a bar it hasn't.
+    -- Not a table: left out too.
+    local odd = P.Read(H.String({ l = { cd = { "Freezing Trap", "Moonfire" }, util = { "Frost Trap" }, buff = {}, debuff = { "Frost Trap" } },
+        r = { cd = { ["Freezing Trap"] = true, Moonfire = true, ["Immolation Trap"] = true, ["Explosive Trap@2"] = true },
+            util = { ["Frost Trap"] = "yes" }, debuff = { ["Frost Trap"] = true }, cd2 = { ["Freezing Trap"] = true } } }))
+    local none = P.Read(H.String({ l = { cd = { "Freezing Trap" }, util = {}, buff = {}, debuff = {} }, r = "odd" }))
+    Equal(H.Text(odd.traps) .. " " .. odd.skipped .. " " .. H.Sane(ns, odd) .. "| " .. H.Text(none.traps) .. " " .. none.skipped,
+        MINE .. " 6 | {} 1", "odd ones left out and counted; only Freezing Trap on Cooldowns kept")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Count ticks on a Cooldowns or Utility spell in profiles and strings -------------------------------
+-- (Squirt, 14 Nov 2026, in the Shaman preset review.) Kept with the profile
+-- as the Debuffs bar's Count ticks is (bar -> name -> true): at load only
+-- names on that bar's lists, true each; copied with Copy, sharing nothing;
+-- and, like the Debuffs bar's, carried in a shared string since 15 Nov 2026
+-- (k, Squirt's yes for the FECM Setups website): ticked, the string
+-- carries it and a profile made from one counts; unticked, it has none.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local saved = { notesSeen = "dev", helpSeen = true, useBars = true, chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Moonfire", "Wrath" }, util = {}, buff = {}, debuff = { "Moonfire" },
+            countTicks = { cd = { Moonfire = true, Wrath = "yes", Gone = true }, util = { Moonfire = true }, debuff = { Moonfire = true } } } } }
+    local ns = Start(saved)
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    local function Counting(profile)
+        local out = {}
+        for _, key in ipairs({ "cd", "util", "debuff" }) do
+            local set = profile.countTicks and profile.countTicks[key]
+            out[#out + 1] = key .. ":" .. (set and H.Text(set) or "none")
+        end
+        return table.concat(out, " ")
+    end
+    local MINE = 'cd:{["Moonfire"]=true} util:{} debuff:{["Moonfire"]=true}'
+    Equal(Counting(db.profiles.Mine) .. " | " .. tostring(B:CountsTicks("cd", "Moonfire")) .. " " .. tostring(B:CountsTicks("cd", "Wrath")),
+        MINE .. " | true false", "loaded: only names on that bar's lists, true each, as the Debuffs bar's")
+    -- Copy: the new profile counts too, sharing no table with yours.
+    ns.CopyProfile("Copy")
+    local copy, mine = db.profiles.Copy.countTicks, db.profiles.Mine.countTicks
+    Equal(ns.ProfileName() .. " " .. Counting(db.profiles.Copy) .. " " .. tostring(copy ~= mine and copy.cd ~= mine.cd),
+        "Copy " .. MINE .. " true", "Copy carries it, sharing nothing")
+    B:SetCountTicks("cd", "Moonfire", false)
+    Equal(tostring(copy.cd.Moonfire) .. " " .. tostring(mine.cd.Moonfire), "nil true", "unticked on the copy: yours as it was")
+    -- In a string: both bars' carried (k), said in what it holds.
+    ns.UseProfile("Mine")
+    local ticked = P.Export()
+    B:SetCountTicks("cd", "Moonfire", false)
+    B:SetCountTicks("debuff", "Moonfire", false)
+    local plain = P.Export()
+    B:SetCountTicks("cd", "Moonfire", true)
+    B:SetCountTicks("debuff", "Moonfire", true)
+    local shared = P.Read(ticked)
+    Equal(table.concat({ tostring(ticked == plain), H.Text(P.Read(plain).options.countTicks), H.Text(shared.options.countTicks),
+        H.Sane(ns, shared) .. "|" .. shared.skipped, P.Describe(shared) }, " | "), 'false | {} | {["cd"]={["Moonfire"]=true},'
+        .. '["debuff"]={["Moonfire"]=true}} | |0 | Holds 3 bar entries, with 2 icon options and its look and layout.',
+        "ticked: carried for both bars, and said in what it holds; unticked: none in the string")
+    P.Import("Theirs", shared, true)
+    local theirs = db.profiles.Theirs.countTicks
+    Equal(ns.ProfileName() .. " " .. tostring(B:CountsTicks("cd", "Moonfire")) .. " " .. tostring(B:CountsTicks("debuff", "Moonfire")) .. " "
+        .. tostring(B:CountsTicks("cd", "Wrath")) .. " | " .. H.Text({ cd = theirs.cd, debuff = theirs.debuff }) .. " | "
+        .. Counting(db.profiles.Mine) .. " | " .. tostring(P.Export() == ticked), 'Theirs true true false | {["cd"]={["Moonfire"]=true},'
+        .. '["debuff"]={["Moonfire"]=true}} | ' .. MINE .. " | true", "imported: both count in the new profile; yours as it was; the same"
+        .. " string back")
+    -- From before it, none; odd ones left out and counted: a spell with no
+    -- tick pace, a name not on that bar's lists, not true, the Buffs bar
+    -- (which counts none), a bar it hasn't; not a table.
+    local function Lists() return { cd = { "Moonfire", "Wrath" }, util = { "Rip" }, buff = { "Rejuvenation" }, debuff = { "Moonfire" } } end
+    local old = P.Read(H.String({ a = "1.10.12", l = Lists() }))
+    local odd = P.Read(H.String({ l = Lists(), k = { cd = { Moonfire = true, Wrath = true, Gone = true }, util = { Rip = "yes" },
+        debuff = { Moonfire = true }, buff = { Rejuvenation = true }, cd2 = { Moonfire = true } } }))
+    local wrong = P.Read(H.String({ l = Lists(), k = "Moonfire" }))
+    Equal(table.concat({ H.Text(old.options.countTicks) .. " " .. old.skipped, H.Text(odd.options.countTicks) .. " " .. odd.skipped
+        .. " " .. H.Sane(ns, odd), H.Text(wrong.options.countTicks) .. " " .. wrong.skipped }, " | "),
+        '{} 0 | {["cd"]={["Moonfire"]=true},["debuff"]={["Moonfire"]=true}} 5  | {} 1',
+        "from before it: none, nothing left out; odd ones left out and counted; not a table: left out")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Every icon option in strings ----------------------------------------------------------------------
+-- (Squirt, 15 Nov 2026: "yea add it", so a setup from the FECM Setups
+-- website looks and works as its screenshots.) Each entry's own ticks go
+-- with the profile under their letters (k Count ticks, o Glow when missing,
+-- v Glow while active, h Others only, d Dim until Warn at, e the entry a
+-- joined icon shows while none is up), and so does Glow size (s); with the
+-- look and layout, Glow for more procs and the tick count's look on the
+-- Cooldowns and Utility bars. All at once: out and back the same, said in
+-- a line, imported on another account with and without the look into new
+-- profiles, and shared back as the very same string. A string from before
+-- them reads and imports as it did. Odd ones are left out and counted: an
+-- option on a bar that hasn't it, a name not on its lists, a spell with no
+-- tick pace, Others only on anything but a hand's enchant, not true, a
+-- glow size out of range or of the wrong kind, a bar it hasn't.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local saved = { notesSeen = "dev", helpSeen = true, useBars = true, chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Moonfire", "Wrath", "Rip" }, util = { "Overpower", "Rake" },
+            buff = { "Thorns", "Mark of the Wild", "hand:main", "Clearcasting" }, debuff = { "Moonfire", "Insect Swarm", "Faerie Fire" },
+            joins = { buff = { ["Mark of the Wild"] = true }, debuff = { ["Insect Swarm"] = true } }, warnAt = { debuff = { Moonfire = 3 } },
+            spellLook = { Wrath = { reagents = true } }, swapForm = { cd = true }, forms = { [5] = { cd = { "Moonfire", "Lacerate" } } },
+            -- Lacerate is on Bear Form's Cooldowns list only: its tick goes too.
+            countTicks = { cd = { Lacerate = true } } } } }
+    local ns = Start(saved)
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    local FIELDS = { "countTicks", "glowMissing", "glowActive", "handOthers", "dimUntilWarn", "missingPicks" }
+    -- A profile's (or a read string's) own ticks, each set with something in it.
+    local function Options(profile)
+        local out = {}
+        for _, field in ipairs(FIELDS) do
+            local sets = {}
+            for key, set in pairs(type(profile[field]) == "table" and profile[field] or {}) do
+                if type(set) == "table" and next(set) then sets[key] = set end
+            end
+            if next(sets) then out[field] = sets end
+        end
+        return H.Text(out)
+    end
+    local set = { B:SetCountTicks("cd", "Moonfire", true), B:SetCountTicks("util", "Rake", true), B:SetCountTicks("debuff", "Moonfire", true),
+        B:SetGlowMissing("buff", "Thorns", true), B:SetGlowMissing("debuff", "Faerie Fire", true), B:SetGlowActive("buff", "Clearcasting", true),
+        B:SetHandOthers("buff", "hand:main", true), B:SetDimUntilWarn("debuff", "Moonfire", true), B:PickMissing("buff", 2),
+        B:PickMissing("debuff", 2) }
+    for i, v in ipairs(set) do set[i] = tostring(v) end
+    B:SetGlowActiveSize(130)
+    B:SetOption("cd", "glowProcs", true)
+    B:SetOption("cd", "tickAt", "BOTTOM")
+    B:SetOption("cd", "tickColour", "gold")
+    B:SetOption("util", "tickFrom", 0)
+    local want = Options(ns.ProfileLists())
+    Equal(table.concat(set, " ") .. " | " .. want, "true true true true true true true true true true | "
+        .. '{["countTicks"]={["cd"]={["Lacerate"]=true,["Moonfire"]=true},["debuff"]={["Moonfire"]=true},["util"]={["Rake"]=true}},'
+        .. '["dimUntilWarn"]={["debuff"]={["Moonfire"]=true}},["glowActive"]={["buff"]={["Clearcasting"]=true}},'
+        .. '["glowMissing"]={["buff"]={["Thorns"]=true},["debuff"]={["Faerie Fire"]=true}},["handOthers"]={["buff"]={["hand:main"]=true}},'
+        .. '["missingPicks"]={["buff"]={["Mark of the Wild"]=true},["debuff"]={["Insect Swarm"]=true}}}',
+        "every icon option ticked, each kept in the profile (Lacerate's on Bear Form's list)")
+
+    -- Out and back.
+    local text = P.Export()
+    local shared = P.Read(text)
+    local cd, util = shared.setup.bars.cd, shared.setup.bars.util
+    Equal(table.concat({ H.Sane(ns, shared) .. "|" .. shared.skipped, Options(shared.options), tostring(shared.glowSize),
+        H.Text(shared.looks), tostring(cd.glowProcs) .. " " .. tostring(util.glowProcs) .. " " .. tostring(cd.tickAt) .. " "
+        .. tostring(cd.tickColour) .. " " .. tostring(util.tickFrom), tostring(P.Export() == text) }, " | "),
+        "|0 | " .. want .. ' | 130 | {["Wrath"]={["reagents"]=true}} | true nil BOTTOM gold 0 | true',
+        "read back the same, nothing left out: every icon option, Glow size, Show reagent count, Glow for more procs and the tick"
+        .. " count's look on Cooldowns and Utility; the same string every time")
+    Equal(P.Describe(shared), "Holds 12 bar entries, with icons for 1 form, own countdowns for 1 spell, low-time warnings for 1 aura,"
+        .. " 11 icon options and its look and layout.", "said in one line, the icon options counted together")
+
+    -- A string from before them (made by 1.10.12): none, nothing left out,
+    -- and imported as it was, with or without its look.
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = { "Thorns", "Mark of the Wild" }, debuff = { "Moonfire" } } end
+    local old = P.Read(H.String({ a = "1.10.12", l = Lists(), j = { buff = { ["Mark of the Wild"] = true } }, t = { debuff = { Moonfire = 3 } },
+        g = { s = {}, b = { cd = { whenReady = "dim" } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. Options(old.options) .. " " .. tostring(old.glowSize) .. " " .. P.Describe(old),
+        "|0 {} nil Holds 4 bar entries, with low-time warnings for 1 aura and its look and layout.",
+        "a string from before them reads as it did: no icon options, no Glow size")
+    P.Import("Old", old, false)
+    local made = db.profiles.Old
+    Equal(table.concat({ ns.ProfileName(), Options(made), tostring(made.glowActiveSize), ns.GlowActiveSize(), H.Text(made.joins.buff),
+        H.Text(made.warnAt), tostring(B:CountsTicks("cd", "Moonfire")), tostring(B:GlowsMissing("buff", "Thorns")) }, " | "),
+        'Old | {} | nil | 100 | {["Mark of the Wild"]=true} | {["debuff"]={["Moonfire"]=3}} | false | false',
+        "imported: its joins and warnings as before, no icon option and the usual Glow size")
+    P.Import("Old look", old, true)
+    Equal(ns.BarData("cd").whenReady .. " " .. tostring(ns.BarData("cd").glowProcs) .. " " .. ns.BarData("cd").tickAt .. " "
+        .. ns.BarData("cd").tickColour .. " " .. ns.BarData("util").tickFrom .. " " .. Options(db.profiles["Old look"]),
+        "dim true BOTTOM gold 0 {}", "with its look: its own bar settings, the rest at their defaults, but Glow for more procs and"
+        .. " the tick count's look on Cooldowns and Utility stay yours (a string from before them says nothing of them), as before")
+
+    -- Odd ones: each left out and counted, the rest kept.
+    local function Odd() return { cd = { "Moonfire", "Wrath" }, util = { "Rake" }, buff = { "Thorns", "hand:main", "Clearcasting" },
+        debuff = { "Moonfire", "Faerie Fire" } } end
+    local odd = P.Read(H.String({ l = Odd(),
+        -- Wrath (no tick pace), Gone (not on the list), the Buffs bar (none), not a table: 4.
+        k = { cd = { Moonfire = true, Wrath = true, Gone = true }, buff = { Thorns = true }, util = "x" },
+        -- Cooldowns (none), not true: 2.
+        o = { cd = { Moonfire = true }, buff = { Thorns = 1 }, debuff = { ["Faerie Fire"] = true } },
+        -- Debuffs (none), Buffs 2 (it hasn't one): 2.
+        v = { debuff = { Moonfire = true }, buff = { Clearcasting = true }, buff2 = { Thorns = true } },
+        -- Thorns (not a hand's enchant), Off hand (not on the list): 2.
+        h = { buff = { Thorns = true, ["hand:main"] = true, ["hand:off"] = true } },
+        -- Cooldowns (none), a bar by number: 2.
+        d = { buff = { Thorns = true }, cd = { Moonfire = true }, [7] = { x = true } },
+        -- Not a table, a size out of range: 2.
+        e = "evil", s = 300 }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. Options(odd.options) .. " " .. tostring(odd.glowSize),
+        '|14 {["countTicks"]={["cd"]={["Moonfire"]=true}},["dimUntilWarn"]={["buff"]={["Thorns"]=true}},'
+        .. '["glowActive"]={["buff"]={["Clearcasting"]=true}},["glowMissing"]={["debuff"]={["Faerie Fire"]=true}},'
+        .. '["handOthers"]={["buff"]={["hand:main"]=true}}} nil', "odd ones left out and counted; only what can be kept")
+    P.Import("Odd", odd, false)
+    Equal(Options(db.profiles.Odd) .. " " .. tostring(B:CountsTicks("cd", "Wrath")) .. " " .. tostring(B:HandOthers("buff", "Thorns")),
+        Options(odd.options) .. " false false", "imported: only those kept")
+
+    -- Glow while active and Dim until Warn at on a weapon enchant's icon
+    -- (its spot is the addon's own: the panel greys both there): left out
+    -- and counted, on a hand's alone or with another enchant, or a named
+    -- enchant's (a rank's too); kept where a buff is joined in its icon, and
+    -- Dim until Warn at on the Debuffs bar as before.
+    local function Hands() return { cd = { "Moonfire" }, util = {}, debuff = { "Moonfire" },
+        buff = { "Thorns", "hand:main", "hand:off", "Rockbiter Weapon", "Windfury Weapon@2", "Mark of the Wild", "Firestone" } } end
+    local hands = P.Read(H.String({ l = Hands(),
+        j = { buff = { ["hand:main"] = true, ["Rockbiter Weapon"] = true, ["Mark of the Wild"] = true } },
+        t = { buff = { ["hand:main"] = 60, ["hand:off"] = 60, Firestone = 60 }, debuff = { Moonfire = 3 } },
+        -- The Off hand, Rockbiter and Firestone: 3.
+        v = { buff = { Thorns = true, ["hand:main"] = true, ["hand:off"] = true, ["Rockbiter Weapon"] = true, ["Windfury Weapon@2"] = true,
+            Firestone = true } },
+        -- The Off hand and Firestone: 2.
+        d = { buff = { ["hand:main"] = true, ["hand:off"] = true, Firestone = true }, debuff = { Moonfire = true } } }))
+    Equal(H.Sane(ns, hands) .. "|" .. hands.skipped .. " " .. Options(hands.options),
+        '|5 {["dimUntilWarn"]={["buff"]={["hand:main"]=true},["debuff"]={["Moonfire"]=true}},'
+        .. '["glowActive"]={["buff"]={["Thorns"]=true,["Windfury Weapon@2"]=true,["hand:main"]=true}}}',
+        "on a weapon enchant's icon alone, Glow while active and Dim until Warn at are left out and counted; with a buff joined in, kept")
+    P.Import("Hands", hands, false)
+    local usable = {}
+    for _, name in ipairs(Hands().buff) do
+        usable[#usable + 1] = name .. "=" .. tostring(B:ActiveUsable("buff", name)) .. "/" .. tostring(B:GlowsActive("buff", name))
+    end
+    Equal(table.concat(usable, " ") .. " | " .. tostring(B:DimsUntilWarn("buff", "hand:off")) .. " " .. tostring(B:DimsUntilWarn("buff", "hand:main")),
+        "Thorns=true/true hand:main=true/true hand:off=false/false Rockbiter Weapon=false/false Windfury Weapon@2=true/true"
+        .. " Mark of the Wild=true/false Firestone=true/false | false true",
+        "imported: none ticked where the panel greys it, so none is stuck ticked and greyed (a druid's panel doesn't know a"
+        .. " warlock's Firestone, which never shows for them)")
+    -- One left from before (an icon split since it was ticked): Share leaves it out.
+    local store = ns.ProfileLists()
+    store.glowActive.buff["hand:off"], store.dimUntilWarn.buff.Firestone = true, true
+    local again = P.Read(P.Export())
+    Equal(again.skipped .. " " .. Options(again.options), "0 " .. Options(hands.options),
+        "Share leaves out those on a weapon enchant's icon alone too")
+
+    -- A string from before a spell's new name (Blessing of Salvation is
+    -- Salvation since build 70425, Greater Blessing of Salvation Mass
+    -- Salvation): its own options come under the new name, as its list
+    -- entry, join and Warn at do, and go out again. (No spell that moved
+    -- ticks, so Count ticks isn't here; it moves the same way.)
+    local renamed = P.Read(H.String({ l = { cd = { "Moonfire" }, util = {}, debuff = { "Moonfire" },
+        buff = { "Thorns", "Blessing of Salvation", "Greater Blessing of Salvation" } },
+        j = { buff = { ["Blessing of Salvation"] = true } }, t = { buff = { ["Blessing of Salvation"] = 60 } },
+        m = { buff = { ["Greater Blessing of Salvation"] = true } }, o = { buff = { ["Blessing of Salvation"] = true } },
+        v = { buff = { ["Blessing of Salvation"] = true } }, d = { buff = { ["Blessing of Salvation"] = true } },
+        e = { buff = { ["Blessing of Salvation"] = true } } }))
+    P.Import("Renamed", renamed, false)
+    local moved = db.profiles.Renamed
+    local underNew = '{["dimUntilWarn"]={["buff"]={["Salvation"]=true}},["glowActive"]={["buff"]={["Salvation"]=true}},'
+        .. '["glowMissing"]={["buff"]={["Salvation"]=true}},["missingPicks"]={["buff"]={["Salvation"]=true}}}'
+    Equal(table.concat({ renamed.skipped, table.concat(moved.buff, ","), H.Text(moved.joins.buff), H.Text(moved.warnAt), Options(moved),
+        H.Text(moved.onlyWhenMissing), tostring(B:GlowsMissing("buff", "Salvation")) .. " " .. tostring(B:GlowsActive("buff", "Salvation"))
+        .. " " .. tostring(B:DimsUntilWarn("buff", "Salvation")) .. " " .. tostring(B:OnlyWhenMissing("buff", "Mass Salvation")) }, " | "),
+        '0 | Thorns,Salvation,Mass Salvation | {["Salvation"]=true} | {["buff"]={["Salvation"]=60}} | ' .. underNew
+        .. ' | {["buff"]={["Mass Salvation"]=true}} | true true true true',
+        "imported under the new names: each option with its entry, and the bar goes by them")
+    local out = P.Read(P.Export())
+    Equal(out.skipped .. " " .. Options(out.options), "0 " .. underNew, "and shared again under the new names, none lost")
+    Equal(#printed, 0, "no errors")
+    -- Glow size: a whole percent from 50 to 150, not the usual 100.
+    local sizes = {}
+    for _, value in ipairs({ 75, 150, 50, 100, 49, 151, 75.5, "130", true }) do
+        local read = P.Read(H.String({ l = Odd(), s = value }))
+        sizes[#sizes + 1] = tostring(read.glowSize) .. "/" .. read.skipped
+    end
+    Equal(table.concat(sizes, " "), "75/0 150/0 50/0 nil/1 nil/1 nil/1 nil/1 nil/1 nil/1",
+        "Glow size kept only as a whole percent from 50 to 150, other than the usual; the rest left out and counted")
+    Equal(#printed, 0, "no errors")
+
+    -- Another account, with its look: a new profile with every option, the
+    -- bars' settings too, the same string back; the importer's own as it was.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local db2 = ForeverEnhancedCooldownManagerDB
+    local own = ns2.ProfileName()
+    local ownBefore = H.Text(db2.profiles[own])
+    local B2 = ns2.Bars
+    local ok = ns2.ProfileShare.Import("With look", ns2.ProfileShare.Read(text), true)
+    local with = db2.profiles["With look"]
+    Equal(table.concat({ tostring(ok), ns2.ProfileName(), Options(with), tostring(with.glowActiveSize) .. " " .. ns2.GlowActiveSize(),
+        tostring(ns2.BarData("cd").glowProcs) .. " " .. ns2.BarData("cd").tickAt .. " " .. ns2.BarData("cd").tickColour .. " "
+        .. ns2.BarData("util").tickFrom, H.Text(with.spellLook), tostring(ns2.ProfileShare.Export() == text),
+        tostring(H.Text(db2.profiles[own]) == ownBefore) }, " | "),
+        "true | With look | " .. want .. ' | 130 130 | true BOTTOM gold 0 | {["Wrath"]={["reagents"]=true}} | true | true',
+        "imported with its look: every option in the new profile, Glow size, the bars' settings, the same string back; yours as it was")
+    Equal(table.concat({ tostring(B2:CountsTicks("cd", "Moonfire")), tostring(B2:CountsTicks("util", "Rake")),
+        tostring(B2:GlowsMissing("debuff", "Faerie Fire")), tostring(B2:GlowsActive("buff", "Clearcasting")),
+        tostring(B2:HandOthers("buff", "hand:main")), tostring(B2:DimsUntilWarn("debuff", "Moonfire")), tostring(B2:Picked("buff", 2)),
+        tostring(B2:Picked("debuff", 2)) }, " "), "true true true true true true true true", "and the bars go by them")
+    -- A third, without its look: the profile's options all the same, the bars' settings its own.
+    character = { guid = "Player-1-0088", name = "Tam", realm = "Zephras" }
+    local ns3 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns3.ProfileShare.Import("No look", ns3.ProfileShare.Read(text), false)
+    local plain = ForeverEnhancedCooldownManagerDB.profiles["No look"]
+    Equal(table.concat({ Options(plain), tostring(plain.glowActiveSize), tostring(ns3.BarData("cd").glowProcs) .. " " .. ns3.BarData("cd").tickAt,
+        tostring(#printed) }, " | "), want .. " | 130 | false TOPLEFT | 0",
+        "imported without its look: every option and Glow size (the profile's), the bars' settings the importer's own")
+end)()
+
+-- A big setup in one string ---------------------------------------------------------------------------
+-- (For the FECM Setups website's presets.) 12 cooldowns, 7 utility, 6 buffs
+-- and 5 debuffs, lists for three forms, and every option on: joins, Only
+-- when missing, pulse ticks and Long, Warn at, own countdowns and sizes,
+-- Show the trap I last laid, every icon option, Glow size, and in its look
+-- Glow for more procs and the tick count's look. Read back with all of it
+-- and nothing left out, within the longest string read, and the same
+-- string back from a new profile made from it.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local cds = { "Moonfire", "Wrath", "Starfire", "Hurricane", "Innervate", "Barkskin", "Nature's Grasp", "Force of Nature", "Starsurge",
+        "Entangling Roots", "Rip", "Rake" }
+    local pulse, long = {}, {}
+    for i, name in ipairs(cds) do
+        pulse[name] = true
+        if i <= 4 then long[name] = "long" end
+    end
+    local profile = { cd = cds, util = { "Overpower", "Faerie Fire", "Bash", "Dash", "Tiger's Fury", "Freezing Trap", "Lacerate" },
+        buff = { "Thorns", "Mark of the Wild", "Omen of Clarity", "Clearcasting", "hand:main", "Nature's Grace" },
+        debuff = { "Moonfire", "Insect Swarm", "Faerie Fire", "Rip", "Rake" },
+        forms = { [5] = { cd = { "Maul", "Swipe", "Bash", "Demoralizing Roar", "Enrage", "Frenzied Regeneration" }, util = { "Growl", "Lacerate" } },
+            [1] = { cd = { "Claw", "Shred", "Rip", "Rake", "Ferocious Bite", "Tiger's Fury" }, util = { "Dash", "Cower", "Prowl" } },
+            [31] = { cd = { "Moonfire", "Wrath", "Starfire", "Hurricane", "Insect Swarm", "Starsurge" }, util = { "Innervate", "Barkskin" } } },
+        swapForm = { cd = true, util = true },
+        joins = { buff = { ["Mark of the Wild"] = true }, debuff = { ["Insect Swarm"] = true } },
+        onlyWhenMissing = { buff = { Thorns = true } }, pulsePick = pulse, pulseStyle = long,
+        warnAt = { buff = { Thorns = 600, ["Mark of the Wild"] = 600 }, debuff = { Moonfire = 3, ["Insect Swarm"] = 2, Rip = 2 } },
+        spellLook = { Wrath = { font = "barlow", size = 120 }, Starfire = { reagents = true }, Moonfire = { size = 90 } },
+        iconSize = { cd = { Moonfire = 120, Wrath = 120, Shred = 80 }, debuff = { Moonfire = 110 } },
+        lastTrap = { util = { ["Freezing Trap"] = true } },
+        countTicks = { cd = { Moonfire = true, Rip = true, Rake = true, ["Entangling Roots"] = true }, util = { Lacerate = true },
+            debuff = { Moonfire = true, ["Insect Swarm"] = true, Rip = true, Rake = true } },
+        glowMissing = { buff = { Thorns = true, ["Mark of the Wild"] = true }, debuff = { ["Faerie Fire"] = true } },
+        glowActive = { buff = { Clearcasting = true, ["Nature's Grace"] = true } }, handOthers = { buff = { ["hand:main"] = true } },
+        dimUntilWarn = { debuff = { Moonfire = true, ["Insect Swarm"] = true } },
+        missingPicks = { buff = { ["Mark of the Wild"] = true }, debuff = { ["Insect Swarm"] = true } }, glowActiveSize = 120 }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, keybinds = true, castBar = true, pulse = true, prdText = true,
+        barStyle = "split", font = "barlow", chars = { ["Player-1-0001"] = "Big" }, profiles = { Big = profile },
+        bars = { cd = { glowProcs = true, tickAt = "BOTTOM", tickColour = "gold", size = 44 }, util = { glowProcs = true, tickFrom = 0 },
+            debuff = { tickColour = "red", showMissing = true } } })
+    local P = ns.ProfileShare
+    local mine = ns.ProfileLists()
+    local text = P.Export()
+    local shared = P.Read(text)
+    -- Sets by bar with something in them, as text.
+    local function Sets(sets)
+        local out = {}
+        for key, set in pairs(type(sets) == "table" and sets or {}) do
+            if type(set) == "table" and next(set) then out[key] = set end
+        end
+        return H.Text(out)
+    end
+    -- Each thing the profile has beside the string's: whether they match.
+    local same = {}
+    for _, pair in ipairs({ { "onlyWhenMissing", "only" }, { "warnAt", "warns" }, { "iconSize", "sizes" }, { "lastTrap", "traps" },
+        { "joins", "joins" } }) do
+        same[#same + 1] = pair[1] .. "=" .. tostring(Sets(mine[pair[1]]) == Sets(shared[pair[2]]))
+    end
+    for _, field in ipairs({ "countTicks", "glowMissing", "glowActive", "handOthers", "dimUntilWarn", "missingPicks" }) do
+        same[#same + 1] = field .. "=" .. tostring(Sets(mine[field]) == Sets(shared.options[field]))
+    end
+    same[#same + 1] = "spellLook=" .. tostring(H.Text(mine.spellLook) == H.Text(shared.looks))
+    same[#same + 1] = "forms=" .. tostring(H.Text(mine.forms) == H.Text(shared.forms))
+    same[#same + 1] = "glowActiveSize=" .. tostring(mine.glowActiveSize == shared.glowSize)
+    Equal(table.concat({ H.Sane(ns, shared) .. "|" .. shared.skipped, tostring(#text <= P.MAX_TEXT), table.concat(same, " "),
+        tostring(shared.setup.bars.cd.glowProcs) .. " " .. tostring(shared.setup.bars.util.glowProcs) }, " | "),
+        "|0 | true | onlyWhenMissing=true warnAt=true iconSize=true lastTrap=true joins=true countTicks=true glowMissing=true"
+        .. " glowActive=true handOthers=true dimUntilWarn=true missingPicks=true spellLook=true forms=true glowActiveSize=true | true true",
+        "read back with every option the profile has and nothing left out, within the longest string read")
+    Equal(P.Describe(shared), "Holds 30 bar entries and 12 pulse ticks, with icons for 3 forms, own countdowns for 3 spells, low-time"
+        .. " warnings for 5 auras, own sizes for 4 icons, the trap you last laid shown on 1 icon, 19 icon options and its look and layout.",
+        "said in one line")
+    io.write("Share: a big setup with every option on is " .. #text .. " letters as a string.\n")
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.ProfileShare.Import("Big", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ns2.ProfileShare.Export() == text) .. " " .. #printed, "true 0", "imported with its look on another account: the same string back")
+end)()
 
 -- Every new choice of one update at once, out and back ----------------------------------------------
 -- (The warlock's list, built in groups: each group's own block is above.)
@@ -2221,29 +2726,101 @@ do
     Equal(#printed, 0, "no errors")
 end
 
--- Glow for more procs: never in a string ---------------------------------------------------------------
--- Each cooldown bar's tick stays with the character: a string never carries
--- it (the full profile is near Discord's 2000 letters), a string's import
--- leaves yours as it is, and one that has it anyway is left out and counted.
+-- Glow for more procs in strings ------------------------------------------------------------------------
+-- (Carried since 15 Nov 2026, Squirt's yes: a shared setup looks and works
+-- as its screenshots.) Each cooldown bar's tick goes with the look and
+-- layout like its other settings, only when ticked (off is the default),
+-- and only a cooldown bar's: on the Buffs or Debuffs bar it's left out and
+-- counted. A string made before it (by 1.10.13 or before, or with no
+-- version) says nothing of it: imported with its look, your own tick stays,
+-- as it did before, and so do Early resets and the tick count's look on
+-- Cooldowns and Utility (carried since then too). One made since that
+-- leaves it out has it off, as every bar setting a string leaves out.
+-- Without its look, your own tick stays. Anything but true or false is
+-- left out.
 
-do
+;(function()
     character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
     local P, B = ns.ProfileShare, ns.Bars
     B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "util")
     B:SetOption("cd", "glowProcs", true)
     local text = P.Export()
     local shared = P.Read(text)
-    local ok = P.Import("Glowing", shared, true)
-    Equal(table.concat({ tostring(text:find("glowProcs", 1, true)), H.Sane(ns, shared) .. "|" .. shared.skipped,
-        tostring(shared.setup.bars.cd.glowProcs), tostring(ok), tostring(ns.BarData("cd").glowProcs) }, " "), "nil |0 nil true true",
-        "not in the string; imported with its look, your own tick stays")
-    local bad = P.Read(H.String({ l = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} },
-        g = { s = {}, b = { cd = { glowProcs = true } }, l = {}, k = {} } }))
-    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.glowProcs), "|1 nil",
-        "a string that has it anyway: left out, and counted")
+    Equal(table.concat({ H.Sane(ns, shared) .. "|" .. shared.skipped, tostring(shared.setup.bars.cd.glowProcs),
+        tostring(shared.setup.bars.util.glowProcs) }, " "), "|0 true nil", "Cooldowns' tick goes in the string; Utility's, off, is left out")
+    -- Made by 1.10.12: nothing about it. Imported with its look: your own
+    -- tick stays, as it did before (Early resets and the Cooldowns and
+    -- Utility bars' tick count look too); the rest of its look comes.
+    local function Lists() return { cd = { "Moonfire" }, util = { "Wrath" }, buff = { "Thorns" }, debuff = { "Moonfire" } } end
+    local function Made(version, bars, look)
+        return P.Read(H.String({ a = version, l = Lists(), g = { s = look or {}, b = bars or { cd = { whenReady = "dim" } }, l = {}, k = {} } }))
+    end
+    local old = Made("1.10.12")
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. tostring(old.setup.bars.cd.glowProcs), "|0 nil",
+        "a string from before it reads as it did, with no Glow for more procs")
+    ns.Set("pulseResets", true)
+    B:SetOption("cd", "tickAt", "BOTTOM")
+    B:SetOption("util", "tickColour", "gold")
+    B:SetOption("debuff", "tickAt", "TOP")
+    P.Import("Old", old, true)
+    local function Now()
+        return table.concat({ tostring(ns.BarData("cd").glowProcs), ns.BarData("cd").whenReady, tostring(ns.Get("pulseResets")),
+            ns.BarData("cd").tickAt, ns.BarData("util").tickColour, ns.BarData("debuff").tickAt }, " ")
+    end
+    Equal(Now(), "true dim true BOTTOM gold TOPLEFT", "imported with its look: Glow for more procs, Early resets and the Cooldowns and"
+        .. " Utility bars' tick count look stay yours, as before; its own bar settings come, the Debuffs bar's tick count look at its default")
+    -- Made by 1.10.13 (the last before them), or with no version: the same.
+    -- Edited to carry one after all, that one comes.
+    local same = {}
+    for _, version in ipairs({ "1.10.13", "v1.10.13", "1.9.9", "zzz" }) do
+        P.Import("Old " .. version, Made(version), true)
+        same[#same + 1] = Now()
+    end
+    P.Import("No version", P.Read(H.String({ l = Lists(), g = { s = {}, b = { cd = { whenReady = "dim" } }, l = {}, k = {} } })), true)
+    same[#same + 1] = Now()
+    P.Import("Edited", Made("1.10.12", { cd = { glowProcs = false, tickAt = "TOP" } }, { pulseResets = false }), true)
+    same[#same + 1] = Now()
+    Equal(table.concat(same, ", "), "true dim true BOTTOM gold TOPLEFT, true dim true BOTTOM gold TOPLEFT, true dim true BOTTOM gold TOPLEFT,"
+        .. " true dim true BOTTOM gold TOPLEFT, true dim true BOTTOM gold TOPLEFT, false show false TOP gold TOPLEFT",
+        "made by 1.10.13 or before, or with no version that reads: yours stay; one it carries comes")
+    -- Made since (the next update, or straight from the source): one it
+    -- leaves out is off, as every bar setting a string leaves out.
+    local since = {}
+    for _, version in ipairs({ "1.10.14", "1.11.0", "dev" }) do
+        ns.Set("pulseResets", true)
+        B:SetOption("cd", "glowProcs", true)
+        B:SetOption("cd", "tickAt", "BOTTOM")
+        P.Import("New " .. version, Made(version), true)
+        since[#since + 1] = Now()
+    end
+    Equal(table.concat(since, ", "), "false dim false TOPLEFT white TOPLEFT, false dim false TOPLEFT white TOPLEFT,"
+        .. " false dim false TOPLEFT white TOPLEFT", "made since: each left out at its default, as every setting a string leaves out")
+    -- On the Buffs or Debuffs bar (which have none), or anything but true or false: left out and counted.
+    local bad = P.Read(H.String({ a = "dev", l = Lists(), g = { s = {}, b = { cd = { glowProcs = "yes" }, util = { glowProcs = 1 },
+        buff = { glowProcs = true }, debuff = { glowProcs = false } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.glowProcs) .. " " .. tostring(bad.setup.bars.util.glowProcs)
+        .. " " .. tostring(bad.setup.bars.buff.glowProcs) .. " " .. tostring(bad.setup.bars.debuff.glowProcs), "|4 nil nil nil nil",
+        "anything but true or false, and the aura bars' (which have none): left out, and counted")
+    P.Import("Bad", bad, true)
+    Equal(tostring(ns.BarData("buff").glowProcs) .. " " .. tostring(ns.BarData("cd").glowProcs), "false false", "imported: none ticked")
     Equal(#printed, 0, "no errors")
-end
+    -- Another account: with its look, ticked there; without it, your own stays.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.Bars:SetOption("util", "glowProcs", true)
+    local ok = ns2.ProfileShare.Import("Glowing", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. tostring(ns2.BarData("cd").glowProcs) .. " " .. tostring(ns2.BarData("util").glowProcs) .. " "
+        .. tostring(ns2.ProfileShare.Export() == text), "true true false true",
+        "imported with its look: ticked on Cooldowns, off on Utility (as the string has it), the same string back")
+    character = { guid = "Player-1-0088", name = "Tam", realm = "Zephras" }
+    local ns3 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns3.Bars:SetOption("util", "glowProcs", true)
+    ns3.ProfileShare.Import("No look", ns3.ProfileShare.Read(text), false)
+    Equal(tostring(ns3.BarData("cd").glowProcs) .. " " .. tostring(ns3.BarData("util").glowProcs) .. " " .. #printed, "false true 0",
+        "imported without its look: your own ticks stay")
+end)()
 
 -- Import makes a new profile, and leaves yours as it is ----------------------------------------------
 
@@ -2721,9 +3298,11 @@ do
         return p and (p[1] .. " " .. tostring(p[2] == nil or type(p[2]) == "table" and "frame" or p[2]) .. " "
             .. tostring(p[3]) .. " " .. tostring(p[4])) or "none"
     end
-    Equal(S[w.profileShare.label].text .. " " .. S[w.profileImport.label].text .. " | " .. Points(w.profileImport) .. " | "
-        .. Points(w.profileShare), "Share Import | TOPRIGHT -10 -6 nil | RIGHT frame LEFT -4",
-        "Share and Import at the top right of the profile menu, level with its heading")
+    Equal(S[w.profileShare.label].text .. " " .. S[w.profileImport.label].text .. " " .. S[w.profileFind.label].text .. " | "
+        .. Points(w.profileFind) .. " | " .. Points(w.profileImport) .. " | " .. Points(w.profileShare) .. " | "
+        .. tostring(S[w.profileImport].points[1][2] == w.profileFind) .. " " .. tostring(S[w.profileShare].points[1][2] == w.profileImport),
+        "Share Import Find presets | TOPRIGHT -10 -6 nil | RIGHT frame LEFT -4 | RIGHT frame LEFT -4 | true true",
+        "Share, Import and Find presets at the top right of the profile menu, level with its heading, Find presets last")
     Equal(S[w.profileInput].points[1][3] .. " " .. S[w.profileList].points[2][5], "-54 -50",
         "the list and the name box where they were")
     Equal(tostring(rawget(w.profileShare, "hint")) .. " | " .. tostring(rawget(w.profileImport, "hint")),
@@ -3366,17 +3945,18 @@ do
     character = { guid = "Player-1-0102", name = "Bram", realm = "Zephras" }
     local ns7 = Start({ notesSeen = "dev", helpSeen = true })
     _G.UnitClass = function() return "Druid", "DRUID" end
-    local all = ns7.ProfileShare.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "ucetkbshmlrwopq" } }))
+    local all = ns7.ProfileShare.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "ucetkgbshmlrwopq" } }))
     asked = ns7.ProfileShare.LookQuestion(all)
     ok, message = ns7.ProfileShare.Import(("N"):rep(ns7.PROFILE_MAX), all, true)
     local _, experimental = asked:gsub("experimental", "")
     Equal(tostring(ok) .. " " .. experimental .. " " .. tostring(#message * 5.6 <= 2 * 560) .. " | " .. asked,
         "true 0 true | Your bar sizes, spots, layout and look change to the shared ones, on every character. It also turns on Combo"
-        .. " points, Energy bar in other forms, Health and power text, Keybinds on icons, Cast bar, Swing timer, Crafting"
+        .. " points, Energy bar in other forms, Health and power text, Keybinds on icons, Key press glow, Cast bar, Swing timer, Crafting"
         .. " batch time, Cast bar tick marks, Cast bar latency, Pull countdown, Raid warnings, Boss cast"
         .. " bars, Cooldown pulse and Proc pulses. Your own bars come on in place of Blizzard's Cooldown"
         .. " Manager, which turns off (reload after). To keep a copy of yours, Share it first.",
-        "all fifteen named before, none marked experimental; the line after fits the footer (" .. #message .. " letters)")
+        "all sixteen named before (Key press glow too), none marked experimental; the line after fits the footer ("
+            .. #message .. " letters)")
     -- In a fight nothing switches (an import is refused there).
     character = { guid = "Player-1-0100", name = "Pell", realm = "Zephras" }
     local ns5 = Start({ notesSeen = "dev", helpSeen = true })
@@ -3385,6 +3965,73 @@ do
     lockdown = false
     Equal(tostring(ok) .. " " .. tostring(ns5.Get("prdCombo")) .. " " .. tostring(ns5.Get("useBars")), "false false false",
         "refused in a fight: no part switched")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Key press glow in a string: a part, as Keybinds on icons is ------------------------------------------
+-- (Squirt's yes, 15 Nov 2026.) Off by default, so a string only carries it
+-- ticked, as its letter g. With the look it comes on for another account,
+-- named in the question, your action bars read again for it; without the
+-- look it stays as it was. A string without it (made before it, or by
+-- someone with it off) never changes yours, on or off. An older FECM leaves
+-- the letter out and counts it, as any letter it doesn't know (above).
+
+do
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = {} } end
+    character = { guid = "Player-1-0201", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, keybinds = true, keyPressGlow = true })
+    local P = ns.ProfileShare
+    local text = P.Export()
+    local shared = P.Read(text)
+    local saved = ForeverEnhancedCooldownManagerDB
+    Equal(H.Text(shared.setup.parts) .. " | " .. shared.skipped .. " | " .. H.Sane(ns, shared) .. "|",
+        '{["keyPressGlow"]=true,["keybinds"]=true,["useBars"]=true} | 0 | |', "ticked: it goes in the string beside the keybinds")
+    local off = Start({ notesSeen = "dev", helpSeen = true, useBars = true, keybinds = true })
+    local plain = off.ProfileShare.Read(off.ProfileShare.Export())
+    Equal(H.Text(plain.setup.parts) .. " " .. tostring(saved.keyPressGlow) .. " " .. tostring(off.Get("keyPressGlow")),
+        '{["keybinds"]=true,["useBars"]=true} true false', "off (the default): not in the string")
+
+    -- Another account: with the look it comes on, named, its keys read again.
+    character = { guid = "Player-1-0202", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local keyed = 0
+    local update = ns2.Keybinds.Update
+    ns2.Keybinds.Update = function(...)
+        keyed = keyed + 1
+        return update(...)
+    end
+    local asked = ns2.ProfileShare.LookQuestion(ns2.ProfileShare.Read(text))
+    local ok, message = ns2.ProfileShare.Import("Pressed", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. tostring(ns2.Get("keyPressGlow")) .. " " .. tostring(ns2.Get("keybinds")) .. " " .. keyed .. " | "
+        .. asked .. " | " .. message, "true true true 1 | Your bar sizes, spots, layout and look change to the shared ones, on every"
+        .. " character. It also turns on Keybinds on icons and Key press glow. To keep a copy of yours, Share it first. | Imported"
+        .. " Pressed with its look and layout, and switched to it. Also turned on 2 of its settings.",
+        "with its look: on, named in the question and counted after, your action bars read again once")
+    Equal(H.Text(ns2.ProfileShare.Read(ns2.ProfileShare.Export()).setup.parts),
+        '{["keyPressGlow"]=true,["keybinds"]=true,["useBars"]=true}', "and shared back the same")
+
+    -- Without its look: nothing switches.
+    character = { guid = "Player-1-0203", name = "Tam", realm = "Zephras" }
+    local ns3 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ok = ns3.ProfileShare.Import("Lists only", ns3.ProfileShare.Read(text), false)
+    Equal(tostring(ok) .. " " .. tostring(ns3.Get("keyPressGlow")), "true false", "unticked: it stays off")
+
+    -- A string without it, from before it (no version letter g) or with it
+    -- off: yours stays as it is, with the look and without, on or off.
+    local before = H.String({ a = "1.10.13", l = Lists(), g = { s = {}, b = {}, l = {}, k = {}, o = "uk" } })
+    local kept = {}
+    for _, mine in ipairs({ true, false }) do
+        for _, look in ipairs({ true, false }) do
+            character = { guid = "Player-1-02" .. (mine and "1" or "2") .. (look and "1" or "2"), name = "Vel", realm = "Zephras" }
+            local nsK = Start({ notesSeen = "dev", helpSeen = true, useBars = true, keyPressGlow = mine })
+            local read = nsK.ProfileShare.Read(before)
+            ok = nsK.ProfileShare.Import("Old", read, look)
+            kept[#kept + 1] = tostring(ok) .. " " .. tostring(read.setup.parts.keyPressGlow) .. " " .. read.skipped .. " "
+                .. tostring(nsK.Get("keyPressGlow"))
+        end
+    end
+    Equal(table.concat(kept, " | "), "true nil 0 true | true nil 0 true | true nil 0 false | true nil 0 false",
+        "an old string: nothing left out, and Key press glow as you had it (on stays on, off stays off), look or not")
     Equal(#printed, 0, "no errors")
 end
 

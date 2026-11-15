@@ -4,7 +4,7 @@
 // suite stops half-way, so a Lua suite only passes when it ends with its
 // "checks passed: N assertions." line and shows no traceback.
 //
-//   node Tools/RunTests.mjs              everything (about 6 minutes: TestBars)
+//   node Tools/RunTests.mjs              everything (about 20 minutes: TestBars)
 //   node Tools/RunTests.mjs --skip TestBars
 //   node Tools/RunTests.mjs --only TestPulse,TestRules
 //
@@ -48,8 +48,10 @@ function run(command, args, { timeout, ...options } = {}) {
   });
 }
 
-// The longest a Lua suite may take: TestBars takes about 6 minutes alone.
+// The longest a Lua suite may take: TestBars takes 15 to 20 minutes.
 export const LUA_TIMEOUT = 30 * 60 * 1000;
+// The least heap (MB) a Lua suite is given: TestBars' need, with room.
+export const LUA_HEAP = 14336;
 
 // A Lua suite's result: passed only with its closing line and no traceback.
 export function judgeLua(code, output) {
@@ -61,8 +63,14 @@ export function judgeLua(code, output) {
 }
 
 export async function runLua(kit, file, timeout = LUA_TIMEOUT) {
-  // TestBars needs far more than node's default heap; the rest are small.
-  const env = { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --max-old-space-size=8192`.trim() };
+  // TestBars needs far more than node's default heap (over 8 GB since
+  // 1.10.14, about 9 in use: 14 GB given); the rest are small. A bigger heap
+  // set in NODE_OPTIONS is kept, a smaller one raised to that.
+  const own = process.env.NODE_OPTIONS ?? '';
+  const asked = Number(own.match(/--max-old-space-size=(\d+)/)?.[1] ?? 0);
+  const heap = Math.max(asked, LUA_HEAP);
+  const rest = own.replace(/--max-old-space-size=\d+/g, '').trim();
+  const env = { ...process.env, NODE_OPTIONS: `${rest} --max-old-space-size=${heap}`.trim() };
   const started = Date.now();
   const { code, output } = await run(process.execPath, [kit.cli, file], { env, timeout });
   return { name: file, ...judgeLua(code, output), output, seconds: Math.round((Date.now() - started) / 1000) };

@@ -172,6 +172,8 @@ EraUI.
   Use on all characters puts one profile on every character
 - Share a profile as text from the Profile menu, or Import one someone shared:
   it becomes a new profile, so yours stays as it is
+- Presets, at the top of the settings' list: links to ready-made setups for
+  every spec and to setups other players share, on squirtsaddons.com
 - Tank, Healer and Damage keep a profile for each role. Switch with my talents
   (off by default) changes to your main talent tree's role profile
 - Positions per profile (off by default): each profile keeps its own bar spots
@@ -195,8 +197,8 @@ EraUI.
   What's new gives you the invite
 
 If you'd rather type: `/ccm` opens the settings, `/ccm reset` resets your layout
-after asking first, `/ccm tour` takes the tour, `/ccm new` shows What's new and
-`/ccm discord` gives you the Discord invite.
+after asking first, `/ccm tour` takes the tour, `/ccm new` shows What's new,
+`/ccm presets` opens Presets and `/ccm discord` gives you the Discord invite.
 
 Blizzard's Cooldown Manager must be on for its new look: Options > Gameplay >
 Advanced Options > Enable Cooldown Manager, or the Turn on button in the

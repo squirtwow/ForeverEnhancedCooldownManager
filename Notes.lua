@@ -10,6 +10,25 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.14",
+        sections = {
+            { "Added", {
+                "Presets page: links to presets and community setups on www.squirtsaddons.com.",
+                "Key press glow: icons light up gold while you hold their key (off by default).",
+                "Cooldown pulse: early resets can pulse, like Improved Stormstrike after a parry.",
+                "Count ticks works on Deep Wound, Deadly Poison, Penance, Lacerating Strikes and Explosive Trap.",
+                "Trap icons can show the trap you last laid.",
+                "Cooldowns and Utility icons can count a DoT's ticks.",
+            } },
+            { "Fixed", {
+                "Gift of the Wild no longer glows as missing under Mark of the Wild.",
+            } },
+            { "Changed", {
+                "Shared profiles now bring tick counts, glows and every icon option.",
+            } },
+        },
+    },
+    {
         version = "1.10.13",
         sections = {
             { "Changed", {

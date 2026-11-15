@@ -449,7 +449,12 @@ end
 -- cooldown in a fight anyway shows, finishes and is passed over here.
 local SHORT = 1.75
 local function Started(cooldown)
-    cooldown.started = GetTime()
+    cooldown.started, cooldown.running = GetTime(), true
+end
+-- And as the game hides it (its cooldown over or cleared): no longer
+-- running. Told by the frame itself, never asked of it (Early resets too).
+local function Ended(cooldown)
+    cooldown.running = false
 end
 
 -- Shooting a wand, each shot can hand a spell sitting ready a short wait of
@@ -496,6 +501,7 @@ local function Watcher()
     cooldown:SetHideCountdownNumbers(true)
     cooldown:SetScript("OnCooldownDone", Done)
     cooldown:SetScript("OnShow", Started)
+    cooldown:SetScript("OnHide", Ended)
     return cooldown
 end
 
@@ -629,6 +635,16 @@ local function Clear(watch)
     cooldown.watch = watch
 end
 
+-- Whether a watcher is counting down a real cooldown now (shown, and longer
+-- than a moment ago), and whether it has stopped: as its own OnShow and
+-- OnHide said (Started, Ended), so nothing is asked of it. Unknown is neither.
+local function Counting(cooldown)
+    return cooldown.running == true and cooldown.started ~= nil and GetTime() - cooldown.started > SHORT
+end
+local function Stopped(cooldown)
+    return cooldown.running == false
+end
+
 local function Feed(watch)
     local cooldown = watch.cooldown
     if watch.spellID then
@@ -647,9 +663,13 @@ local function Feed(watch)
         -- pulse after every global cooldown. Never secret either. One of its
         -- own ending under a global cooldown still says so as it ends.
         if type(info) == "table" and Open(info.isOnGCD) and info.isOnGCD == true then return end
+        local counting = Counting(cooldown)
         -- Without the global cooldown. Secret in a fight: handed on as it is.
         local duration = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(watch.spellID, true)
         if duration then cooldown:SetCooldownFromDurationObject(duration) else Clear(watch) end
+        -- With Early resets too: one counting a moment ago and stopped now
+        -- came back early (a talent's reset), so it pulses as it comes back.
+        if counting and ns.Get("pulseResets") and Stopped(cooldown) then P:Done(watch) end
         return
     end
     local start, length, enable

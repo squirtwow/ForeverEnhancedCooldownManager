@@ -295,6 +295,8 @@ local function BuildOptions(window, page, inner)
         return "Your class's procs, like Clearcasting or Missile Barrage: a pulse the moment one lands, in a fight too."
             .. " Procs pulse without a sound."
     end)
+    page.resets = Tick("Early resets too", "pulseResets", 0, -116,
+        "A pulse when a talent brings a cooldown back early, like a reset after a parry or dodge.")
     page.volume = Tick("Play at Master volume", "pulseMaster", COLUMN, -138,
         "Plays the sound at your Master volume, so you hear it with Sound Effects down or off. Your sound settings don't change.")
 end
@@ -483,6 +485,7 @@ function ns.BuildPulsePage(window, page, width)
         self.items:SetChecked(ns.Get("pulseItems"))
         self.procs:SetChecked(ns.Get("pulseProcs"))
         self.procs:SetUsable(P:CanProcs())
+        self.resets:SetChecked(ns.Get("pulseResets"))
         self.volume:SetChecked(ns.Get("pulseMaster"))
         self.previewButton:SetLabel("Preview " .. Editing())
 

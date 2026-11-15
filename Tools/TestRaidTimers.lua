@@ -1069,7 +1069,8 @@ local w = FECMFrame
 Equal(w.nav.raid ~= nil and S[w.nav.raid.label].text, "Raid Timers", "Raid Timers in the window's list")
 Equal(S[w.moreHeading].text, "MORE", "under a heading of its own, More, like Your bars")
 local function Top(item) return -S[item].points[1][3] end
-Equal(Top(w.nav.general) .. " " .. Top(w.nav.raid), "328 390", "below General, the rest of the list where it was")
+-- (Lower down since Presets came first in the list, the pages under the bars closer together.)
+Equal(Top(w.nav.general) .. " " .. Top(w.nav.raid), "344 398", "below General, the rest of the list where it was")
 local news = S[w.news].points[1]
 Equal(Top(w.nav.raid) + S[w.nav.raid].height <= 489 - news[3] - S[w.news].height, true,
     "clear of the What's new button at the foot of the list")
@@ -1930,7 +1931,7 @@ do
     end
     local RAID = "Raid Timers, Sizes, Edit Mode"
     local menu = Tour:News("0.9.0")[1]
-    Equal(menu.title .. ": " .. menu.text(), "The menu: Everything is in this list: your four bars at the top, then Look, Layout,"
+    Equal(menu.title .. ": " .. menu.text(), "The menu: Everything is in this list: Presets at the top, then your four bars, Look, Layout,"
         .. " Cast bar and General, and Raid Timers under More.", "the full tour's first step points out Raid Timers under More")
     local added = Tour:News("1.2.0")
     Equal(Titles(added) .. " | " .. Versions(added), RAID .. " | true true",

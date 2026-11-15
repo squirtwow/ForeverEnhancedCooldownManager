@@ -4,6 +4,11 @@
 -- only. In a fight the main bar can still change page (forms, stances, paging
 -- keys); the keys follow from what was read. Nothing is read while the option
 -- is off.
+-- Key press glow (a player's idea, Squirt's yes, 15 Nov 2026) reads the same:
+-- while it's ticked, the bar buttons whose keys press each spell or item now
+-- are kept beside its key, for Bars.lua to read each button's state (pushed
+-- or not) and light the icon. A button is only ever looked at: nothing is set
+-- on it, hooked or written to it. Nothing is read while both are off.
 local _, ns = ...
 
 local K = {}
@@ -31,6 +36,7 @@ local REPAGE = { ACTIONBAR_PAGE_CHANGED = true, UPDATE_BONUS_ACTIONBAR = true, U
 
 local actions = {} -- slot -> { spell=, item=, name=, macro= }   (read outside combat)
 local bound = {} -- binding -> key text                           (read outside combat)
+local blizzard = {} -- binding -> Blizzard's bar button for it, Key press glow only (found by name, never touched)
 local own = {} -- a bar addon's buttons that have a key             (read outside combat)
 local ownBinding = {} -- bindings those buttons answer instead of Blizzard's
 local OWN_BUTTONS = 15 * BUTTONS
@@ -42,12 +48,21 @@ for _, bar in ipairs(BARS) do PAGE_BINDING[(bar[3] - 1) / BUTTONS + 1] = bar[1] 
 local AWAY_PAGES = { 1, 2, 7, 8, 9, 10 }
 -- What the keys press now, by spell ID, item ID and spell name: each key's
 -- text, and its tier beside it (lower wins), so working them out again as
--- the main bar changes page makes nothing new.
-local function Map() return { text = {}, tier = {} } end
+-- the main bar changes page makes nothing new. With Key press glow, every
+-- bar button whose key presses it now too (buttons, a list each).
+local function Map() return { text = {}, tier = {}, buttons = {} } end
 local bySpell, byItem, byName = Map(), Map(), Map()
+local merged = {} -- a healthstone or potion family's buttons, all its items' together (K:ButtonsForEntry)
+local pressing = false -- Key press glow ticked, as the keys were last worked out
 local function Clear(map)
     wipe(map.text)
     wipe(map.tier)
+    wipe(map.buttons)
+end
+
+-- Whether anything wants the keys read: Keybinds on icons, or Key press glow.
+local function Wanted()
+    return ns.Get("keybinds") == true or ns.Get("keyPressGlow") == true
 end
 
 -- Every value from the game passes through one of these before it is
@@ -202,12 +217,26 @@ end
 local function Scan()
     wipe(actions)
     wipe(bound)
+    wipe(blizzard) -- (found again as the keys are worked out, with Key press glow)
     for slot = 1, SLOTS do actions[slot] = Read(slot) end
     for i = 1, BUTTONS do
         bound[MAIN[1] .. i] = Bound(MAIN[1] .. i, MAIN[2] .. i)
         for _, bar in ipairs(BARS) do bound[bar[1] .. i] = Bound(bar[1] .. i, bar[2] .. i) end
     end
     ScanOwn()
+end
+
+-- Blizzard's own bar buttons by their binding, for Key press glow: only
+-- found by name, never touched.
+local function Button(name)
+    local button = _G[name]
+    return type(button) == "table" and button or nil
+end
+local function FindButtons()
+    for i = 1, BUTTONS do
+        blizzard[MAIN[1] .. i] = Button(MAIN[2] .. i)
+        for _, bar in ipairs(BARS) do blizzard[bar[1] .. i] = Button(bar[2] .. i) end
+    end
 end
 
 -- Which keys press what, now ------------------------------------------------------------
@@ -231,22 +260,36 @@ end
 
 -- A spell in several slots shows the key that casts it: one placed directly
 -- (tier 1) before a macro (tier 2); then the main bar at the page its keys
--- press now, then the side bars in order, then the lower button.
-local function Put(map, id, text, tier)
+-- press now, then the side bars in order, then the lower button. With Key
+-- press glow every button that presses it now is kept, each once: holding
+-- any of their keys lights it. A main bar page its keys don't press now
+-- (away) gives no button.
+local function Put(map, id, text, tier, button)
     if id == nil then return end
     local was = map.tier[id]
     if not was or tier < was then map.text[id], map.tier[id] = text, tier end
+    if not button then return end
+    local list = map.buttons[id]
+    if not list then
+        map.buttons[id] = { button }
+        return
+    end
+    for i = 1, #list do
+        if list[i] == button then return end
+    end
+    list[#list + 1] = button
 end
-local function Give(action, text, away)
+local function Give(action, text, away, button)
     if not (action and text) then return end
     local tier = (action.macro and 2 or 1) + (away and 2 or 0)
-    Put(bySpell, action.spell, text, tier)
-    Put(byItem, action.item, text, tier)
-    if not action.item then Put(byName, action.name, text, tier) end
+    if away or not pressing then button = nil end
+    Put(bySpell, action.spell, text, tier, button)
+    Put(byItem, action.item, text, tier, button)
+    if not action.item then Put(byName, action.name, text, tier, button) end
 end
 local function Take(slot, binding)
     if ownBinding[binding] then return end -- a bar addon's button answers that key
-    Give(actions[slot], bound[binding])
+    Give(actions[slot], bound[binding], nil, blizzard[binding])
 end
 
 -- From what was read only, so safe in combat.
@@ -254,10 +297,13 @@ local function Resolve()
     Clear(bySpell)
     Clear(byItem)
     Clear(byName)
+    wipe(merged)
+    pressing = ns.Get("keyPressGlow") == true
+    if pressing and next(blizzard) == nil then FindButtons() end
     for i = 1, #own do
         local entry = own[i]
         local slot = SlotOf(entry.button)
-        if slot then Give(actions[slot], entry.text) end
+        if slot then Give(actions[slot], entry.text, nil, entry.button) end
     end
     for i = 1, #own do
         local entry = own[i]
@@ -288,20 +334,30 @@ end
 
 -- Reads everything again and shows the keys: now, or once the fight is over.
 function K:Update()
-    if not ns.Get("keybinds") then
+    if not Wanted() then
         wipe(actions)
         wipe(bound)
+        wipe(blizzard)
         wipe(own)
         wipe(ownBinding)
         Clear(bySpell)
         Clear(byItem)
         Clear(byName)
+        wipe(merged)
+        pressing = false
         self.pending = nil
         Push()
         return
     end
     if InCombatLockdown() then
         self.pending = true
+        -- Key press glow ticked or unticked in a fight, your bars already
+        -- read for the keybinds: its buttons worked out from what was read
+        -- (as a page change is in a fight). All read again once it's over.
+        if next(actions) ~= nil and pressing ~= (ns.Get("keyPressGlow") == true) then
+            Resolve()
+            Push()
+        end
         return
     end
     self.pending = nil
@@ -312,7 +368,7 @@ end
 
 -- The main bar changed page: its keys press other slots now. In a fight too.
 function K:Repage()
-    if not ns.Get("keybinds") then return end
+    if not Wanted() then return end
     Resolve()
     Push()
 end
@@ -369,6 +425,44 @@ function K:ForEntry(entry)
     return nil
 end
 
+-- Key press glow: the bar buttons whose keys press one of your bar's entries
+-- now, found as its key is (K:ForEntry), as a list, or nil with none (or the
+-- tick off). A spell counts any rank's buttons, a fixed rank only its own;
+-- a healthstone or potion family every one of its items'. Lists are the
+-- addon's own, made again each time the keys are worked out: Bars.lua
+-- reads each button's state from them and never changes them.
+local function Buttons(map, id)
+    return id ~= nil and map.buttons[id] or nil
+end
+local function Join(list, more)
+    if not more then return end
+    for _, button in ipairs(more) do
+        local found = false
+        for i = 1, #list do found = found or list[i] == button end
+        if not found then list[#list + 1] = button end
+    end
+end
+
+function K:ButtonsForEntry(entry)
+    if not (pressing and entry) then return nil end
+    if entry.kind == "spell" then return Buttons(byName, entry.name) or Buttons(bySpell, entry.spellID) end
+    if entry.kind == "rank" then return Buttons(bySpell, entry.spellID) end
+    if entry.kind == "item" or entry.kind == "slot" then return Buttons(byItem, entry.itemID) end
+    if entry.kind == "family" then
+        local list = merged[entry]
+        if list == nil then
+            list = {}
+            Join(list, Buttons(byItem, entry.itemID))
+            local items = entry.family and entry.family.items or {}
+            for i = #items, 1, -1 do Join(list, Buttons(byItem, items[i])) end
+            if #list == 0 then list = false end
+            merged[entry] = list
+        end
+        return list or nil
+    end
+    return nil
+end
+
 -- The key for a spell ID, as Blizzard's icons give it (their base spell):
 -- that rank, or any rank of the same name.
 function K:ForSpell(id)
@@ -396,7 +490,7 @@ function K:Start()
     for event in pairs(REPAGE) do frame:RegisterEvent(event) end
     frame:RegisterEvent("PLAYER_REGEN_ENABLED")
     frame:SetScript("OnEvent", function(_, event)
-        if not ns.Get("keybinds") then return end
+        if not Wanted() then return end
         if event == "PLAYER_REGEN_ENABLED" then
             -- Anything that changed in the fight; Blizzard's icons whose spell
             -- was secret then get their key now.

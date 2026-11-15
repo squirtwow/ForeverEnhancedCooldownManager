@@ -47,6 +47,10 @@ local GROUP = {
     ["Blessing of Wisdom"] = "Greater Blessing of Wisdom",
     ["Blessing of Kings"] = "Greater Blessing of Kings",
 }
+-- And the other way round (a player's report, 15 Nov 2026): a Gift of the
+-- Wild icon glowed as missing while Mark of the Wild was on you.
+local SINGLE = {}
+for one, group in pairs(GROUP) do SINGLE[group] = one end
 
 -- Names a later build gave a spell: one saved by its old name still counts
 -- as the new one. Build 70291 dropped "Effect" from the trap debuffs' names
@@ -207,6 +211,32 @@ local function Text(value)
     return type(value) == "string" and Open(value) and value ~= "" and value or nil
 end
 
+-- A hunter's traps: every rank of each shares one cooldown with the others,
+-- so a trap's icon can show whichever you laid last (Show the trap I last
+-- laid, Bars.lua).
+local TRAPS = { ["Freezing Trap"] = true, ["Immolation Trap"] = true, ["Frost Trap"] = true, ["Explosive Trap"] = true }
+
+-- The trap a bar entry is (by its key, a fixed rank's too), or nil.
+function S:Trap(key)
+    if type(key) ~= "string" then return nil end
+    local name = key:match("^[^@#]+")
+    return TRAPS[name] and name or nil
+end
+
+-- The trap a spell ID lays (any rank's, from the game data: ns.RANKS), or
+-- nil. A secret ID is never looked at. Made the first time it's asked.
+local trapIDs
+function S:TrapOf(id)
+    if not Open(id) or type(id) ~= "number" then return nil end
+    if not trapIDs then
+        trapIDs = {}
+        for name in pairs(TRAPS) do
+            for _, each in ipairs(ns.RANKS and ns.RANKS[name] or {}) do trapIDs[each] = name end
+        end
+    end
+    return trapIDs[id]
+end
+
 -- Spells pinned to one ID. Two spells can share a name (up to build 70707
 -- the Skyborne's racial gives two buffs called Energized, 1270842 for 15
 -- seconds and 1259691 for longer), and an entry kept by name watches every ID it
@@ -297,8 +327,10 @@ local function BuffIDs(name, known)
         local now = RENAMED[name]
         Add(ranks[name])
         if GROUP[name] then Add(ranks[GROUP[name]]) end
+        if SINGLE[name] then Add(ranks[SINGLE[name]]) end
         if now then Add(ranks[now]) end
         if now and GROUP[now] then Add(ranks[GROUP[now]]) end
+        if now and SINGLE[now] then Add(ranks[SINGLE[now]]) end
         Add(named[name])
         if now then Add(named[now]) end
         Add(EXTRA_IDS[name])

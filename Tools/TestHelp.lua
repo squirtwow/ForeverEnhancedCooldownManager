@@ -1490,7 +1490,7 @@ end)()
             end
         end
     end
-    for _, key in ipairs({ "cd", "util", "buff", "debuff", "look", "layout", "cast", "general", "raid", "pulse" }) do Check(key) end
+    for _, key in ipairs({ "presets", "cd", "util", "buff", "debuff", "look", "layout", "cast", "general", "raid", "pulse" }) do Check(key) end
     -- Layout with a layout picked: Undo, Reset and Turn off along its top row.
     local layout = w.pages.layout
     layout.cards[1]:Click()
@@ -1700,7 +1700,7 @@ end)()
         local problems = Fit.Problems(w.pages[key] or w.pages.bar, key == "look" and Fit.LookBoxes(w) or nil)
         if problems ~= "" then found[#found + 1] = (label or key) .. ": " .. problems end
     end
-    for _, key in ipairs({ "cd", "util", "buff", "debuff", "look", "layout", "cast", "general", "pulse" }) do Check(key) end
+    for _, key in ipairs({ "presets", "cd", "util", "buff", "debuff", "look", "layout", "cast", "general", "pulse" }) do Check(key) end
     local problems = Fit.Problems(w.navFrame) .. Fit.BarList(w) .. Fit.Problems(w.header)
     if problems ~= "" then found[#found + 1] = "list or title bar: " .. problems end
     -- Look, with Blizzard's Cooldown Manager and your display off, a reload
@@ -1969,15 +1969,25 @@ end)()
     -- A full bar (40 icons): the Cooldowns tray takes three rows, closer
     -- than an aura bar's, so under its taller options the spell list still
     -- shows two rows and more; the Buffs tray four, under its shorter ones.
+    -- And the Cooldowns bar again with Moonfire counting its ticks, buff and
+    -- debuff times shown: its tick count is in Moonfire's own panel, so the
+    -- list keeps its two rows there too.
     local profile = ForeverEnhancedCooldownManagerDB.profiles[ns.ProfileName()]
     local rows = {}
-    for _, key in ipairs({ "cd", "buff" }) do
+    for _, case in ipairs({ "cd", "buff", "cd counting" }) do
+        local key, label = case:match("^%a+"), case
         local full = {}
         for i = 1, ns.BAR_MAX_SPELLS do full[i] = "item:" .. (20000 + i) end
+        if case == "cd counting" then full[1] = "Moonfire" end
         profile[key] = full
         ns.Bars:Changed()
+        if case == "cd counting" then
+            ns.Bars:SetOption("cd", "showAuras", true)
+            ns.Bars:SetCountTicks("cd", "Moonfire", true)
+            label = case .. " " .. tostring(ns.Bars:CountsTicks("cd", "Moonfire"))
+        end
         w:Select(key)
-        Check(key, key .. " full")
+        Check(key, label .. " full")
         local shown, lowest = 0, 0
         for _, icon in ipairs(bp.icons) do
             if icon:IsVisible() then
@@ -1987,11 +1997,11 @@ end)()
         end
         local _, top, _, bottom = Fit.Rect(bp.list)
         local _, trayTop, _, trayBottom = Fit.Rect(bp.tray)
-        rows[#rows + 1] = key .. " " .. shown .. " icons in " .. tostring(lowest <= trayBottom) .. " " .. math.floor((bottom - top) / 22)
+        rows[#rows + 1] = label .. " " .. shown .. " icons in " .. tostring(lowest <= trayBottom) .. " " .. math.floor((bottom - top) / 22)
             .. " rows"
     end
-    Equal(table.concat(rows, ", "), "cd 40 icons in true 2 rows, buff 40 icons in true 2 rows",
-        "a full bar: every icon in its tray, and two rows of the spell list showing")
+    Equal(table.concat(rows, ", "), "cd 40 icons in true 2 rows, buff 40 icons in true 2 rows, cd counting true 40 icons in true 2 rows",
+        "a full bar: every icon in its tray, and two rows of the spell list showing, a Cooldowns spell counting its ticks too")
     Equal(table.concat(found, " | "), "", "on every page and in every state, each label clear of the next control, all inside the page")
     Equal(#printed, 0, "no errors")
 end)()
@@ -3186,10 +3196,10 @@ end)()
     local iconsLeft = Fit.Rect(w.sampleIcons)
     Equal(tostring(button:IsVisible()) .. " " .. S[button.label].text .. " " .. tostring(left > sampleLeft and right < iconsLeft) .. " | " .. Note(button)
         .. " | " .. tostring(Fit.Wide(Note(button), "GameFontHighlightSmall") <= 2 * S[w.note].width),
-        "true Icon details true | The cooldown swipe's colour and see-through, the countdown's size, colour and spot, and an edge"
-        .. " line, on your icons and Blizzard's, and your icons' shape, with a preview. | true",
-        "Icon details in the preview, between the sample bar and the sample icons, the shape only your icons', in two lines of the"
-        .. " footer, no longer marked experimental")
+        "true Icon details true | The swipe's colour and see-through, the countdown's size, colour and spot, and an edge line on"
+        .. " your icons and Blizzard's, plus your icons' shape and Key press glow. | true",
+        "Icon details in the preview, between the sample bar and the sample icons, the shape and Key press glow only your icons',"
+        .. " in two lines of the footer, no longer marked experimental")
     Equal(Looks(icon.cooldown), "0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0", "your icons as always: a 70% black swipe, no edge line,"
         .. " white numbers half the icon in its middle")
 
@@ -3226,6 +3236,42 @@ end)()
         "Black 30% 100% White CENTER false Game's own false 0.45 square",
         "the defaults: square icons, black at 30%, 100% white numbers in the middle, no edge line (its colour greyed), Defaults greyed")
 
+    -- Key press glow (Squirt's yes, 15 Nov 2026): a tick of its own on the
+    -- seventh row, under Edge line and over the note, off by default, its
+    -- hover in two lines of the footer and not marked experimental. Ticked
+    -- and unticked from here; Defaults (Icon details' own look) leaves it.
+    do
+        local press = panel.press
+        local note = Note(press)
+        local _, _, _, edgeBottom = Fit.Rect(panel.edge)
+        local pressLeft, pressTop, _, pressBottom = Fit.Rect(press)
+        local noteTop
+        for _, obj in ipairs(objects) do
+            if S[obj].parent == dialog and S[obj].kind == "FontString" and tostring(S[obj].text):find("^On your bars") then
+                noteTop = select(2, Fit.Rect(obj))
+            end
+        end
+        Equal(tostring(press:IsVisible()) .. " " .. tostring(press:GetChecked()) .. " " .. S[press.text].text .. " " .. tostring(ns.Get("keyPressGlow"))
+            .. " | " .. note .. " | " .. tostring(Fit.Wide(note, "GameFontHighlightSmall") <= 2 * S[w.note].width) .. " "
+            .. tostring(note:find("experimental", 1, true) == nil) .. " " .. tostring(pressTop >= edgeBottom and pressBottom <= noteTop)
+            .. " " .. tostring(pressLeft == select(1, Fit.Rect(panel.edge))),
+            "true false Key press glow false | A gold border on an icon on your Cooldowns and Utility bars while you hold down the key"
+            .. " that casts it, as your action bars show a held button. | true true true true",
+            "Key press glow: off, its hover two lines at most and not marked experimental, under Edge line and over the note, in line with it")
+        Check(dialog, "Key press glow off")
+        press:Click()
+        Equal(tostring(ns.Get("keyPressGlow")) .. " " .. tostring(press:GetChecked()) .. " " .. S[panel.defaults].alpha, "true true 0.45",
+            "ticked: on, and still nothing for Defaults to put back")
+        local kept = Note(panel.defaults)
+        Equal(kept .. " | " .. tostring(Fit.Wide(kept, "GameFontHighlightSmall") <= 2 * S[w.note].width),
+            "Every detail here back as the icons always looked: square, a 70% black swipe, white numbers in the middle, no edge"
+            .. " line. A custom colour is kept; Key press glow stays. | true",
+            "Defaults' hover says Key press glow stays as it is, in two lines of the footer")
+        Check(dialog, "Key press glow ticked")
+        press:Click()
+        Equal(tostring(ns.Get("keyPressGlow")) .. " " .. tostring(press:GetChecked()), "false false", "unticked: off again")
+    end
+
     -- Icons (a player's idea: Blizzard's look with Swap with my form): the
     -- first row, Square as always or Blizzard, neither hover marked
     -- experimental, each fitting two lines of the footer. Blizzard draws
@@ -3249,10 +3295,11 @@ end)()
             if S[obj].parent == dialog and S[obj].kind == "FontString" and tostring(S[obj].text):find("^the icons") then quiet = obj end
             if S[obj].parent == dialog and S[obj].kind == "FontString" and tostring(S[obj].text):find("^On your bars") then note = obj end
         end
-        Equal(quiet and S[quiet].text, "the icons, the swipe, the countdown and the edge line",
-            "the title's quiet words name the icons (Check: still inside the panel)")
+        Equal(quiet and S[quiet].text, "the icons, swipe, countdown, edge line and key press glow",
+            "the title's quiet words name the icons and key press glow (Check: still inside the panel)")
         Equal(note and S[note].text, "On your bars, and on Blizzard's icons while Apply this look to the Cooldown Manager is on"
-            .. " (Icons: your bars only). Each change shows at once.", "the panel's note: Icons reach only your bars (Check: it fits)")
+            .. " (Icons and Key press glow: your bars only). Changes show at once.",
+            "the panel's note: Icons and Key press glow reach only your bars (Check: it fits)")
         local art = icon.texture
         local function Drawn(texture, cooldown)
             return #(S[texture].masks or {}) .. " " .. tostring(Last(texture, "SetTexCoord")) .. " "
@@ -3480,8 +3527,9 @@ end)()
     Equal(table.concat({ tostring(panel.dialog:IsVisible()), tostring(S[panel].points[2][3]), S[panel.title].text, S[panel.quiet].text,
         panel.font.selected, S[panel.font.label].text, tostring(panel.own:GetChecked()), S[panel.size.value].text, tostring(panel.size.usable),
         tostring(panel.glow:IsVisible()), tostring(panel.only:IsVisible()), tostring(panel.ticks:IsVisible()), tostring(S[panel.defaults].alpha) }, " "),
-        "true 28 MOONFIRE on Cooldowns look Look page false 100% false false false false 0.45",
-        "opened over the window, clear of the footer: the Look page's font and size, no ticks on Cooldowns, Defaults greyed")
+        "true 28 MOONFIRE on Cooldowns look Look page false 100% false false false true 0.45",
+        "opened over the window, clear of the footer: the Look page's font and size, of the aura ticks only Count ticks on"
+        .. " Cooldowns (Moonfire's debuff ticks), Defaults greyed")
     Equal(tostring(panel.active:IsVisible()) .. " " .. tostring(panel.glowSize:IsVisible()) .. " " .. tostring(panel.glowSizeLabel:IsVisible()),
         "false false false", "no Glow while active on Cooldowns, nor its Glow size")
     Equal(Font(preview.cooldown) .. " " .. S[preview].width .. " " .. tostring(Last(preview.cooldown, "SetCooldown", 2)) .. " "
@@ -3805,6 +3853,242 @@ end)()
     Equal(#printed, 0, "no errors from a spell's own panel")
 end)()
 
+-- Show the trap I last laid, in a trap's own panel ---------------------------------------------------
+-- (Squirt, 15 Nov 2026, in the Hunter preset review.) A trap's tray icon on
+-- the Cooldowns or Utility page (Cooldowns 2's too) opens its panel with
+-- the tick, off at first, saying what it does, not marked experimental,
+-- and fitting; another spell's panel, and a trap's on the Debuffs page,
+-- have none. Ticked, it's kept for that bar and entry; unticked, gone.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    local B = ns.Bars
+    table.insert(book[1].items, { name = "Freezing Trap", subName = "Rank 1", spellID = 1499, iconID = 135834 })
+    table.insert(book[1].items, { name = "Frost Trap", subName = "Rank 1", spellID = 13809, iconID = 135840 })
+    ns.Spells:Stale()
+    B:Assign("Freezing Trap", "cd")
+    B:Assign("Frost Trap", "util")
+    B:SetAura("debuff", "Frost Trap", true)
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("cd")
+    local bp = w.pages.bar
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local found = {}
+    local function Check(panel, label)
+        local problems = Fit.Problems(panel.dialog)
+        local _, top, _, bottom = Fit.Rect(panel.dialog)
+        if top < 42 or bottom > 560 - 28 then problems = problems .. ("the panel at %.1f to %.1f, over the title bar or the footer"):format(top, bottom) end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    local function Shown(panel)
+        return S[panel.title].text .. " " .. tostring(panel.trap:IsVisible()) .. " " .. tostring(panel.trap:GetChecked())
+    end
+
+    -- Moonfire's panel: no tick. Freezing Trap's: the tick, off, its hover.
+    bp.icons[1]:Click()
+    local panel = w.spellPanel
+    local moon = Shown(panel)
+    bp.icons[2]:Click()
+    Equal(moon .. " | " .. Shown(panel) .. " | " .. S[panel.trap.text].text .. " | " .. Note(panel.trap),
+        "MOONFIRE false false | FREEZING TRAP true false | Show the trap I last laid | Traps share one cooldown, so this icon"
+        .. " shows whichever trap you laid last.", "only a trap's panel has the tick, off at first, saying what it does")
+    Check(panel, "Cooldowns, a trap")
+    -- Ticked: kept for Cooldowns' Freezing Trap. Unticked: gone.
+    panel.trap:Click()
+    local ticked = tostring(B:ShowsLastTrap("cd", "Freezing Trap")) .. " " .. tostring(panel.trap:GetChecked())
+    panel.trap:Click()
+    Equal(ticked .. " | " .. tostring(B:ShowsLastTrap("cd", "Freezing Trap")) .. " " .. tostring(ns.ProfileLists().lastTrap),
+        "true true | false nil", "ticked: kept for Cooldowns' trap; unticked: gone, nothing kept")
+    -- Utility's trap has it too; the same trap on the Debuffs page doesn't.
+    w:Select("util")
+    bp.icons[1]:Click()
+    local util = Shown(panel)
+    Check(panel, "Utility, a trap")
+    w:Select("debuff")
+    bp.icons[1]:Click()
+    Equal(util .. " | " .. Shown(panel), "FROST TRAP true false | FROST TRAP false false",
+        "on Utility too; not on the Debuffs page")
+    Check(panel, "Debuffs, a trap")
+    -- Cooldowns 2, an extra bar: the tick there too, kept for that bar.
+    B:AddBar("cd")
+    B:Assign("Freezing Trap", "cd2")
+    w:Select("cd2")
+    bp.icons[1]:Click()
+    panel.trap:Click()
+    Equal(Shown(panel) .. " " .. tostring(B:ShowsLastTrap("cd2", "Freezing Trap")) .. " " .. tostring(B:ShowsLastTrap("cd", "Freezing Trap")),
+        "FREEZING TRAP true true true false", "on Cooldowns 2 too, kept for that bar")
+    Check(panel, "Cooldowns 2, a trap, ticked")
+    Equal(table.concat(found, " | "), "", "every piece inside the panel and none on another, under the title bar, clear of the footer")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Count ticks in a Cooldowns or Utility spell's own panel -------------------------------------------
+-- (Squirt, 14 Nov 2026, in the Shaman preset review.) A spell whose debuff
+-- ticks (Moonfire) has Count ticks in its panel on the Cooldowns and
+-- Utility pages (Cooldowns 2's too), off at first, greyed while its bar
+-- doesn't show buff and debuff times (its hover says to tick that first),
+-- saying what it does once it can, not marked experimental; one whose
+-- debuff doesn't tick (Wrath) and an item have none. Ticked, the panel
+-- shows its bar's own tick count beside and under the tick (Start at 1, On
+-- the edge, the seven spots, its size and colour), each saying it's for
+-- every icon counting on that bar, set for that bar alone, every piece
+-- clear of the next; the page's options stay as they were, so a full bar
+-- keeps its spell list (the full-bar check above). The Debuffs page's rows
+-- stay where they were. A trap showing the trap last laid says it counts
+-- its own trap's ticks alone.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire", "Wrath", "item:5512" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    local B = ns.Bars
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("cd")
+    local bp = w.pages.bar
+    local opts = bp.options
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local found = {}
+    local function Check(panel, label)
+        local problems = Fit.Problems(panel.dialog)
+        local _, top, _, bottom = Fit.Rect(panel.dialog)
+        if top < 42 or bottom > 560 - 28 then problems = problems .. ("the panel at %.1f to %.1f, over the title bar or the footer"):format(top, bottom) end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    local function Page(key, label)
+        w:Select(key)
+        local problems = Fit.Problems(w.pages.bar)
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    local function Shown(panel)
+        return S[panel.title].text .. " " .. tostring(panel.ticks:IsVisible()) .. " " .. tostring(panel.ticks:GetChecked()) .. " "
+            .. tostring(panel.ticks.usable)
+    end
+
+    -- Wrath's panel and the item's: none. Moonfire's: Count ticks, off,
+    -- greyed until Show buff and debuff time is ticked, saying so.
+    bp.icons[2]:Click()
+    local panel = w.spellPanel
+    local wrath = Shown(panel)
+    bp.icons[3]:Click()
+    local item = tostring(panel.ticks:IsVisible())
+    bp.icons[1]:Click()
+    Equal(wrath .. " | " .. item .. " | " .. Shown(panel) .. " | " .. S[panel.ticks.text].text .. " | " .. Note(panel.ticks),
+        "WRATH false false false | false | MOONFIRE true false false | Count ticks | Tick Show buff and debuff time first: the count shows"
+        .. " while this icon shows its debuff's time on your target.", "none for Wrath or an item; Moonfire's off, greyed, saying what it needs")
+    Check(panel, "Cooldowns, Count ticks greyed")
+    B:SetOption("cd", "showAuras", true)
+    panel:Refresh()
+    Equal(Shown(panel) .. " | " .. Note(panel.ticks), "MOONFIRE true false true | While this icon shows its debuff's time on your"
+        .. " target, counts its ticks there, every 3 seconds for Moonfire, starting again when you reapply it.",
+        "with buff and debuff times shown: usable, saying what it does and its pace")
+    -- Ticked: kept for Cooldowns' Moonfire. Its bar's tick count in the
+    -- panel: Start at 1 and On the edge beside the tick, the seven spots
+    -- across the row under, then its size and colour, at its bar's
+    -- settings; the page's options as they were. The panel and page fit.
+    local look = panel.tickLook
+    local hidden = tostring(look.at:IsVisible()) .. " " .. tostring(look.from:IsVisible())
+    panel.ticks:Click()
+    w:Refresh()
+    local function X(region) return S[region].points[1][2] end
+    local function Y(region) return S[region].points[1][3] end
+    local tickY = Y(panel.ticks)
+    Equal(table.concat({ hidden, tostring(B:CountsTicks("cd", "Moonfire")), tostring(panel.ticks:GetChecked()), tostring(look.at:IsVisible()),
+        tostring(look.from:IsVisible()), tostring(look.edge:IsVisible()), tostring(look.size:IsVisible()), tostring(look.choice:IsVisible()),
+        tostring(Y(look.from) == tickY and Y(look.edge) == tickY), tostring(tickY + 2 - Y(look.at)), tostring(Y(look.at) - Y(look.size)),
+        tostring(X(look.at)), tostring(S[look.at].width), tostring(opts.tickAt:IsVisible()), tostring(math.floor(S[bp.optionsArea].height)) }, " "),
+        "false false true true true true true true true true 26 26 16 438 false 189",
+        "ticked: kept; its bar's tick count beside and under the tick, the spots across the panel; none on the page, its options as before")
+    Equal(look.at.selected .. " " .. tostring(look.from:GetChecked()) .. " " .. tostring(look.edge:GetChecked()) .. " " .. S[look.size.value].text
+        .. " " .. S[look.sizeLabel].text .. " " .. S[look.colour].text .. " " .. S[look.at.buttons[4].label].text,
+        "TOPLEFT true false 100% Count size Colour Centre", "at its bar's settings: top left, from 1, not on the edge, 100%")
+    local function Fits(text) return Fit.Wide(text, "GameFontHighlightSmall") <= 2 * S[w.note].width end
+    local notes = { Note(look.at.buttons[1]), Note(look.at.buttons[4]), Note(look.size), Note(look.from), Note(look.edge) }
+    local fits = true
+    for _, text in ipairs(notes) do fits = fits and Fits(text) end
+    Equal(table.concat(notes, " | ") .. " | " .. tostring(fits), "Where the tick count sits on each icon counting ticks on Cooldowns. |"
+        .. " Where the tick count sits on each icon counting ticks on Cooldowns. The centre is the countdown's: untick Show countdown numbers"
+        .. " to keep it clear. | How big the tick count is on each icon counting ticks on Cooldowns: 100% follows the icon's size. | 1 as the"
+        .. " debuff lands, 2 after its first tick, like stacks. Unticked, it counts the ticks so far, from 0. | Centres the count on the icon's"
+        .. " edge at its spot, half outside, so it covers less of the icon. Not for the centre. | true",
+        "each says what it does, the spots and size for every icon counting on its bar, each within two lines of the footer")
+    Check(panel, "Cooldowns, Count ticks ticked")
+    -- Its choices set the Cooldowns bar's own tick count, shown at once,
+    -- not the Debuffs bar's; the panel stays open.
+    look.at.buttons[5]:Click()
+    look.from:Click()
+    look.edge:Click()
+    look.size:Choose(150)
+    look.choice.swatches[2]:Click()
+    local cdData, debuffData = ns.BarData("cd"), ns.BarData("debuff")
+    Equal(table.concat({ cdData.tickAt, cdData.tickFrom, tostring(cdData.tickEdge), cdData.tickSize, cdData.tickColour, debuffData.tickAt,
+        debuffData.tickFrom, tostring(debuffData.tickEdge), debuffData.tickSize, debuffData.tickColour }, " ") .. " | " .. look.at.selected .. " "
+        .. tostring(look.from:GetChecked()) .. " " .. tostring(look.edge:GetChecked()) .. " " .. S[look.size.value].text .. " " .. tostring(S[panel].shown),
+        "BOTTOMLEFT 0 true 150 gold TOPLEFT 1 false 100 white | BOTTOMLEFT false true 150% true",
+        "the Cooldowns bar's own settings, shown at once; the Debuffs bar's as they were; the panel still open")
+    Check(panel, "Cooldowns, its tick count changed")
+    panel.done:Click()
+    Page("cd", "the Cooldowns page, a spell counting")
+    -- The Debuffs page counting: its rows back where they were.
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetCountTicks("debuff", "Moonfire", true)
+    w:Select("debuff")
+    Equal(tostring(opts.tickAt:IsVisible()) .. " " .. S[opts.tickAt].points[1][3] .. " " .. S[opts.tickSize].points[1][3] .. " "
+        .. ns.BarData("debuff").tickAt, "true -129 -151 TOPLEFT", "on the Debuffs page: its rows where they were, its own settings")
+    Page("debuff", "the Debuffs page counting, after the Cooldowns page")
+    -- Utility, and Cooldowns 2: the tick there too.
+    B:Assign("Moonfire", "util")
+    B:SetOption("util", "showAuras", true)
+    w:Select("util")
+    bp.icons[1]:Click()
+    local util = Shown(panel)
+    Check(panel, "Utility, Count ticks")
+    B:AddBar("cd")
+    B:Assign("Moonfire", "cd2")
+    w:Select("cd2")
+    bp.icons[1]:Click()
+    Equal(util .. " | " .. Shown(panel) .. " " .. tostring(B:CountsTicks("cd", "Moonfire")), "MOONFIRE true false true | MOONFIRE true false"
+        .. " false false", "on Utility and Cooldowns 2 too (greyed there until its bar shows the times); moved off Cooldowns, its tick there went")
+    panel.done:Click()
+    -- Moved back to Cooldowns and ticked, then unticked in its panel: its
+    -- bar's tick count goes from the panel; the page's options never changed.
+    B:Assign("Moonfire", "cd")
+    B:SetCountTicks("cd", "Moonfire", true)
+    w:Select("cd")
+    for _, icon in ipairs(bp.icons) do
+        if icon:IsVisible() and icon.spellName == "Moonfire" then icon:Click() end
+    end
+    local ticked = S[panel.title].text .. " " .. tostring(look.at:IsVisible())
+    panel.ticks:Click()
+    Equal(ticked .. " | " .. tostring(B:CountsTicks("cd", "Moonfire")) .. " " .. tostring(look.at:IsVisible()) .. " " .. tostring(look.from:IsVisible())
+        .. " " .. tostring(look.size:IsVisible()) .. " " .. tostring(opts.tickAt:IsVisible()) .. " " .. math.floor(S[bp.optionsArea].height),
+        "MOONFIRE true | false false false false false 189", "unticked in its panel: its tick count goes from there; the page's options as before")
+    Check(panel, "Cooldowns, Count ticks unticked")
+    panel.done:Click()
+    -- A hunter's Immolation Trap ticked Show the trap I last laid: Count
+    -- ticks says it counts that trap's own ticks alone, whichever trap the
+    -- icon shows (the time it shows is that trap's own too), in two lines.
+    table.insert(book[1].items, { name = "Immolation Trap", subName = "Rank 1", spellID = 13795, iconID = 135813 })
+    ns.Spells:Stale()
+    B:Assign("Immolation Trap", "cd")
+    w:Select("cd")
+    for _, icon in ipairs(bp.icons) do
+        if icon:IsVisible() and icon.spellName == "Immolation Trap" then icon:Click() end
+    end
+    local own = S[panel.title].text .. " " .. tostring(panel.ticks:IsVisible()) .. " " .. tostring(panel.trap:IsVisible()) .. " | " .. Note(panel.ticks)
+    panel.trap:Click()
+    panel.ticks:Click()
+    Equal(own .. " | " .. tostring(B:ShowsLastTrap("cd", "Immolation Trap")) .. " " .. tostring(B:CountsTicks("cd", "Immolation Trap")) .. " | "
+        .. Note(panel.ticks) .. " | " .. tostring(Fits(Note(panel.ticks))), "IMMOLATION TRAP true true | While this icon shows its debuff's time"
+        .. " on your target, counts its ticks there, every 3 seconds for Immolation Trap, starting again when you reapply it. | true true |"
+        .. " Counts Immolation Trap's ticks alone, every 3 seconds, while its debuff's time shows on this icon: not another trap's, though the"
+        .. " icon shows the one you laid last. | true", "a trap showing the last one laid: Count ticks says it counts its own trap alone")
+    Check(panel, "Cooldowns, a trap counting its ticks")
+    Equal(table.concat(found, " | "), "", "every piece inside its panel or page and none on another, under the title bar, clear of the footer")
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- Block and Colour fade on the Look page -------------------------------------------------------------
 -- Block, a fourth pill beside Glass, Split and Outline, and Colour fade, a
 -- tick level with the colour past its name, clear of the keybinds' choices:
@@ -4102,6 +4386,246 @@ end)()
         "true true | true false false | false  | false | false false",
         "ticked: Cooldowns' own, Utility's stays off; not on the Buffs or Debuffs pages; unticked again")
     Equal(#printed, 0, "no errors from Glow for more procs")
+end)()
+
+-- The Import box: the line saying what a string holds never runs into the
+-- name box under it, for a big preset with every option (the FECM Setups
+-- website's, TestShare's "A big setup in one string") and with some left out
+-- too; the look's tick and its note clear of the buttons, ticked or not.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    local P = ns.ProfileShare
+    ns.Bars:Assign("Moonfire", "cd")
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    local box = w.shareBox
+    w.profileButton:Click()
+    w.profileImport:Click()
+    box.paste:SetText(P.Export())
+    S[box.paste].scripts.OnTextChanged(box.paste)
+    -- What a string holds, n of each (true each), as P.Read gives it.
+    local function Many(n)
+        local set = {}
+        for i = 1, n do set["s" .. i] = true end
+        return set
+    end
+    local function Holds(count, picks, forms, looks, warns, extras, sizes, traps, options, skipped)
+        local shared = { count = count, picks = picks, skipped = skipped, setup = {}, forms = {}, looks = Many(looks),
+            warns = { buff = Many(warns) }, extras = Many(extras), sizes = { cd = Many(sizes) }, traps = { util = Many(traps) },
+            options = { glowMissing = { buff = Many(options) } } }
+        for i = 1, forms do shared.forms[i] = { cd = { "Wrath" } } end
+        return P.Describe(shared)
+    end
+    local big = Holds(30, 12, 3, 3, 5, 0, 4, 1, 19, 99)
+    Equal(big, "Holds 30 bar entries and 12 pulse ticks, with icons for 3 forms, own countdowns for 3 spells, low-time warnings for 5"
+        .. " auras, own sizes for 4 icons, the trap you last laid shown on 1 icon, 19 icon options and its look and layout. 99 left out,"
+        .. " as this version doesn't use them.", "the big preset's line, with some left out")
+    local found = {}
+    for _, case in ipairs({ { "a big preset", (big:gsub(" 99 left out.*$", "")) }, { "a big preset with some left out", big } }) do
+        for _, ticked in ipairs({ false, true }) do
+            box.look:SetChecked(ticked)
+            box:Check()
+            box.status:SetText(case[2])
+            local problems = Fit.Problems(box)
+            if problems ~= "" then found[#found + 1] = case[1] .. (ticked and " (look ticked): " or ": ") .. problems end
+        end
+    end
+    Equal(table.concat(found, "; "), "", "the line clear of the name box (four lines' room), the look's tick and note clear of the buttons")
+    -- The longest it says (every part, three figures each, left out too) in
+    -- those four lines at the game's own width (about 5.25 a letter in the
+    -- small font, measured on screenshots).
+    local longest = Holds(160, 400, 6, 200, 120, 4, 160, 8, 999, 999)
+    Equal(math.ceil(#longest * 5.25 / S[box.status].width) <= 4, true, "the longest it says fits in its four lines in the game")
+    Equal(S[box.lookNote].text, P.LOOK_ON, "(ticked last: the look's note)")
+    w:Hide()
+    Equal(#printed, 0, "no errors from the Import box")
+end)()
+
+-- Presets: first in the list, in gold, and its page of links ----------------------------------------
+-- (Squirt's pick, 15 Nov 2026: the website's setups standing out in /ccm.)
+-- Presets sits first in the list, over Your bars, set in and edged in gold
+-- with the game's star, gold under every accent; the pages under the bars
+-- a little closer to keep the bars' room. Its page: two cards (the official
+-- presets, edged in gold, and the setups players share, edged in the
+-- accent), each with Get the link, which opens the copy box with its link
+-- (never typed over), and how to import under them; every piece inside its
+-- card or the steps and clear of the next. Opened by its row, the profile
+-- menu's Find presets and /ccm presets.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w, T = FECMFrame, ns.Theme
+    local GOLD = T.GOLD
+    local item, page = w.nav.presets, w.pages.presets
+    local function Colour(c) return ("%.3f,%.3f,%.3f"):format(c[1] or c.r, c[2] or c.g, c[3] or c.b) end
+    local gold = Colour(GOLD)
+    Equal(gold .. " " .. tostring(T:OnAccent(GOLD)[1] < .5), "0.914,0.706,0.298 true", "gold is #e9b44c, light: dark words on it")
+
+    -- Its row: first, over the Your bars heading and the bars, set in 8
+    -- from each side, as high as Look; the star, then its name.
+    local p1, p2 = S[item].points[1], S[item].points[2]
+    local label = S[item.label]
+    Equal(table.concat({ p1[1], p1[2], p1[3], p2[1], p2[2], S[item].height, S[w.nav.look].height, S[w.yourBars].points[1][3],
+        S[w.barList].points[1][5], label.text, tostring(S[item.star].texture), tostring(S[item.label].points[1][2] == item.star) }, " "),
+        "TOPLEFT 8 -6 RIGHT -8 26 26 -40 -56 Presets Interface\\TargetingFrame\\UI-RaidTargetingIcon_1 true",
+        "Presets first in the list (6 down, 26 high like Look), Your bars under it (40), the bars under that (56); the game's star by its name")
+    Equal(item.hint, "Ready-made setups for every spec, and setups other players share, on squirtsaddons.com.", "its note on hover")
+    -- Gold whatever the accent: its name, edge, wash, lit fill, glow and mark,
+    -- the page's heading, the official card, its button and the profile
+    -- menu's Find presets; the players' card and the steps in the accent.
+    local wrong, accents = {}, {}
+    for key in pairs(T.ACCENTS) do accents[#accents + 1] = key end
+    table.sort(accents)
+    for _, key in ipairs(accents) do
+        ns.Set("accent", key)
+        T:Repaint()
+        w:Refresh()
+        local accent = Colour(T.ACCENTS[key].colour)
+        local golds = {
+            name = S[item.label].colour, edge = S[item].border, mark = { Last(item.mark, "SetColorTexture", 1), Last(item.mark, "SetColorTexture", 2),
+                Last(item.mark, "SetColorTexture", 3) }, fill = { Last(item.fill, "SetColorTexture", 1), Last(item.fill, "SetColorTexture", 2),
+                Last(item.fill, "SetColorTexture", 3) }, wash = Last(item.wash, "SetGradient", 3), glow = Last(item.glow, "SetGradient", 3),
+            star = S[item.star].tint, heading = S[page.title].colour, card = S[page.official].border,
+            cardEdge = { Last(page.official.edge, "SetColorTexture", 1), Last(page.official.edge, "SetColorTexture", 2),
+                Last(page.official.edge, "SetColorTexture", 3) },
+            button = { Last(page.official.link, "SetBackdropColor", 1), Last(page.official.link, "SetBackdropColor", 2),
+                Last(page.official.link, "SetBackdropColor", 3) }, find = S[w.profileFind.label].colour,
+        }
+        for name, colour in pairs(golds) do
+            if Colour(colour) ~= gold then wrong[#wrong + 1] = key .. " " .. name .. " " .. Colour(colour) end
+        end
+        local accented = { players = { Last(page.community.edge, "SetColorTexture", 1), Last(page.community.edge, "SetColorTexture", 2),
+            Last(page.community.edge, "SetColorTexture", 3) }, outline = S[page.community.link].border,
+            words = S[page.community.link.label].colour, step = S[page.stepRows[1].number].colour, people = S[page.community.mark.parts[1]].tint }
+        for name, colour in pairs(accented) do
+            if Colour(colour) ~= accent then wrong[#wrong + 1] = key .. " " .. name .. " not in the accent" end
+        end
+    end
+    ns.Set("accent", "purple")
+    T:Repaint()
+    table.sort(wrong)
+    Equal(#accents .. " | " .. table.concat(wrong, "; ") .. " | " .. tostring(Last(item.wash, "SetGradient", 3).a) .. " "
+        .. tostring(Last(item.glow, "SetGradient", 3).a) .. " " .. tostring(Last(item.fill, "SetColorTexture", 4)),
+        "5 |  | 0.18 0.36 0.12", "gold under all five accents, the players' card, its button and the steps in each accent; washed"
+        .. " in gold as the pages are in the accent, lit stronger, as a chosen page is")
+
+    -- Clicked: its page, lit as a chosen page is, the others not.
+    w:Select("look")
+    local before = tostring(item.fill:IsShown()) .. " " .. tostring(item.glow:IsShown()) .. " " .. tostring(item.mark:IsShown())
+    item:Click()
+    Equal(before .. " | " .. w.selected .. " " .. tostring(page:IsShown()) .. " " .. tostring(w.pages.look:IsShown()) .. " "
+        .. tostring(item.fill:IsShown()) .. " " .. tostring(item.glow:IsShown()) .. " " .. tostring(item.mark:IsShown()) .. " "
+        .. tostring(w.nav.look.fill:IsShown()), "false false false | presets true false true true true false",
+        "clicked, its page shows and it's lit, Look not")
+
+    -- The page's words.
+    local official, community = page.official, page.community
+    local steps = {}
+    for _, row in ipairs(page.stepRows) do steps[#steps + 1] = S[row.number].text .. " " .. S[row.text].text end
+    Equal(table.concat({ S[page.title].text, S[page.about].text, S[official.title].text, S[official.text].text, S[official.note].text,
+        S[official.link.label].text, S[community.title].text, S[community.text].text, S[community.note].text, S[community.link.label].text,
+        S[page.how].text, table.concat(steps, " / ") }, " | "),
+        "PRESETS | Ready-made setups you can import in a click, on squirtsaddons.com. | Official presets | 27 setups by Squirt, one for"
+        .. " every spec. Each one comes with screenshots from the game. | Every class, every spec | Get the link | Community setups |"
+        .. " Setups shared by other players. Each one is checked before it goes live. | Share yours too: click your profile name, then"
+        .. " Share. | Get the link | HOW TO IMPORT | 1 Copy a string on the site / 2 Click your profile name, then Import / 3 Paste, then"
+        .. " Make new profile", "the heading, the line under it, both cards' words and how to import")
+    Equal(ns.SITE_URL .. " " .. ns.PRESETS_URL .. " " .. ns.COMMUNITY_URL,
+        "www.squirtsaddons.com www.squirtsaddons.com www.squirtsaddons.com", "the links, kept in one place: both the home page")
+    -- The cards side by side, the same size, the steps under them.
+    local ol, ot, or_, ob = Fit.Rect(official)
+    local cl, ct, cr, cb = Fit.Rect(community)
+    local _, st = Fit.Rect(page.steps)
+    Equal(table.concat({ ot, ct, or_ - ol, cr - cl, ob - ot, cb - ct, cl - or_, tostring(st > ob) }, " "), "105 105 296 296 168 168 14 true",
+        "the two cards side by side, as wide and high as each other, 14 apart, how to import under them")
+
+    -- Get the link: the copy box, its link selected and never typed over.
+    local function Link(button)
+        button:Click()
+        local box = FECMCopyLink
+        local out = tostring(S[box].shown) .. " " .. S[box.title].text .. " " .. box.input:GetText() .. " " .. S[box.note].text
+        box.input:SetText("typed over")
+        S[box.input].scripts.OnTextChanged(box.input)
+        out = out .. " | " .. box.input:GetText() .. " " .. tostring(S[box.input].last.HighlightText ~= nil)
+        box.close:Click()
+        return out .. " " .. tostring(S[box].shown)
+    end
+    Equal(Link(official.link) .. " || " .. Link(community.link),
+        "true OFFICIAL PRESETS www.squirtsaddons.com Press Ctrl+C to copy, then paste it into your browser. |"
+        .. " www.squirtsaddons.com true false || true COMMUNITY SETUPS www.squirtsaddons.com Press Ctrl+C to copy,"
+        .. " then paste it into your browser. | www.squirtsaddons.com true false",
+        "each Get the link opens the copy box with its own title and link, selected, saying how to copy; typed over, it puts the link"
+        .. " back; Close closes it")
+    -- Hovered: a lighter gold (the players' a lighter fill), and its note.
+    S[official.link].scripts.OnEnter(official.link)
+    local lit, note = Colour({ Last(official.link, "SetBackdropColor", 1), Last(official.link, "SetBackdropColor", 2),
+        Last(official.link, "SetBackdropColor", 3) }), S[w.note].text
+    S[official.link].scripts.OnLeave(official.link)
+    local back = Colour({ Last(official.link, "SetBackdropColor", 1), Last(official.link, "SetBackdropColor", 2),
+        Last(official.link, "SetBackdropColor", 3) })
+    S[community.link].scripts.OnEnter(community.link)
+    local players = S[w.note].text
+    S[community.link].scripts.OnLeave(community.link)
+    Equal(lit .. " " .. back .. " | " .. note .. " | " .. players .. " | " .. Colour(S[official.link.label].colour) .. " "
+        .. tostring(S[official.link.label].shadow),
+        "0.931,0.765,0.438 " .. gold .. " | The link to Squirt's presets on squirtsaddons.com, ready to copy. | The link to setups"
+        .. " other players share on squirtsaddons.com, ready to copy. | 0.070,0.070,0.070 0",
+        "hovered, the gold lightens and the footer says what each does; dark words on the gold, no smeared shadow")
+
+    -- Everything fits: each piece inside its card or the steps, none on
+    -- another, all on the page; the list with Presets in it; each note on
+    -- two lines of the footer at most.
+    local problems = Fit.Problems(page, { { official, "the official card" }, { community, "the players' card" }, { page.steps, "the steps" } })
+    local list = Fit.Problems(w.navFrame) .. Fit.BarList(w)
+    local long = {}
+    for _, hint in ipairs({ item.hint, official.link.hint, community.link.hint, w.profileFind.hint }) do
+        if Fit.Wide(hint, "GameFontHighlightSmall") > 2 * S[w.note].width then long[#long + 1] = hint end
+    end
+    local _, presetsTop, _, presetsBottom = Fit.Rect(item)
+    local _, headingTop = Fit.Rect(w.yourBars)
+    Equal(problems .. " | " .. list .. " | " .. table.concat(long, "; ") .. " | " .. tostring(presetsBottom < headingTop)
+        .. " " .. tostring(presetsTop > 42), " |  |  | true true",
+        "on the page every piece inside its card or the steps and clear of the next; the list fits, Presets over Your bars")
+    -- In the game's own font (about 5.25 a letter small, measured on
+    -- screenshots), each card's words on two lines at most, the note one or two.
+    local function Lines(text) return math.ceil(#S[text].text * 5.25 / S[text].width) end
+    Equal(Lines(official.text) .. " " .. Lines(community.text) .. " " .. Lines(official.note) .. " " .. Lines(community.note), "2 2 1 2",
+        "in the game, each card's words on two lines, the notes on one or two")
+
+    -- The profile menu's Find presets: the page, the menu put away.
+    w:Select("look")
+    w.profileButton:Click()
+    local open = tostring(S[w.profilePanel].shown)
+    w.profileFind:Click()
+    Equal(open .. " " .. tostring(S[w.profilePanel].shown) .. " " .. w.selected .. " " .. tostring(page:IsShown()) .. " | "
+        .. w.profileFind.hint .. " | " .. tostring(S[w.profileImport].points[1][2] == w.profileFind),
+        "true false presets true | Ready-made setups to import, on the Presets page. | true",
+        "Find presets, beside Import, opens the page and puts the menu away")
+    -- The page's walkthrough: the ? shows its three steps.
+    w.help:Click()
+    local titles = {}
+    for _ = 1, 5 do
+        titles[#titles + 1] = S[FECMTour.title].text
+        if S[FECMTour.next.label].text == "Done" then break end
+        FECMTour.next:Click()
+    end
+    FECMTour.next:Click()
+    Equal(table.concat(titles, ", ") .. " | " .. w.selected, "OFFICIAL PRESETS, COMMUNITY SETUPS, HOW TO IMPORT | presets",
+        "the ? walks through the page: both cards, then how to import")
+
+    -- /ccm presets: the window opens on the page, from anywhere.
+    w:Select("general")
+    w:Hide()
+    SlashCmdList.FECM("presets")
+    local typed = tostring(S[w].shown) .. " " .. w.selected .. " " .. tostring(page:IsShown())
+    w:Select("cd")
+    SlashCmdList.FECM("  Presets ")
+    Equal(typed .. " | " .. w.selected .. " " .. tostring(page:IsShown()), "true presets true | presets true",
+        "/ccm presets opens the window on Presets, in any case, with spaces round it")
+    Equal(#printed, 0, "no errors from Presets")
 end)()
 
 Equal(#printed, 0, "no errors")

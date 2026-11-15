@@ -3909,6 +3909,23 @@ end)()
     Equal(tostring(B:TickPace("Bane of Agony")) .. " " .. tostring(B:TickPace("Bane of Doom")) .. " "
         .. tostring(B:TickPace("Immolation Trap Effect")) .. " " .. tostring(B:TickPace("Rupture@3")), "2 nil 3 2",
         "Agony every 2 s; not Bane of Doom; the trap by its old name; a fixed rank by its spell's")
+    -- The table from build 70938's data (15 Nov 2026): Deadly Poison I to
+    -- V, Penance, Lacerating Strikes and Explosive Trap count now (by its
+    -- old name too, Explosive Trap Effect); Deep Wound still does. Frost
+    -- Trap doesn't (old name Frost Trap Aura): its periodic trigger fires
+    -- nothing, only its slow does anything. Each trap lasts its debuff's own
+    -- length, not the 60 s its laying spell waits on the ground. Curse of
+    -- Idiocy is gone: nothing in Forever teaches it, so the Debuffs page no
+    -- longer offers it.
+    Equal(table.concat({ tostring(B:TickPace("Deadly Poison")), tostring(B:TickPace("Deadly Poison V")), tostring(B:TickPace("Penance")),
+        tostring(B:TickPace("Lacerating Strikes")), tostring(B:TickPace("Explosive Trap")), tostring(B:TickPace("Explosive Trap Effect")),
+        tostring(B:TickPace("Frost Trap")), tostring(B:TickPace("Frost Trap Aura")), tostring(B:TickPace("Deep Wound")),
+        tostring(B:TickPace("Curse of Idiocy")), table.concat(ns.DEBUFF_LASTS["Explosive Trap"] or {}, ","),
+        table.concat(ns.DEBUFF_LASTS["Frost Trap"] or {}, ","), table.concat(ns.DEBUFF_LASTS["Freezing Trap"] or {}, ","),
+        table.concat(ns.DEBUFF_LASTS["Immolation Trap"] or {}, ","), tostring(ns.DEBUFF_LASTS["Curse of Idiocy"]) }, " "),
+        "3 3 1 3 2 2 nil nil 3 nil 20 30 10,15,20 15 nil",
+        "new paces: Deadly Poison, Penance, Lacerating Strikes, Explosive Trap (old name too), Deep Wound; not Frost Trap;"
+        .. " the traps' debuff lengths only; none for Curse of Idiocy")
     Equal(Shows(bar, 1) .. " | " .. Shows(bar, 2), "every 3 / every 3 | hidden / hidden",
         "Moonfire's icon counts every 3 seconds, its pace in the game's data, fixed and packed; Wrath's doesn't")
     -- Fixed spots (Show missing ... greyed): the same.
@@ -4093,6 +4110,17 @@ end)()
     ns.DEBUFF_LASTS.Thorns, ns.DEBUFF_LASTS.Wrath = nil, nil
     -- Rupture's lengths with each combo point (a review's case).
     Equal(table.concat(ns.DEBUFF_LASTS.Rupture, ","), "6,8,10,12,14,16", "Rupture lasts 6 to 16 s with combo points")
+    -- The traps (a review's case): Immolation Trap counted in one icon with
+    -- Explosive or Frost Trap is told apart by each debuff's own length (15 s
+    -- against 20 or 30), not the 60 s their laying spells wait on the ground.
+    local function Told(other)
+        local pace, shows, clash = B:IconTicks({ "Immolation Trap", other }, { ["Immolation Trap"] = true })
+        local out = {}
+        for _, each in ipairs(shows or {}) do out[#out + 1] = each[1] .. "=" .. tostring(each[2]) end
+        return tostring(pace) .. " " .. table.concat(out, ",") .. " " .. tostring(clash)
+    end
+    Equal(Told("Explosive Trap") .. " | " .. Told("Frost Trap"), "3 15=true,20=false nil | 3 15=true,30=false nil",
+        "Immolation Trap counted beside Explosive or Frost Trap: told apart by their debuffs' lengths")
     B:SetJoined("debuff", 2, false)
     Equal(tostring(S[ticks.frame].shown) .. " " .. Curve(), "true 0=1 100000=1", "apart again: counting, its colour throughout")
     -- Glow when missing on the Debuffs bar: only with an enemy targeted.
@@ -4122,6 +4150,155 @@ end)()
     Equal(tostring(corpse) .. " " .. tostring(S[B.driver].events.UNIT_FLAGS), "0 true", "your target dead: no glow (heard as it dies)")
     _G.C_StringUtil, _G.C_CurveUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty =
         before[1], before[2], before[3], before[4]
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Count ticks on the Cooldowns and Utility icons (Squirt, 14 Nov 2026, in
+-- the Shaman preset review: the preset hides the Debuffs bar, so Flame
+-- Shock's ticks on its Cooldowns icon). Ticked in a spell's own panel, off
+-- by default, only for a spell whose debuff ticks. While the bar shows buff
+-- and debuff times, one more slot on its debuff container, told the same
+-- spells as the icon's debuff time, holds only the count: so it shows just
+-- while your debuff is up on your target. The debuff's time is secret in a
+-- fight, so the game draws the count (its time so far through the rule the
+-- addon set out of combat), as on the Debuffs bar; the addon reads no aura.
+-- Where it sits, its size and colour are the bar's own. Nothing made for a
+-- bar with none ticked; kept over a reload and copied with the profile, as
+-- the Debuffs bar's is; gone with its spell.
+;(function()
+    local before = { _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    -- A fresh game with the number rules, and a shaman's Flame Shock known.
+    local function Game()
+        Fresh()
+        _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+            return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end,
+                ClearBreakpoints = function(self) self.rules = {} end }
+        end }
+        _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = { Up = 1, Down = 2 }, { ElapsedDuration = 2 }
+        table.insert(book[2].items, { name = "Flame Shock", subName = "Rank 1", spellID = 8050, iconID = 135813 })
+    end
+    Game()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:Assign("Flame Shock", "cd")
+    B:Assign("Wrath", "cd")
+    B:AddItem("cd", 5512)
+    local cd = B:Get("cd")
+    -- Off by default, nothing kept; offered for Flame Shock on the bar it's
+    -- on, not Wrath (no ticks), nor where Flame Shock isn't, nor the Buffs bar.
+    Equal(table.concat({ tostring(B:CountsTicks("cd", "Flame Shock")), tostring(ns.ProfileLists().countTicks.cd),
+        tostring(B:SetCountTicks("cd", "Wrath", true)), tostring(B:SetCountTicks("util", "Flame Shock", true)),
+        tostring(B:SetCountTicks("buff", "Flame Shock", true)), tostring(B:TickPace("Flame Shock")) }, " "), "false nil false false false 3",
+        "off by default with nothing kept; not for Wrath, nor a bar Flame Shock isn't on; its pace every 3 s")
+    -- Ticked with Show buff and debuff time off: kept, but nothing made.
+    Equal(tostring(B:SetCountTicks("cd", "Flame Shock", true)) .. " " .. tostring(B:CountsTicks("cd", "Flame Shock")) .. " "
+        .. tostring(cd.auraContainers) .. " " .. tostring(cd.tickSlots), "true true nil nil",
+        "ticked with buff and debuff times off: kept, nothing made, nothing drawn")
+    -- With them on: one count slot on the debuff side, told Flame Shock's
+    -- spells as its debuff time is, only yours, its icon holding only the count.
+    B:SetOption("cd", "showAuras", true)
+    local t = S[cd.auraContainers.t]
+    local k1, t1 = t.slots.k1, t.slots.t1
+    local slot = cd.tickSlots and cd.tickSlots[1]
+    local ticks = slot and slot.ticks
+    local options = k1 and k1.supplied.durationTextOptions
+    local component = options and options.textFormat.components[1]
+    local function IDs(set)
+        local list = {}
+        for id in pairs(set or {}) do list[#list + 1] = id end
+        table.sort(list)
+        return table.concat(list, ",")
+    end
+    Equal(table.concat({ tostring(k1 and k1.filter), tostring(k1 and k1.enabled), tostring(k1 and k1.filters.includeSpellIDs[8050]),
+        tostring(k1 and k1.filters.isFromPlayerOrPlayerPet), tostring(k1 and IDs(k1.filters.includeSpellIDs) == IDs(t1.filters.includeSpellIDs)),
+        tostring(t.slots.k2), tostring(k1 and k1.supplied.SetIcon), tostring(k1 and k1.supplied.SetDurationCooldown) }, " "),
+        "HARMFUL|PLAYER true true true true nil nil nil",
+        "one count slot, your debuff on your target, the very spells its debuff time watches; no icon or sweep of its own")
+    Equal(tostring(component and component.property) .. " " .. tostring(component and ticks and component.formatter == ticks.formatter) .. " "
+        .. tostring(ticks and k1.supplied.SetDurationText == ticks.text) .. " " .. tostring(Last(slot.anchor, "SetAllPoints") == cd.icons[1]),
+        "2 true true true", "the game draws its time so far through the count's rule, over Flame Shock's icon")
+    local rules = ticks.formatter.rules
+    Equal(#rules .. " " .. rules[1].components[1].div .. " " .. rules[1].components[1].rounding .. " " .. tostring(S[ticks.frame].shown),
+        "1 3 1 true", "every 3 seconds, from 1 like stacks, its count set to show")
+    -- In sight only while your Flame Shock is on the target (the game shows
+    -- the slot's icon then), as its debuff time is; nothing read by the addon.
+    local reads = AuraReads
+    t.Update({ { id = 8050, harmful = true, mine = true } })
+    local up = tostring(InSight(ticks.text)) .. " " .. tostring(InSight(t1.button))
+    t.Update({})
+    local gone = tostring(InSight(ticks.text)) .. " " .. tostring(InSight(t1.button))
+    t.Update({ { id = 8050, harmful = true, other = true } })
+    local theirs = tostring(InSight(ticks.text))
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    t.Update({ { id = 8050, harmful = true, mine = true } })
+    local fight = tostring(InSight(ticks.text)) .. " " .. containerCallsInCombat
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(up .. " | " .. gone .. " | " .. theirs .. " | " .. fight .. " | " .. (AuraReads - reads), "true true | false false | false | true 0 | 0",
+        "counting while your Flame Shock is up, with its time; not while it's gone, nor another player's; in a fight the game"
+        .. " draws it with nothing asked of the container; no aura read")
+    -- Where it sits, its size and colour, from 0: the Cooldowns bar's own,
+    -- the Debuffs bar's left as they were.
+    B:SetOption("cd", "tickAt", "BOTTOMLEFT")
+    B:SetOption("cd", "tickColour", "gold")
+    B:SetOption("cd", "tickFrom", 0)
+    local point = S[ticks.text].points[1] or {}
+    local debuff = ns.BarData("debuff")
+    Equal(table.concat({ tostring(point[1]), tostring((S[ticks.text].colour or {})[2]), tostring(rules ~= ticks.formatter.rules),
+        tostring(ticks.formatter.rules[1].components[1].rounding), tostring(Last(ticks.text, "SetFontObject") == ns.Style:Ticks(cd.icons[1].size)),
+        debuff.tickAt, debuff.tickColour, tostring(debuff.tickFrom) }, " "), "BOTTOMLEFT 0.82 true 2 true TOPLEFT white 1",
+        "bottom left, gold, from 0 (rounded down), sized for its icon: the Cooldowns bar's own; the Debuffs bar's as they were")
+    -- Unticked in a fight: counting until it ends, then switched off and hidden.
+    lockdown = true
+    B:SetCountTicks("cd", "Flame Shock", false)
+    local still = tostring(k1.enabled) .. " " .. tostring(S[ticks.frame].shown) .. " " .. tostring(cd.auraPending)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(still .. " | " .. tostring(k1.enabled) .. " " .. tostring(S[ticks.frame].shown), "true true true | false false",
+        "unticked in a fight: still counting until it ends, then off and hidden")
+    -- Ticked again, then Show buff and debuff time off: the slot switched
+    -- off and its count hidden (none drawn while the icon shows no time).
+    B:SetCountTicks("cd", "Flame Shock", true)
+    local again = tostring(k1.enabled) .. " " .. tostring(S[ticks.frame].shown) .. " " .. tostring(t.slots.k2)
+    B:SetOption("cd", "showAuras", false)
+    t.Update({ { id = 8050, harmful = true, mine = true } })
+    Equal(again .. " | " .. tostring(k1.enabled) .. " " .. tostring(S[ticks.frame].shown) .. " " .. tostring(InSight(ticks.text)),
+        "true true nil | false false false", "ticked again: the same slot; buff and debuff times off: off, nothing drawn")
+    B:SetOption("cd", "showAuras", true)
+    Equal(ns.DebugReport():match("1%. Flame Shock[^\n]*"):match(" | counts ticks.*$"), " | counts ticks every 3 s: slot k1, rule 3:0",
+        "/ccm debug says it counts, and how")
+    -- Kept over a reload, and in a copy of the profile; the Debuffs bar's
+    -- tick settings and Count ticks left alone.
+    -- (Moonfire on Cat Form's own Cooldowns list only, as Swap with my form
+    -- keeps it: kept too.)
+    local saved = ForeverEnhancedCooldownManagerDB
+    local mine = saved.profiles[ns.ProfileName()]
+    mine.countTicks.cd.Wrath, mine.countTicks.cd.Gone, mine.countTicks.cd.Moonfire = "yes", true, true
+    mine.forms = { [1] = { cd = { "Moonfire" } } }
+    Game()
+    ns = Load(saved)
+    B = ns.Bars
+    local kept = {}
+    for name, on in pairs(ns.ProfileLists().countTicks.cd or {}) do kept[#kept + 1] = name .. "=" .. tostring(on) end
+    table.sort(kept)
+    Equal(table.concat(kept, " ") .. " " .. ns.BarData("cd").tickAt .. " " .. tostring(ns.BarData("cd").tickFrom),
+        "Flame Shock=true Moonfire=true BOTTOMLEFT 0", "after a reload: Flame Shock still counts, and Moonfire on a form's list"
+        .. " (odd ones dropped); its bar's settings kept")
+    local own = ns.ProfileName()
+    ns.CopyProfile("Raid")
+    Equal(tostring(ns.ProfileName()) .. " " .. tostring(B:CountsTicks("cd", "Flame Shock")), "Raid true", "a copy of the profile counts too")
+    ns.UseProfile(own)
+    -- Moved to Utility: gone from Cooldowns, as it's off that bar; ticked
+    -- there, it counts on that bar.
+    B:Assign("Flame Shock", "util")
+    Equal(tostring(B:CountsTicks("cd", "Flame Shock")) .. " " .. tostring(B:SetCountTicks("util", "Flame Shock", true)) .. " "
+        .. tostring(B:CountsTicks("util", "Flame Shock")), "false true true", "moved to Utility: off Cooldowns, ticked there on its own")
+    -- Taken off: gone, and none kept after a reload.
+    B:Assign("Flame Shock", nil)
+    Equal(tostring(B:CountsTicks("util", "Flame Shock")) .. " " .. tostring((ns.ProfileLists().countTicks.util or {})["Flame Shock"]),
+        "false nil", "taken off: no longer kept")
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = before[1], before[2], before[3]
     Equal(#printed, 0, "no errors")
 end)()
 
@@ -5489,7 +5666,8 @@ end)()
 -- won't take the loop). The game shows it only while Shadow Trance is up, in
 -- a fight too, with none of the addon's code run; it's told and styled out
 -- of a fight only, and placed by name in one. Nothing is made for a bar
--- without such a spell. (Not shared in profile strings: TestShare.)
+-- without such a spell. (Shared with a profile string's look and layout
+-- since 15 Nov 2026: TestShare.)
 
 -- A warlock's Shadow Bolt, two ranks, in the mock spellbook (after Fresh).
 -- (A global: this file's main chunk is at Lua's 200 locals.)

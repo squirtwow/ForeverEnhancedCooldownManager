@@ -1,7 +1,8 @@
 -- The profile menu in the /ccm window's header: the profile this character
 -- uses, and a panel under it listing every profile (click one to switch, or
 -- its x to delete it after asking) with a box to type a name for New, Copy
--- or Rename, and Share and Import at its top (ProfileShare.lua). At its foot,
+-- or Rename, and Share, Import and Find presets at its top (ProfileShare.lua,
+-- Window.lua's Presets page). At its foot,
 -- Roles: Tank, Healer and Damage, a profile for each, and Switch with my
 -- talents with each talent tree's role (or None) under it. Profiles hold the spell
 -- lists only (the bars', and the Cooldown pulse's ticks); the rules live in
@@ -222,14 +223,24 @@ function ns.BuildProfileMenu(window, header, anchor)
     end)
     window:HookScript("OnHide", function() panel:Hide() end)
 
-    -- Share and Import, at the top right, level with the heading: the
-    -- profile you're on as text, or one pasted in as a new profile
-    -- (ProfileShare.lua: a new file, so only after a full restart).
+    -- Find presets, at the top right, level with the heading: the Presets
+    -- page (Window.lua), for a ready-made setup to import, its word in gold
+    -- as Presets is in the list.
+    local find = T:Button(panel, "Find presets", 84, 18)
+    find:SetPoint("TOPRIGHT", -10, -6)
+    find.label:SetTextColor(T.GOLD[1], T.GOLD[2], T.GOLD[3])
+    find:SetScript("OnClick", function() window:Select("presets") end)
+    window:Hint(find, "Ready-made setups to import, on the Presets page.")
+    window.profileFind = find
+
+    -- Share and Import, beside it: the profile you're on as text, or one
+    -- pasted in as a new profile (ProfileShare.lua: a new file, so only
+    -- after a full restart).
     local share = ns.ProfileShare
     if share then
         local box = share.BuildBox(window)
         local import = T:Button(panel, "Import", 56, 18)
-        import:SetPoint("TOPRIGHT", -10, -6)
+        import:SetPoint("RIGHT", find, "LEFT", -4, 0)
         import:SetScript("OnClick", function() box:Open("import") end)
         window:Hint(import, "Paste a shared profile to make it a new profile. Yours stays as it is.")
         local send = T:Button(panel, "Share", 56, 18)

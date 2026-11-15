@@ -263,7 +263,7 @@ local function NewIcon(bar)
     return icon
 end
 
-local ShowKey -- with the keybinds, below
+local ShowKey, Presses -- with the keybinds, below, and Key press glow after them
 
 -- The name under an icon: a trinket or ammo by the item itself, and a
 -- healthstone or potion family by the one you carry (its own name when
@@ -287,6 +287,31 @@ local function Follow(icon)
     icon.texture:SetTexture(entry.icon)
     icon.label:SetText(Label(entry))
     ShowKey(icon)
+    -- (Key press glow: one with a button for the item it shows now is watched from now on.)
+    if icon.pressButtons and not icon.pressWatched then Presses() end
+end
+
+-- Show the trap I last laid (Squirt, 15 Nov 2026, in the Hunter preset
+-- review): a hunter's traps share one cooldown, so a trap's icon ticked in
+-- its panel shows whichever trap you laid last, as a demon's abilities come
+-- and go with the demon: its picture, and its name under it. Its cooldown,
+-- colour and glow stay its own spell's (the cooldown is the same one). Your
+-- casts are heard only while a ticked icon shows on a bar you have (a trap
+-- you know: HearTraps, with the driver below, asked as each Cooldowns or
+-- Utility bar is laid out), in a fight too; the trap is kept for the
+-- session. Until one is laid each shows its own. Your own bars only, never
+-- Blizzard's.
+local traps = { laid = nil, art = nil, hearing = false }
+local HearTraps
+
+-- A ticked trap icon showing the last trap laid, or its own again (laid is
+-- its own, or none yet). Set only when that changes.
+local function LaidLook(icon)
+    local other = traps.laid ~= icon.trap and traps.laid or nil
+    if icon.laidShown == other then return end
+    icon.laidShown = other
+    icon.texture:SetTexture(other and traps.art or icon.ownArt)
+    icon.label:SetText(other or icon.ownLabel)
 end
 
 -- The icon's colour: white, blue (low on mana), grey (can't be used now) or
@@ -1055,16 +1080,178 @@ function B:KeyFor(name)
     return keys and name and keys:ForEntry(ns.Spells:Find(name)) or nil
 end
 
+-- The bar buttons whose keys cast a bar entry now, by name, for Key press
+-- glow: a list (Keybinds.lua's own), or nil with none or the tick off.
+function B:ButtonsFor(name)
+    local keys = ns.Keybinds
+    if not (keys and name and ns.Get("keyPressGlow") == true) then return nil end
+    return keys:ButtonsForEntry(ns.Spells:Find(name))
+end
+
 -- A key showing up or going moves the count with it: the addon's own
 -- frames only, so in combat too. Nothing is looked up while keybinds are
 -- off, and nothing is set again while the key stays the same (a form
--- change asks every icon again).
+-- change asks every icon again). Its buttons for Key press glow are kept
+-- whatever the key's text (Presses, below, watches them).
 ShowKey = function(icon)
+    icon.pressButtons = B:ButtonsFor(icon.name)
     local key = ns.Get("keybinds") and B:KeyFor(icon.name) or nil
     if icon.keyed ~= nil and icon.keyText == key then return end
     icon.keyText = key
     icon.keyed = Style:SetKey(icon.key, key)
     Room(icon)
+end
+
+-- Key press glow (a player's idea; Squirt's yes, 15 Nov 2026: as Blizzard's
+-- action bars show a button held down). While it's ticked (Icon details), a
+-- Cooldowns or Utility icon (their extra bars' too) shows a gold border
+-- while a bar button whose key casts its spell (Keybinds.lua) is held down.
+-- Each button's state is only read, never set, by the addon's own frame's
+-- OnUpdate, which runs only while the tick is on and an icon on your bars
+-- has a button: otherwise it has no script at all. The icons watched are
+-- worked out again only as the keys are (a binding, bar or page changed)
+-- and as the bars are laid out; every lit one goes out then, and one still
+-- held lights again on the next frame. The border is the addon's own, on
+-- the icon's top: over its art, Blizzard's frame round it and its sweep (a
+-- held key often starts the cooldown, and the sweep would dim it), under
+-- its key, count and glows. Its four sides are made the first time it
+-- lights, sized with the icon: just inside the art on a square icon; on one
+-- drawn like Blizzard's, inside the empty edge Blizzard's mask leaves and
+-- rounded by a mask of its own like Blizzard's (made on the top with them,
+-- since a mask rounds only its own frame's textures).
+do
+    local GOLD = { .914, .706, .298 } -- #e9b44c, a held button's gold
+    local watched, spare = {}, {}
+    local driver, driving = nil, false -- the frame reading the buttons, made the first time one is watched
+
+    -- How wide the sides are on an icon of size, and how far in they sit
+    -- on one drawn like Blizzard's (its mask leaves about 2 empty at 50).
+    local function Width(size) return math.max(2, math.floor(size * .06 + .5)) end
+    local function Inset(size) return math.ceil(size * .05) end
+
+    -- The border's own mask on the icon's top, the art's shape: made the
+    -- first time an icon drawn like Blizzard's lights. Should the game
+    -- refuse it, the sides stay square there (still set in).
+    local function PressMask(icon)
+        if icon.pressMaskMade == nil then
+            local ok, made = pcall(function()
+                local mask = icon.top:CreateMaskTexture()
+                mask:SetAtlas(Style.BLIZZARD_MASK)
+                mask:SetAllPoints(icon.texture)
+                return mask
+            end)
+            icon.pressMaskMade = ok and made or false
+        end
+        return icon.pressMaskMade or nil
+    end
+
+    -- The sides placed, again only when the icon's size or shape changed.
+    local function Place(icon)
+        local kit, size = icon.shape, icon.size or icon:GetWidth()
+        local rounded = kit ~= nil and kit.rounded == true
+        local mask = rounded and PressMask(icon) or nil
+        if icon.pressSize == size and icon.pressRounded == rounded then return end
+        icon.pressSize, icon.pressRounded = size, rounded
+        local width, inset, art = Width(size), rounded and Inset(size) or 0, icon.texture
+        for i, side in ipairs(GLOW_SIDES) do
+            local strip = icon.press[i]
+            strip:ClearAllPoints()
+            for p = 1, 2 do
+                local point = side[p]
+                local x = point:find("LEFT") and inset or -inset
+                local y = point:find("TOP") and -inset or inset
+                strip:SetPoint(point, art, point, x, y)
+            end
+            if side[3] then strip:SetHeight(width) else strip:SetWidth(width) end
+            -- Rounded with the art by its own mask, or square again.
+            if icon.pressMask ~= mask then
+                if icon.pressMask then pcall(strip.RemoveMaskTexture, strip, icon.pressMask) end
+                if mask then pcall(strip.AddMaskTexture, strip, mask) end
+            end
+        end
+        icon.pressMask = mask
+    end
+
+    -- Lit or out; only a change is set.
+    local function Light(icon, on)
+        if (icon.pressLit == true) == on then return end
+        icon.pressLit = on
+        if on and not icon.press then
+            icon.press = {}
+            for i = 1, #GLOW_SIDES do
+                local strip = icon.top:CreateTexture(nil, "BORDER")
+                strip:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+                strip:Hide()
+                icon.press[i] = strip
+            end
+        end
+        if on then Place(icon) end
+        for _, strip in ipairs(icon.press) do strip:SetShown(on) end
+    end
+
+    -- Whether any of an icon's buttons is held down: each one's state read,
+    -- a hidden or odd answer never counting.
+    local function Held(buttons)
+        for i = 1, #buttons do
+            local button = buttons[i]
+            local get = button.GetButtonState
+            if type(get) == "function" then
+                local ok, state = pcall(get, button)
+                if ok and Open(state) and state == "PUSHED" then return true end
+            end
+        end
+        return false
+    end
+
+    -- Every frame, while any icon is watched.
+    local function Watch()
+        for i = 1, #watched do
+            local icon = watched[i]
+            local buttons = icon.pressButtons
+            Light(icon, buttons ~= nil and Held(buttons))
+        end
+    end
+
+    -- The icons with a button to watch, on your bars now: worked out again,
+    -- every lit one out first, and the OnUpdate on or taken off.
+    Presses = function()
+        for i = 1, #watched do
+            local icon = watched[i]
+            icon.pressWatched = nil
+            Light(icon, false)
+        end
+        local list, n = spare, 0
+        if ns.Get("keyPressGlow") == true and B:Enabled() then
+            for _, bar in pairs(bars) do
+                if bar.kind == "cooldown" then
+                    for i = 1, bar.count or 0 do
+                        local icon = bar.icons[i]
+                        if icon.pressButtons then
+                            n = n + 1
+                            list[n] = icon
+                            icon.pressWatched = true
+                        end
+                    end
+                end
+            end
+        end
+        spare, watched = watched, list
+        wipe(spare)
+        local want = n > 0
+        if want and not driver then
+            driver = CreateFrame("Frame")
+            B.pressDriver = driver -- (for the tests)
+        end
+        if driver and driving ~= want then
+            driving = want
+            driver:SetScript("OnUpdate", want and Watch or nil)
+        end
+    end
+
+    -- How many icons are watched now. For the tests.
+    function B:PressWatched()
+        return #watched
+    end
 end
 
 local function Layout(bar)
@@ -1108,20 +1295,33 @@ local function Layout(bar)
             WatchRange(icon, on and not ITEM_KINDS[entry.kind] and entry.spellID or nil)
             KeyLook(icon, own)
             ShowKey(icon)
-            icon.texture:SetTexture(entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID)))
+            local art = entry.icon or (entry.spellID and C_Spell.GetSpellTexture(entry.spellID))
+            icon.texture:SetTexture(art)
             icon.count:SetText("")
             icon.label:SetWidth(own + spacing)
             icon.label:SetText(Label(entry))
             icon.label:SetShown(data.showNames)
+            -- Show the trap I last laid, when ticked: its own picture and
+            -- name kept, then the last trap laid's on it.
+            icon.trap = not ITEM_KINDS[entry.kind] and ns.LastTrap(bar.key, name) and ns.Spells:Trap(name) or nil
+            icon.laidShown, icon.ownArt, icon.ownLabel = nil, nil, nil
+            if icon.trap then
+                icon.ownArt, icon.ownLabel = art, Label(entry)
+                LaidLook(icon)
+            end
             icon:Show()
         end
     end
     for i = count + 1, #bar.icons do
         bar.icons[i]:Hide()
-        bar.icons[i].spellID = nil
+        bar.icons[i].spellID, bar.icons[i].trap = nil, nil
         WatchRange(bar.icons[i], nil)
     end
     bar.count = count
+    -- Your casts heard or not, for the trap icons on your bars now.
+    HearTraps()
+    -- And the icons Key press glow watches.
+    Presses()
     bar:SetSize(B:Arrange(bar, bar.icons, count, data))
     -- Buff and debuff times over the icons, when ticked (IconAuras.lua).
     ns.IconAuras:Layout(bar, data)
@@ -1261,10 +1461,15 @@ function B:Report(add, say)
                     if icon.spellID and C_Spell.IsSpellUsable then usable, noMana = C_Spell.IsSpellUsable(icon.spellID) end
                     local glow = icon.glow
                     local loop = glow.proc and (", loop " .. tostring(glow.ProcLoop:IsPlaying())) or ""
+                    -- (Show the trap I last laid, when ticked: the trap it shows.)
+                    local trap = icon.trap and (" | shows the trap last laid: " .. tostring(icon.laidShown or icon.trap)
+                        .. ", heard " .. tostring(traps.hearing)) or ""
+                    -- (Count ticks, when ticked: its pace and its count's slot.)
                     add(("  %d. %s | %s %s | reactive %s | usable %s, no mana %s | glow %s (%s%s) | size %s | range watched %s"
-                        .. " | can't cast %s"):format(i, say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID),
+                        .. " | can't cast %s%s%s"):format(i, say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID),
                         tostring(icon.reactive), say(usable), say(noMana), tostring(glow:IsShown()), glow.proc and "proc" or "edge", loop,
-                        say(icon:GetWidth()), tostring(icon.ranged == true), tostring(icon.cantCast == true)))
+                        say(icon:GetWidth()), tostring(icon.ranged == true), tostring(icon.cantCast == true), trap,
+                        ns.IconAuras:TickReport(bar, icon.name)))
                 end
             end
             if not aura then
@@ -1363,11 +1568,20 @@ function B:ApplyKeybinds()
         KeyLook(icon, icon.size or ns.IconSize(bar.data))
         ShowKey(icon)
     end)
+    Presses()
 end
 
--- The keys again after a binding or page change; text only, so in combat too.
+-- The keys again after a binding or page change; text only, so in combat
+-- too. And the buttons Key press glow watches with them.
 function B:ShowKeys()
     EachKey(ShowKey)
+    Presses()
+end
+
+-- Key press glow ticked or unticked (Icon details): each icon's buttons
+-- found again and watched, or every border out and nothing watched.
+function B:ApplyKeyPress()
+    self:ShowKeys()
 end
 
 -- Icon details picked on the Look page, on every icon, those not in use
@@ -1559,6 +1773,7 @@ end
 local Listen -- the driver's events, with the driver below
 local HearAuras -- and whether it hears your buffs change (Only show missing)
 local HearForms -- and your form (Swap with my form)
+-- (And HearTraps, your casts: Show the trap I last laid, with the traps above.)
 
 -- Lays the bars out again with your spells and items as they are now (and
 -- the form you're in, for a bar swapping with it). Off, bars made earlier
@@ -1827,8 +2042,12 @@ end
 local function Forget(key, name)
     if name then
         ns.ForgetSpellLook(name)
-        -- And its icon's own size on this bar, once none of its lists has it.
+        -- And its icon's own size on this bar, and on a Cooldowns or Utility
+        -- bar its Show the trap I last laid and Count ticks, once none of
+        -- its lists has it.
         ns.ForgetOwnSize(key, name)
+        ns.ForgetLastTrap(key, name)
+        ns.ForgetCountTicks(key, name)
     end
     if not (ns.AURA_BARS[key] and name) then return name end
     ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
@@ -1868,6 +2087,8 @@ function B:Assign(name, key)
     if current then
         Take(current, index)
         ns.ForgetOwnSize(current, name)
+        ns.ForgetLastTrap(current, name)
+        ns.ForgetCountTicks(current, name)
     end
     if not key then ns.ForgetSpellLook(name) end
     if key then
@@ -2468,21 +2689,31 @@ end
 -- Count ticks (a player's idea: Bane of Agony's ticks): a debuff on the
 -- Debuffs bar whose icon counts its ticks so far, at its own pace (in
 -- seconds, from the game's data: ns.TICK_PERIODS, Buffs.lua). Only debuffs
--- that tick; a trap kept under its old name too.
+-- that tick; a trap kept under its old name too. And a spell on a Cooldowns
+-- or Utility bar (an extra one too: Squirt, 14 Nov 2026, Flame Shock's
+-- ticks) whose icon counts them while it shows the debuff's time on your
+-- target (Show buff and debuff time, IconAuras.lua).
 function B:TickPace(name)
     if type(name) ~= "string" or type(ns.TICK_PERIODS) ~= "table" then return nil end
     return ns.Spells:ByName(ns.TICK_PERIODS, name:match("^[^@#]+"))
 end
 
+-- Whether a bar's entries can count ticks: a Debuffs bar's, a Cooldowns or
+-- Utility bar's.
+local function Counts(key)
+    local kind = ns.BAR_KIND[key]
+    return kind == "debuff" or kind == "cd" or kind == "util"
+end
+
 function B:SetCountTicks(key, name, on)
-    if ns.BAR_KIND[key] ~= "debuff" or not IndexOf(key, name) or not self:TickPace(name) then return false end
+    if not Counts(key) or not IndexOf(key, name) or not self:TickPace(name) then return false end
     ns.CountTicks(key)[name] = on and true or nil
     self:Changed()
     return true
 end
 
 function B:CountsTicks(key, name)
-    return ns.BAR_KIND[key] == "debuff" and ns.CountTicks(key)[name] == true
+    return Counts(key) and ns.CountsTicks(key, name)
 end
 
 -- Warn at N seconds left (a player's idea: Siphon Life with 3 seconds left
@@ -2671,6 +2902,24 @@ end
 function B:ShowsReagents(name)
     local look = ns.SpellLook(name)
     return look ~= nil and look.reagents == true
+end
+
+-- Show the trap I last laid (above, LaidLook): ticked for a trap's entry on
+-- a Cooldowns or Utility bar (an extra one too). False for anything else.
+function B:SetLastTrap(key, name, on)
+    if ns.AURA_BARS[key] or not IndexOf(key, name) or not ns.Spells:Trap(name) then return false end
+    if ns.SetLastTrap(key, name, on) then self:Changed() end
+    return true
+end
+
+function B:ShowsLastTrap(key, name)
+    return not ns.AURA_BARS[key] and ns.LastTrap(key, name)
+end
+
+-- The trap you laid last this session, by name, or nil before one.
+-- For the tests.
+function B:LastLaid()
+    return traps.laid
 end
 
 -- Every bar made laid out again with the looks as they are now (each
@@ -3164,9 +3413,30 @@ local function Unread()
     return false
 end
 
-local function OnEvent(_, event, arg)
+-- A cast of yours (Show the trap I last laid, heard only while an icon is
+-- ticked): a trap other than the last one laid shows at once on every
+-- ticked trap icon (the addon's own frames, so in a fight too). Any other
+-- spell, or a spell ID the game keeps secret: nothing, and what shows stays.
+local function Laid(id)
+    local trap = ns.Spells:TrapOf(id)
+    if not trap or trap == traps.laid then return end
+    traps.laid, traps.art = trap, ns.Spells:Icon(trap)
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = bars[key]
+        if bar and bar.kind == "cooldown" then
+            for i = 1, bar.count or 0 do
+                if bar.icons[i].trap then LaidLook(bar.icons[i]) end
+            end
+        end
+    end
+end
+
+local function OnEvent(_, event, arg, ...)
     if event == "UNIT_AURA" then
         checking = true
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        -- (The unit, the cast's GUID, then its spell ID.)
+        Laid((select(2, ...)))
     elseif event == "UNIT_INVENTORY_CHANGED" or event == "WEAPON_ENCHANT_CHANGED" then
         -- A weapon enchant on or off, read on the next frame however many came.
         B.enchanting = true
@@ -3450,6 +3720,36 @@ local function Switch()
         driver:UnregisterAllEvents()
         driver:SetScript("OnUpdate", nil)
         hearing, checking, forming, shifting, wanding = false, false, false, false, false
+        traps.hearing = false
+    end
+end
+
+-- Whether an icon laid out on a bar you have is ticked Show the trap I last
+-- laid. A trap you don't know yet, or one on another class's character
+-- (a profile used on all of them), has no icon there, so it doesn't count.
+local function TrapShown()
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = bars[key]
+        if bar and bar.kind == "cooldown" then
+            for i = 1, bar.count or 0 do
+                if bar.icons[i].trap then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- Your casts are heard only while your bars are on and a ticked trap icon
+-- shows on one (Laid, above): in a fight too, as that's when traps are
+-- laid. Otherwise nothing is heard and nothing done.
+HearTraps = function()
+    local want = listening and TrapShown() or false
+    if want == traps.hearing then return end
+    traps.hearing = want
+    if want then
+        pcall(driver.RegisterUnitEvent, driver, "UNIT_SPELLCAST_SUCCEEDED", "player")
+    else
+        pcall(driver.UnregisterEvent, driver, "UNIT_SPELLCAST_SUCCEEDED")
     end
 end
 
@@ -3457,6 +3757,7 @@ Listen = function()
     Switch()
     HearAuras()
     HearForms()
+    HearTraps()
 end
 
 function B:Start()

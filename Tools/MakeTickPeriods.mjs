@@ -22,8 +22,16 @@ function csv(file) {
 }
 
 // Periodic auras that tick on a target: damage, heal, leech, mana leech,
-// damage by percent, and a periodic trigger (Insect Swarm's kind).
+// damage by percent, and a periodic trigger (Arcane Missiles' kind).
 const PERIODIC = new Set(['3', '8', '23', '53', '64', '89']);
+// A periodic trigger ticks only when it fires a spell: Frost Trap's fires
+// nothing (its slow is all it does), so it isn't counted.
+const TRIGGER = '23';
+// A periodic dummy (226) that is a bleed all the same: the warrior's Deep
+// Wound ticks every 3 s through one. Other dummies (Consecration, Hurricane)
+// stay out.
+const DUMMY_BLEEDS = new Set(['Deep Wound']);
+const DUMMY = '226';
 
 const ranks = fs.readFileSync(path.join(here, '..', 'Ranks.lua'), 'utf8');
 const idsOf = new Map();
@@ -52,9 +60,18 @@ for (const m of csv('SpellMisc.csv')) {
   allLasts.set(Number(m.SpellID), all);
 }
 
+const dummyIds = new Set();
+for (const name of DUMMY_BLEEDS) for (const id of idsOf.get(name) || []) dummyIds.add(id);
+
 const periodOf = new Map(); // spell ID -> ms
+// And the spells that put an aura on: a trap's laying spell puts none (it
+// sets the trap down, waiting up to 60 s), so its length isn't a debuff's.
+const auraIds = new Set();
 for (const e of csv('SpellEffect.csv')) {
-  if (PERIODIC.has(e.EffectAura) && Number(e.EffectAuraPeriod) > 0) {
+  if (e.EffectAura && e.EffectAura !== '0') auraIds.add(Number(e.SpellID));
+  const ticks = (PERIODIC.has(e.EffectAura) && (e.EffectAura !== TRIGGER || Number(e.EffectTriggerSpell) > 0))
+    || (e.EffectAura === DUMMY && dummyIds.has(Number(e.SpellID)));
+  if (ticks && Number(e.EffectAuraPeriod) > 0) {
     const id = Number(e.SpellID), period = Number(e.EffectAuraPeriod);
     if (lasts.has(id) && lasts.get(id) / period < 2) continue;
     if (!periodOf.has(id)) periodOf.set(id, period);
@@ -81,11 +98,13 @@ console.log(`ns.TICK_PERIODS = {\n${lines.join('\n')}\n}`);
 // And how long each debuff lasts (seconds, each length its ranks have), so a
 // joined icon holding debuffs that tick at different paces counts only while
 // one of the counted ones is up (told apart by length: Bane of Agony 24 s,
-// Bane of Doom 60 s). Lasting forever or no time: left out.
+// Bane of Doom 60 s). Lasting forever or no time: left out. Only a spell
+// that puts an aura on counts (not a trap's laying spell).
 const lastsLines = [];
 for (const name of [...names].sort()) {
   const all = new Set();
   for (const id of idsOf.get(name) || []) {
+    if (!auraIds.has(id)) continue;
     for (const ms of allLasts.get(id) || []) if (ms > 0) all.add(ms / 1000);
   }
   if (all.size === 0) continue;

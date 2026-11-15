@@ -1005,12 +1005,23 @@ function Proto:Clear()
     if s.scripts.OnCooldownDone then s.scripts.OnCooldownDone(self) end
 end
 
+-- The duration for a cooldown come back (Zero, by spell ID), sealed the same:
+-- a Cooldown frame handed it clears, as the game's does by default, and
+-- hides, with no done script. (Globals: the main chunk is at 200 locals.)
+ZERO = setmetatable({}, getmetatable(sealed))
+function Proto:SetCooldownFromDurationObject(duration)
+    S[self].last.SetCooldownFromDurationObject = table.pack(duration)
+    if rawequal(duration, ZERO) then self:Hide() end
+end
+
 local function PulseGame()
     sounds, asked, held = {}, {}, {}
+    Zero = {}
     _G.PlaySound = function(kit, channel) sounds[#sounds + 1] = kit .. " " .. tostring(channel) end
     _G.C_Spell.GetSpellCooldownDuration = function(id, ignoreGCD)
         assert(ignoreGCD == true, "global cooldown must be ignored")
         asked[#asked + 1] = id
+        if Zero[id] then return ZERO end
         return sealed
     end
     -- Like the game: the times secret in a fight, whether it's on hold never,
@@ -1160,7 +1171,8 @@ local page = w.pages.pulse
 do
     local function Top(item) return -S[item].points[1][3] end
     Equal(S[w.nav.pulse.label].text, "Cooldown pulse", "Cooldown pulse in the window's list")
-    Equal(Top(w.nav.raid) .. " " .. Top(w.nav.pulse), "390 422", "under More, right after Raid Timers")
+    -- (Each 28 under the one before since Presets came first in the list.)
+    Equal(Top(w.nav.raid) .. " " .. Top(w.nav.pulse), "398 426", "under More, right after Raid Timers")
     local news = S[w.news].points[1]
     Equal(Top(w.nav.pulse) + S[w.nav.pulse].height <= 489 - news[3] - S[w.news].height, true,
         "clear of the What's new button at the foot of the list")
@@ -1371,6 +1383,34 @@ do
     Done(bash)
     Equal(P:Showing(), "Bash", "done a minute after it showed: it pulses")
     Finish(P)
+    -- Early resets too: a cooldown counting that a talent brings back early
+    -- (the game hands a zero duration and the watcher stops) pulses then.
+    -- Off by default; never for one only just started, nor one sitting ready.
+    Equal(tostring(ns.Get("pulseResets")), "false", "early resets: off by default")
+    function EarlyReset(after)
+        Zero[5211] = nil
+        bash:Hide()
+        bash:Show()
+        clock = clock + after
+        Zero[5211] = true
+        Fire("SPELL_UPDATE_COOLDOWN")
+        Tick(P)
+        return tostring(P:Showing()) .. " " .. tostring(bash:IsShown())
+    end
+    clock = clock + 5
+    Equal(EarlyReset(8), "nil false", "a cooldown reset early, with Early resets off: stopped, no pulse")
+    ns.Set("pulseResets", true)
+    clock = clock + 5
+    Equal(EarlyReset(8), "Bash false", "with it on, in a fight: it pulses as it comes back")
+    Finish(P)
+    clock = clock + 5
+    Equal(EarlyReset(1), "nil false", "one only a global cooldown old when it stops: no pulse")
+    clock = clock + 5
+    Fire("SPELL_UPDATE_COOLDOWN")
+    Tick(P)
+    Equal(tostring(P:Showing()), "nil", "one sitting ready, asked again: no pulse")
+    ns.Set("pulseResets", false)
+    Zero = {}
     -- With the interface hidden (Alt+Z), none.
     clock = clock + 5
     S[UIParent].shown = false
@@ -2027,7 +2067,7 @@ do
     end
     for i, style in ipairs({ "Quick", "Long" }) do
         page.edit.buttons[i]:Click()
-        Equal(Laid(), "15 |  | ", style .. " under Edit: every tick, label, choice and slider inside the options, none on another")
+        Equal(Laid(), "16 |  | ", style .. " under Edit: every tick, label, choice and slider inside the options, none on another")
     end
     page.edit.buttons[1]:Click()
 
@@ -2145,8 +2185,8 @@ end
 do
     Equal(ns.PulseLong(4) .. ", " .. ns.PulseLong(45) .. ", " .. ns.PulseLong(90) .. ", " .. ns.PulseLong(180) .. ", "
         .. ns.PulseLong(3600), "4s, 45s, 1.5 min, 3 min, 1 hour", "a cooldown in plain words, seconds as the sliders say them")
-    Equal(ns.Tour:News("0.9.0")[1].text(), "Everything is in this list: your four bars at the top, then Look, Layout, Cast bar and General,"
-        .. " and Raid Timers and Cooldown pulse under More.", "the tour's first step points out both pages under More")
+    Equal(ns.Tour:News("0.9.0")[1].text(), "Everything is in this list: Presets at the top, then your four bars, Look, Layout, Cast bar"
+        .. " and General, and Raid Timers and Cooldown pulse under More.", "the tour's first step points out both pages under More")
 end
 
 -- Ticks follow the profile, as the bars' lists do -----------------------------------------------------
@@ -2710,6 +2750,7 @@ end
         general = "SWITCH YOUR BARS ON, ONE ICON EACH, MINIMAP BUTTON, HELP | 4 | general true",
         raid = "RAID TIMERS, SIZES, EDIT MODE | 3 | raid true",
         pulse = "TURN IT ON, PICK YOUR COOLDOWNS, QUICK AND LONG, WHERE IT SHOWS | 4 | pulse true",
+        presets = "OFFICIAL PRESETS, COMMUNITY SETUPS, HOW TO IMPORT | 3 | presets true",
     }
     local pages, wrong = {}, {}
     for key in pairs(w.nav) do pages[#pages + 1] = key end
@@ -2718,7 +2759,7 @@ end
         local got = Walk(key)
         if got ~= expected[key] then wrong[#wrong + 1] = key .. ": " .. got end
     end
-    Equal(table.concat(pages, ",") .. " | " .. table.concat(wrong, "; "), "buff,cast,cd,debuff,general,layout,look,pulse,raid,util | ",
+    Equal(table.concat(pages, ",") .. " | " .. table.concat(wrong, "; "), "buff,cast,cd,debuff,general,layout,look,presets,pulse,raid,util | ",
         "every page in the list has a walkthrough of two steps or more, its own steps only, staying on it, each part outlined:"
         .. " the four bars share their page's steps, but Buffs and Debuffs skip the spell bars' Show items, When ready, On cooldown"
         .. " and Swap with your form (a druid with Bear Form)")

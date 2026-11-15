@@ -163,6 +163,7 @@ ns.DEFAULTS = {
     pulseShadow = true, -- and a soft shadow
     pulseItems = true, -- your trinkets, and items on your Cooldowns and Utility bars, are listed too
     pulseProcs = false, -- your class's procs are listed too, each pulsing as it lands
+    pulseResets = false, -- a cooldown a talent brings back early pulses too
     pulseX = 0, -- where it sits: from the middle of the screen
     pulseY = 0,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
@@ -190,6 +191,7 @@ ns.DEFAULTS = {
     keybindsPlain = false, -- and on Blizzard's icons with the look off, Blizzard's look kept (Skin.lua, Keys alone)
     keybindPosition = "BOTTOM", -- where on the icon: BOTTOM, TOPLEFT, TOP or TOPRIGHT
     keybindSize = 100, -- its size, as a share of the automatic size that follows the icon
+    keyPressGlow = false, -- a gold border on a Cooldowns/Utility icon while you hold the key that casts it (Bars.lua, Icon details)
     layoutPreview = true, -- the Layout page draws your icons with the Look page's border, shadow and keybinds
     barScale = 100, -- every bar's icons together, as a share of each bar's own size (the Layout page's All bars)
     growArrows = false, -- while your bars are arranged (unlocked or in Edit Mode), an arrow on each for the way it grows
@@ -454,7 +456,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "iconStyle", "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
     "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",
-    "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseX", "pulseY" }
+    "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseResets", "pulseX", "pulseY" }
 -- And each colour's custom one, kept beside it.
 for _, key in ipairs(ns.COLOUR_SETTINGS) do ns.SHARE_LOOK[#ns.SHARE_LOOK + 1] = key .. "Custom" end
 -- The parts a shared profile carries the ones on of (ProfileShare.lua), each
@@ -472,6 +474,7 @@ ns.SHARE_PARTS = {
     { key = "prdEnergy", code = "e", name = "Energy bar in other forms", classes = { DRUID = true } },
     { key = "prdText", code = "t", name = "Health and power text" },
     { key = "keybinds", code = "k", name = "Keybinds on icons" },
+    { key = "keyPressGlow", code = "g", name = "Key press glow" }, -- (since 1.10.14: an older FECM leaves it out and says so)
     { key = "castBar", code = "b", name = "Cast bar" },
     { key = "swingTimer", code = "s", name = "Swing timer" },
     { key = "castBatch", code = "h", name = "Crafting batch time" },
@@ -482,6 +485,19 @@ ns.SHARE_PARTS = {
     { key = "bossCasts", code = "o", name = "Boss cast bars" },
     { key = "pulse", code = "p", name = "Cooldown pulse" },
     { key = "pulseProcs", code = "q", name = "Proc pulses" },
+}
+-- Each entry's own ticks a shared profile carries with the profile
+-- (ProfileShare.lua; Squirt, 15 Nov 2026: so a setup from the FECM Setups
+-- website looks and works as its screenshots), as the profile keeps them
+-- (field -> bar -> name -> true), and the kinds of bar each is for. In a
+-- string each is its letter: never change a letter or use one again.
+ns.SHARE_TICKS = {
+    { field = "countTicks", code = "k", kinds = { debuff = true, cd = true, util = true } }, -- Count ticks
+    { field = "glowMissing", code = "o", kinds = { buff = true, debuff = true } }, -- Glow when missing
+    { field = "glowActive", code = "v", kinds = { buff = true } }, -- Glow while active
+    { field = "handOthers", code = "h", kinds = { buff = true } }, -- Others only, on a hand's enchant
+    { field = "dimUntilWarn", code = "d", kinds = { buff = true, debuff = true } }, -- Dim until Warn at
+    { field = "missingPicks", code = "e", kinds = { buff = true, debuff = true } }, -- the entry a joined icon shows while none is up
 }
 
 -- Bars: each bar lists spells by name, so the highest known rank is
@@ -552,10 +568,11 @@ local POINTS = { CENTER = true, TOP = true, BOTTOM = true, TOPLEFT = true, TOPRI
     BOTTOMLEFT = true, BOTTOMRIGHT = true }
 ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- A bar's settings a shared profile carries (its spells are in the profile,
--- and so is Swap with my form, beside the lists it swaps between).
+-- and so is Swap with my form, beside the lists it swaps between). Glow
+-- for more procs (glowProcs) is a cooldown bar's only.
 ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "showGCD", "selfDebuffs", "grow", "wrap", "point",
-    "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
+    "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom", "glowProcs" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -566,9 +583,10 @@ ns.OUT_OF_COMBAT_NAMES = { show = "Show", fade = "Fade", hide = "Hide" }
 ns.WHEN_READY = { "show", "dim", "hide" }
 ns.WHEN_READY_NAMES = { show = "Show", dim = "Dim", hide = "Hide" }
 ns.BUFF_SLOTS = 16 -- the Buffs bar has one secure slot per buff
--- The Debuffs bar's tick count (Count ticks, a player's idea): where on the
--- icon, its size as a share of the automatic size, its colour, and whether
--- it starts at 0 or 1 (1 reads like stacks: Bane of Agony's).
+-- The Debuffs bar's tick count (Count ticks, a player's idea), and the
+-- Cooldowns and Utility bars' (a spell's icon showing its debuff's time):
+-- where on the icon, its size as a share of the automatic size, its colour,
+-- and whether it starts at 0 or 1 (1 reads like stacks: Bane of Agony's).
 ns.TICK_AT_KEYS = { "TOPLEFT", "TOP", "TOPRIGHT", "CENTER", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" } -- down the icon
 ns.TICK_AT_NAMES = { TOPLEFT = "Top left", TOP = "Top centre", TOPRIGHT = "Top right", BOTTOMLEFT = "Bottom left",
     BOTTOM = "Bottom centre", BOTTOMRIGHT = "Bottom right", CENTER = "Centre" }
@@ -818,7 +836,11 @@ local function RenameSpells(profile)
     end
     for field in pairs(PULSE_LISTS) do RenameSet(profile[field]) end
     if type(profile.spellLook) == "table" then RenameSet(profile.spellLook) end
-    for _, field in ipairs({ "warnAt", "iconSize" }) do
+    -- And each entry's own choices kept by bar: Warn at, its size, Show the
+    -- trap I last laid, and its ticks (Count ticks, the glows, Only when
+    -- missing, Others only, Dim until Warn at, a joined icon's shown entry).
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing",
+        "glowActive", "handOthers", "dimUntilWarn" }) do
         for _, set in pairs(type(profile[field]) == "table" and profile[field] or {}) do
             if type(set) == "table" then RenameSet(set) end
         end
@@ -937,6 +959,24 @@ local function RepairSizes(profile)
     profile.iconSize = next(kept) ~= nil and kept or nil
 end
 
+-- A profile's Show the trap I last laid ticks: only a Cooldowns or Utility
+-- bar it has (an extra one too), only names on that bar's lists, true each.
+-- None kept leaves no table.
+local function RepairTraps(profile)
+    if profile.lastTrap == nil then return end
+    local sets, kept = type(profile.lastTrap) == "table" and profile.lastTrap or {}, {}
+    for key, set in pairs(sets) do
+        if not ns.AURA_BARS[key] and Present(profile, key) and type(set) == "table" then
+            local own = {}
+            for name, on in pairs(set) do
+                if on == true and type(name) == "string" and OnBarLists(profile, key, name) then own[name] = true end
+            end
+            if next(own) ~= nil then kept[key] = own end
+        end
+    end
+    profile.lastTrap = next(kept) ~= nil and kept or nil
+end
+
 -- A profile's lists, repaired in place, with their joins: on the Buffs and
 -- Debuffs bars, the names joined to the entry just before them.
 local function Lists(profile)
@@ -955,12 +995,19 @@ local function Lists(profile)
     -- glow while they're missing, the debuffs that count their ticks, the
     -- buffs shown only while they're missing and the buffs that glow while
     -- they're up (both a Buffs bar's own), and the entries dimmed until
-    -- their Warn at time: only names on that aura bar's list.
+    -- their Warn at time: only names on that aura bar's list. Count ticks
+    -- is a Cooldowns or Utility bar's too (an extra one too: a spell's icon
+    -- counting its debuff's ticks, IconAuras.lua): names on its lists, a
+    -- form's too.
     for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers",
         "dimUntilWarn" }) do
         if type(profile[field]) ~= "table" then profile[field] = {} end
         for key, set in pairs(profile[field]) do
-            if not (ns.AURA_BARS[key] and Present(profile, key)) or type(set) ~= "table"
+            if field == "countTicks" and not ns.AURA_BARS[key] and Present(profile, key) and type(set) == "table" then
+                for name, on in pairs(set) do
+                    if on ~= true or not OnBarLists(profile, key, name) then set[name] = nil end
+                end
+            elseif not (ns.AURA_BARS[key] and Present(profile, key)) or type(set) ~= "table"
                 or ((field == "onlyWhenMissing" or field == "glowActive" or field == "handOthers") and ns.BAR_KIND[key] ~= "buff") then
                 profile[field][key] = nil
             else
@@ -1005,6 +1052,7 @@ local function Lists(profile)
     RepairLooks(profile)
     RepairWarns(profile)
     RepairSizes(profile)
+    RepairTraps(profile)
     if not GlowSizeValue(profile.glowActiveSize) then profile.glowActiveSize = nil end
     RenameSpells(profile)
     -- Positions per profile: its spots and sizes, repaired as they're used.
@@ -1428,9 +1476,28 @@ function ns.GlowMissing(key)
 end
 
 -- This character's debuffs on an aura bar whose icons count their ticks (a
--- player's idea: Bane of Agony's), by name, true each.
+-- player's idea: Bane of Agony's), by name, true each. And the spells on a
+-- Cooldowns or Utility bar (an extra one too) whose icons count their
+-- debuff's ticks while they show its time (Squirt, 14 Nov 2026: Flame
+-- Shock's, IconAuras.lua).
 function ns.CountTicks(key)
     return Choices("countTicks", key)
+end
+
+-- Whether an entry on a bar counts its ticks, read without making a table
+-- for that bar (the Cooldowns and Utility bars ask as they're laid out).
+function ns.CountsTicks(key, name)
+    local sets = ns.ProfileLists().countTicks
+    local set = type(sets) == "table" and sets[key]
+    return type(set) == "table" and set[name] == true
+end
+
+-- A spell gone from a Cooldowns or Utility bar: its Count ticks there goes
+-- too, once none of that bar's lists has it (a form's too). An aura bar's
+-- goes with its entry (Bars.lua Forget).
+function ns.ForgetCountTicks(key, name)
+    if ns.AURA_BARS[key] or not ns.CountsTicks(key, name) then return end
+    if not OnBarLists(ns.ProfileLists(), key, name) then ns.CountTicks(key)[name] = nil end
 end
 
 -- This character's buffs on a Buffs bar shown only while they're missing
@@ -1621,6 +1688,42 @@ function ns.IconSizeFor(key, name, size)
     return math.max(ns.BAR_LIMITS.size[1], math.floor(size * percent / 100 + .5))
 end
 
+-- Show the trap I last laid (Squirt, 15 Nov 2026, in the Hunter preset
+-- review): a trap's entry on a Cooldowns or Utility bar (an extra one too)
+-- whose icon shows whichever trap you laid last (Bars.lua), ticked in the
+-- panel its tray icon opens. Kept by bar and entry in the profile
+-- (profile.lastTrap[bar][name] = true), only once one is ticked, so a
+-- profile from before loads unchanged. Shared strings carry it (r,
+-- ProfileShare.lua), so a preset made with it ticked swaps traps for
+-- whoever imports it (Squirt: "thatll need to be enabled for the traps to
+-- swap").
+function ns.LastTrap(key, name)
+    local sets = ns.ProfileLists().lastTrap
+    local set = type(sets) == "table" and sets[key]
+    return type(set) == "table" and type(name) == "string" and set[name] == true
+end
+
+-- Ticks it, or with false unticks it: only for an entry on one of a
+-- Cooldowns or Utility bar's lists, on a bar you have. True when it changed.
+function ns.SetLastTrap(key, name, on)
+    local store = ns.ProfileLists()
+    if type(name) ~= "string" or ns.AURA_BARS[key] or not Present(store, key) then return false end
+    if on and not OnBarLists(store, key, name) then return false end
+    if ns.LastTrap(key, name) == (on and true or false) then return false end
+    local sets = type(store.lastTrap) == "table" and store.lastTrap or {}
+    local set = type(sets[key]) == "table" and sets[key] or {}
+    set[name] = on and true or nil
+    sets[key] = next(set) ~= nil and set or nil
+    store.lastTrap = next(sets) ~= nil and sets or nil
+    return true
+end
+
+-- An entry gone from a bar: its tick there goes too, once none of that
+-- bar's lists has it.
+function ns.ForgetLastTrap(key, name)
+    if ns.LastTrap(key, name) and not OnBarLists(ns.ProfileLists(), key, name) then ns.SetLastTrap(key, name, false) end
+end
+
 -- Extra bars ---------------------------------------------------------------------
 -- Another bar of a kind (Cooldowns 2 and 3, Utility 2 and 3, Buffs 2 and 3,
 -- Debuffs 2 and 3), a copy of it in everything but Swap with my form: added
@@ -1691,8 +1794,8 @@ end
 
 -- Removes an extra bar from the profile you're on, with its list and its
 -- entries' choices there (joins, picks, glow, ticks, only when missing,
--- Warn at and Dim until Warn at, icon sizes); a look goes once no list of
--- yours has its entry.
+-- Warn at and Dim until Warn at, icon sizes, Show the trap I last laid); a
+-- look goes once no list of yours has its entry.
 -- Its settings and place stay, for when one is added again. True, or false
 -- and why not. Bars.lua B:RemoveBar empties its frame.
 function ns.RemoveBar(key)
@@ -1707,12 +1810,13 @@ function ns.RemoveBar(key)
     store.extraBars = next(extras) ~= nil and extras or nil
     store[key] = nil
     for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers", "warnAt",
-        "iconSize", "dimUntilWarn" }) do
+        "iconSize", "dimUntilWarn", "lastTrap" }) do
         local sets = store[field]
         if type(sets) == "table" then sets[key] = nil end
     end
-    if type(store.warnAt) == "table" and next(store.warnAt) == nil then store.warnAt = nil end
-    if type(store.iconSize) == "table" and next(store.iconSize) == nil then store.iconSize = nil end
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap" }) do
+        if type(store[field]) == "table" and next(store[field]) == nil then store[field] = nil end
+    end
     for _, name in ipairs(names) do ns.ForgetSpellLook(name) end
     ns.SyncBarKeys()
     return true
@@ -1941,7 +2045,7 @@ local function Duplicate(from)
         for name in pairs(joins) do profile.joins[key][name] = true end
     end
     -- And which entry each joined icon shows, faded, while none is up, which
-    -- buffs glow while they're missing, which debuffs count their ticks,
+    -- buffs glow while they're missing, which entries count their ticks,
     -- which buffs show only while they're missing and which glow while up,
     -- and which entries stay dim until their Warn at time.
     for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers",
@@ -1963,9 +2067,10 @@ local function Duplicate(from)
     end
     -- And how big its buffs' glows while they're up are (Glow size).
     profile.glowActiveSize = GlowSizeValue(from.glowActiveSize) and from.glowActiveSize or nil
-    -- And each warned entry's seconds (Warn at N seconds left), and each
-    -- icon's own size (Lists checks them).
-    for _, field in ipairs({ "warnAt", "iconSize" }) do
+    -- And each warned entry's seconds (Warn at N seconds left), each icon's
+    -- own size and each trap ticked Show the trap I last laid (Lists checks
+    -- them).
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap" }) do
         if type(from[field]) == "table" then
             profile[field] = {}
             for key, set in pairs(from[field]) do
@@ -2246,18 +2351,25 @@ end
 
 -- A shared profile's look, bar sizes and spots, layout and Tracked Bar
 -- colours in place of yours, everything it leaves out at its default (it
--- only carries what differs). Each is repaired as it goes in.
+-- only carries what differs), but for settings a string from its version
+-- says nothing of (setup.keep, ProfileShare.lua): those stay yours. Each is
+-- repaired as it goes in.
 local function UseSetup(setup)
     local look = type(setup.look) == "table" and setup.look or {}
+    local keep = type(setup.keep) == "table" and setup.keep or {}
+    local keepLook, keepBars = type(keep.look) == "table" and keep.look or {}, type(keep.bars) == "table" and keep.bars or {}
     for _, key in ipairs(ns.SHARE_LOOK) do
         local value = look[key]
-        if value ~= nil and ns.Valid(key, value) then db[key] = value else db[key] = nil end
+        if value ~= nil and ns.Valid(key, value) then db[key] = value elseif keepLook[key] ~= true then db[key] = nil end
     end
     local bars = type(setup.bars) == "table" and setup.bars or {}
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
         if Settled(key, bars[key]) then
             local data, from = ns.BarData(key), type(bars[key]) == "table" and bars[key] or {}
-            for _, field in ipairs(ns.SHARE_BAR_FIELDS) do data[field] = from[field] end
+            local own = type(keepBars[key]) == "table" and keepBars[key] or {}
+            for _, field in ipairs(ns.SHARE_BAR_FIELDS) do
+                if from[field] ~= nil or own[field] ~= true then data[field] = from[field] end
+            end
             ns.BarData(key)
         end
     end
@@ -2335,6 +2447,26 @@ function ns.ImportProfile(text, shared, withLook)
             if ns.BAR_NAMES[key] and type(set) == "table" then profile.iconSize[key] = CopySet(set) end
         end
     end
+    -- Each trap icon ticked Show the trap I last laid (Lists keeps those on
+    -- a Cooldowns or Utility bar's lists).
+    if type(shared.traps) == "table" then
+        profile.lastTrap = {}
+        for key, set in pairs(shared.traps) do
+            if ns.BAR_NAMES[key] and not ns.AURA_BARS[key] and type(set) == "table" then profile.lastTrap[key] = CopySet(set) end
+        end
+    end
+    -- Each entry's own ticks (ns.SHARE_TICKS: Count ticks, Glow when missing
+    -- and the rest), on a bar of a kind that has it (Lists keeps those on
+    -- its lists), and how big its buffs' glows while up are (Lists drops a
+    -- size that can't be kept). A string from before them has none.
+    local options = type(shared.options) == "table" and shared.options or {}
+    for _, tick in ipairs(ns.SHARE_TICKS) do
+        profile[tick.field] = {}
+        for key, set in pairs(type(options[tick.field]) == "table" and options[tick.field] or {}) do
+            if ns.BAR_NAMES[key] and tick.kinds[ns.BAR_KIND[key]] and type(set) == "table" then profile[tick.field][key] = CopySet(set) end
+        end
+    end
+    profile.glowActiveSize = shared.glowSize
     -- Each entry's own look (Lists keeps those on its lists).
     if type(shared.looks) == "table" then
         profile.spellLook = {}
@@ -2748,20 +2880,22 @@ function ns.BarData(key)
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
     bar.showGCD = bar.showGCD == true -- the global cooldown's sweep on cooldown icons after each cast, off unless ticked
     -- Glow for more procs: cooldown icons glow for procs the game doesn't
-    -- light (IconAuras.lua), off unless ticked. Not in shared profiles.
+    -- light (IconAuras.lua), off unless ticked. Shared with the look and
+    -- layout, a cooldown bar's only (ProfileShare.lua).
     bar.glowProcs = bar.glowProcs == true
     bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
-    -- The Debuffs bar's tick count: top left, its automatic size, white,
-    -- from 1, unless you choose. Custom keeps its colour beside it, and
-    -- without one is white again.
-    local debuff = kind == "debuff"
-    bar.tickAt = debuff and ns.TICK_AT_NAMES[bar.tickAt] and bar.tickAt or "TOPLEFT"
-    bar.tickSize = debuff and Limit(bar.tickSize, ns.TICK_SIZE) or ns.TICK_SIZE[3]
-    bar.tickCustom = debuff and ns.Hex(bar.tickCustom) or ""
-    bar.tickColour = debuff and (ns.COUNT_COLOURS[bar.tickColour] or (bar.tickColour == ns.CUSTOM and bar.tickCustom ~= ""))
+    -- The tick count of the Debuffs bar, and of the Cooldowns and Utility
+    -- bars (Count ticks on a spell's icon, IconAuras.lua), each bar its own:
+    -- top left, its automatic size, white, from 1, unless you choose.
+    -- Custom keeps its colour beside it, and without one is white again.
+    local counts = kind ~= "buff"
+    bar.tickAt = counts and ns.TICK_AT_NAMES[bar.tickAt] and bar.tickAt or "TOPLEFT"
+    bar.tickSize = counts and Limit(bar.tickSize, ns.TICK_SIZE) or ns.TICK_SIZE[3]
+    bar.tickCustom = counts and ns.Hex(bar.tickCustom) or ""
+    bar.tickColour = counts and (ns.COUNT_COLOURS[bar.tickColour] or (bar.tickColour == ns.CUSTOM and bar.tickCustom ~= ""))
         and bar.tickColour or "white"
-    bar.tickFrom = debuff and bar.tickFrom == 0 and 0 or 1
-    bar.tickEdge = debuff and bar.tickEdge == true -- On the edge: centred on the icon's border, off unless ticked
+    bar.tickFrom = counts and bar.tickFrom == 0 and 0 or 1
+    bar.tickEdge = counts and bar.tickEdge == true -- On the edge: centred on the icon's border, off unless ticked
     bar.perRow = Limit(bar.perRow, ns.BAR_LIMITS.perRow)
     if not ns.GROW_NAMES[bar.grow] then bar.grow = "centre" end
     if not ns.WRAP_NAMES[bar.wrap] then bar.wrap = "down" end
@@ -3253,6 +3387,8 @@ local function Load()
             ns.Tour:Start()
         elseif msg:match("^%s*discord%s*$") and ns.ShowDiscord then
             ns.ShowDiscord()
+        elseif msg:match("^%s*presets%s*$") and ns.ShowPresets then
+            ns.ShowPresets()
         elseif msg:match("^%s*debug%s*$") and ns.ShowDebug then
             ns.ShowDebug()
         elseif ns.Toggle then

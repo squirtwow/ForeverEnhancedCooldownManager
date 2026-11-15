@@ -118,7 +118,7 @@ local STEPS = {
             local more = {}
             if RaidTimersPage() then more[#more + 1] = "Raid Timers" end
             if ns.BuildPulsePage then more[#more + 1] = "Cooldown pulse" end
-            return "Everything is in this list: your four bars at the top, then Look, Layout, Cast bar and General"
+            return "Everything is in this list: Presets at the top, then your four bars, Look, Layout, Cast bar and General"
                 .. (#more > 0 and (", and " .. table.concat(more, " and ") .. " under More.") or ".")
         end,
         target = function(w) return w.navFrame end,
@@ -743,6 +743,30 @@ local HELP = {
         text = "Take the tour shows you the basics again. Discord gives you the invite to copy, for help, bugs and ideas.",
         target = function(w) return w.tour, w.discord end,
         side = "below",
+    },
+    -- Presets (Window.lua): the two cards, then how to import one.
+    {
+        page = "presets",
+        title = "Official presets",
+        text = "Squirt's own setups, one for every spec, each with screenshots from the game."
+            .. " Get the link gives you the address to copy into your browser.",
+        target = function(w) return w.pages.presets.official end,
+        side = "below",
+    },
+    {
+        page = "presets",
+        title = "Community setups",
+        text = "Setups other players share, each checked before it goes live. To share yours, click your profile name, then Share.",
+        target = function(w) return w.pages.presets.community end,
+        side = "below",
+        align = "end",
+    },
+    {
+        page = "presets",
+        title = "How to import",
+        text = "Copy a string on the site, click your profile name, then Import. Paste it and click Make new profile: yours stays as it is.",
+        target = function(w) return w.pages.presets.steps end,
+        side = "right",
     },
 }
 

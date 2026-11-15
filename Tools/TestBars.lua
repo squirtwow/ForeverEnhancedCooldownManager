@@ -2749,6 +2749,32 @@ local pwf = ns.Spells:Find("Power Word: Fortitude")
 Equal(pwf and pwf.line, "Added", "added spells listed under Added")
 local slotIDs = S[containers[1]].groups.g1.filters.includeSpellIDs
 Equal(slotIDs[1243] and slotIDs[10938] and slotIDs[21564], true, "any rank, and Prayer of Fortitude, counts")
+-- The other way round too (a player's report, 15 Nov 2026): a Gift of the
+-- Wild icon counts Mark of the Wild, so it doesn't glow as missing under it.
+do
+    local buffs = ns.BarData("buff").spells
+    local hadMark = ns.CustomSpells()["Mark of the Wild"]
+    ns.AddCustom("Gift of the Wild", { 21849 })
+    ns.AddCustom("Mark of the Wild", hadMark or { 1126 })
+    table.insert(buffs, "Gift of the Wild")
+    table.insert(buffs, "Mark of the Wild")
+    ns.Spells:Stale()
+    local gift = ns.Spells:Find("Gift of the Wild")
+    local giftIDs = gift and gift.ids or {}
+    local mark = ns.Spells:Find("Mark of the Wild")
+    local markIDs = mark and mark.ids or {}
+    table.remove(buffs)
+    table.remove(buffs)
+    ns.CustomSpells()["Gift of the Wild"] = nil
+    ns.CustomSpells()["Mark of the Wild"] = hadMark
+    ns.Spells:Stale()
+    local has = {}
+    for _, id in ipairs(giftIDs) do has[id] = true end
+    Equal(has[21849] and has[1126] and has[9885], true, "Gift of the Wild counts Mark of the Wild, any rank")
+    has = {}
+    for _, id in ipairs(markIDs) do has[id] = true end
+    Equal(has[1126] and has[21849] and has[21850], true, "and Mark of the Wild counts Gift of the Wild")
+end
 -- Another class's spell another character added to another bar (a hunter's
 -- Call Pet, in a shared profile) stays off this druid's Buffs page; Fortitude,
 -- on the Buffs bar, stays on it (1.8.1, the user's druid).
@@ -5082,6 +5108,159 @@ end)()
         .. List("debuff"), "false " .. STUN .. " | false " .. STUN .. " -> false " .. STUN .. " | Moonfire Charge Stun",
         "a warrior's Charge Stun onto Cooldowns: turned away, as before")
     named[19244], named[19647] = nil, nil
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
+-- Show the trap I last laid (Squirt, 15 Nov 2026, in the Hunter preset
+-- review: "thatll need to be enabled for the traps to swap"). A hunter's
+-- traps share one cooldown, so a trap's icon on a Cooldowns or Utility bar
+-- (an extra one too), ticked in its panel, shows whichever trap was laid
+-- last (UNIT_SPELLCAST_SUCCEEDED for you), as a demon's abilities come and
+-- go with the demon: its picture, and its name under it. Off by default;
+-- only a trap's entry, only on a cooldown bar; unticked icons, any other
+-- spell and a secret spell ID change nothing; the icon's cooldown stays its
+-- own spell's. Your casts are heard only while one is ticked. Kept by bar
+-- and entry in the profile, gone with the entry or its bar; the trap laid
+-- is kept for the session only. (In a function of its own: the main chunk
+-- is at 200 locals.)
+;(function()
+    local SPELLBOOK = {
+        { name = "Freezing Trap", subName = "Rank 1", spellID = 1499, iconID = 135834 },
+        { name = "Freezing Trap", subName = "Rank 2", spellID = 14310, iconID = 135834 },
+        { name = "Immolation Trap", subName = "Rank 1", spellID = 13795, iconID = 135813 },
+        { name = "Frost Trap", subName = "Rank 1", spellID = 13809, iconID = 135840 },
+        { name = "Explosive Trap", subName = "Rank 1", spellID = 13813, iconID = 135826 },
+        { name = "Arcane Shot", subName = "Rank 1", spellID = 3044, iconID = 132218 },
+    }
+    local saved = { useBars = true, notesSeen = "dev",
+        bars = { cd = { spells = { "Freezing Trap", "Immolation Trap", "Arcane Shot" } }, util = { spells = { "Frost Trap" } } } }
+    Start(1, "HUNTER", saved, SPELLBOOK)
+    local function Icon(key, i) return B:Get(key).icons[i] end
+    -- An icon's picture and name, as shown.
+    local function Shows(key, i)
+        local icon = Icon(key, i)
+        return tostring(S[icon.texture].texture) .. " " .. tostring(S[icon.label].text)
+    end
+    local function Lay(id) Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3-0-0-0-0-0", id) end
+    local function Heard() return tostring(S[B.driver].events.UNIT_SPELLCAST_SUCCEEDED == true) end
+    local function Kept()
+        local sets, out = ns.ProfileLists().lastTrap, {}
+        for _, key in ipairs(ns.ALL_BAR_KEYS) do
+            local names = {}
+            for name, on in pairs(type(sets) == "table" and sets[key] or {}) do names[#names + 1] = name .. "=" .. tostring(on) end
+            table.sort(names)
+            if #names > 0 then out[#out + 1] = key .. ":" .. table.concat(names, ",") end
+        end
+        return type(sets) == "table" and table.concat(out, " ") or "none"
+    end
+
+    -- Off by default: each shows its own; a trap laid changes nothing, and
+    -- your casts aren't even heard.
+    Equal(Shows("cd", 1) .. " | " .. Shows("cd", 2) .. " | " .. Shows("util", 1) .. " | " .. Heard() .. " " .. Kept() .. " "
+        .. tostring(B:ShowsLastTrap("cd", "Freezing Trap")), "135834 Freezing Trap | 135813 Immolation Trap | 135840 Frost Trap"
+        .. " | false none false", "off by default: each trap its own, your casts not heard, nothing kept")
+    Lay(13809)
+    Equal(Shows("cd", 1) .. " " .. tostring(B:LastLaid()), "135834 Freezing Trap nil", "a trap laid while off: nothing heard or changed")
+
+    -- Only for a trap's entry on a cooldown bar it's on: not Arcane Shot,
+    -- not a trap on another bar, not an aura bar, not a bar you don't have.
+    B:SetAura("debuff", "Freezing Trap", true)
+    Equal(table.concat({ tostring(B:SetLastTrap("cd", "Arcane Shot", true)), tostring(B:SetLastTrap("cd", "Frost Trap", true)),
+        tostring(B:SetLastTrap("debuff", "Freezing Trap", true)), tostring(B:SetLastTrap("cd2", "Freezing Trap", true)), Kept(), Heard() }, " "),
+        "false false false false none false", "turned away: a spell that isn't a trap, a trap not on that bar, the Debuffs bar, a bar you don't have")
+    B:SetAura("debuff", "Freezing Trap", false)
+
+    -- Ticked for Freezing Trap on Cooldowns: kept, your casts heard; it shows
+    -- its own until a trap is laid.
+    Equal(tostring(B:SetLastTrap("cd", "Freezing Trap", true)) .. " " .. Kept() .. " " .. Heard() .. " | " .. Shows("cd", 1),
+        "true cd:Freezing Trap=true true | 135834 Freezing Trap", "ticked: kept by bar and entry, casts heard, its own until one is laid")
+    -- Frost Trap laid: the ticked icon shows it, at once (no frame needed);
+    -- Immolation Trap's (unticked) and Frost Trap's own on Utility don't
+    -- change, and its spell is still Freezing Trap's own (rank 2).
+    Lay(13809)
+    Equal(Shows("cd", 1) .. " | " .. Shows("cd", 2) .. " | " .. Shows("util", 1) .. " | " .. tostring(B:LastLaid()) .. " "
+        .. tostring(Icon("cd", 1).spellID), "135840 Frost Trap | 135813 Immolation Trap | 135840 Frost Trap | Frost Trap 14310",
+        "Frost Trap laid: the ticked icon shows it, unticked ones as they were, its spell still Freezing Trap's")
+    cooldownCalls = {}
+    B:RefreshAll()
+    Equal(table.concat(cooldownCalls, ","), "14310,13795,3044,13809", "each icon's cooldown read for its own spell")
+    -- Any other spell, or a spell ID the game keeps secret: nothing changes.
+    Lay(3044)
+    Lay(SECRET)
+    Lay(nil)
+    Equal(Shows("cd", 1) .. " " .. tostring(B:LastLaid()), "135840 Frost Trap Frost Trap",
+        "Arcane Shot, a secret spell ID or none: what shows stays (and no secret touched)")
+    -- Another rank's ID (the data's, not in this spellbook) lays its trap.
+    Lay(14317)
+    Equal(Shows("cd", 1), "135826 Explosive Trap", "Explosive Trap rank 3 laid: by its rank's ID, with the trap's own picture")
+    -- Its own laid: its own again.
+    Lay(1499)
+    Equal(Shows("cd", 1) .. " " .. tostring(B:LastLaid()), "135834 Freezing Trap Freezing Trap", "Freezing Trap laid: its own again")
+    Lay(13795)
+    -- Laid out again (names shown, the bars rebuilt): still the last one.
+    B:SetOption("cd", "showNames", true)
+    B:Rebuild()
+    Equal(Shows("cd", 1) .. " " .. tostring(S[Icon("cd", 1).label].shown), "135813 Immolation Trap true",
+        "laid out again, names shown: still the trap laid last")
+    local lines = {}
+    B:Report(function(line) lines[#lines + 1] = line end, tostring)
+    Equal(table.concat(lines, "\n"):match("1%. Freezing Trap[^\n]*"):match("| shows the trap last laid: .*$"),
+        "| shows the trap last laid: Immolation Trap, heard true", "/ccm debug says which trap it shows")
+
+    -- Frost Trap on Utility ticked too: it shows the trap laid last at once.
+    B:SetLastTrap("util", "Frost Trap", true)
+    Equal(Shows("util", 1) .. " " .. Kept(), "135813 Immolation Trap cd:Freezing Trap=true util:Frost Trap=true",
+        "Frost Trap ticked on Utility: shows the trap laid last at once")
+    -- Moved to Cooldowns 2 (an extra bar): its Utility tick goes; ticked
+    -- there, the same; Cooldowns 2 removed, its tick with it.
+    B:AddBar("cd")
+    Equal(tostring(B:Transfer("util", "cd2", "Frost Trap")) .. " " .. Kept(), "true cd:Freezing Trap=true",
+        "moved to Cooldowns 2: its Utility tick gone with it")
+    Equal(tostring(B:SetLastTrap("cd2", "Frost Trap", true)) .. " " .. Shows("cd2", 1) .. " " .. Kept(),
+        "true 135813 Immolation Trap cd:Freezing Trap=true cd2:Frost Trap=true", "ticked on Cooldowns 2: the same there")
+    B:RemoveBar("cd2")
+    Equal(Kept(), "cd:Freezing Trap=true", "Cooldowns 2 removed: its tick with it")
+
+    -- Unticked: its own again, and with none ticked your casts aren't heard.
+    B:SetLastTrap("cd", "Freezing Trap", false)
+    Equal(Shows("cd", 1) .. " " .. Kept() .. " " .. Heard(), "135834 Freezing Trap none false",
+        "unticked: its own again, nothing kept, casts not heard")
+    -- Ticked again and taken off the bar: the tick goes with it.
+    B:SetLastTrap("cd", "Freezing Trap", true)
+    B:TakeOff("cd", "Freezing Trap")
+    Equal(Kept() .. " " .. Heard(), "none false", "taken off: its tick gone, casts not heard")
+
+    -- Kept over a reload, a saved tick that can't be kept dropped: a name
+    -- not on the bar, not true, an aura bar's, a bar the profile hasn't, not
+    -- a table. The trap laid was the last session's: each shows its own again.
+    B:Assign("Freezing Trap", "cd")
+    B:SetLastTrap("cd", "Freezing Trap", true)
+    local profile = ns.ProfileLists()
+    profile.lastTrap.cd.Ghost, profile.lastTrap.cd["Immolation Trap"] = true, "yes"
+    profile.lastTrap.buff, profile.lastTrap.cd3, profile.lastTrap.util = { Thorns = true }, { ["Frost Trap"] = true }, "odd"
+    Start(1, "HUNTER", ForeverEnhancedCooldownManagerDB, SPELLBOOK)
+    local cd, trapAt = B:Get("cd"), nil
+    for i = 1, cd.count do
+        if cd.icons[i].name == "Freezing Trap" then trapAt = i end
+    end
+    Equal(Kept() .. " | " .. Heard() .. " | " .. Shows("cd", trapAt) .. " " .. tostring(B:LastLaid()),
+        "cd:Freezing Trap=true | true | 135834 Freezing Trap nil", "reloaded: the tick kept, the rest dropped; its own until one is laid")
+    Lay(13809)
+    Equal(Shows("cd", trapAt), "135840 Frost Trap", "and it follows the next trap laid")
+    -- Heard only while a ticked trap icon shows: not for a warrior on the
+    -- same profile (Use on all) nor a hunter who hasn't learned the trap
+    -- yet, though the tick is kept for when it shows; once learned, heard.
+    Start(1, "WARRIOR", ForeverEnhancedCooldownManagerDB, { SPELLBOOK[6] })
+    Equal(Kept() .. " | " .. Heard(), "cd:Freezing Trap=true | false", "a warrior on the same profile: no trap icon, casts not heard")
+    Start(1, "HUNTER", ForeverEnhancedCooldownManagerDB, { SPELLBOOK[6] })
+    Equal(Kept() .. " | " .. Heard(), "cd:Freezing Trap=true | false", "a hunter without the trap yet: casts not heard")
+    Start(1, "HUNTER", ForeverEnhancedCooldownManagerDB, SPELLBOOK)
+    Equal(Kept() .. " | " .. Heard(), "cd:Freezing Trap=true | true", "once it's known: heard")
+    -- Your bars off: nothing heard.
+    ns.SetBars(false)
+    B:Rebuild()
+    Equal(Heard(), "false", "your bars off: casts not heard")
     Equal(#printed, 0, "no errors")
     w:Hide()
 end)()
@@ -9910,7 +10089,7 @@ end)()
         if step.version ~= "1.0.0" then longest = math.max(longest, #text) else basics = math.max(basics, #text) end
     end
     Equal(tostring(plain) .. " " .. tostring(longest > 0 and longest <= basics), "true true", "the steps are plain, the new ones short")
-    Equal(Tour:News("0.9.0")[1].text(), "Everything is in this list: your four bars at the top, then Look, Layout, Cast bar and General.",
+    Equal(Tour:News("0.9.0")[1].text(), "Everything is in this list: Presets at the top, then your four bars, Look, Layout, Cast bar and General.",
         "the menu step without a Raid Timers page (a full restart after updating) doesn't name it")
     local keybinds = ns.Keybinds
     ns.Keybinds = nil
@@ -10431,6 +10610,36 @@ do
         "true true", "with a Discord button by Got it, past Show me what's new")
     notes.discord:Click()
     Equal(S[box].shown, true, "which gives the invite")
+    box.close:Click()
+    notes:Hide()
+
+    -- Presets: the website's setups, first in the list. (In this block, with
+    -- no Load of its own: every Load hooks the display's bars again, which
+    -- slows every test after it. More of it, its look and fit, in
+    -- Tools/TestHelp.lua.)
+    tw:Hide()
+    SlashCmdList.FECM("presets")
+    local page, item = tw.pages.presets, tw.nav.presets
+    Equal(tostring(S[tw].shown) .. " " .. tw.selected .. " " .. tostring(S[page].shown) .. " " .. S[item.label].text .. " "
+        .. table.concat(S[item.label].colour, ",") .. " " .. tostring(S[item].points[1][3] > S[tw.yourBars].points[1][3]),
+        "true presets true Presets 0.914,0.706,0.298 true", "/ccm presets opens the window on Presets, in gold, over Your bars")
+    page.official.link:Click()
+    Equal(tostring(S[box].shown) .. " " .. S[box.title].text .. " " .. box.input:GetText(), "true OFFICIAL PRESETS www.squirtsaddons.com",
+        "the official presets' Get the link: their link to copy")
+    box.input:SetText("typed over")
+    S[box.input].scripts.OnTextChanged(box.input)
+    Equal(box.input:GetText(), "www.squirtsaddons.com", "which can't be typed over")
+    box.close:Click()
+    page.community.link:Click()
+    Equal(S[box.title].text .. " " .. box.input:GetText() .. " | " .. S[box.note].text,
+        "COMMUNITY SETUPS www.squirtsaddons.com | Press Ctrl+C to copy, then paste it into your browser.",
+        "the players' setups' Get the link: theirs, saying how to copy it")
+    box.close:Click()
+    tw:Select("general")
+    tw.profileButton:Click()
+    tw.profileFind:Click()
+    Equal(tw.selected .. " " .. tostring(S[page].shown) .. " " .. tostring(S[tw.profilePanel].shown), "presets true false",
+        "the profile menu's Find presets opens it, the menu put away")
 end
 
 -- Keybinds on your icons ------------------------------------------------------------------

@@ -310,13 +310,23 @@ local BAR_CHECKS = {
     tickEdge = Bool,
     -- Custom's own colour beside it: six hex digits as kept, or none.
     tickCustom = function(v) return v == "" or ns.Hex(v) == v end,
+    glowProcs = Bool,
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], spacing = ns.BAR_LIMITS.spacing[3], perRow = ns.BAR_LIMITS.perRow[3],
     whenReady = "show", onCooldown = "show", dimUnusable = false, dimOpacity = ns.BAR_LIMITS.dimOpacity[3],
     outOfCombat = "show", showMissing = false, onlyMissing = false, greyedNoTarget = false, showNames = false, showTimer = true,
     showAuras = false, showGCD = false, selfDebuffs = false, grow = "centre", wrap = "down",
-    tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false, tickCustom = "" }
+    tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false, tickCustom = "",
+    glowProcs = false }
+-- A bar setting only some bars have, and which: Glow for more procs is a
+-- cooldown bar's (Cooldowns, Utility, and their extra bars). On any other
+-- bar a string's is left out and counted, and Share never writes one.
+local BAR_FITS = { glowProcs = function(key) return not ns.AURA_BARS[key] end }
+local function Fits(field, key)
+    local fits = BAR_FITS[field]
+    return not fits or fits(key)
+end
 -- The layout's own settings; its rows and the bars taken out are lists.
 local LAYOUT_CHECKS = {
     on = Bool, preset = Preset, base = Preset, left = BarKey, right = BarKey,
@@ -345,16 +355,89 @@ local LAYOUT_DEFAULTS = { on = false, gap = ns.ROW_GAP[3], spacing = ns.ICON_GAP
 -- own countdown font and size (i: entry -> { font, size }, settings per spell),
 -- the aura bars' warned entries (t: "buff"/"debuff" -> name -> seconds,
 -- Warn at N seconds left), the extra bars (x: "debuff2" -> true, Extra bars;
--- their lists in l, their settings in g) and icons' own sizes (z: bar ->
--- name -> percent).
+-- their lists in l, their settings in g), icons' own sizes (z: bar ->
+-- name -> percent), the trap icons ticked Show the trap I last laid (r:
+-- bar -> name -> true), each entry's own ticks (ns.SHARE_TICKS, each under
+-- its letter: k Count ticks, o Glow when missing, v Glow while active, h
+-- Others only, d Dim until Warn at, e the entry a joined icon shows while
+-- none is up; bar -> name -> true) and how big the buffs' glows while up
+-- are (s: Glow size, a percent).
 local KNOWN = { n = true, a = true, l = true, f = true, w = true, j = true, m = true, p = true, q = true, c = true, g = true,
-    i = true, t = true, x = true, z = true }
+    i = true, t = true, x = true, z = true, r = true, s = true }
+for _, tick in ipairs(ns.SHARE_TICKS) do KNOWN[tick.code] = true end
 local MAX_LOOKS = 200 -- entries with a look of their own
+
+-- A weapon enchant's entry: a hand's (hand:main, hand:off), or one by name
+-- (Buffs.lua ns.WEAPON_ENCHANTS: a poison, a stone, a scroll's imbue) at
+-- any rank or ID.
+local function Enchant(name)
+    if ns.Spells.HAND_KEYS ~= nil and ns.Spells.HAND_KEYS[name] == true then return true end
+    return ns.WEAPON_ENCHANTS ~= nil and ns.WEAPON_ENCHANTS[name:match("^[^@#]+")] ~= nil
+end
+
+-- Whether the icon an entry sits in on a Buffs bar's list (joins: the
+-- names joined to the one before them) has a buff in it, not weapon
+-- enchants alone, as Bars.lua B:ActiveUsable judges it by them all (as for
+-- another character's): a weapon enchant's spot is the addon's own, which
+-- can't glow or dim. (A Seal beside its family is one icon with it too,
+-- but no enchant has a family, so the joins tell it.)
+local function IconHasBuff(list, joins, name)
+    if not Enchant(name) then return true end
+    list, joins = type(list) == "table" and list or {}, type(joins) == "table" and joins or {}
+    for at, entry in ipairs(list) do
+        if entry == name then
+            local first, last = at, at
+            while first > 1 and joins[list[first]] == true do first = first - 1 end
+            while list[last + 1] ~= nil and joins[list[last + 1]] == true do last = last + 1 end
+            for i = first, last do
+                if not Enchant(list[i]) then return true end
+            end
+            return false
+        end
+    end
+    return false
+end
+
+-- What an entry needs for a tick of its own, beyond being on a bar of a
+-- kind that has it: Count ticks a tick pace in the game's data (Buffs.lua
+-- ns.TICK_PERIODS, every class's), Others only a hand's enchant, Glow while
+-- active a buff in its icon, and on a Buffs bar Dim until Warn at too (the
+-- panel greys both for weapon enchants alone). So an edited string can't
+-- tick any of them where it would do nothing. (key: its bar; list and
+-- joins: that bar's.)
+local NEEDS = {
+    countTicks = function(name) return ns.Bars ~= nil and ns.Bars:TickPace(name) ~= nil end,
+    handOthers = function(name) return ns.Spells.HAND_KEYS ~= nil and ns.Spells.HAND_KEYS[name] == true end,
+    glowActive = function(name, _, list, joins) return IconHasBuff(list, joins, name) end,
+    dimUntilWarn = function(name, key, list, joins) return ns.BAR_KIND[key] ~= "buff" or IconHasBuff(list, joins, name) end,
+}
+local function Can(field, name, key, list, joins)
+    local needs = NEEDS[field]
+    return type(name) == "string" and (not needs or needs(name, key, list, joins))
+end
+
+-- Glow size as kept: a whole percent within its limits, other than the
+-- usual size (which a profile keeps none of).
+local function GlowSize(value)
+    local limits = ns.GLOW_ACTIVE_SIZE
+    return Integer(value) and Within(value, limits) and value ~= limits[3]
+end
 
 -- Reading ----------------------------------------------------------------------------------------
 
 local function Table(value)
     return type(value) == "table" and value or {}
+end
+
+-- The names on a bar's lists in a string (lists: bar -> list), and on each
+-- form's list for it (forms: form -> bar -> list), as a set.
+local function OnLists(lists, forms, key)
+    local onBar = {}
+    for _, entry in ipairs(Table(lists[key])) do onBar[entry] = true end
+    for _, own in pairs(forms) do
+        for _, entry in ipairs(Table(own[key])) do onBar[entry] = true end
+    end
+    return onBar
 end
 
 -- A profile's name from a string: plain text, cut to fit, or nil.
@@ -367,11 +450,38 @@ local function SharedName(value)
     return name ~= "" and name or nil
 end
 
+-- Settings strings carry only since the update after 1.10.13 (Squirt, 15
+-- Nov 2026): Glow for more procs, the tick count's look on a Cooldowns or
+-- Utility bar (an extra one too; the Debuffs bars' came before) and Early
+-- resets in the look. A string from 1.10.13 or before (or with no version)
+-- says nothing of them, so with its look and layout yours stay as they are
+-- (Core.lua UseSetup), as they did before, in place of going back to their
+-- default as a setting a string leaves out does. As keep (look -> setting
+-- -> true, bars -> bar -> setting -> true), or nil for a string that
+-- carries them all.
+local CARRIED_AFTER = "1.10.13"
+local NEW_LOOK = { "pulseResets" }
+local NEW_COOLDOWN = { "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
+local function Kept(version)
+    if ns.CompareVersions(version, CARRIED_AFTER) == 1 then return nil end
+    local keep = { look = {}, bars = {} }
+    for _, key in ipairs(NEW_LOOK) do keep.look[key] = true end
+    for _, key in ipairs(ns.ALL_BAR_KEYS) do
+        local own = { glowProcs = true }
+        if not ns.AURA_BARS[key] then
+            for _, field in ipairs(NEW_COOLDOWN) do own[field] = true end
+        end
+        keep.bars[key] = own
+    end
+    return keep
+end
+
 -- The look and layout from a string's g: only settings this version shares,
--- each checked. A string made by 1.6.0 has Swap with my form with each
--- bar's settings: true or false read (true on the Cooldowns or Utility bar
--- goes into swap, for the profile), anything else left out.
-local function Setup(g, Skip, swap)
+-- each checked, and those its version (made by) says nothing of (keep). A
+-- string made by 1.6.0 has Swap with my form with each bar's settings: true
+-- or false read (true on the Cooldowns or Utility bar goes into swap, for
+-- the profile), anything else left out.
+local function Setup(g, Skip, swap, version)
     local setup = { look = {}, bars = {}, layout = {}, colours = {}, custom = {}, parts = {} }
     for key, value in pairs(Table(g.s)) do
         if key == "I" then key, value = "iconStyle", LONG_ICONS[value] or value end
@@ -403,7 +513,7 @@ local function Setup(g, Skip, swap)
         local own = {}
         for field, value in pairs(Table(bars[key])) do
             local check = BAR_CHECKS[field]
-            if check and check(value) then
+            if check and check(value) and Fits(field, key) then
                 own[field] = value
             elseif field == "swapForm" and Bool(value) then
                 if value and ns.CanSwap(key) then swap[key] = true end
@@ -451,6 +561,7 @@ local function Setup(g, Skip, swap)
     for id in pairs(hexes) do
         if not setup.custom[id] then Skip() end
     end
+    setup.keep = Kept(version)
     return setup
 end
 
@@ -463,7 +574,7 @@ local function Clean(data)
         if not KNOWN[key] then Skip() end
     end
     local shared = { lists = {}, forms = {}, swap = {}, joins = {}, only = {}, pick = {}, style = {}, added = {}, looks = {}, warns = {},
-        extras = {}, sizes = {}, count = 0, picks = 0 }
+        extras = {}, sizes = {}, traps = {}, options = {}, count = 0, picks = 0 }
     -- Its extra bars (Extra bars, Core.lua): the keys this version knows,
     -- true each, four at most (Cooldowns 3 and the like too; a version from
     -- before them counts those as left out).
@@ -635,11 +746,7 @@ local function Clean(data)
     if data.z ~= nil and type(data.z) ~= "table" then Skip() end
     for key, set in pairs(Table(data.z)) do
         if shared.lists[key] and type(set) == "table" then
-            local onBar, kept = {}, {}
-            for _, entry in ipairs(shared.lists[key]) do onBar[entry] = true end
-            for _, own in pairs(shared.forms) do
-                for _, entry in ipairs(own[key] or {}) do onBar[entry] = true end
-            end
+            local onBar, kept = OnLists(shared.lists, shared.forms, key), {}
             for name, percent in pairs(set) do
                 if onBar[name] and ns.SizeValue(percent) then kept[name] = percent else Skip() end
             end
@@ -648,19 +755,61 @@ local function Clean(data)
             Skip()
         end
     end
+    -- The trap icons ticked Show the trap I last laid: a Cooldowns or
+    -- Utility bar the string has (an extra one too), traps on its lists (a
+    -- form's too), true each.
+    if data.r ~= nil and type(data.r) ~= "table" then Skip() end
+    for key, set in pairs(Table(data.r)) do
+        if shared.lists[key] and not ns.AURA_BARS[key] and type(set) == "table" then
+            local onBar, kept = OnLists(shared.lists, shared.forms, key), {}
+            for name, on in pairs(set) do
+                if on == true and onBar[name] and ns.Spells:Trap(name) then kept[name] = true else Skip() end
+            end
+            if next(kept) then shared.traps[key] = kept end
+        else
+            Skip()
+        end
+    end
+    -- Each entry's own ticks (ns.SHARE_TICKS: Count ticks, Glow when
+    -- missing, Glow while active, Others only, Dim until Warn at, and the
+    -- entry a joined icon shows while none is up), each under its letter: a
+    -- bar the string has, of a kind that has it, names on its lists (a
+    -- form's too) that can have it, true each.
+    for _, tick in ipairs(ns.SHARE_TICKS) do
+        local sets, own = data[tick.code], {}
+        if sets ~= nil and type(sets) ~= "table" then Skip() end
+        for key, set in pairs(Table(sets)) do
+            if shared.lists[key] and tick.kinds[ns.BAR_KIND[key]] and type(set) == "table" then
+                local onBar, kept, list, joins = OnLists(shared.lists, shared.forms, key), {}, shared.lists[key], shared.joins[key]
+                for name, on in pairs(set) do
+                    if on == true and onBar[name] and Can(tick.field, name, key, list, joins) then kept[name] = true else Skip() end
+                end
+                if next(kept) then own[key] = kept end
+            else
+                Skip()
+            end
+        end
+        shared.options[tick.field] = own
+    end
+    -- How big the buffs' glows while up are (Glow size), as kept.
+    if data.s ~= nil then
+        if GlowSize(data.s) then shared.glowSize = data.s else Skip() end
+    end
+    shared.version = type(data.a) == "string" and #data.a <= 32 and data.a:find("^[%w%.%-]+$") and data.a or nil
     if type(data.g) == "table" then
-        shared.setup = Setup(data.g, Skip, shared.swap)
+        shared.setup = Setup(data.g, Skip, shared.swap, shared.version)
     elseif data.g ~= nil then
         Skip()
     end
     shared.name = SharedName(data.n)
-    shared.version = type(data.a) == "string" and #data.a <= 32 and data.a:find("^[%w%.%-]+$") and data.a or nil
     shared.skipped = skipped
     return shared
 end
 
 -- A pasted string's profile: { name, lists, forms, swap, joins, only, pick,
--- style, added, looks, warns, setup (or nil), count (entries on its bars), picks, skipped }; or nil
+-- style, added, looks, warns, extras, sizes, traps, options (each entry's
+-- own ticks: field -> bar -> name -> true), glowSize (or nil), setup (or
+-- nil), count (entries on its bars), picks, skipped }; or nil
 -- and why not (nil only, for an empty box). The string is read from its
 -- "FECM1:" wherever that is, so a whole chat message pasted (words or a
 -- code block's mark before it) still reads, up to the last letter Base64
@@ -715,6 +864,20 @@ function P.Describe(shared)
     end
     if extras > 0 then with[#with + 1] = extras == 1 and "an extra bar" or ("%d extra bars"):format(extras) end
     if sizes > 0 then with[#with + 1] = ("own sizes for %d %s"):format(sizes, sizes == 1 and "icon" or "icons") end
+    local traps = 0
+    for _, set in pairs(shared.traps or {}) do
+        for _ in pairs(set) do traps = traps + 1 end
+    end
+    if traps > 0 then with[#with + 1] = ("the trap you last laid shown on %d %s"):format(traps, traps == 1 and "icon" or "icons") end
+    -- Each entry's own ticks, all counted together (Count ticks, the glows,
+    -- Others only, Dim until Warn at, a joined icon's shown entry).
+    local options = 0
+    for _, sets in pairs(shared.options or {}) do
+        for _, set in pairs(sets) do
+            for _ in pairs(set) do options = options + 1 end
+        end
+    end
+    if options > 0 then with[#with + 1] = ("%d icon %s"):format(options, options == 1 and "option" or "options") end
     if shared.setup then with[#with + 1] = "its look and layout" end
     -- A list of them: commas, then "and" before the last.
     local last = table.remove(with)
@@ -773,7 +936,7 @@ local function SetupNow()
         local data, own, stacked = ns.BarData(key), {}, saved.on and not saved.hidden[key]
         for _, field in ipairs(ns.SHARE_BAR_FIELDS) do
             local value = data[field]
-            if value ~= nil and value ~= BAR_DEFAULTS[field] and not (stacked and STACKED[field]) then own[field] = value end
+            if value ~= nil and value ~= BAR_DEFAULTS[field] and not (stacked and STACKED[field]) and Fits(field, key) then own[field] = value end
         end
         bars[key] = own
     end
@@ -796,6 +959,45 @@ local function SetupNow()
         if ns.GetSaved(part.key) == true then parts[#parts + 1] = part.code end
     end
     return { s = look, b = bars, l = layout, k = colours, h = hexes, o = #parts > 0 and table.concat(parts) or nil }
+end
+
+-- The trap icons ticked Show the trap I last laid on your Cooldowns and
+-- Utility bars (their extra ones too): traps on that bar's lists (lists:
+-- bar -> list, and each form's), true each; or nil for none.
+local function TrapsOut(store, lists, forms)
+    local out = {}
+    for key, set in pairs(Table(store.lastTrap)) do
+        if lists[key] and not ns.AURA_BARS[key] then
+            local onBar, kept = OnLists(lists, forms, key), {}
+            for name, on in pairs(Table(set)) do
+                if on == true and onBar[name] and ns.Spells:Trap(name) then kept[name] = true end
+            end
+            if next(kept) then out[key] = kept end
+        end
+    end
+    return next(out) and out or nil
+end
+
+-- Each entry's own ticks in the profile (store) a string carries
+-- (ns.SHARE_TICKS), into data under their letters: a bar of a kind that
+-- has it, names on that bar's lists (lists: bar -> list, and each form's)
+-- that can have it (joins: each aura bar's), true each; none, no letter.
+-- And Glow size (s), when it isn't the usual size.
+local function TicksOut(store, lists, forms, joins, data)
+    for _, tick in ipairs(ns.SHARE_TICKS) do
+        local out = {}
+        for key, set in pairs(Table(store[tick.field])) do
+            if lists[key] and tick.kinds[ns.BAR_KIND[key]] then
+                local onBar, kept = OnLists(lists, forms, key), {}
+                for name, on in pairs(Table(set)) do
+                    if on == true and onBar[name] and Can(tick.field, name, key, lists[key], joins[key]) then kept[name] = true end
+                end
+                if next(kept) then out[key] = kept end
+            end
+        end
+        data[tick.code] = next(out) and out or nil
+    end
+    if GlowSize(store.glowActiveSize) then data.s = store.glowActiveSize end
 end
 
 -- The profile you're on, with the look and layout, as a share string; or
@@ -887,17 +1089,15 @@ function P.Export()
     -- Each icon's own size, for those on its bar's lists (a form's too).
     local sizes = {}
     for key, set in pairs(Table(store.iconSize)) do
-        local onBar, kept = {}, {}
-        for _, entry in ipairs(data.l[key] or {}) do onBar[entry] = true end
-        for _, lists in pairs(forms) do
-            for _, entry in ipairs(lists[key] or {}) do onBar[entry] = true end
-        end
+        local onBar, kept = OnLists(data.l, forms, key), {}
         for name, percent in pairs(Table(set)) do
             if onBar[name] and ns.SizeValue(percent) then kept[name] = percent end
         end
         if next(kept) then sizes[key] = kept end
     end
     if next(sizes) then data.z = sizes end
+    data.r = TrapsOut(store, data.l, forms)
+    TicksOut(store, data.l, forms, joins, data)
     local picks, styles = Picks(ns.PulsePicks(), true), Picks(ns.PulseStyles(), "long")
     if next(joins) then data.j = joins end
     if next(picks) then data.p = picks end
@@ -1186,8 +1386,8 @@ function P.Import(text, shared, withLook)
     if not ok then return false, message end
     if withLook then
         local shown, note, turned = SwitchOn(shared)
-        -- Keys on icons: your action bars read again first, as the Look page's tick has it.
-        if turned.keybinds and ns.Keybinds then ns.Keybinds:Update() end
+        -- Keys on icons, or Key press glow: your action bars read again first, as their ticks have it.
+        if (turned.keybinds or turned.keyPressGlow) and ns.Keybinds then ns.Keybinds:Update() end
         Redraw()
         if shown > 0 then message = message .. (" Also turned on %d of its settings."):format(shown) end
         -- Your bars on: Blizzard's Cooldown Manager went off, as the question said.
@@ -1207,14 +1407,16 @@ end
 -- holds before anything changes, then makes it a new profile.
 
 local BOX_WIDTH, INNER = 480, 452
-local IMPORT_HEIGHT, EXPORT_HEIGHT = 252, 136
+-- (Import's line saying what a string holds has four lines' room: a big
+-- preset's, with every option, takes three or four.)
+local IMPORT_HEIGHT, EXPORT_HEIGHT = 272, 136
 local EXPORT_DETAIL = "Your profile, with your bars' look and layout, as text. Press Ctrl+C to copy it, then paste it"
     .. " where you like, such as Discord."
 local IMPORT_DETAIL = "Paste a profile someone shared. It becomes a new profile, and yours stays as it is."
     .. " Spells your class can't use don't show."
 local LOOK_ON = "Your bar sizes, spots, layout and look are replaced by its own, on every character. Anything it has switched on"
     .. " comes on too."
-local LOOK_OFF = "Unticked, only its bars' spells and pulse ticks come, in your own look and layout."
+local LOOK_OFF = "Unticked, its bars' spells, their own options and its pulse ticks come, in your own look and layout."
 local LOOK_ASK = "Your bar sizes, spots, layout and look change to the shared ones, on every character."
 local KEEP_YOURS = " To keep a copy of yours, Share it first."
 P.LOOK_ON, P.LOOK_OFF = LOOK_ON, LOOK_OFF
@@ -1321,10 +1523,10 @@ function P.BuildBox(window)
 
     -- The new profile's name: the one it came with, or one typed.
     local nameLabel = T:Text(box, "GameFontHighlightSmall")
-    nameLabel:SetPoint("TOPLEFT", 14, -134)
+    nameLabel:SetPoint("TOPLEFT", 14, -154)
     nameLabel:SetText("New profile's name")
     local name = T:Input(box, P.IMPORTED, 300)
-    name:SetPoint("TOPLEFT", 140, -130)
+    name:SetPoint("TOPLEFT", 140, -150)
     name:SetMaxLetters(ns.PROFILE_MAX)
     name:SetScript("OnEscapePressed", Close)
     window:Hint(name, "The new profile's name. A name already taken gets a number after it.")
@@ -1332,12 +1534,12 @@ function P.BuildBox(window)
 
     -- Its look and layout as well, only when ticked: off each time.
     local lookNote = T:Text(box, "GameFontHighlightSmall", T.MUTED)
-    lookNote:SetPoint("TOPLEFT", 32, -180)
+    lookNote:SetPoint("TOPLEFT", 32, -200)
     lookNote:SetWidth(INNER - 18)
     local look = T:Check(box, "Also use its look and layout", function(self)
         lookNote:SetText(self:GetChecked() and LOOK_ON or LOOK_OFF)
     end)
-    look:SetPoint("TOPLEFT", 14, -160)
+    look:SetPoint("TOPLEFT", 14, -180)
     window:Hint(look, "Its bar sizes, spots, layout and look in place of yours, on every character, and anything it has switched on"
         .. " comes on too. It asks first.")
     box.look, box.lookNote = look, lookNote

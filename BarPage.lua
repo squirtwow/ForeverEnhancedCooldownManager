@@ -14,7 +14,9 @@ local ROW, HEADER_ROW = 22, 20 -- spell list rows
 -- Debuffs bar counting ticks, and on the Cooldowns and Utility bars two rows
 -- more for On cooldown's tick and Dimmed icons, then Show the global
 -- cooldown's tick under them, which ends at its foot, so the spell list
--- under a full bar still shows two rows.
+-- under a full bar still shows two rows. (Never taller there: their tick
+-- count is set in a counting spell's own panel, PanelTickLook, as two rows
+-- more here would leave a full bar's page no spell list.)
 local OPTIONS, OPTIONS_TALL, OPTIONS_COOLDOWN = 134, 178, 189
 local EMPTY = {
     cd = "Nothing here yet. Tick spells in the list below, or drag them here from your spellbook or bags.",
@@ -26,6 +28,15 @@ local EMPTY = {
 local function Full(key)
     return ns.BAR_NAMES[key] .. " is full."
 end
+
+-- The tick count's hovers: on the Debuffs page and in a Cooldowns or
+-- Utility spell's panel. Two spots say more, after where it sits.
+local TICK_AT_MORE = {
+    BOTTOMRIGHT = " Bottom right is where stacks show, so the two can overlap.",
+    CENTER = " The centre is the countdown's: untick Show countdown numbers to keep it clear.",
+}
+local TICK_FROM_NOTE = "1 as the debuff lands, 2 after its first tick, like stacks. Unticked, it counts the ticks so far, from 0."
+local TICK_EDGE_NOTE = "Centres the count on the icon's edge at its spot, half outside, so it covers less of the icon. Not for the centre."
 
 -- The "Show your debuffs on you" tick on each aura bar's page (the Debuffs
 -- one seen working in game 2026-10-08, so no experimental label).
@@ -99,13 +110,28 @@ end
 local function TicksNote(bar, name, label)
     local B = ns.Bars
     local pace = name and B:TickPace(name) or 0
+    local seconds = "every " .. pace .. (pace == 1 and " second" or " seconds")
+    local every = seconds .. " for " .. (label or "it")
+    -- On a Cooldowns or Utility bar: while its icon shows its debuff's time.
+    if not ns.AURA_BARS[bar] then
+        if not ns.BarData(bar).showAuras then
+            return "Tick Show buff and debuff time first: the count shows while this icon shows its debuff's time on your target."
+        end
+        -- A trap showing the trap last laid still counts (and times) its own
+        -- trap's debuff alone, whichever trap's picture it shows.
+        if name and B:ShowsLastTrap(bar, name) then
+            return "Counts " .. (label or name) .. "'s ticks alone, " .. seconds .. ", while its debuff's time shows on this icon:"
+                .. " not another trap's, though the icon shows the one you laid last."
+        end
+        return "While this icon shows its debuff's time on your target, counts its ticks there, " .. every
+            .. ", starting again when you reapply it."
+    end
     local clash = name and B:TickClash(bar, name)
     local found = clash and ns.Spells:Find(clash)
     if clash then
         return "Can't count while it shares an icon with " .. (found and found.name or clash) .. ": the game can't tell the two apart."
     end
-    return "Counts its ticks on its icon, every " .. pace .. (pace == 1 and " second" or " seconds")
-        .. " for " .. (label or "it") .. ", starting again when you reapply it."
+    return "Counts its ticks on its icon, " .. every .. ", starting again when you reapply it."
 end
 
 -- Settings per spell ---------------------------------------------------------------
@@ -292,7 +318,55 @@ local function PanelTicks(window, dialog, shade, Changed)
         Changed()
     end)
     window:Hint(others, "Only lights for an oil, a sharpening stone or a scroll's imbue, never your own Spellstone, poison or shaman weapon, so those can't hide a missing oil.")
-    return glow, only, ticks, active, reagents, others
+    -- Show the trap I last laid: a trap's alone, on Cooldowns or Utility
+    -- (Squirt, 15 Nov 2026).
+    local trap = T:Check(dialog, "Show the trap I last laid", function(self)
+        B:SetLastTrap(shade.bar, shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(trap, "Traps share one cooldown, so this icon shows whichever trap you laid last.")
+    return glow, only, ticks, active, reagents, others, trap
+end
+
+-- A Cooldowns or Utility bar's tick count (Count ticks on a spell's icon,
+-- Squirt's, 14 Nov 2026): where on the icon, from 1, on the edge, its size
+-- and colour, as the Debuffs page has under its options. Here, beside and
+-- under a ticked Count ticks, for every icon counting ticks on that bar
+-- (the hovers say so): two more rows on the bar's page would leave a full
+-- bar no room for its spell list.
+local function PanelTickLook(window, dialog, shade, Changed)
+    local B = ns.Bars
+    local function Set(field, value)
+        B:SetOption(shade.bar, field, value)
+        Changed()
+    end
+    local function Every() return " on each icon counting ticks on " .. ns.BAR_NAMES[shade.bar] end
+    -- The seven spots across the panel, each as wide as its name needs.
+    local items = { fit = true }
+    for _, key in ipairs(ns.TICK_AT_KEYS) do items[#items + 1] = { key = key, label = ns.TICK_AT_NAMES[key] } end
+    local at = T:Segmented(dialog, items, PANEL.width - 32, function(key) Set("tickAt", key) end)
+    for _, button in ipairs(at.buttons) do
+        window:Hint(button, function() return "Where the tick count sits" .. Every() .. "." .. (TICK_AT_MORE[button.key] or "") end)
+    end
+    local from = T:Check(dialog, "Start at 1", function(self) Set("tickFrom", self:GetChecked() and 1 or 0) end)
+    window:Hint(from, TICK_FROM_NOTE)
+    local edge = T:Check(dialog, "On the edge", function(self) Set("tickEdge", self:GetChecked()) end)
+    window:Hint(edge, TICK_EDGE_NOTE)
+    -- Its size (a share, "100%"), then its colour: one swatch that opens the colours.
+    local sizeLabel = T:Text(dialog, "GameFontHighlight")
+    sizeLabel:SetText("Count size")
+    local size = T:Slider(dialog, "", ns.TICK_SIZE, 10, 250, function(value) B:SetOption(shade.bar, "tickSize", value) end, 0)
+    size.value:SetWidth(36)
+    local set = size.Set
+    function size:Set(value)
+        set(self, value)
+        self.value:SetText(value .. "%")
+    end
+    window:Hint(size, function() return "How big the tick count is" .. Every() .. ": 100% follows the icon's size." end)
+    local colour = T:Text(dialog, "GameFontHighlight")
+    colour:SetText("Colour")
+    local choice = TickColour(window, dialog, shade)
+    return { at = at, from = from, edge = edge, sizeLabel = sizeLabel, size = size, colour = colour, choice = choice }
 end
 
 -- Glow size, right under Glow while active and shown with it: how big the
@@ -405,25 +479,39 @@ end
 
 -- Which of its own ticks the entry has on its bar: Glow when missing on the
 -- Buffs and Debuffs bars, Only when missing and Glow while active on Buffs,
--- Count ticks on Debuffs for one that ticks. Each shown and set as its row
--- in the list is (Glow while active has no row there).
+-- Count ticks on Debuffs for one that ticks; Count ticks for a spell whose
+-- debuff ticks, Show reagent count for a spell that uses one, and Show the
+-- trap I last laid for a trap, on Cooldowns and Utility. Each shown and set
+-- as its row in the list is (Glow while active and the Cooldowns and
+-- Utility bars' own have no row there).
 local function PaintTicks(shade, bar, name)
     local B = ns.Bars
     local aura, kind = ns.AURA_BARS[bar] ~= nil, ns.BAR_KIND[bar] -- (an extra bar goes by its kind)
+    local entry = ns.Spells:Find(name)
     shade.glow:SetChecked(B:GlowsMissing(bar, name))
     shade.glow:SetUsable(B:MissingSpot(bar, name))
     shade.only:SetChecked(B:OnlyWhenMissing(bar, name))
     shade.only:SetUsable(not ns.BarData(bar).onlyMissing)
+    -- Count ticks greyed while its icon can't count (its hover says why),
+    -- unless it's ticked, so it can be unticked: on the Debuffs bar shared
+    -- with another that's in the way, on a Cooldowns or Utility bar while
+    -- the debuff's time isn't shown.
+    local counts = aura and not B:TickClash(bar, name) or not aura and ns.BarData(bar).showAuras == true
     shade.ticks:SetChecked(B:CountsTicks(bar, name))
-    shade.ticks:SetUsable(shade.ticks:GetChecked() or not B:TickClash(bar, name))
+    shade.ticks:SetUsable(shade.ticks:GetChecked() or counts)
     shade.active:SetChecked(B:GlowsActive(bar, name))
     shade.active:SetUsable(B:ActiveUsable(bar, name))
     shade.reagents:SetChecked(B:ShowsReagents(name))
     shade.others:SetChecked(B:HandOthers(bar, name))
-    local entry = ns.Spells:Find(name)
+    shade.trap:SetChecked(B:ShowsLastTrap(bar, name))
+    -- (On a Cooldowns or Utility bar a spell's alone, a fixed rank's too: an
+    -- item puts no debuff on anyone.)
+    local spell = entry and (entry.kind == "spell" or entry.kind == "rank")
+    local ticks = B:TickPace(name) ~= nil and (kind == "debuff" or not aura and spell)
     return { aura and shade.glow or nil, kind == "buff" and shade.only or nil,
-        kind == "debuff" and B:TickPace(name) ~= nil and shade.ticks or nil, kind == "buff" and shade.active or nil,
-        B:UsesReagent(bar, name) and shade.reagents or nil, kind == "buff" and entry and entry.hand and shade.others or nil }
+        ticks and shade.ticks or nil, kind == "buff" and shade.active or nil,
+        B:UsesReagent(bar, name) and shade.reagents or nil, kind == "buff" and entry and entry.hand and shade.others or nil,
+        not aura and ns.Spells:Trap(name) and shade.trap or nil }
 end
 
 local function SpellPanel(window)
@@ -479,7 +567,8 @@ local function SpellPanel(window)
     shade.ownIcon, shade.iconSize = PanelIconSize(window, dialog, shade, Changed)
     At(shade.ownIcon, PANEL.at, 2, 2)
     At(shade.iconSize, PANEL.at + PANEL.own, 2)
-    shade.glow, shade.only, shade.ticks, shade.active, shade.reagents, shade.others = PanelTicks(window, dialog, shade, Changed)
+    shade.glow, shade.only, shade.ticks, shade.active, shade.reagents, shade.others, shade.trap = PanelTicks(window, dialog, shade, Changed)
+    shade.tickLook = PanelTickLook(window, dialog, shade, Changed)
     shade.glowSizeLabel, shade.glowSize, shade.glowSizeUsable = PanelGlowSize(window, dialog, shade, Changed)
     shade.warnLabel, shade.warn = PanelWarn(window, dialog, shade)
     shade.dim = PanelDim(window, dialog, shade, Changed)
@@ -542,9 +631,9 @@ local function SpellPanel(window)
             self.dim:SetUsable(B:DimUsable(bar, name))
             rows = rows + 1
         end
-        for _, tick in ipairs({ self.glow, self.only, self.active, self.ticks, self.reagents, self.others }) do
+        for _, tick in ipairs({ self.glow, self.only, self.active, self.ticks, self.reagents, self.others, self.trap }) do
             local on = tick == shown[1] or tick == shown[2] or tick == shown[3] or tick == shown[4] or tick == shown[5]
-                or tick == shown[6]
+                or tick == shown[6] or tick == shown[7]
             tick:SetShown(on)
             if on then
                 At(tick, 16, rows, 2)
@@ -560,6 +649,29 @@ local function SpellPanel(window)
                     self.glowSize:Set(ns.GlowActiveSize())
                     self.glowSize:SetUsable(self.glowSizeUsable())
                     rows = rows + 1
+                end
+            end
+            -- A ticked Count ticks on a Cooldowns or Utility bar: its bar's
+            -- tick count, Start at 1 and On the edge beside it, the spots
+            -- in the row under, then its size and colour.
+            if tick == self.ticks then
+                local look, counting = self.tickLook, on and not aura and tick:GetChecked()
+                for _, part in pairs(look) do part:SetShown(counting) end
+                if counting then
+                    local data = ns.BarData(bar)
+                    At(look.from, 150, rows - 1, 2)
+                    At(look.edge, 270, rows - 1, 2)
+                    At(look.at, 16, rows)
+                    At(look.sizeLabel, 16, rows + 1, 4)
+                    At(look.size, PANEL.at, rows + 1)
+                    At(look.colour, 360, rows + 1, 4)
+                    At(look.choice, 410, rows + 1)
+                    look.at:SetSelected(data.tickAt)
+                    look.from:SetChecked(data.tickFrom == 1)
+                    look.edge:SetChecked(data.tickEdge == true)
+                    look.size:Set(data.tickSize)
+                    look.choice:Paint()
+                    rows = rows + 2
                 end
             end
         end
@@ -1207,12 +1319,12 @@ function ns.BuildBarPage(window, page, width)
         "Where the next row goes when there are more icons than fit across.")
     -- The Debuffs bar's tick count (Count ticks, a player's idea: where on
     -- the icon, from 1 like stacks or from 0, its size and colour), in two
-    -- rows under the rest while any of the bar's debuffs counts.
+    -- rows under the rest while any of the bar's debuffs counts. (The
+    -- Cooldowns and Utility bars' own is in a counting spell's panel.)
     local AT_NOTE = "Where the tick count sits on each icon."
     local tickAt = Pills("Tick count", 0, -129, 500, ns.TICK_AT_KEYS, ns.TICK_AT_NAMES, "tickAt", {
         TOPLEFT = AT_NOTE, TOP = AT_NOTE, TOPRIGHT = AT_NOTE, BOTTOMLEFT = AT_NOTE, BOTTOM = AT_NOTE,
-        BOTTOMRIGHT = AT_NOTE .. " Bottom right is where stacks show, so the two can overlap.",
-        CENTER = AT_NOTE .. " The centre is the countdown's: untick Show countdown numbers to keep it clear.",
+        BOTTOMRIGHT = AT_NOTE .. TICK_AT_MORE.BOTTOMRIGHT, CENTER = AT_NOTE .. TICK_AT_MORE.CENTER,
     }, true)
     local tickFrom = T:Check(options, "Start at 1", function(self)
         B:SetOption(state.bar, "tickFrom", self:GetChecked() and 1 or 0)
@@ -1220,7 +1332,7 @@ function ns.BuildBarPage(window, page, width)
     end)
     -- Under the spots, after the size and colours (the seven spots take the row).
     tickFrom:SetPoint("TOPLEFT", 398, -153)
-    window:Hint(tickFrom, "1 as the debuff lands, 2 after its first tick, like stacks. Unticked, it counts the ticks so far, from 0.")
+    window:Hint(tickFrom, TICK_FROM_NOTE)
     -- And beside it, On the edge (a player's ask): the count centred on the
     -- icon's border at its spot, half outside, like durations on nameplates.
     local tickEdge = T:Check(options, "On the edge", function(self)
@@ -1228,8 +1340,7 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end)
     tickEdge:SetPoint("TOPLEFT", 492, -153)
-    window:Hint(tickEdge, "Centres the count on the icon's edge at its spot, half outside, so it covers less of the icon."
-        .. " Not for the centre.")
+    window:Hint(tickEdge, TICK_EDGE_NOTE)
     -- Its size, then its colour: one swatch that opens the colours, so the
     -- slider has the room the row of swatches had.
     local tickSize = T:Slider(options, "Size", ns.TICK_SIZE, 10, 260, function(value)
@@ -1254,9 +1365,8 @@ function ns.BuildBarPage(window, page, width)
     -- shared profile, whose tick you can't see).
     local function Counting()
         local key = state.bar
-        local counts = ns.CountTicks(key)
         for _, name in ipairs(ns.BarData(key).spells) do
-            if counts[name] and ns.Spells:ForMe(name, key) and B:TickPace(name) then return true end
+            if B:CountsTicks(key, name) and ns.Spells:ForMe(name, key) and B:TickPace(name) then return true end
         end
         return false
     end
@@ -1764,7 +1874,8 @@ function ns.BuildBarPage(window, page, width)
         for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity, showGCD, glowProcs }) do
             part:SetShown(not aura)
         end
-        -- The tick count's two rows, while a Debuffs bar counts any.
+        -- The tick count's two rows, while a Debuffs bar counts any (a
+        -- Cooldowns or Utility bar's are in a counting spell's panel).
         local kind = ns.BAR_KIND[key] -- (an extra bar's options are its kind's)
         local counting = kind == "debuff" and Counting()
         for _, part in ipairs({ tickAt, tickAt.label, tickFrom, tickEdge, tickSize, tickColour, tickChoice }) do part:SetShown(counting) end

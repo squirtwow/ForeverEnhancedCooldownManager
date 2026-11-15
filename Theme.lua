@@ -23,6 +23,9 @@ T.FIELD = { .075, .078, .086, 1 }
 T.TEXT = { .84, .843, .851 }
 T.MUTED = { .545, .553, .573 }
 T.WARN = { 1, .45, .3 }
+-- Presets, in the window's list and on its page (Window.lua): gold whatever
+-- the accent, so the website's setups stand out.
+T.GOLD = { .914, .706, .298 }
 
 -- Soft washes of the accent, full on the right and fading out to the left:
 -- how strong each is at its right-hand edge.
@@ -92,11 +95,16 @@ local function Gradient(texture, colour, strength)
     end
 end
 
--- A wash of the accent over a frame's background, repainted with the accent.
-function T:Fade(parent, strength)
+-- A wash of the accent over a frame's background, repainted with the accent;
+-- given a colour, a wash of that, which stays (Presets' gold).
+function T:Fade(parent, strength, colour)
     local fade = parent:CreateTexture(nil, "BORDER")
     fade:SetTexture(FLAT)
-    self:Paint(function(accent) Gradient(fade, accent, strength) end)
+    if colour then
+        Gradient(fade, colour, strength)
+    else
+        self:Paint(function(accent) Gradient(fade, accent, strength) end)
+    end
     return fade
 end
 

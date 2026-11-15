@@ -2041,8 +2041,8 @@ end)()
 -- (Only when missing, Glow when missing, Others only on a hand's enchant, a
 -- trinket's buff, Count ticks, Warn at, Dim until Warn at, its own size) are
 -- kept over a reload, copied with the profile sharing no table, shared in
--- a string where they always are (Only when missing, Warn at, sizes; the
--- rest never) and made by an import; removing the bar takes them all.
+-- a string (every one since 15 Nov 2026) and made by an import; removing
+-- the bar takes them all.
 ;(function()
     local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
     local B, P = ns.Bars, ns.ProfileShare
@@ -2098,13 +2098,14 @@ end)()
     ns.ImportProfile("Friend", read, false)
     local friend = ns.ProfileLists()
     Equal(table.concat({ H.Text(read.extras), tostring(read.skipped), H.Text(read.only.buff3), H.Text(read.warns.debuff3),
-        H.Text(read.sizes.debuff3), H.Text(friend.buff3), H.Text(friend.onlyWhenMissing.buff3), tostring(next(friend.handOthers.buff3 or {})),
-        tostring(next(friend.dimUntilWarn.debuff3 or {})), H.Keys(ns), tostring(P.Export() == text), tostring(#text < 2000) }, " | "),
+        H.Text(read.sizes.debuff3), H.Text(read.options.handOthers.buff3), H.Text(read.options.dimUntilWarn.debuff3),
+        H.Text(read.options.glowMissing.buff3), H.Text(read.options.countTicks.debuff3), Choices(friend), H.Keys(ns),
+        tostring(P.Export() == text), tostring(#text < 2000) }, " | "),
         "{[\"buff2\"]=true,[\"buff3\"]=true,[\"debuff2\"]=true,[\"debuff3\"]=true} | 0 | {[\"Thorns\"]=true} | {[\"Moonfire\"]=3}"
-        .. " | {[\"Moonfire\"]=120} | {[1]=\"Thorns\",[2]=\"hand:main\",[3]=\"trinket:1\"} | {[\"Thorns\"]=true} | nil | nil | cd util buff"
-        .. " buff2 buff3 debuff debuff2 debuff3 | true | true", "shared: the four extra bars, Buffs 3's list with its hand and trinket"
-        .. " entries, Only when missing, Warn at and sizes (Others only and Dim until Warn at never, as on Buffs); imported, the same"
-        .. " string back")
+        .. " | {[\"Moonfire\"]=120} | {[\"hand:main\"]=true} | {[\"Moonfire\"]=true} | {[\"Thorns\"]=true} | {[\"Moonfire\"]=true} | "
+        .. want .. " | cd util buff buff2 buff3 debuff debuff2 debuff3 | true | true", "shared: the four extra bars, Buffs 3's list with"
+        .. " its hand and trinket entries, and every choice there (Others only, Dim until Warn at, Glow when missing and Count ticks"
+        .. " too, since 15 Nov 2026); imported, all of them, the same string back")
     -- Removed: every choice of theirs goes with them.
     B:RemoveBar("buff3")
     B:RemoveBar("debuff3")
@@ -2124,13 +2125,38 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- Count ticks on Cooldowns 2 (Squirt, 14 Nov 2026): a spell there whose
+-- debuff ticks counts them on its icon while it shows the debuff's time,
+-- in a count slot of that bar's own, with that bar's own tick count
+-- settings; ticked for that bar alone, and gone with it when it's removed.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:AddBar("cd")
+    B:Assign("Moonfire", "cd2")
+    B:SetOption("cd2", "showAuras", true)
+    B:SetOption("cd2", "tickAt", "TOPRIGHT")
+    local ticked = B:SetCountTicks("cd2", "Moonfire", true)
+    local cd2 = B:Get("cd2")
+    local k1 = S[cd2.auraContainers.t].slots.k1
+    Equal(table.concat({ tostring(ticked), tostring(B:CountsTicks("cd2", "Moonfire")), tostring(B:CountsTicks("cd", "Moonfire")),
+        tostring(k1 and k1.enabled), tostring(k1 and k1.filters.includeSpellIDs[8921]), ns.BarData("cd2").tickAt, ns.BarData("cd").tickAt,
+        tostring(B:Get("cd").tickSlots) }, " "), "true true false true true TOPRIGHT TOPLEFT nil",
+        "ticked on Cooldowns 2: its own count slot, watching Moonfire; its own tick count spot; nothing on Cooldowns")
+    B:RemoveBar("cd2")
+    local store = ns.ProfileLists()
+    Equal(tostring(store.countTicks.cd2) .. " " .. H.Keys(ns), "nil cd util buff debuff", "Cooldowns 2 removed: its Count ticks gone with it")
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- The window's list of your bars, up to eight, with + Add a bar ------------------------------------
 -- (Squirt's pick, concept B, 13 Nov 2026.) Every bar you have is a row like
 -- the four's (its name, count and a preview of its icons), never set in,
 -- each kind's together; under a kind's last bar its + Add a bar line, once
 -- the bar has spells or an extra bar of its kind is there. No spells and no
 -- extra bar: the four exactly as always. They share the four's room (192,
--- 28 under the list's top): as + lines and bars come, every row a little
+-- 56 under the list's top, under Presets and the Your bars heading since
+-- Presets came first in the list): as + lines and bars come, every row a little
 -- shorter with smaller icons, down to 32 high with 12 px icons (the four
 -- with a + under each); past that the rows stay so and the list scrolls in
 -- that room (Squirt's complaint was one-line rows with no previews: never
@@ -2148,9 +2174,10 @@ end)()
     -- The game measures the list as pinned: 192 high (the mock keeps no
     -- sizes from anchors).
     S[list].height = 192
-    -- The list from the top: each bar's row (its top as if unscrolled, 28
+    -- The list from the top: each bar's row (its top as if unscrolled, TOP
     -- being the list's top, +height, x, its name's anchor, previews
     -- showing) and each + line (its top, x), in order.
+    local TOP = 56
     local function List()
         local out = {}
         for _, key in ipairs(ns.ALL_BAR_KEYS) do
@@ -2160,18 +2187,18 @@ end)()
                 for _, icon in ipairs(item.icons or {}) do
                     if icon:IsShown() then shown = shown + 1 end
                 end
-                out[#out + 1] = { -p[3], ("%s %d+%d %d %s%d,%d %d"):format(key, 28 - p[3], S[item].height, p[2], label[1], label[2], label[3], shown) }
+                out[#out + 1] = { -p[3], ("%s %d+%d %d %s%d,%d %d"):format(key, TOP - p[3], S[item].height, p[2], label[1], label[2], label[3], shown) }
             end
         end
         for kind, line in pairs(w.navPlus) do
-            if line:IsShown() then out[#out + 1] = { -S[line].points[1][3], ("+%s %d %d"):format(kind, 28 - S[line].points[1][3], S[line].points[1][2]) } end
+            if line:IsShown() then out[#out + 1] = { -S[line].points[1][3], ("+%s %d %d"):format(kind, TOP - S[line].points[1][3], S[line].points[1][2]) } end
         end
         table.sort(out, function(a, b) return a[1] < b[1] end)
         for i, row in ipairs(out) do out[i] = row[2] end
         return table.concat(out, ", ")
     end
     -- The list's view: pinned by two corners to the list on the left (its
-    -- top 28 down, its foot as far as the view goes, the thumb's room at the
+    -- top TOP down, its foot as far as the view goes, the thumb's room at the
     -- right while it scrolls); then how high the view and its content are,
     -- the content's width, the thumb, and how far it's scrolled.
     local function View()
@@ -2179,7 +2206,7 @@ end)()
         if not (a and b) then return #S[list].points .. " corners: not pinned" end
         local content = S[list.content]
         return ("%d %s%d,%d %s%s%d,%d | %d of %d, %d wide, thumb %s, at %d"):format(#S[list].points, a[1], a[4], a[5], b[1], b[3], b[4], b[5],
-            -b[5] - 28, content.height, content.width, tostring(S[list.thumb].shown), list:GetVerticalScroll())
+            -b[5] - TOP, content.height, content.width, tostring(S[list.thumb].shown), list:GetVerticalScroll())
             .. (a[2] == w.navFrame and b[2] == w.navFrame and "" or " (pinned to something else)")
     end
     -- Every bar's row with its preview: 32 high at least, its name over its
@@ -2201,9 +2228,10 @@ end)()
         return table.concat(wrong, "; ")
     end
     -- Nothing in the list on anything else in it, all of it inside its
-    -- content; the view ending above the rule (224), the content all in
+    -- content; the view ending above the rule (252), the content all in
     -- sight unless the list scrolls; nothing under it on anything else or
-    -- on What's new (its top 455 down the list), and Look where it always was.
+    -- on What's new (its top 455 down the list), and Look where it always
+    -- is (260 since Presets came first); Presets over the Your bars heading.
     local function Fits()
         local inList, under, wrong = {}, {}, {}
         for key, item in pairs(w.nav) do
@@ -2236,14 +2264,18 @@ end)()
         for _, a in ipairs(inList) do
             if -S[a[1]].points[1][3] + S[a[1]].height > content.height then wrong[#wrong + 1] = a[2] .. " past the list's end" end
         end
-        local view, rule = -foot[5] - 28, -S[w.under[1][1]].points[1][3]
-        if 28 + view > rule then wrong[#wrong + 1] = "the list on the rule" end
+        local view, rule = -foot[5] - TOP, -S[w.under[1][1]].points[1][3]
+        if TOP + view > rule then wrong[#wrong + 1] = "the list on the rule" end
+        local presets, heading = w.nav.presets, -S[w.yourBars].points[1][3]
+        if -S[presets].points[1][3] + S[presets].height > heading or heading + 12 > TOP then
+            wrong[#wrong + 1] = "Presets on Your bars, or Your bars on the list"
+        end
         if content.height > view and foot[4] ~= -8 then wrong[#wrong + 1] = "the list cut off, not scrolling" end
         local news = 489 - S[w.news].points[1][3] - S[w.news].height
         for _, a in ipairs(under) do
             if -S[a[1]].points[1][3] + S[a[1]].height > news then wrong[#wrong + 1] = a[2] .. " on What's new" end
         end
-        if S[w.nav.look].points[1][3] ~= -232 then wrong[#wrong + 1] = "Look moved to " .. -S[w.nav.look].points[1][3] end
+        if S[w.nav.look].points[1][3] ~= -260 then wrong[#wrong + 1] = "Look moved to " .. -S[w.nav.look].points[1][3] end
         return table.concat(wrong, "; ")
     end
     local function Icon(key, i)
@@ -2274,8 +2306,8 @@ end)()
     for _, timer in ipairs(timers) do timer() end
     Equal(four .. " | " .. Icon("cd", 2) .. " " .. S[w.nav.cd.count].text .. " " .. tostring(w.nav.cd2) .. " | " .. Fits() .. " | "
         .. tostring(part == w.nav.cd) .. " " .. beside .. " | " .. built .. " | " .. tostring(View() == built),
-        "cd 28+46 0 TOPLEFT14,-9 0, util 76+46 0 TOPLEFT14,-9 0, buff 124+46 0 TOPLEFT14,-9 0, debuff 172+46 0 TOPLEFT14,-9 0 |"
-        .. " TOPLEFT30,-26 14 0 nil |  | true TOPLEFT true TOPRIGHT | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide,"
+        "cd 56+46 0 TOPLEFT14,-9 0, util 104+46 0 TOPLEFT14,-9 0, buff 152+46 0 TOPLEFT14,-9 0, debuff 200+46 0 TOPLEFT14,-9 0 |"
+        .. " TOPLEFT30,-26 14 0 nil |  | true TOPLEFT true TOPRIGHT | 2 TOPLEFT0,-56 BOTTOMRIGHTTOPRIGHT0,-248 | 192 of 192, 180 wide,"
         .. " thumb false, at 0 | true", "no spells, no extra bar: the four exactly as always, no + line, nothing made for an extra bar,"
         .. " the list the four's 192, the list's full width, no thumb; the tour's Extra bars step points at Cooldowns in the list;"
         .. " the list pinned again as the window shows")
@@ -2285,8 +2317,8 @@ end)()
     B:SetAura("debuff", "Moonfire", true)
     w:Refresh()
     Equal(List() .. " | " .. Icon("cd", 2) .. " " .. Icon("cd", 1) .. " | " .. Fits() .. " | " .. Previews() .. " | " .. View(),
-        "cd 28+39 0 TOPLEFT14,-7 1, +cd 69 20, util 83+39 0 TOPLEFT14,-7 0, buff 124+39 0 TOPLEFT14,-7 0, debuff 165+39 0 TOPLEFT14,-7 1,"
-        .. " +debuff 206 20 | TOPLEFT28,-22 12 TOPLEFT14,-22 12 |  |  | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide,"
+        "cd 56+39 0 TOPLEFT14,-7 1, +cd 97 20, util 111+39 0 TOPLEFT14,-7 0, buff 152+39 0 TOPLEFT14,-7 0, debuff 193+39 0 TOPLEFT14,-7 1,"
+        .. " +debuff 234 20 | TOPLEFT28,-22 12 TOPLEFT14,-22 12 |  |  | 2 TOPLEFT0,-56 BOTTOMRIGHTTOPRIGHT0,-248 | 192 of 192, 180 wide,"
         .. " thumb false, at 0", "spells on two bars: + Add a bar under those two only, set in; every row the same, a little shorter,"
         .. " its preview kept; all in sight, no scrolling; Look in place")
     -- Spells on all four and one extra bar (the review's case: one-line rows
@@ -2301,9 +2333,9 @@ end)()
     w:Select("cd2")
     Equal(List() .. " | " .. Icon("cd2", 1) .. " " .. Icon("cd", 1) .. " " .. S[w.nav.cd2.count].text .. " " .. tostring(w.nav.cd2.fill:IsShown())
         .. " " .. tostring(w.nav.cd.fill:IsShown()) .. " " .. H.Note(w.nav.cd2) .. " | " .. Fits() .. " | " .. Previews() .. " | " .. View(),
-        "cd 28+32 0 TOPLEFT14,-4 1, cd2 62+32 0 TOPLEFT14,-4 1, +cd 96 20, util 110+32 0 TOPLEFT14,-4 1, +util 144 20, buff 158+32 0"
-        .. " TOPLEFT14,-4 1, +buff 192 20, debuff 206+32 0 TOPLEFT14,-4 1, +debuff 240 20 | TOPLEFT14,-18 12 TOPLEFT14,-18 12 1 true false"
-        .. " Your Cooldowns 2 bar: its icons, how it shows, and your spells to tick onto it. |  |  | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT-8,-220"
+        "cd 56+32 0 TOPLEFT14,-4 1, cd2 90+32 0 TOPLEFT14,-4 1, +cd 124 20, util 138+32 0 TOPLEFT14,-4 1, +util 172 20, buff 186+32 0"
+        .. " TOPLEFT14,-4 1, +buff 220 20, debuff 234+32 0 TOPLEFT14,-4 1, +debuff 268 20 | TOPLEFT14,-18 12 TOPLEFT14,-18 12 1 true false"
+        .. " Your Cooldowns 2 bar: its icons, how it shows, and your spells to tick onto it. |  |  | 2 TOPLEFT0,-56 BOTTOMRIGHTTOPRIGHT-8,-248"
         .. " | 192 of 226, 172 wide, thumb true, at 0", "Cooldowns 2: a full row like Cooldowns (same x, no indent, its own count and"
         .. " preview), lit on its page; the + under it now; every row keeps its preview; the list scrolls in the bars' room; Look in place")
     -- Debuffs' page: its row and the + under it scrolled into sight (no
@@ -2328,10 +2360,10 @@ end)()
     part, beside = ExtraStep("cd")
     local eight = List()
     Equal(eight .. " | " .. Fits() .. " | " .. Previews() .. " | " .. View() .. " | " .. table.concat(alphas, " ") .. " | "
-        .. tostring(part == w.navPlus.cd) .. " " .. beside, "cd 28+32 0 TOPLEFT14,-4 1, cd2 62+32 0 TOPLEFT14,-4 1, cd3 96+32 0"
-        .. " TOPLEFT14,-4 0, +cd 130 20, util 144+32 0 TOPLEFT14,-4 1, util2 178+32 0 TOPLEFT14,-4 0, +util 212 20, buff 226+32 0"
-        .. " TOPLEFT14,-4 1, +buff 260 20, debuff 274+32 0 TOPLEFT14,-4 1, debuff2 308+32 0 TOPLEFT14,-4 0, +debuff 342 20 |  |  | 2"
-        .. " TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT-8,-220 | 192 of 328, 172 wide, thumb true, at 0 | 0.45 0.45 0.45 0.45 | true TOPLEFT true"
+        .. tostring(part == w.navPlus.cd) .. " " .. beside, "cd 56+32 0 TOPLEFT14,-4 1, cd2 90+32 0 TOPLEFT14,-4 1, cd3 124+32 0"
+        .. " TOPLEFT14,-4 0, +cd 158 20, util 172+32 0 TOPLEFT14,-4 1, util2 206+32 0 TOPLEFT14,-4 0, +util 240 20, buff 254+32 0"
+        .. " TOPLEFT14,-4 1, +buff 288 20, debuff 302+32 0 TOPLEFT14,-4 1, debuff2 336+32 0 TOPLEFT14,-4 0, +debuff 370 20 |  |  | 2"
+        .. " TOPLEFT0,-56 BOTTOMRIGHTTOPRIGHT-8,-248 | 192 of 328, 172 wide, thumb true, at 0 | 0.45 0.45 0.45 0.45 | true TOPLEFT true"
         .. " TOPRIGHT", "eight bars and four + lines: every row alike, 32 high, no indent, its own preview; the + lines (greyed: four"
         .. " in all) still under each kind; the list scrolls in the bars' room, so all fits above What's new; the tour's Extra bars"
         .. " step points at the + under Cooldowns' bars, its box beside it")
@@ -2369,10 +2401,10 @@ end)()
     ns.UseProfile("Plain")
     w:Refresh()
     Equal(plain .. " || " .. other .. " || " .. tostring(back == eight) .. " || " .. tostring(List() .. " | " .. View() == other) .. " "
-        .. Fits() .. " | " .. Previews(), "cd 28+46 0 TOPLEFT14,-9 0, util 76+46 0 TOPLEFT14,-9 0, buff 124+46 0 TOPLEFT14,-9 0,"
-        .. " debuff 172+46 0 TOPLEFT14,-9 0 | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide, thumb false, at 0 || cd"
-        .. " 28+33 0 TOPLEFT14,-4 0, util 63+33 0 TOPLEFT14,-4 0, buff 98+33 0 TOPLEFT14,-4 1, buff2 133+33 0 TOPLEFT14,-4 0, +buff 168"
-        .. " 20, debuff 182+33 0 TOPLEFT14,-4 0 | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 189, 180 wide, thumb false, at 0 ||"
+        .. Fits() .. " | " .. Previews(), "cd 56+46 0 TOPLEFT14,-9 0, util 104+46 0 TOPLEFT14,-9 0, buff 152+46 0 TOPLEFT14,-9 0,"
+        .. " debuff 200+46 0 TOPLEFT14,-9 0 | 2 TOPLEFT0,-56 BOTTOMRIGHTTOPRIGHT0,-248 | 192 of 192, 180 wide, thumb false, at 0 || cd"
+        .. " 56+33 0 TOPLEFT14,-4 0, util 91+33 0 TOPLEFT14,-4 0, buff 126+33 0 TOPLEFT14,-4 1, buff2 161+33 0 TOPLEFT14,-4 0, +buff 196"
+        .. " 20, debuff 210+33 0 TOPLEFT14,-4 0 | 2 TOPLEFT0,-56 BOTTOMRIGHTTOPRIGHT0,-248 | 192 of 189, 180 wide, thumb false, at 0 ||"
         .. " true || true  | ", "a new profile: the four as always, the list back to its full width, no thumb, at the top; Buffs 2"
         .. " added there: its own row, the + under it, all in sight; yours: your eight again; back: Buffs 2's list again, the others'"
         .. " rows gone")
@@ -2391,10 +2423,10 @@ end)()
     B:SetAura("debuff", "Moonfire", false)
     w:Refresh()
     Equal(plus .. " || " .. List() .. " | " .. Icon("cd", 2) .. " " .. tostring(w.nav.cd2:IsShown()) .. " | " .. Fits() .. " | " .. View(),
-        "134 | cd 28+32 0 TOPLEFT14,-4 1, +cd 62 20, util 76+32 0 TOPLEFT14,-4 1, +util 110 20, buff 124+32 0 TOPLEFT14,-4 1, +buff 158"
-        .. " 20, debuff 172+32 0 TOPLEFT14,-4 1, +debuff 206 20 |  |  | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide,"
-        .. " thumb false, at 0 || cd 28+46 0 TOPLEFT14,-9 0, util 76+46 0 TOPLEFT14,-9 0, buff 124+46 0 TOPLEFT14,-9 0, debuff 172+46 0"
-        .. " TOPLEFT14,-9 0 | TOPLEFT30,-26 14 false |  | 2 TOPLEFT0,-28 BOTTOMRIGHTTOPRIGHT0,-220 | 192 of 192, 180 wide, thumb false,"
+        "134 | cd 56+32 0 TOPLEFT14,-4 1, +cd 90 20, util 104+32 0 TOPLEFT14,-4 1, +util 138 20, buff 152+32 0 TOPLEFT14,-4 1, +buff 186"
+        .. " 20, debuff 200+32 0 TOPLEFT14,-4 1, +debuff 234 20 |  |  | 2 TOPLEFT0,-56 BOTTOMRIGHTTOPRIGHT0,-248 | 192 of 192, 180 wide,"
+        .. " thumb false, at 0 || cd 56+46 0 TOPLEFT14,-9 0, util 104+46 0 TOPLEFT14,-9 0, buff 152+46 0 TOPLEFT14,-9 0, debuff 200+46 0"
+        .. " TOPLEFT14,-9 0 | TOPLEFT30,-26 14 false |  | 2 TOPLEFT0,-56 BOTTOMRIGHTTOPRIGHT0,-248 | 192 of 192, 180 wide, thumb false,"
         .. " at 0", "every extra removed: four rows and four + lines, laid out again, all in sight at the list's full width, back"
         .. " at the top; no spells: the four exactly as always, icons back to 14")
     Equal(#printed, 0, "no errors")
@@ -2439,6 +2471,257 @@ end)()
         .. " buff debuff cd2 debuff2 debuff3 | cd util buff debuff cd2 cd3 debuff2 debuff3",
         "each extra a row of its own under the display, drawn on the Layout page; moving by numbers steps through all eight;"
         .. " Cooldowns 3 taken out and put back")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Key press glow ----------------------------------------------------------------------------------------
+-- (A player's idea; Squirt's yes, 15 Nov 2026: as Blizzard's action bars
+-- show a button held down.) Off by default: nothing read and no frame
+-- updating for it. Ticked in Icon details, an icon on your Cooldowns,
+-- Utility or an extra cooldown bar whose spell a bar button holds
+-- (Blizzard's main and side bars, a bar addon's) shows a gold border while
+-- that button reads PUSHED, and loses it as it reads NORMAL again: the
+-- addon's own four textures on the icon's top, over its art and its sweep
+-- (a held key often starts the cooldown) and under its key and count, sized
+-- with the icon, rounded by a mask of its own like Blizzard's (on the top
+-- too) on an icon drawn like Blizzard's. Each button is only asked its state: nothing else
+-- is read on it, set on it or written to it. Unticked, every border goes
+-- out and the frame's OnUpdate is taken off.
+
+;(function()
+    local NAMES = { [8921] = "Moonfire", [8924] = "Moonfire", [5176] = "Wrath", [7384] = "Overpower" }
+    local function Flush()
+        for _ = 1, 5 do
+            local list = timers
+            timers = {}
+            for _, timer in ipairs(list) do timer() end
+            if #timers == 0 then return end
+        end
+    end
+    -- A bar button: it answers its state (PUSHED or NORMAL, as the test
+    -- sets it), and the methods given; anything else read on it, or any key
+    -- written to it, is noted.
+    local states, asked, touched = {}, 0, {}
+    local function Button(name, methods)
+        local own = methods or {}
+        own.GetButtonState = function(self)
+            asked = asked + 1
+            return states[self]
+        end
+        local button = setmetatable({}, {
+            __index = function(_, key)
+                if own[key] then return own[key] end
+                touched[#touched + 1] = name .. " read " .. tostring(key)
+            end,
+            __newindex = function(_, key) touched[#touched + 1] = name .. " written " .. tostring(key) end,
+        })
+        states[button] = "NORMAL"
+        return button
+    end
+    -- How many of an icon's border's sides show, or none made.
+    local function Lit(icon)
+        if not icon.press then return "none" end
+        local shown = 0
+        for _, strip in ipairs(icon.press) do
+            if S[strip].shown then shown = shown + 1 end
+        end
+        return tostring(shown)
+    end
+
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local spellName = C_Spell.GetSpellName
+    C_Spell.GetSpellName = function(id) return NAMES[id] or spellName(id) end
+    local B, K = ns.Bars, ns.Keybinds
+    B:AddBar("cd")
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "cd2")
+    B:Assign("Overpower", "util")
+    -- Moonfire's first rank on the main bar's first key, Wrath on the side bar's.
+    actionSlots[1], keyOf.ACTIONBUTTON1 = { "spell", 8921 }, "1"
+    actionSlots[61], keyOf.MULTIACTIONBAR1BUTTON1 = { "spell", 5176 }, "SHIFT-1"
+    _G.ActionButton1, _G.MultiBarBottomLeftButton1 = Button("ActionButton1"), Button("MultiBarBottomLeftButton1")
+    local main, side = ActionButton1, MultiBarBottomLeftButton1
+    Fire("UPDATE_BINDINGS")
+    Fire("ACTIONBAR_SLOT_CHANGED", 1)
+    Flush()
+    local moon, wrath, over = B:Get("cd").icons[1], B:Get("cd2").icons[1], B:Get("util").icons[1]
+    Equal(tostring(ns.Get("keyPressGlow")) .. " " .. actionReads .. " " .. tostring(B.pressDriver) .. " " .. B:PressWatched() .. " "
+        .. tostring(moon.pressButtons) .. " " .. asked .. " " .. #touched .. " " .. tostring(moon.press),
+        "false 0 nil 0 nil 0 0 nil", "off by default: no action bar read, no frame made for it, nothing watched, no button asked")
+
+    -- Ticked in Icon details: your action bars read, the icons with a button watched.
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    w.iconDetails:Click()
+    local panel = w.iconPanel
+    panel.press:Click()
+    Flush()
+    local driver = B.pressDriver
+    Equal(tostring(ns.Get("keyPressGlow")) .. " " .. actionReads .. " " .. B:PressWatched() .. " "
+        .. tostring(driver ~= nil and S[driver].scripts.OnUpdate ~= nil) .. " " .. #moon.pressButtons .. " "
+        .. tostring(moon.pressButtons[1] == main) .. " " .. tostring(wrath.pressButtons[1] == side) .. " " .. tostring(over.pressButtons)
+        .. " " .. tostring(S[moon.key].shown) .. " " .. #touched, "true " .. K.SLOTS .. " 2 true 1 true true nil false 0",
+        "ticked: your action bars read once; Moonfire (its first rank in the slot) and Cooldowns 2's Wrath watched, each with its"
+        .. " button, Overpower (on no bar) not; with Keybinds on icons off, no key text")
+    local function Frame() S[driver].scripts.OnUpdate(driver, 1 / 60) end
+    asked = 0
+    Frame()
+    Equal(Lit(moon) .. " " .. Lit(wrath) .. " " .. asked, "none none 2", "nothing held: each button asked once a frame, no border made")
+
+    -- Held: the border, made then, on the icon's top (over the sweep).
+    local made = {}
+    local create = Proto.CreateTexture
+    Proto.CreateTexture = function(self, _, layer, _, sublevel)
+        local texture = create(self)
+        made[texture] = tostring(layer) .. " " .. tostring(sublevel)
+        return texture
+    end
+    states[main] = "PUSHED"
+    Frame()
+    Proto.CreateTexture = create
+    local strip = moon.press and moon.press[1]
+    local gold = S[strip].last.SetColorTexture
+    local top = S[strip].points
+    local above = Last(moon.top, "SetFrameLevel")
+    Equal(Lit(moon) .. " " .. Lit(wrath) .. " " .. made[strip] .. " " .. tostring(S[strip].parent == moon.top) .. " "
+        .. tostring(above == moon.cooldown:GetFrameLevel() + 1) .. " "
+        .. ("%.3f %.3f %.3f %g"):format(gold[1], gold[2], gold[3], gold[4]) .. " " .. tostring(top[1][2] == moon.texture) .. " "
+        .. top[1][1] .. " " .. top[1][4] .. " " .. top[1][5] .. " " .. top[2][1] .. " " .. S[strip].height .. " " .. S[moon].width
+        .. " " .. tostring(moon.pressMaskMade),
+        "4 none BORDER nil true true 0.914 0.706 0.298 1 true TOPLEFT 0 0 TOPRIGHT 2 36 nil",
+        "Moonfire's key held: four gold sides on the icon's top (over its art and its sweep, under its key and count), just"
+        .. " inside the art, 2 wide on a 36 icon, no mask made while square; Wrath's not lit")
+    asked = 0
+    Frame()
+    Equal(Lit(moon) .. " " .. asked, "4 2", "still held: still lit")
+    states[main], states[side] = "NORMAL", "PUSHED"
+    Frame()
+    Equal(Lit(moon) .. " " .. Lit(wrath), "0 4", "let go: out; the side bar's button held: Cooldowns 2's Wrath lit")
+    states[side] = SECRETS.string
+    Frame()
+    Equal(Lit(wrath), "0", "an answer the game keeps secret never counts")
+    states[side] = "NORMAL"
+    -- In a fight too: only read.
+    lockdown = true
+    states[main] = "PUSHED"
+    Frame()
+    Equal(Lit(moon), "4", "in a fight too")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    -- The bars laid out again: out, and lit again on the next frame while still held.
+    B:Rebuild()
+    local rebuilt = Lit(moon)
+    Frame()
+    Equal(rebuilt .. " " .. Lit(moon), "0 4", "the bars laid out again: out, then lit on the next frame while still held")
+    -- Moonfire taken off your action bar: out at once, no longer watched.
+    actionSlots[1] = nil
+    Fire("ACTIONBAR_SLOT_CHANGED", 1)
+    Flush()
+    Frame()
+    Equal(Lit(moon) .. " " .. tostring(moon.pressButtons) .. " " .. B:PressWatched(), "0 nil 1",
+        "its spell gone from the button: out at once and no longer watched, its button still held")
+    states[main] = "NORMAL"
+    actionSlots[1] = { "spell", 8921 }
+    Fire("ACTIONBAR_SLOT_CHANGED", 1)
+    Flush()
+
+    -- A bar addon's button (one of Dominos'): Overpower in its slot, lit while it's held.
+    local dominos = Button("DominosActionButton13", {
+        GetName = function() return "DominosActionButton13" end,
+        GetAttribute = function(_, what) if what == "action" then return 13 end end,
+    })
+    actionSlots[13], keyOf["CLICK DominosActionButton13:HOTKEY"] = { "spell", 7384 }, "F"
+    _G.Dominos = { ActionButtons = { buttons = { [dominos] = 13 } } }
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    states[dominos] = "PUSHED"
+    Frame()
+    Equal(Lit(over) .. " " .. B:PressWatched() .. " " .. tostring(over.pressButtons ~= nil and over.pressButtons[1] == dominos), "4 3 true",
+        "a bar addon's button held: Utility's Overpower lit")
+    states[dominos] = "NORMAL"
+    Frame()
+    _G.Dominos = nil
+
+    -- With Keybinds on icons too: the key and the border.
+    w.keybinds:Click()
+    states[main] = "PUSHED"
+    Frame()
+    Equal(tostring(ns.Get("keybinds")) .. " " .. S[moon.key].text .. " " .. tostring(S[moon.key].shown) .. " " .. Lit(moon), "true 1 true 4",
+        "Keybinds on icons ticked as well: Moonfire shows its key and lights while it's held")
+
+    -- Drawn like Blizzard's (Icon details' Icons): rounded by a mask of its
+    -- own like Blizzard's, on the top with it (a mask rounds only its own
+    -- frame's textures), in from its empty edge; square again after.
+    ns.Set("iconStyle", "blizzard")
+    B:Rebuild()
+    Frame()
+    local p = S[strip].points[1]
+    local mask = moon.pressMaskMade
+    Equal(tostring(moon.shape.rounded) .. " " .. Lit(moon) .. " " .. tostring(mask ~= nil and mask ~= moon.shape.mask) .. " "
+        .. tostring(mask and S[mask].parent == moon.top) .. " " .. tostring(mask and Last(mask, "SetAtlas")) .. " "
+        .. tostring(mask and Last(mask, "SetAllPoints") == moon.texture) .. " "
+        .. tostring(S[strip].masks ~= nil and #S[strip].masks == 1 and S[strip].masks[1] == mask)
+        .. " " .. p[1] .. " " .. p[4] .. " " .. p[5], "true 4 true true " .. ns.Style.BLIZZARD_MASK .. " true true TOPLEFT 2 -2",
+        "drawn like Blizzard's: lit, rounded by its own mask of Blizzard's shape on the top, over the art, and 2 in from the"
+        .. " art's edge")
+    ns.Set("iconStyle", "square")
+    B:Rebuild()
+    Frame()
+    p = S[strip].points[1]
+    Equal(Lit(moon) .. " " .. #(S[strip].masks or {}) .. " " .. p[4] .. " " .. p[5], "4 0 0 0", "square again: unmasked, at the art's edge")
+
+    -- A bigger icon, a wider border.
+    B:SetOption("cd", "size", 64)
+    Frame()
+    Equal(Lit(moon) .. " " .. S[moon].width .. " " .. S[strip].height, "4 64 4", "a 64 icon: 4 wide")
+    B:SetOption("cd", "size", 36)
+    Frame()
+
+    -- Your bars off: nothing watched, the frame stops; back on, watched again.
+    ns.Set("useBars", false)
+    B:Rebuild()
+    Equal(Lit(moon) .. " " .. B:PressWatched() .. " " .. tostring(S[driver].scripts.OnUpdate), "0 0 nil",
+        "your bars off: out, nothing watched, no OnUpdate")
+    ns.Set("useBars", true)
+    B:Rebuild()
+    Frame()
+    Equal(Lit(moon) .. " " .. B:PressWatched(), "4 2", "back on: watched and lit again")
+
+    -- Unticked: every border out, the OnUpdate taken off, nothing watched.
+    panel.press:Click()
+    Equal(tostring(ns.Get("keyPressGlow")) .. " " .. Lit(moon) .. " " .. tostring(S[driver].scripts.OnUpdate) .. " " .. B:PressWatched()
+        .. " " .. tostring(moon.pressButtons) .. " " .. tostring(ns.Get("keybinds")) .. " " .. tostring(S[moon.key].shown),
+        "false 0 nil 0 nil true true", "unticked: out, the OnUpdate taken off (not left to return), nothing watched; the keys stay")
+    asked = 0
+    Fire("UPDATE_BINDINGS")
+    Flush()
+    Equal(asked .. " " .. tostring(S[driver].scripts.OnUpdate) .. " " .. B:PressWatched(), "0 nil 0",
+        "and stays so as the keys are read again")
+    -- Ticked in a fight, your bars already read for the keybinds: watched
+    -- and lit at once from what was read, not only once the fight is over;
+    -- unticked in it, out at once.
+    lockdown = true
+    panel.press:Click()
+    Flush()
+    states[main] = "PUSHED"
+    Frame()
+    Equal(tostring(ns.Get("keyPressGlow")) .. " " .. B:PressWatched() .. " " .. tostring(S[driver].scripts.OnUpdate ~= nil) .. " "
+        .. Lit(moon), "true 2 true 4", "ticked in a fight with the keybinds on: watched and lit at once, from what was read")
+    states[main] = "NORMAL"
+    panel.press:Click()
+    Equal(tostring(ns.Get("keyPressGlow")) .. " " .. Lit(moon) .. " " .. tostring(S[driver].scripts.OnUpdate) .. " " .. B:PressWatched(),
+        "false 0 nil 0", "unticked in a fight: out at once, the OnUpdate taken off")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Flush()
+    -- Anything odd saved: off.
+    ForeverEnhancedCooldownManagerDB.keyPressGlow = "yes"
+    Equal(tostring(ns.Get("keyPressGlow")), "false", "anything odd saved: off")
+    ForeverEnhancedCooldownManagerDB.keyPressGlow = nil
+    Equal(table.concat(touched, ", "), "", "each button only asked its state: nothing else read on it, nothing set or written to it")
+    C_Spell.GetSpellName = spellName
+    _G.ActionButton1, _G.MultiBarBottomLeftButton1 = nil, nil
     Equal(#printed, 0, "no errors")
 end)()
 

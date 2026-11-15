@@ -1,5 +1,6 @@
--- The /ccm window: your bars listed down the left, each with a preview of
--- its icons, then the Look and General pages; the chosen page fills the rest.
+-- The /ccm window: Presets at the top of the list down the left, then your
+-- bars, each with a preview of its icons, then the Look and General pages;
+-- the chosen page fills the rest.
 -- A bar's page (BarPage.lua) shows its icons, its options and a spell list to
 -- tick from. Drawn in the flat charcoal Theme style.
 local _, ns = ...
@@ -9,12 +10,20 @@ local WIDTH, HEIGHT = 820, 560
 local HEADER, FOOTER, NAV = 42, 28, 180
 ns.WINDOW_HEADER, ns.WINDOW_FOOTER = HEADER, FOOTER -- for a bar page's spell panel (BarPage.lua)
 local PREVIEW = 9 -- icons previewed under each bar's name
--- The bar list (LayBars): its first bar's top, each bar's room as always
--- (a 46 high row and 2 under it), each + Add a bar line's (12 high, and 2
--- under it), the least a bar's row ever takes (32 high with 12 px icons,
--- as the four with a + under each: past that the list scrolls), and the
--- room kept at its right for the scroll thumb while it does.
-local LIST_TOP, BAR_STEP, PLUS_STEP, PLUS_HIGH, LEAST_STEP, THUMB_ROOM = 28, 48, 14, 12, 34, 8
+-- The bar list (LayBars): its first bar's top (under Presets and the Your
+-- bars heading), each bar's room as always (a 46 high row and 2 under it),
+-- each + Add a bar line's (12 high, and 2 under it), the least a bar's row
+-- ever takes (32 high with 12 px icons, as the four with a + under each:
+-- past that the list scrolls), and the room kept at its right for the
+-- scroll thumb while it does.
+local LIST_TOP, BAR_STEP, PLUS_STEP, PLUS_HIGH, LEAST_STEP, THUMB_ROOM = 56, 48, 14, 12, 34, 8
+-- The pages under the bars (Look to Cooldown pulse): each one's row, and
+-- from one to the next. 4 shorter than they were, for Presets' room at the
+-- top, so the bars keep theirs.
+local ITEM_HIGH, ITEM_STEP = 26, 28
+-- Presets, first in the list (PresetsItem): in from the list's sides, down
+-- from its top, and as high as the pages under the bars.
+local PRESETS_IN, PRESETS_TOP = 8, 6
 local HEART = "Heart.tga" -- white on clear, tinted to the accent in the footer's credit
 -- A list's scroll thumb, wherever there's one: the bar pages, Look and the profiles.
 ns.SCROLL_NOTE = "Drag to scroll the list, or turn the mouse wheel over it."
@@ -879,12 +888,16 @@ end
 -- on the panel's own icons (their cooldowns running round, drawn by the
 -- calls your bars' icons use), on your bars and on Blizzard's icons.
 -- Everything starts as the icons always looked; Defaults puts it all back.
+-- Then Key press glow, your bars' icons lit while you hold their key: a
+-- part switched on or off like Keybinds on icons (ns.SHARE_PARTS), so
+-- Defaults leaves it as it is.
 -- Like the Health and power text panel, its shade leaves the footer clear.
 -- Made the first time it opens.
-local DETAIL = { width = 540, at = 110, row = 25, icon = 40, gap = 14, tray = { 38, 64 } }
+-- (rows: how many rows of choices there are, Key press glow's the seventh; the note goes under them.)
+local DETAIL = { width = 540, at = 110, row = 25, rows = 7, icon = 40, gap = 14, tray = { 38, 64 } }
 local DETAIL_TIMES = { 9, 15, 24, 40 } -- each preview icon's cooldown, in seconds, round and round
 local DETAIL_NOTE = "On your bars, and on Blizzard's icons while Apply this look to the Cooldown Manager is on"
-    .. " (Icons: your bars only). Each change shows at once."
+    .. " (Icons and Key press glow: your bars only). Changes show at once."
 
 -- The preview: four icons in a row, each with a cooldown of the addon's
 -- own going round, its key on it as on your bars.
@@ -1067,6 +1080,21 @@ local function EdgeRow(window, dialog, Changed)
     return tick, colour
 end
 
+-- Key press glow's row (Bars.lua, a player's idea): your bars' icons only,
+-- off until ticked. Your action bars are read again first (Keybinds.lua),
+-- as the keybinds' tick has it; unticked, every border goes out at once.
+local function PressRow(window, dialog)
+    local tick = T:Check(dialog, "Key press glow", function(self)
+        ns.Set("keyPressGlow", self:GetChecked())
+        if ns.Keybinds then ns.Keybinds:Update() end
+        if ns.Bars then ns.Bars:ApplyKeyPress() end
+        window:Refresh()
+    end)
+    window:Hint(tick, "A gold border on an icon on your Cooldowns and Utility bars while you hold down the key that casts it,"
+        .. " as your action bars show a held button.")
+    return tick
+end
+
 local function IconPanel(window)
     local shade = CreateFrame("Frame", nil, window)
     shade:SetPoint("TOPLEFT")
@@ -1087,7 +1115,7 @@ local function IconPanel(window)
     title:SetPoint("TOPLEFT", 16, -16)
     local quiet = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     quiet:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    quiet:SetText("the icons, the swipe, the countdown and the edge line")
+    quiet:SetText("the icons, swipe, countdown, edge line and key press glow")
     local tray = DetailTray(dialog)
     shade.tray = tray
     local function Changed()
@@ -1124,14 +1152,16 @@ local function IconPanel(window)
     local edge, edgeColour = EdgeRow(window, dialog, Changed)
     At(edge, 16, 5, 2)
     At(edgeColour, DETAIL.at, 5)
+    local press = PressRow(window, dialog)
+    At(press, 16, 6, 2)
     shade.swipeColour, shade.seeThrough, shade.size, shade.countdownColour = swipeColour, seeThrough, size, countdownColour
     shade.spot, shade.format, shade.edge, shade.edgeColour = spot, format, edge, edgeColour
-    shade.iconStyle = iconStyle
+    shade.iconStyle, shade.press = iconStyle, press
 
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     note:SetWidth(DETAIL.width - 32)
     note:SetText(DETAIL_NOTE)
-    At(note, 16, 6, 4)
+    At(note, 16, DETAIL.rows, 4)
     local done = T:Button(dialog, "Done", 90, 22)
     done:SetPoint("BOTTOMRIGHT", -16, 14)
     done:SetScript("OnClick", function() shade:Hide() end)
@@ -1145,14 +1175,14 @@ local function IconPanel(window)
         Changed()
     end)
     window:Hint(defaults, "Every detail here back as the icons always looked: square, a 70% black swipe, white numbers in the"
-        .. " middle and no edge line. A custom colour you picked is kept for next time.")
+        .. " middle, no edge line. A custom colour is kept; Key press glow stays.")
     shade.done, shade.defaults = done, defaults
     window:HookScript("OnHide", function() shade:Hide() end)
     -- Tall enough for the note's lines: sized as it's made, and again each
     -- time it shows, as the other panels are (a hidden note may not have
     -- measured its lines yet).
     local function Height()
-        dialog:SetHeight(math.ceil(-y + 6 * DETAIL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
+        dialog:SetHeight(math.ceil(-y + DETAIL.rows * DETAIL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
     end
     Height()
 
@@ -1169,6 +1199,7 @@ local function IconPanel(window)
         size:Set(ns.Get("countdownSize"))
         spot:SetSelected(ns.Get("countdownSpot"))
         format:SetSelected(ns.Get("countdownFormat"))
+        press:SetChecked(ns.Get("keyPressGlow"))
         local edgeOn = ns.Get("swipeEdge") == true
         edge:SetChecked(edgeOn)
         edgeColour:SetEnabled(edgeOn)
@@ -1700,15 +1731,16 @@ local function BuildLook(window, page, width)
     end
     window.sampleIcons = sample
     -- Beside them, Icon details: the swipe, the countdown and the edge line
-    -- on your icons and Blizzard's, in a panel over the window.
+    -- on your icons and Blizzard's, and your icons' shape and Key press glow,
+    -- in a panel over the window.
     local details = T:Button(tray, "Icon details", 96, 20)
     details:SetPoint("RIGHT", sample, "LEFT", -14, 0)
     details:SetScript("OnClick", function()
         window.iconPanel = window.iconPanel or IconPanel(window)
         window.iconPanel:Open()
     end)
-    window:Hint(details, "The cooldown swipe's colour and see-through, the countdown's size, colour and spot, and an edge line,"
-        .. " on your icons and Blizzard's, and your icons' shape, with a preview.")
+    window:Hint(details, "The swipe's colour and see-through, the countdown's size, colour and spot, and an edge line on your"
+        .. " icons and Blizzard's, plus your icons' shape and Key press glow.")
     window.iconDetails = details
 
     -- The choices: the design and colour, then what the look applies to.
@@ -2281,11 +2313,225 @@ local ERAUI_LINKS = {
     { label = "GitHub", url = "https://github.com/squirtwow/EraUI" },
 }
 ns.DISCORD_URL = "https://discord.gg/FVfcDWJncr"
+-- The website: its official presets and the setups players share (Presets).
+-- Both cards link to its home page, so players see its intro first (Squirt's
+-- call, 15 Nov 2026), written www. first as he asked (a browser takes it as is).
+ns.SITE_URL = "www.squirtsaddons.com"
+ns.PRESETS_URL = ns.SITE_URL
+ns.COMMUNITY_URL = ns.SITE_URL
 
 -- The Discord invite, ready to copy: from the General page, What's new and
 -- /ccm discord.
 function ns.ShowDiscord()
     CopyLink("Join the Discord", ns.DISCORD_URL, "Found a bug or have an idea? " .. COPY)
+end
+
+-- Presets ----------------------------------------------------------------------------
+-- The website's setups in a page of their own (Squirt's pick, 15 Nov 2026),
+-- first in the list and in gold whatever the accent, so they stand out: a
+-- card for the official presets and one for the setups players share, each
+-- with its link to copy (an addon can't open a web page), and how to import
+-- one under them. Opened from the list, the profile menu's Find presets and
+-- /ccm presets.
+local GOLD = T.GOLD
+local STAR = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1" -- the game's own star marker
+local DISC = "Interface\\CharacterFrame\\TempPortraitAlphaMask" -- a round white disc
+local CARD = { top = 62, high = 168, gap = 14 } -- the two cards: how far down, how high, and between them
+
+-- The game's star, in gold (or the colour given): by Presets in the list,
+-- and inside the official card's shield.
+local function Star(parent, size, colour)
+    colour = colour or GOLD
+    local star = parent:CreateTexture(nil, "OVERLAY")
+    star:SetSize(size, size)
+    star:SetTexture(STAR)
+    star:SetDesaturated(true)
+    star:SetVertexColor(colour[1], colour[2], colour[3])
+    return star
+end
+
+-- A gold shield with a dark star on it, for the official presets: a block
+-- with a point under it (the tour's arrow, turned over).
+local function Shield(card)
+    local mark = CreateFrame("Frame", nil, card)
+    mark:SetSize(14, 16)
+    local top = mark:CreateTexture(nil, "ARTWORK")
+    top:SetPoint("TOPLEFT")
+    top:SetSize(14, 9)
+    top:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+    local point = mark:CreateTexture(nil, "ARTWORK")
+    point:SetPoint("TOPLEFT", 0, -9)
+    point:SetSize(14, 7)
+    point:SetTexture(ns.MEDIA .. "TourArrow.tga")
+    point:SetTexCoord(0, 1, 1, 0)
+    point:SetVertexColor(GOLD[1], GOLD[2], GOLD[3])
+    local star = Star(mark, 9, T.PANEL)
+    star:SetPoint("CENTER", 0, 2)
+    mark.parts = { top, point, star }
+    return mark
+end
+
+-- Two people, one behind the other, in the accent, for the setups players
+-- share: a round head over round shoulders (the top of a disc) each.
+local function People(card)
+    local mark = CreateFrame("Frame", nil, card)
+    mark:SetSize(18, 15)
+    local parts = {}
+    -- (Each its own sublevel, so the one in front is drawn over the other.)
+    local function Person(x, y, alpha, sublevel)
+        local head = mark:CreateTexture(nil, "ARTWORK", nil, sublevel)
+        head:SetSize(6, 6)
+        head:SetPoint("TOPLEFT", x + 3, -y)
+        local body = mark:CreateTexture(nil, "ARTWORK", nil, sublevel)
+        body:SetSize(12, 6)
+        body:SetPoint("TOPLEFT", x, -(y + 7))
+        body:SetTexCoord(0, 1, 0, .5)
+        for _, part in ipairs({ head, body }) do
+            part:SetTexture(DISC)
+            part:SetAlpha(alpha)
+            parts[#parts + 1] = part
+        end
+    end
+    Person(6, 0, .5, 1) -- behind, to the right
+    Person(0, 2, 1, 2)
+    T:Paint(function(accent)
+        for _, part in ipairs(parts) do part:SetVertexColor(accent[1], accent[2], accent[3]) end
+    end)
+    mark.parts = parts
+    return mark
+end
+
+-- Get the link on the official card: filled with gold, dark words on it,
+-- a lighter gold under the mouse.
+local function GoldButton(button)
+    local on = T:OnAccent(GOLD)
+    local lit = { GOLD[1] + (1 - GOLD[1]) * .2, GOLD[2] + (1 - GOLD[2]) * .2, GOLD[3] + (1 - GOLD[3]) * .2 }
+    button:SetBackdropColor(GOLD[1], GOLD[2], GOLD[3], 1)
+    button:SetBackdropBorderColor(GOLD[1], GOLD[2], GOLD[3], 1)
+    button.label:SetTextColor(on[1], on[2], on[3])
+    -- The font's black drop shadow smears dark words (as on a light accent).
+    button.label:SetShadowColor(0, 0, 0, 0)
+    button:SetScript("OnEnter", function(self) self:SetBackdropColor(lit[1], lit[2], lit[3], 1) end)
+    button:SetScript("OnLeave", function(self) self:SetBackdropColor(GOLD[1], GOLD[2], GOLD[3], 1) end)
+end
+
+-- Get the link on the players' card: outlined in the accent, its words too,
+-- lighter under the mouse.
+local function OutlineButton(button)
+    button:SetBackdropColor(T.PANEL[1], T.PANEL[2], T.PANEL[3], 1)
+    T:Paint(function(accent)
+        button:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+        button.label:SetTextColor(accent[1], accent[2], accent[3])
+    end)
+    button:SetScript("OnEnter", function(self) self:SetBackdropColor(T.HOVER[1], T.HOVER[2], T.HOVER[3], 1) end)
+    button:SetScript("OnLeave", function(self) self:SetBackdropColor(T.PANEL[1], T.PANEL[2], T.PANEL[3], 1) end)
+end
+
+-- A card: its edge along the top (gold or the accent), its mark and title,
+-- what it holds, a quiet line and Get the link, which opens its link to copy.
+local function PresetCard(window, page, x, width, spec)
+    local card = CreateFrame("Frame", nil, page, "BackdropTemplate")
+    card:SetPoint("TOPLEFT", x, -CARD.top)
+    card:SetSize(width, CARD.high)
+    T:Flat(card, T.PANEL, spec.gold and GOLD or T.BORDER)
+    local edge = card:CreateTexture(nil, "ARTWORK")
+    edge:SetPoint("TOPLEFT", 1, -1)
+    edge:SetPoint("TOPRIGHT", -1, -1)
+    edge:SetHeight(2)
+    if spec.gold then
+        edge:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+        -- A little gold washed in from the right, as the accent is over the pages.
+        local wash = T:Fade(card, T.FADE.page / 2, GOLD)
+        wash:SetPoint("TOPLEFT", 1, -3)
+        wash:SetPoint("BOTTOMRIGHT", -1, 1)
+    else
+        T:Paint(function(accent) edge:SetColorTexture(accent[1], accent[2], accent[3], 1) end)
+    end
+    card.edge = edge
+    card.mark = (spec.gold and Shield or People)(card)
+    card.mark:SetPoint("TOPLEFT", 14, -15)
+    card.title = T:Text(card, "GameFontHighlight")
+    card.title:SetPoint("TOPLEFT", 38, -17)
+    card.title:SetText(spec.title)
+    card.text = T:Text(card, "GameFontHighlightSmall")
+    card.text:SetPoint("TOPLEFT", 14, -42)
+    card.text:SetWidth(width - 28)
+    card.text:SetText(spec.text)
+    card.note = T:Text(card, "GameFontHighlightSmall", T.MUTED)
+    card.note:SetPoint("TOPLEFT", 14, -88)
+    card.note:SetWidth(width - 28)
+    card.note:SetText(spec.note)
+    local link = T:Button(card, "Get the link", 110, 24)
+    link:SetPoint("BOTTOMLEFT", 14, 14)
+    -- (Styled first: setting its scripts after its hint would drop the hint.)
+    if spec.gold then GoldButton(link) else OutlineButton(link) end
+    link:SetScript("OnClick", function() CopyLink(spec.title, spec.url) end)
+    window:Hint(link, spec.hint)
+    card.link = link
+    return card
+end
+
+-- How to import, a numbered step a row.
+local IMPORT_STEPS = { "Copy a string on the site", "Click your profile name, then Import", "Paste, then Make new profile" }
+local STEP_ROW, STEP_BADGE = 26, 18
+
+local function BuildPresets(window, page, width)
+    local title = T:Text(page, "GameFontNormalSmall", GOLD)
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("PRESETS")
+    page.title = title
+    page.about = Detail(page, "Ready-made setups you can import in a click, on squirtsaddons.com.", 16, -34, width - 32)
+
+    local cardWidth = math.floor((width - 32 - CARD.gap) / 2)
+    page.official = PresetCard(window, page, 16, cardWidth, {
+        gold = true, title = "Official presets", url = ns.PRESETS_URL,
+        text = "27 setups by Squirt, one for every spec. Each one comes with screenshots from the game.",
+        note = "Every class, every spec",
+        hint = "The link to Squirt's presets on squirtsaddons.com, ready to copy.",
+    })
+    page.community = PresetCard(window, page, 16 + cardWidth + CARD.gap, cardWidth, {
+        title = "Community setups", url = ns.COMMUNITY_URL,
+        text = "Setups shared by other players. Each one is checked before it goes live.",
+        note = "Share yours too: click your profile name, then Share.",
+        hint = "The link to setups other players share on squirtsaddons.com, ready to copy.",
+    })
+
+    local top = CARD.top + CARD.high + 24
+    page.how = T:Heading(page, "How to import")
+    page.how:SetPoint("TOPLEFT", 16, -top)
+    -- The steps in one frame, for the page's walkthrough to point at.
+    local steps = CreateFrame("Frame", nil, page)
+    steps:SetPoint("TOPLEFT", 16, -(top + 20))
+    steps:SetSize(300, #IMPORT_STEPS * STEP_ROW - (STEP_ROW - STEP_BADGE))
+    page.steps, page.stepRows = steps, {}
+    for i, words in ipairs(IMPORT_STEPS) do
+        local badge = CreateFrame("Frame", nil, steps, "BackdropTemplate")
+        badge:SetSize(STEP_BADGE, STEP_BADGE)
+        badge:SetPoint("TOPLEFT", 0, -(i - 1) * STEP_ROW)
+        T:Flat(badge, T.FIELD, T.CONTROL_BORDER)
+        local number = T:Text(badge, "GameFontHighlightSmall")
+        number:SetPoint("CENTER")
+        number:SetJustifyH("CENTER")
+        number:SetText(tostring(i))
+        T:Paint(function(accent)
+            badge:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+            number:SetTextColor(accent[1], accent[2], accent[3])
+        end)
+        local text = T:Text(steps, "GameFontHighlightSmall")
+        text:SetPoint("LEFT", badge, "RIGHT", 8, 0)
+        text:SetText(words)
+        page.stepRows[i] = { badge = badge, number = number, text = text }
+    end
+
+    -- Nothing on it changes: the accent repaints what's in it.
+    function page:Refresh() end
+end
+
+-- The Presets page, opened: from the profile menu's Find presets and
+-- /ccm presets.
+function ns.ShowPresets()
+    ns.ShowWindow()
+    ns.window:Select("presets")
 end
 
 local function BuildGeneral(window, page)
@@ -2428,7 +2674,8 @@ end
 
 -- What each page is for, in the footer on hover.
 local NAV_NOTES = {
-    look = "Blizzard's Cooldown Manager and your resource display restyled: bar designs, borders, shadows, keybinds, font, textures,"
+    presets = "Ready-made setups for every spec, and setups other players share, on squirtsaddons.com.",
+    look ="Blizzard's Cooldown Manager and your resource display restyled: bar designs, borders, shadows, keybinds, font, textures,"
         .. " health and power text, ready glow and the accent.",
     layout = "One-click layouts that stack your bars around your Personal Resource Display.",
     cast = "Your own cast bar and a swing timer, under your Personal Resource Display.",
@@ -2441,7 +2688,7 @@ local function NavItem(window, nav, key, label, y, previews)
     local item = CreateFrame("Button", nil, nav)
     item:SetPoint("TOPLEFT", 0, -y)
     item:SetPoint("RIGHT")
-    item:SetHeight(previews and 46 or 30)
+    item:SetHeight(previews and 46 or ITEM_HIGH)
     item.fill = item:CreateTexture(nil, "BACKGROUND")
     item.fill:SetAllPoints()
     T:Fill(item.fill, T.SELECTED)
@@ -2456,10 +2703,11 @@ local function NavItem(window, nav, key, label, y, previews)
     hover:SetAllPoints()
     hover:SetColorTexture(1, 1, 1, .04)
     item.label = T:Text(item, "GameFontHighlight")
-    item.label:SetPoint("TOPLEFT", 14, -9)
+    -- (A bar's row is laid out again as the list is: BarRow.)
+    item.label:SetPoint("TOPLEFT", 14, previews and -9 or -(ITEM_HIGH - 12) / 2)
     item.label:SetText(label)
     item.count = T:Text(item, "GameFontHighlightSmall", T.MUTED)
-    item.count:SetPoint("TOPRIGHT", -12, -10)
+    item.count:SetPoint("TOPRIGHT", -12, previews and -10 or -(ITEM_HIGH - 10) / 2)
     item.count:SetJustifyH("RIGHT")
     if previews then
         item.icons = {}
@@ -2474,6 +2722,43 @@ local function NavItem(window, nav, key, label, y, previews)
     item.key = key
     item:SetScript("OnClick", function() window:Select(key) end)
     window:Hint(item, NAV_NOTES[key] or ("Your " .. label .. " bar: its icons, how it shows, and your spells to tick onto it."))
+    return item
+end
+
+-- Presets, first in the list, over Your bars: a page like the others (lit
+-- while it's open, the same hover), but set in from the list's sides and
+-- drawn in gold whatever the accent, edged and washed in it, with the
+-- game's star by its name, so it stands out.
+local function PresetsItem(window, nav)
+    local item = CreateFrame("Button", nil, nav, "BackdropTemplate")
+    item:SetPoint("TOPLEFT", PRESETS_IN, -PRESETS_TOP)
+    item:SetPoint("RIGHT", -PRESETS_IN, 0)
+    item:SetHeight(ITEM_HIGH)
+    T:Flat(item, T.NAV, { GOLD[1], GOLD[2], GOLD[3], .6 })
+    local function Inside(region)
+        region:SetPoint("TOPLEFT", 1, -1)
+        region:SetPoint("BOTTOMRIGHT", -1, 1)
+        return region
+    end
+    item.wash = Inside(T:Fade(item, T.FADE.page, GOLD))
+    -- Lit as the other pages are, in gold.
+    item.fill = Inside(item:CreateTexture(nil, "BACKGROUND", nil, 1))
+    item.fill:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], .12)
+    item.glow = Inside(T:Fade(item, T.FADE.selected, GOLD))
+    item.mark = item:CreateTexture(nil, "ARTWORK")
+    item.mark:SetPoint("TOPLEFT", 1, -1)
+    item.mark:SetPoint("BOTTOMLEFT", 1, 1)
+    item.mark:SetWidth(3)
+    item.mark:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 1)
+    Inside(item:CreateTexture(nil, "HIGHLIGHT")):SetColorTexture(1, 1, 1, .04)
+    item.star = Star(item, 14)
+    item.star:SetPoint("LEFT", 10, 0)
+    item.label = T:Text(item, "GameFontHighlight", GOLD)
+    item.label:SetPoint("LEFT", item.star, "RIGHT", 6, 0)
+    item.label:SetText("Presets")
+    item.key = "presets"
+    item:SetScript("OnClick", function() window:Select("presets") end)
+    window:Hint(item, NAV_NOTES.presets)
     return item
 end
 
@@ -3023,10 +3308,12 @@ local function BuildWindow()
     edge:SetWidth(1)
     T:Fill(edge, T.BORDER)
     window.nav = {}
+    -- Presets first, over everything (PresetsItem).
+    window.nav.presets = PresetsItem(window, nav)
     -- The addon's own bars, headed so they aren't taken for Blizzard's
     -- Essential or Utility Cooldowns.
     local yours = T:Text(nav, "GameFontHighlightSmall", T.MUTED)
-    yours:SetPoint("TOPLEFT", 14, -12)
+    yours:SetPoint("TOPLEFT", 14, -(LIST_TOP - 16))
     yours:SetText("YOUR BARS")
     window.yourBars = yours
     -- The bars, in a list that scrolls once they don't all fit (LayBars):
@@ -3067,7 +3354,7 @@ local function BuildWindow()
     y = y + 12
     local function Listed(key, label)
         window.nav[key] = Under(NavItem(window, nav, key, label, y), 0, y - bars, 0)
-        y = y + 32
+        y = y + ITEM_STEP
     end
     Listed("look", "Look")
     Listed("layout", "Layout")
@@ -3077,27 +3364,29 @@ local function BuildWindow()
     Listed("general", "General")
     -- More: pages beyond the Cooldown Manager and your bars, headed like
     -- your bars: Raid Timers, then Cooldown pulse. New files, so each only
-    -- after a full restart.
+    -- after a full restart. (A little closer under General than it was, for
+    -- Presets' room at the top.)
     local raidPage = ns.BuildRaidTimersPage ~= nil
     local pulsePage = ns.BuildPulsePage ~= nil
     if raidPage or pulsePage then
         local moreRule = nav:CreateTexture(nil, "BORDER")
-        moreRule:SetPoint("TOPLEFT", 12, -(y + 4))
+        moreRule:SetPoint("TOPLEFT", 12, -(y + 3))
         moreRule:SetPoint("RIGHT", -12, 0)
         moreRule:SetHeight(1)
         T:Fill(moreRule, T.BORDER)
-        Under(moreRule, 12, y + 4 - bars, -12)
+        Under(moreRule, 12, y + 3 - bars, -12)
         local moreHeading = T:Text(nav, "GameFontHighlightSmall", T.MUTED)
-        moreHeading:SetPoint("TOPLEFT", 14, -(y + 14))
+        moreHeading:SetPoint("TOPLEFT", 14, -(y + 11))
         moreHeading:SetText("MORE")
-        window.moreHeading = Under(moreHeading, 14, y + 14 - bars)
-        y = y + 30
+        window.moreHeading = Under(moreHeading, 14, y + 11 - bars)
+        y = y + 26
         if raidPage then Listed("raid", "Raid Timers") end
         if pulsePage then Listed("pulse", "Cooldown pulse") end
     end
     -- The bars' room (LayBars): the list's height (489) less What's new at
-    -- its foot with 3 over it (12 + 22 + 3), the heading over the bars (28)
-    -- and everything under them (232 with every page): 192, the four's.
+    -- its foot with 3 over it (12 + 22 + 3), Presets and the heading over
+    -- the bars (56) and everything under them (204 with every page): 192,
+    -- the four's.
     window.barRoom = (HEIGHT - HEADER - FOOTER - 1) - (12 + 22 + 3) - LIST_TOP - (y - 2 - bars)
     -- What's new in this version, at the foot of the list.
     local news = T:Button(nav, "What's new", NAV - 24, 22)
@@ -3114,7 +3403,8 @@ local function BuildWindow()
         page:Hide()
         return page
     end
-    window.pages = { look = Page(), layout = Page(), general = Page(), bar = Page() }
+    window.pages = { presets = Page(), look = Page(), layout = Page(), general = Page(), bar = Page() }
+    BuildPresets(window, window.pages.presets, WIDTH - NAV - 2)
     BuildLook(window, window.pages.look, WIDTH - NAV - 2)
     ns.BuildLayoutPage(window, window.pages.layout, WIDTH - NAV - 2, HEIGHT - HEADER - FOOTER - 1)
     if castPage then
