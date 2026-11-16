@@ -1175,10 +1175,14 @@ function H.Sane(ns, shared)
     end
     if extras > 4 then return "extra bars" end
     if type(shared.skipped) ~= "number" or shared.skipped < 0 then return "skipped" end
-    -- The bars swapping with your form: the Cooldowns and Utility bars, true each.
+    -- The bars swapping with your form: the Cooldowns, Utility and Debuffs
+    -- bars (an extra Debuffs bar with it), true each.
     if type(shared.swap) ~= "table" then return "swap" end
+    local function Swappable(k)
+        return k == "cd" or k == "util" or k == "debuff" or ((k == "debuff2" or k == "debuff3") and shared.extras[k] == true)
+    end
     for k, v in pairs(shared.swap) do
-        if (k ~= "cd" and k ~= "util") or v ~= true then return "a bar swapping " .. tostring(k) end
+        if not Swappable(k) or v ~= true then return "a bar swapping " .. tostring(k) end
     end
     if shared.name ~= nil and not (type(shared.name) == "string" and #shared.name <= 48 and not shared.name:find("[%c|]")) then return "name" end
     if shared.version ~= nil and not (type(shared.version) == "string" and shared.version:find("^[%w%.%-]+$")) then return "version" end
@@ -1214,14 +1218,17 @@ function H.Sane(ns, shared)
         count = count + #list
     end
     -- Each form's lists: a form with a list of its own (the game data's), the
-    -- Cooldowns and Utility bars only, an entry on one of a form's two. Not
-    -- in the count: that's the bars' own lists (each form's starts as a copy).
+    -- Cooldowns, Utility and Debuffs bars only (an extra Debuffs bar with
+    -- it), an entry on one of a form's two cooldown bars, once on a Debuffs
+    -- bar's. Not in the count: that's the bars' own lists (each form's
+    -- starts as a copy).
     if type(shared.forms) ~= "table" then return "forms" end
     for form, lists in pairs(shared.forms) do
         if type(form) ~= "number" or ns.FORM_LISTS[form] ~= form or type(lists) ~= "table" then return "a form " .. tostring(form) end
-        local inForm = {}
+        local cooldowns = {}
         for key, list in pairs(lists) do
-            if (key ~= "cd" and key ~= "util") or type(list) ~= "table" or #list > 40 then return "a form's list " .. tostring(key) end
+            if not Swappable(key) or type(list) ~= "table" or #list > 40 then return "a form's list " .. tostring(key) end
+            local inForm = ns.AURA_BARS[key] and {} or cooldowns
             for k, v in pairs(list) do
                 if type(k) ~= "number" or not Word(v) or inForm[v] then return "an entry on a form's " .. key end
                 if v:find("^hand:") then return "a hand on a form's " .. key end
@@ -1232,10 +1239,18 @@ function H.Sane(ns, shared)
         end
     end
     if shared.count ~= count then return "count" end
+    -- (A join: a name with one before it on one of its bar's lists, a form's too.)
     for key, set in pairs(shared.joins) do
         if not ns.AURA_BARS[key] then return "joins on " .. tostring(key) end
+        local after = {}
+        for _, list in ipairs({ shared.lists[key] or {} }) do
+            for i, v in ipairs(list) do if i > 1 then after[v] = true end end
+        end
+        for _, lists in pairs(shared.forms) do
+            for i, v in ipairs(lists[key] or {}) do if i > 1 then after[v] = true end end
+        end
         for name, v in pairs(set) do
-            if v ~= true or not on[name] or shared.lists[key][1] == name then return "a join " .. tostring(name) end
+            if v ~= true or not on[name] or not after[name] then return "a join " .. tostring(name) end
         end
     end
     -- Only when missing: a Buffs bar's only (Buffs 2's with it), names on its
@@ -1287,13 +1302,16 @@ function H.Sane(ns, shared)
         looks = looks + 1
     end
     if looks > 200 then return "looks" end
-    -- Warn at: the Buffs and Debuffs bars' only, names on that bar's list,
-    -- a whole number of seconds from 1 to an hour each.
+    -- Warn at: the Buffs and Debuffs bars' only, names on that bar's lists
+    -- (a form's too), a whole number of seconds from 1 to an hour each.
     if type(shared.warns) ~= "table" then return "warns" end
     for key, set in pairs(shared.warns) do
         if not ns.AURA_BARS[key] or not shared.lists[key] or type(set) ~= "table" then return "warns on " .. tostring(key) end
         local listed = {}
         for _, v in ipairs(shared.lists[key]) do listed[v] = true end
+        for _, lists in pairs(shared.forms) do
+            for _, v in ipairs(lists[key] or {}) do listed[v] = true end
+        end
         for name, v in pairs(set) do
             if not listed[name] or not (type(v) == "number" and v == math.floor(v) and v >= 1 and v <= 3600) then
                 return "a warning " .. tostring(name)
@@ -1486,7 +1504,7 @@ end
 -- switches on are ns.SHARE_PARTS.)
 H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
     "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew",
-    "keybindsPlain" }
+    "keybindsPlain", "totemTime" }
 -- Every part a string can switch on, in order, with its letter.
 H.PARTS = "useBars=u prdCombo=c prdEnergy=e prdText=t keybinds=k keyPressGlow=g castBar=b swingTimer=s castBatch=h castTicks=m"
     .. " castLatency=l pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q"
@@ -1524,7 +1542,7 @@ do
         for _, f in ipairs(ns.SHARE_BAR_FIELDS) do found = found or f == field end
         if not found then fields[#fields + 1] = field .. " not shared" end
     end
-    Equal(table.concat(fields, ","), "size,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
+    Equal(table.concat(fields, ","), "size,heightPct,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
         .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,showGCD,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,"
         .. "tickFrom,tickEdge,tickCustom,glowProcs",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
@@ -2663,6 +2681,80 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Swap with my form on a Debuffs bar, in strings ------------------------------------------------------
+-- (Squirt's yes, 16 Nov 2026: a player's idea, one debuff shown only in a
+-- certain form.) The Debuffs bar's tick (w) and each form's list for it (f)
+-- go with the profile as the cooldown bars' do: a form's list checked as a
+-- bar's, each debuff once on it (it may be on a cooldown bar's list for that
+-- form too); an extra Debuffs bar's only with that bar. Each entry's own
+-- choices for a debuff only on a form's list (Warn at, Count ticks, a join
+-- after an entry there) go with it. Strings without any read and share
+-- exactly as before, and a 1.6.0 string never ticks the Debuffs bar.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    for _, entry in ipairs({ "Moonfire", "Garrote", "Rake" }) do table.insert(ns.ActiveList("debuff"), entry) end
+    B:Assign("Moonfire", "cd")
+    B:Changed()
+    local plain = P.Export()
+    B:SetOption("debuff", "swapForm", true)
+    -- Bear form's own list, set up from the bar's page: Faerie Fire, then
+    -- Moonfire joined to it (first on the normal list, where it joins
+    -- nothing), then Insect Swarm counting its ticks; Faerie Fire warns at 5.
+    ns.SetEditingForm(5)
+    local bear = ns.ActiveList("debuff")
+    for i = #bear, 1, -1 do bear[i] = nil end
+    for _, entry in ipairs({ "Faerie Fire", "Moonfire", "Insect Swarm" }) do table.insert(bear, entry) end
+    ns.SetEditingForm(nil)
+    ns.Joins("debuff")["Moonfire"] = true
+    ns.SetWarnAt("debuff", "Faerie Fire", 5)
+    ns.CountTicks("debuff")["Insect Swarm"] = true
+    B:Changed()
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. H.Text(shared.swap) .. " | " .. H.Text(shared.forms) .. " | "
+        .. H.Text(shared.joins.debuff) .. " " .. H.Text(shared.warns.debuff) .. " " .. H.Text(shared.options.countTicks.debuff),
+        '|0 {["debuff"]=true} | {[5]={["debuff"]={[1]="Faerie Fire",[2]="Moonfire",[3]="Insect Swarm"}}} | {["Moonfire"]=true}'
+            .. ' {["Faerie Fire"]=5} {["Insect Swarm"]=true}',
+        "shared: the Debuffs bar's tick and bear form's list (Moonfire on it and on Cooldowns), its join, Warn at and Count ticks")
+    Equal(P.Describe(shared), "Holds 4 bar entries, with icons for 1 form, low-time warnings for 1 aura, 1 icon option and its look"
+        .. " and layout.", "said in a line: the bars' own entries, the one form with a list of its own, its warning and tick")
+    local ok = P.Import("Bear debuffs", shared, false)
+    local saved = db.profiles["Bear debuffs"]
+    Equal(tostring(ok) .. " " .. ns.ProfileName() .. " " .. tostring(ns.Swaps("debuff")) .. " | " .. H.Text(saved.swapForm) .. " "
+        .. H.Text(saved.forms) .. " | " .. H.Text(saved.joins.debuff) .. " " .. H.Text(saved.warnAt.debuff) .. " "
+        .. H.Text(saved.countTicks.debuff),
+        'true Bear debuffs true | {["debuff"]=true} {[5]={["debuff"]={[1]="Faerie Fire",[2]="Moonfire",[3]="Insect Swarm"}}} | '
+            .. '{["Moonfire"]=true} {["Faerie Fire"]=5} {["Insect Swarm"]=true}',
+        "imported: ticked in the new profile, with bear form's list and each of its debuffs' choices")
+    Equal(P.Export(), text, "and it shares the very same string back")
+    -- An extra Debuffs bar's only with that bar; the rest as ever.
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = {}, debuff = { "Rake" } } end
+    local extra = P.Read(H.String({ l = Lists(), w = { debuff = true, debuff2 = true }, f = { [1] = { debuff = { "Rake", "Rake", 7 },
+        debuff2 = { "Rake" }, buff = { "Thorns" } } } }))
+    Equal(H.Sane(ns, extra) .. "|" .. extra.skipped .. " " .. H.Text(extra.swap) .. " " .. H.Text(extra.forms),
+        '|5 {["debuff"]=true} {[1]={["debuff"]={[1]="Rake"}}}',
+        "no Debuffs 2 in the string: its tick and list left out, as are a debuff twice, a number and a Buffs bar's list")
+    local withExtra = P.Read(H.String({ l = { cd = {}, util = {}, buff = {}, debuff = {}, debuff2 = { "Rake" } }, x = { debuff2 = true },
+        w = { debuff2 = true }, f = { [1] = { debuff2 = { "Rake" } } } }))
+    Equal(H.Sane(ns, withExtra) .. "|" .. withExtra.skipped .. " " .. H.Text(withExtra.swap) .. " " .. H.Text(withExtra.forms),
+        '|0 {["debuff2"]=true} {[1]={["debuff2"]={[1]="Rake"}}}', "with Debuffs 2: its tick and cat form's list for it")
+    -- Made by 1.6.0, the tick with a bar's settings: never the Debuffs bar's.
+    local old = P.Read(H.String({ a = "1.6.0", l = Lists(), g = { s = {}, b = { debuff = { swapForm = true } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. H.Text(old.swap), "|0 {}", "a 1.6.0 string with it on the Debuffs bar: off, as it was")
+    -- A string without any (shared before it was ticked): no tick, no form
+    -- lists, and imported it shares the very same string back.
+    local before = P.Read(plain)
+    P.Import("Plain", before, false)
+    Equal(H.Sane(ns, before) .. "|" .. before.skipped .. " " .. H.Text(before.swap) .. " " .. H.Text(before.forms) .. " "
+        .. tostring(ns.Swaps("debuff")) .. " | " .. tostring(P.Export() == plain), "|0 {} {} false | true",
+        "a string without it: off, no form lists, and the same string back")
+    Equal(#printed, 0, "no errors")
+end
+
 -- Dimmed icons in strings made before it ------------------------------------------------------------
 -- Each bar's Dimmed icons goes with the look and layout like its other
 -- settings. A string made before it (with none) reads as 40%, as dim as
@@ -2820,6 +2912,66 @@ end
     ns3.ProfileShare.Import("No look", ns3.ProfileShare.Read(text), false)
     Equal(tostring(ns3.BarData("cd").glowProcs) .. " " .. tostring(ns3.BarData("util").glowProcs) .. " " .. #printed, "false true 0",
         "imported without its look: your own ticks stay")
+end)()
+
+-- Icon height in a string ------------------------------------------------------------------------------
+-- (A player's idea: icons wider or taller than square.) A bar's Icon height
+-- goes in a string where it isn't 100%, is read back the same and comes
+-- with the look. A string from 1.10.14 or before (or with no version) says
+-- nothing of it, so each bar's stays as it is; one made since that leaves
+-- it out has it at 100%, as every setting a string leaves out. Outside 50
+-- to 150, or not a number: left out and counted.
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "util")
+    local plain = P.Export()
+    B:SetOption("util", "heightPct", 130)
+    local text = P.Export()
+    local shared = P.Read(text)
+    B:SetOption("util", "heightPct", 100)
+    local back = P.Export()
+    B:SetOption("util", "heightPct", 130)
+    Equal(table.concat({ H.Sane(ns, shared) .. "|" .. shared.skipped, tostring(shared.setup.bars.util.heightPct),
+        tostring(shared.setup.bars.cd.heightPct), tostring(P.Read(plain).setup.bars.util.heightPct), tostring(back == plain),
+        tostring(text ~= plain) }, " "), "|0 130 nil nil true true",
+        "Utility's 130% goes in the string; Cooldowns' 100% is left out, and at 100% the string is exactly as before")
+    -- Older strings: nothing about it, so each bar's stays; one made since
+    -- that leaves it out: 100%; one edited to carry it: that.
+    local function Lists() return { cd = { "Moonfire" }, util = { "Wrath" }, buff = { "Thorns" }, debuff = { "Moonfire" } } end
+    local function Made(version, bars)
+        return P.Read(H.String({ a = version, l = Lists(), g = { s = {}, b = bars or { cd = { whenReady = "dim" } }, l = {}, k = {} } }))
+    end
+    local function Took(name, shared)
+        B:SetOption("util", "heightPct", 130)
+        P.Import(name, shared, true)
+        return ns.BarData("util").heightPct .. " " .. ns.BarData("cd").whenReady
+    end
+    local old = {}
+    for _, version in ipairs({ "1.10.14", "1.10.13", "1.9.9" }) do old[#old + 1] = Took("Old " .. version, Made(version)) end
+    old[#old + 1] = Took("No version", P.Read(H.String({ l = Lists(), g = { s = {}, b = { cd = { whenReady = "dim" } }, l = {}, k = {} } })))
+    old[#old + 1] = Took("Edited", Made("1.10.14", { util = { heightPct = 80 } }))
+    Equal(table.concat(old, ", "), "130 dim, 130 dim, 130 dim, 130 dim, 80 show",
+        "a string from 1.10.14 or before, or with no version, says nothing of it: Utility's 130% stays; one edited to carry it: that")
+    local since = {}
+    for _, version in ipairs({ "1.10.15", "1.11.0", "dev" }) do since[#since + 1] = Took("New " .. version, Made(version)) end
+    Equal(table.concat(since, ", "), "100 dim, 100 dim, 100 dim", "made since: left out, so 100%")
+    -- Odd values: left out and counted.
+    local bad = P.Read(H.String({ a = "dev", l = Lists(), g = { s = {}, b = { cd = { heightPct = 49 }, util = { heightPct = 151 },
+        buff = { heightPct = "120" }, debuff = { heightPct = 90 } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.heightPct) .. " " .. tostring(bad.setup.bars.util.heightPct)
+        .. " " .. tostring(bad.setup.bars.buff.heightPct) .. " " .. tostring(bad.setup.bars.debuff.heightPct), "|3 nil nil nil 90",
+        "under 50, over 150 or not a number: left out, and counted; 90 kept")
+    -- Another account, with its look: Utility at 130%, the same string back.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.Bars:SetOption("cd", "heightPct", 70)
+    local ok = ns2.ProfileShare.Import("Tall", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. ns2.BarData("util").heightPct .. " " .. ns2.BarData("cd").heightPct .. " "
+        .. tostring(ns2.ProfileShare.Export() == text) .. " " .. #printed, "true 130 100 true 0",
+        "imported with its look: Utility at 130%, Cooldowns at 100% as the string has it, the same string back")
 end)()
 
 -- Import makes a new profile, and leaves yours as it is ----------------------------------------------

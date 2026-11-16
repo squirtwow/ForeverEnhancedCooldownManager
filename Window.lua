@@ -203,19 +203,8 @@ local function PaintChoice(button)
     button.custom:SetBackdropBorderColor(edge[1], edge[2], edge[3], 1)
 end
 
--- Under its swatch, or over it where the window's foot is too close (the
--- Each bar list's last rows).
-local function OpenPopup(button)
-    ClosePopup()
-    local popup, window = button.popup, button.window
-    button:Paint() -- a colour row's swatches, or a font row's list (FontChoice)
-    popup:ClearAllPoints()
-    local bottom, floor = button:GetBottom(), window:GetBottom()
-    if type(bottom) == "number" and type(floor) == "number" and bottom - popup:GetHeight() - 4 < floor + FOOTER then
-        popup:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, 4)
-    else
-        popup:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -4)
-    end
+-- Shown as the one pop-up up (OpenPopup, and a page's own: PagePopup).
+local function Raise(popup, window)
     popup:Show()
     popupOpen = popup
     -- Escape closes the pop-up alone. The game's Escape hides every window
@@ -229,6 +218,22 @@ local function OpenPopup(button)
     end
     -- And a click anywhere else, which the game tells any frame that asks.
     pcall(popup.RegisterEvent, popup, "GLOBAL_MOUSE_DOWN")
+end
+
+-- Under its swatch, or over it where the window's foot is too close (the
+-- Each bar list's last rows).
+local function OpenPopup(button)
+    ClosePopup()
+    local popup, window = button.popup, button.window
+    button:Paint() -- a colour row's swatches, or a font row's list (FontChoice)
+    popup:ClearAllPoints()
+    local bottom, floor = button:GetBottom(), window:GetBottom()
+    if type(bottom) == "number" and type(floor) == "number" and bottom - popup:GetHeight() - 4 < floor + FOOTER then
+        popup:SetPoint("BOTTOMLEFT", button, "TOPLEFT", 0, 4)
+    else
+        popup:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -4)
+    end
+    Raise(popup, window)
 end
 
 -- The game's colour picker, open for a row's Custom. While it's open the
@@ -581,6 +586,44 @@ local function FontChoice(window, parent, width, spec)
     return button
 end
 ns.FontChoice = FontChoice
+
+-- A page's own small pop-up (the Layout page's icon size box), in the same
+-- look and one at a time with the colour and font ones. It closes as they
+-- do: Escape, a click anywhere but on it or what opened it, another page or
+-- the window closing. The page fills it and places it, then :Open(owner)
+-- shows it (owner: what opened it), :Close() and :IsOpen().
+local function PagePopup(window, width, height)
+    local popup = CreateFrame("Frame", nil, window, "BackdropTemplate")
+    popup:SetSize(width, height)
+    popup:SetFrameLevel(window:GetFrameLevel() + POP_LEVEL)
+    popup:SetClampedToScreen(true)
+    popup:EnableMouse(true) -- what's under it isn't clicked by mistake
+    T:Flat(popup, T.PANEL, T.CONTROL_BORDER)
+    T:Paint(function(accent) popup:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1) end)
+    popup:Hide()
+    popup.window = window
+    popup:SetScript("OnHide", function(self)
+        Forget(self)
+        if self:IsShown() then self:Hide() end
+    end)
+    popup:SetScript("OnEvent", function(self)
+        local owner = self.owner
+        if popupOpen == self and not self:IsMouseOver() and not (owner and owner:IsMouseOver()) then ClosePopup() end
+    end)
+    function popup:Open(owner)
+        ClosePopup()
+        self.owner = owner
+        Raise(self, window)
+    end
+    function popup:Close()
+        if popupOpen == self then ClosePopup() end
+    end
+    function popup:IsOpen()
+        return popupOpen == self
+    end
+    return popup
+end
+ns.PagePopup = PagePopup
 
 -- Health and power text --------------------------------------------------------------
 -- A panel over the window from the Look page's Set up: where the text goes
@@ -1095,6 +1138,19 @@ local function PressRow(window, dialog)
     return tick
 end
 
+-- Totem time, beside it (IconAuras.lua, a player's idea): your bars' icons
+-- only, off until ticked; unticked, every totem's time goes at once.
+local function TotemRow(window, dialog)
+    local tick = T:Check(dialog, "Totem time", function(self)
+        ns.Set("totemTime", self:GetChecked())
+        if ns.IconAuras then ns.IconAuras:ApplyTotems() end
+        window:Refresh()
+    end)
+    window:Hint(tick, "A totem's icon on your Cooldowns and Utility bars shows the time its totem has left while it stands,"
+        .. " the 5 minute ones too.")
+    return tick
+end
+
 local function IconPanel(window)
     local shade = CreateFrame("Frame", nil, window)
     shade:SetPoint("TOPLEFT")
@@ -1154,9 +1210,11 @@ local function IconPanel(window)
     At(edgeColour, DETAIL.at, 5)
     local press = PressRow(window, dialog)
     At(press, 16, 6, 2)
+    local totem = TotemRow(window, dialog)
+    At(totem, DETAIL.at + 140, 6, 2)
     shade.swipeColour, shade.seeThrough, shade.size, shade.countdownColour = swipeColour, seeThrough, size, countdownColour
     shade.spot, shade.format, shade.edge, shade.edgeColour = spot, format, edge, edgeColour
-    shade.iconStyle, shade.press = iconStyle, press
+    shade.iconStyle, shade.press, shade.totem = iconStyle, press, totem
 
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     note:SetWidth(DETAIL.width - 32)
@@ -1200,6 +1258,7 @@ local function IconPanel(window)
         spot:SetSelected(ns.Get("countdownSpot"))
         format:SetSelected(ns.Get("countdownFormat"))
         press:SetChecked(ns.Get("keyPressGlow"))
+        totem:SetChecked(ns.Get("totemTime"))
         local edgeOn = ns.Get("swipeEdge") == true
         edge:SetChecked(edgeOn)
         edgeColour:SetEnabled(edgeOn)

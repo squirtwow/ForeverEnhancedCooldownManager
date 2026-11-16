@@ -92,6 +92,14 @@ function F:Fixed(data)
     return data.showMissing == true and not self:OnlyMissing(data)
 end
 
+-- Swap with my form on a Debuffs bar with fixed spots: every form's
+-- entries get a slot and spot out of a fight, and only the form's showing
+-- are in sight, so a change of form in one shows at once (F:ShowForm).
+-- Packed, the bar is laid out again for each form, out of a fight only.
+function F:Follows(key, data)
+    return ns.AURA_BARS[key] ~= nil and data ~= nil and self:Fixed(data) and ns.Swaps(key)
+end
+
 -- Keep them greyed with no target (the Debuffs bar's own, a player's idea):
 -- with missing debuffs greyed, their spots stay with no enemy targeted
 -- (ns.BarData keeps it off on the Buffs bar).
@@ -104,42 +112,48 @@ end
 -- and size (settings per spell), or nil for the Look page's. An aura
 -- container's icon is drawn square or like Blizzard's at that size too
 -- (out of a fight, as it's made or laid out; a weapon enchant's own time
--- has no art of its own: its spot's).
-local function Fit(parts, size, showTimer, look)
-    if parts.shape then Style:Shape(parts.shape, size) end
-    parts.cooldown:SetCountdownFont(Style:Countdown(size, look))
+-- has no art of its own: its spot's). high: its height (Icon height; nil
+-- while square), the art cropped to it and the numbers sized by the
+-- shorter side.
+local function Fit(parts, size, showTimer, look, high)
+    high = high or size
+    if parts.shape then Style:Shape(parts.shape, size, nil, high / size) end
+    local face = math.min(size, high)
+    parts.cooldown:SetCountdownFont(Style:Countdown(face, look))
     parts.cooldown:SetHideCountdownNumbers(not showTimer)
-    parts.count:SetFontObject(Style:Count(size))
+    parts.count:SetFontObject(Style:Count(face))
     Style:AuraNumbers(parts)
 end
 
 -- Icon details (the Look page) on the bar's icons as made: each packed
 -- icon's and each fixed spot's, square or like Blizzard's and its numbers
 -- sized as laid out (in its entry's own look). Only out of a fight
--- (Bars.lua AuraDetails).
+-- (Bars.lua AuraDetails). (Packed icons are BASE across, parts.high tall.)
 function F:Details(bar)
-    local function Detail(parts, size, look)
-        if parts.shape then Style:Shape(parts.shape, size) end
+    local function Detail(parts, size, look, high)
+        high = high or size
+        if parts.shape then Style:Shape(parts.shape, size, nil, high / size) end
         Style:CooldownLook(parts.cooldown)
-        parts.cooldown:SetCountdownFont(Style:Countdown(size, look))
+        parts.cooldown:SetCountdownFont(Style:Countdown(math.min(size, high), look))
         Style:AuraNumbers(parts)
     end
     local looks = bar.looks or {}
-    for _, parts in ipairs(bar.groupParts or {}) do Detail(parts, BASE, parts.index and looks[parts.index]) end
+    for _, parts in ipairs(bar.groupParts or {}) do Detail(parts, BASE, parts.index and looks[parts.index], parts.high) end
     for _, holder in ipairs(bar.holders or {}) do
         Style:Shape(holder.shape) -- the spot itself, at its size as laid out
-        if holder.slot then Detail(holder.slot, holder.size or BASE, holder.look) end
-        if holder.enchant then Detail(holder.enchant, holder.size or BASE, holder.look) end
+        if holder.slot then Detail(holder.slot, holder.size or BASE, holder.look, holder.high) end
+        if holder.enchant then Detail(holder.enchant, holder.size or BASE, holder.look, holder.high) end
     end
 end
 
 -- Settings per spell: a packed entry's icon in its entry's own look (or the
 -- Look page's again), set only when that changes. Out of a fight (F:Layout).
-local function GroupFont(parts, look)
-    local key = Style:LookKey(look)
+-- By its shorter side (face: Icon height).
+local function GroupFont(parts, look, face)
+    local key = Style:LookKey(look) .. "|" .. face
     if parts.lookKey == key then return end
     parts.lookKey = key
-    parts.cooldown:SetCountdownFont(Style:Countdown(BASE, look))
+    parts.cooldown:SetCountdownFont(Style:Countdown(face, look))
 end
 
 -- Count ticks (a player's idea: how many times Bane of Agony has ticked),
@@ -500,8 +514,9 @@ F.ActiveGlow = ActiveGlow
 -- carries its own border and shadow; a fixed one's holder has them. A
 -- Debuffs bar entry's icon can count ticks too (counts), and a Buffs bar
 -- entry's can glow while it's up (active). look: its entry's own countdown
--- font and size (settings per spell), or nil.
-local function Look(button, size, showTimer, decorate, counts, look, active)
+-- font and size (settings per spell), or nil. high: its height (Icon
+-- height; nil while square).
+local function Look(button, size, showTimer, decorate, counts, look, active, high)
     button:EnableMouse(false)
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -531,8 +546,8 @@ local function Look(button, size, showTimer, decorate, counts, look, active)
         parts.decor = Style:Decor(button, button, 0, true)
         Style:ShowDecor(parts.decor, Style:DecorFor("icon", true))
     end
-    Fit(parts, size, showTimer, look)
-    parts.lookKey = Style:LookKey(look)
+    Fit(parts, size, showTimer, look, high)
+    parts.lookKey = Style:LookKey(look) .. "|" .. math.min(size, high or size)
     return parts
 end
 
@@ -568,18 +583,21 @@ local function SlotLook(holder, key)
     return function(button)
         button:SetAllPoints(holder)
         holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, ns.BAR_KIND[key] == "debuff", holder.look,
-            ns.BAR_KIND[key] == "buff")
+            ns.BAR_KIND[key] == "buff", holder.high)
     end
 end
 
 -- A packed entry's group (index: its place) keeps its icons' tick counts or
 -- glows and its entry's own look; the group of your debuffs on you has none.
+-- BASE across and the bar's Icon height of that tall (bar.groupHigh); the
+-- button is kept (parts.button) to follow a new height (F:Apply).
 local function GroupLook(bar, index)
     return function(button)
-        button:SetSize(BASE, BASE)
+        local high = bar.groupHigh or BASE
+        button:SetSize(BASE, high)
         local parts = Look(button, BASE, bar.data.showTimer, true, ns.BAR_KIND[bar.key] == "debuff" and index ~= nil,
-            index and bar.looks and bar.looks[index] or nil, ns.BAR_KIND[bar.key] == "buff" and index ~= nil)
-        parts.index = index
+            index and bar.looks and bar.looks[index] or nil, ns.BAR_KIND[bar.key] == "buff" and index ~= nil, high)
+        parts.index, parts.button, parts.high = index, button, high
         bar.groupParts[#bar.groupParts + 1] = parts
         if parts.ticks then
             bar.groupTicks[index] = bar.groupTicks[index] or {}
@@ -626,20 +644,23 @@ local function CanMark()
         and type(enum.DurationTextBindingProperty) == "table" and enum.DurationTextBindingProperty.RemainingDuration ~= nil
 end
 
--- The edge as text, size across.
-local function Edge(size)
-    return ("|T%s:%d:%d:0:0:64:64:0:64:0:64:%s|t"):format(MARK, size, size, MARK_COLOUR)
+-- The edge as text, size across and high tall (Icon height; square without).
+-- (A texture in text takes its height first.)
+local function Edge(size, high)
+    return ("|T%s:%d:%d:0:0:64:64:0:64:0:64:%s|t"):format(MARK, high or size, size, MARK_COLOUR)
 end
 
--- Dim until Warn at: an entry's icon art as text, size across, trimmed as
--- the icons are (Style.ZOOM) and darkened. Nil for art that can't be
--- written in text (none, or a name with the text's own marks in it).
-local function Cover(icon, size)
+-- Dim until Warn at: an entry's icon art as text, size across and high
+-- tall, trimmed as the icons are (Style:Coords: zoomed, and cropped to the
+-- icon's height) and darkened. Nil for art that can't be written in text
+-- (none, or a name with the text's own marks in it).
+local function Cover(icon, size, high)
     if not (type(icon) == "number" or type(icon) == "string" and icon ~= "" and not icon:find("[|:]")) then return nil end
-    local zoom = Style.ZOOM
+    high = high or size
+    local left, right, top, bottom = Style:Coords(high / size, false)
     local function At(share) return math.floor(share * 100 + .5) end
-    return ("|T%s:%d:%d:0:0:100:100:%d:%d:%d:%d:%s|t"):format(tostring(icon), size, size, At(zoom[1]), At(zoom[2]), At(zoom[3]),
-        At(zoom[4]), DIM_COLOUR)
+    return ("|T%s:%d:%d:0:0:100:100:%d:%d:%d:%d:%s|t"):format(tostring(icon), high, size, At(left), At(right), At(top),
+        At(bottom), DIM_COLOUR)
 end
 
 -- A w-slot's icon: over its entry's spot, never taking the mouse, drawing
@@ -1117,8 +1138,11 @@ function F:PaintEnchants(bar)
             holder.enchantLit = on
             if ids.hands then Which(holder, on and id, slot) end
             local parts = EnchantParts(holder)
-            -- A packed bar's spot isn't scaled as its slot is, so its own size.
-            Fit(parts, packed and ns.IconSize(bar.data) or holder.size or BASE, holder.showTimer ~= false, holder.look)
+            -- A packed bar's spot isn't scaled as its slot is, so its own size
+            -- (and height: Icon height).
+            local across = packed and ns.IconSize(bar.data) or holder.size or BASE
+            Fit(parts, across, holder.showTimer ~= false, holder.look,
+                packed and ns.IconHeight(bar.data, across) or holder.high)
             -- Warn at, on a hand entry: its countdown red from its seconds
             -- left, as an aura's is. (Not yet on a named enchant's: parked.)
             Style:WarnText(parts.cooldown, ids.hands and bar.warns[i] or nil)
@@ -1415,6 +1439,28 @@ end
 -- they carry the slots.
 function F:Spots(bar)
     local packed, spots = self:Packed(bar.data), {}
+    -- Swapping with your form (F:Follows): the form's spots, in its order;
+    -- every other form's goes out of sight, its slot (anchored to it, as
+    -- the times over the cooldown icons are, IconAuras.lua) with it. The
+    -- addon's own frames only, so in a fight too (F:ShowForm).
+    local shown = bar.formSpots and bar.formSpots[bar.formShown]
+    if shown then
+        local on = {}
+        for _, i in ipairs(shown) do
+            on[i] = true
+            spots[#spots + 1] = bar.holders[i]
+        end
+        for i = 1, bar.count do
+            local holder = bar.holders[i]
+            holder:SetShown(on[i] == true)
+            if not on[i] then
+                holder:ClearAllPoints()
+                holder:SetPoint("CENTER", UIParent, "BOTTOMLEFT", -10000, -10000)
+            end
+        end
+        bar.spots, bar.leadPoint, bar.leadX = spots, nil, 0
+        return spots
+    end
     for i = 1, bar.count do
         local holder = bar.holders[i]
         local shown = Own(bar, i, packed) and Spot(bar, i)
@@ -1430,12 +1476,29 @@ function F:Spots(bar)
     return spots
 end
 
+-- Swap with my form on a Debuffs bar with fixed spots, in a fight: the
+-- spots of the form now showing (ns.ShownForm) in sight and placed in the
+-- bar's rows, the rest out of sight, each slot following its spot. Nothing
+-- is told to the game's container, and the bar keeps its size and place
+-- (it has room for the most any form shows). True when done; false for a
+-- packed bar, a form not set up before the fight, or one with an entry
+-- that had no slot left: the bar is laid out again once the fight is over.
+function F:ShowForm(bar)
+    if not (bar and bar.formSpots) then return false end
+    local form = ns.ShownForm(bar.key)
+    if not bar.formSpots[form] or bar.formCrowded[form] then return false end
+    bar.formShown = form
+    local spots = self:Spots(bar)
+    ns.Bars:Arrange(bar, spots, #spots, bar.data, bar.room)
+    return true
+end
+
 -- Glow when missing (a player's idea: a Seal that fell off): the glow picked
 -- on the Look page on a buff's greyed spot, kept inside it (clipped) and
 -- under the game's icon. The addon can't tell in a fight whether the buff is
 -- up, and needn't: while it's on you the game's icon covers the glow. Made
--- the first time it's wanted.
-local function MissingGlow(holder, on, size)
+-- the first time it's wanted. (size across, high tall: Icon height.)
+local function MissingGlow(holder, on, size, high)
     local host = holder.glowHost
     if not on then
         if host then ns.SetGlow(host, false) end
@@ -1448,7 +1511,7 @@ local function MissingGlow(holder, on, size)
         host.top, host.glows = host, {}
         holder.glowHost = host
     end
-    host:SetSize(size, size)
+    host:SetSize(size, high or size)
     ns.UseGlow(host)
     ns.SetGlow(host, true)
 end
@@ -1466,15 +1529,23 @@ function F:Layout(bar, data)
     -- Glow while active: a Buffs bar's own.
     local actives = ns.BAR_KIND[bar.key] == "buff" and ns.GlowActive(bar.key) or {}
     -- A packed bar's slots sit in its container, scaled with the packed
-    -- icons, so their numbers are sized as those icons' are.
+    -- icons, so their numbers are sized as those icons' are (Icon height:
+    -- as tall as those, fitHigh).
     local fit = packed and BASE or size
+    local fitHigh = ns.IconHeight(data, BASE)
     local weapons = ns.BAR_KIND[bar.key] == "buff"
     -- Others only, on a hand entry: every named weapon enchant on the bar,
     -- which that entry leaves to its own (one table, filled as the bar is read),
     -- and your class's own enchants, on the bar or not (OWN_ENCHANTS).
     local others = weapons and ns.HandOthers(bar.key) or {}
     local namedOnBar = setmetatable({}, { __index = OWN_ENCHANTS })
-    for _, group in ipairs(ns.Bars:Units(bar.key)) do
+    -- Swapping with your form, with fixed spots (F:Follows): every form's
+    -- entries, each joined group once (the form showing first, so it always
+    -- has room), and each one's slot noted by its names (slotOf); one with
+    -- no room left is noted too (crowded). Else the list showing.
+    local units, forms, slotOf, crowded = ns.Bars:Units(bar.key), nil, {}, {}
+    if self:Follows(bar.key, data) then units, forms = ns.Bars:FormUnits(bar.key) end
+    for _, group in ipairs(units) do
         local ids, entry, picked, glow, yours, only = {}, nil, nil, false, {}, false
         local active = false -- (any of yours in it ticked Glow while active)
         local dim = false -- (any of yours in it ticked Dim until Warn at)
@@ -1519,8 +1590,11 @@ function F:Layout(bar, data)
         -- while none is up; else its first of yours.
         entry = picked or entry
         -- (A hand entry has no spells of its own: its hand is what it watches.)
-        if entry and (next(ids) or enchants.hands or trinket) and count < ns.BUFF_SLOTS then
+        local wanted = entry and (next(ids) or enchants.hands or trinket)
+        if wanted and count >= ns.BUFF_SLOTS then crowded[table.concat(group, "+")] = true end
+        if wanted and count < ns.BUFF_SLOTS then
             count = count + 1
+            slotOf[table.concat(group, "+")] = count
             local holder = bar.holders[count]
             -- Its own size (settings per spell; a joined icon: the first of
             -- yours with one), on a bar whose spots are fixed: a packed bar's
@@ -1529,16 +1603,18 @@ function F:Layout(bar, data)
             for _, name in ipairs(yours) do
                 if not sized and ns.OwnSize(bar.key, name) then own, sized = ns.IconSizeFor(bar.key, name, size), true end
             end
-            holder:SetSize(own, own)
-            Style:Shape(holder.shape, own)
+            -- That wide and the bar's Icon height of it tall, its art cropped to fit.
+            local ownHigh = ns.IconHeight(data, own)
+            holder:SetSize(own, ownHigh)
+            Style:Shape(holder.shape, own, nil, ownHigh / own)
             holder.ownSize = own ~= size and own or nil
             -- Its countdown in its entry's own look (settings per spell; a
             -- joined icon: the first of yours with one).
             local look = ns.SpellLookFor(yours)
             local fits = packed and fit or own
-            holder.size, holder.showTimer, holder.look = fits, data.showTimer, look
+            holder.size, holder.high, holder.showTimer, holder.look = fits, packed and fitHigh or ownHigh, data.showTimer, look
             bar.looks[count] = look
-            if holder.slot then Fit(holder.slot, fits, data.showTimer, look) end
+            if holder.slot then Fit(holder.slot, fits, data.showTimer, look, holder.high) end
             -- (What a hand entry shows while nothing is on it: F:PaintEnchants.)
             local text = #group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name
             holder.icon:SetTexture(entry.icon)
@@ -1547,7 +1623,7 @@ function F:Layout(bar, data)
             holder.restIcon, holder.restName, holder.whichIcon, holder.whichName = entry.icon, text, entry.icon, text
             -- (A packed bar offers no names: its icons have no spot for one.)
             holder.label:SetShown(data.showNames and not packed)
-            MissingGlow(holder, glow, own)
+            MissingGlow(holder, glow, own, ownHigh)
             bar.slotIDs[count] = ids
             bar.names[count] = table.concat(group, "+")
             bar.tickPaces[count], bar.tickShows[count] = pace, shows
@@ -1579,9 +1655,26 @@ function F:Layout(bar, data)
     end
     for _, parts in ipairs(bar.groupParts) do
         parts.cooldown:SetHideCountdownNumbers(not data.showTimer)
-        if parts.index then GroupFont(parts, bar.looks[parts.index]) end
+        if parts.index then GroupFont(parts, bar.looks[parts.index], math.min(BASE, parts.high or BASE)) end
     end
     bar.count = count
+    -- Swapping with your form: each form's spots in its order (by its list,
+    -- 0 for Normal), whether any of its entries had no room left (crowded:
+    -- in a fight it waits for the end then, F:ShowForm), and the most spots
+    -- any form shows, which the bar keeps room for (Bars.lua LayoutAuras).
+    -- And the form whose spots show now (else Normal's, 0).
+    bar.formSpots, bar.formCrowded, bar.room = nil, nil, count
+    if forms then
+        bar.formSpots, bar.formCrowded, bar.room = {}, {}, 0
+        for form, names in pairs(forms) do
+            local spots = {}
+            for _, name in ipairs(names) do
+                if slotOf[name] then spots[#spots + 1] = slotOf[name] elseif crowded[name] then bar.formCrowded[form] = true end
+            end
+            bar.formSpots[form], bar.room = spots, math.max(bar.room, #spots)
+        end
+    end
+    bar.formShown = ns.ShownForm(bar.key)
     -- Which are on you, then the spots that show. (Packed icons line up
     -- from the bar's centre, or from the edge the bar grows away from, past
     -- any spots: F:Apply. Fixed spots are placed in rows by the bar.)
@@ -1664,7 +1757,8 @@ local function SelfSpot(bar, spacing)
     return "LEFT", "RIGHT", spacing
 end
 
-function F:ApplySelf(bar, packed, spacing, scale)
+-- (tall: the icons' height in the signature, F:Apply's GroupHeight.)
+function F:ApplySelf(bar, packed, spacing, scale, tall)
     local own = ns.AURA_BARS[bar.key].unit == "player"
     local on = packed and bar.data.selfDebuffs == true
     -- After the last entry, or before the first when the bar grows left (on
@@ -1672,7 +1766,7 @@ function F:ApplySelf(bar, packed, spacing, scale)
     local layout = { layoutIndex = bar.data.grow == "left" and 0 or ns.BUFF_SLOTS + 1, groupSpacing = spacing }
     local signature, point, to, x = "", nil, nil, nil
     if on then
-        signature = layout.layoutIndex .. "|" .. spacing
+        signature = layout.layoutIndex .. "|" .. spacing .. (tall or "")
         if not own then
             point, to, x = SelfSpot(bar, spacing)
             signature = signature .. "|" .. point .. "|" .. to .. "|" .. x .. "|" .. scale
@@ -1705,6 +1799,28 @@ end
 
 -- Tells the secure container which entries go where. Never in combat; a change
 -- made then waits for the fight to end. Only what changed is sent.
+-- Icon height on a packed bar: its icons, the game's, are BASE across and
+-- high tall in their container, then scaled with it. Made at that height
+-- (GroupLook); a new one sizes each icon made so far again, its art cropped
+-- and its numbers fitted, out of a fight only (F:Apply), and the game lays
+-- them out again (their layout sent again, with the height in its
+-- signature). An icon the game won't size stays as it was. The height as
+-- it goes in a signature: nothing while square, as before.
+local function GroupHeight(bar, high)
+    if bar.groupHigh ~= high then
+        bar.groupHigh = high
+        for _, parts in ipairs(bar.groupParts) do
+            if parts.high ~= high and parts.button and pcall(parts.button.SetSize, parts.button, BASE, high) then
+                local look = parts.index and bar.looks[parts.index] or nil
+                parts.high = high
+                Fit(parts, BASE, bar.data.showTimer, look, high)
+                parts.lookKey = Style:LookKey(look) .. "|" .. math.min(BASE, high)
+            end
+        end
+    end
+    return high ~= BASE and ("|" .. high) or ""
+end
+
 function F:Apply(bar)
     local container = bar.container
     if not container then return end
@@ -1718,6 +1834,7 @@ function F:Apply(bar)
     local on = ns.Bars:Enabled() and ns.HasBar(bar.key)
     local packed = self:Packed(data)
     local scale = packed and ns.IconSize(data) / BASE or 1
+    local tall = GroupHeight(bar, ns.IconHeight(data, BASE)) -- (Icon height, for the groups' signatures)
     -- Packed icons line up from the bar's centre, or from the edge the bar
     -- grows away from; past the spots of any buffs ticked Only when missing
     -- (F:Spots), the offset in the container's own size, as it's scaled.
@@ -1780,14 +1897,14 @@ function F:Apply(bar)
             AddGroup(container, "g" .. i, ns.AURA_BARS[bar.key].filter, { initializeFrame = F.Guard(GroupLook(bar, i)), maxFrameCount = 1,
                 candidateFilters = Filters(bar, bar.slotIDs[i]), layout = { layoutIndex = Index(i), groupSpacing = spacing } })
             bar.groups = i
-            bar.appliedGroups[i] = Signature(bar.slotIDs[i]) .. "|" .. spacing .. "|" .. Index(i)
+            bar.appliedGroups[i] = Signature(bar.slotIDs[i]) .. "|" .. spacing .. "|" .. Index(i) .. tall
         end
     end
     for i = 1, bar.groups do
         -- (Not one ticked Only when missing: its own slot shows it. Nor a
         -- weapon enchant: its own spot.)
         local ids = on and packed and bar.only[i] ~= true and not bar.imbues[i] and bar.slotIDs[i] or nil
-        local signature = ids and (Signature(ids) .. "|" .. spacing .. "|" .. Index(i)) or ""
+        local signature = ids and (Signature(ids) .. "|" .. spacing .. "|" .. Index(i) .. tall) or ""
         if bar.appliedGroups[i] ~= signature then
             bar.appliedGroups[i] = signature
             local key = "g" .. i
@@ -1800,7 +1917,7 @@ function F:Apply(bar)
             end
         end
     end
-    self:ApplySelf(bar, on and packed, spacing, scale)
+    self:ApplySelf(bar, on and packed, spacing, scale, tall)
     if bar.appliedScale ~= scale then
         bar.appliedScale = scale
         container:SetScale(scale)
@@ -1899,8 +2016,12 @@ function F:Ticks(bar)
     local data = bar.data
     for i = 1, ns.BUFF_SLOTS do
         local seconds, shows, holder = bar.tickPaces[i], bar.tickShows[i], bar.holders[i]
-        if holder.slot and holder.slot.ticks then SetCount(holder.slot.ticks, seconds, shows, data, holder.size or BASE) end
-        for _, ticks in ipairs(bar.groupTicks[i] or {}) do SetCount(ticks, seconds, shows, data, BASE) end
+        -- (Sized by the icon's shorter side: Icon height.)
+        local size = holder.size or BASE
+        if holder.slot and holder.slot.ticks then
+            SetCount(holder.slot.ticks, seconds, shows, data, math.min(size, holder.high or size))
+        end
+        for _, ticks in ipairs(bar.groupTicks[i] or {}) do SetCount(ticks, seconds, shows, data, math.min(BASE, bar.groupHigh or BASE)) end
     end
 end
 
@@ -1920,18 +2041,22 @@ function F:Warns(bar)
         local mark = holder.mark
         if mark then
             local seconds = not packed and warn or nil
-            local size = math.floor((holder.size or BASE) * MARK_SPREAD + .5)
+            -- (Round the spot as it is: its height too, Icon height.)
+            local wide = holder.size or BASE
+            local high = holder.high or wide
+            local size, sizeHigh = math.floor(wide * MARK_SPREAD + .5), math.floor(high * MARK_SPREAD + .5)
             -- (Dimmed: the cover a pixel past the spot all round, so the
             -- game's icon is hidden even if the text sits a pixel off.)
-            local across = math.floor((holder.size or BASE) + .5) + 2
-            local cover = seconds and bar.dims and bar.dims[i] and Cover(bar.dims[i], across) or nil
-            local rule = seconds and (seconds .. ":" .. size .. (cover and (":dim " .. across .. " " .. tostring(bar.dims[i])) or "")) or ""
+            local across, tall = math.floor(wide + .5) + 2, math.floor(high + .5) + 2
+            local cover = seconds and bar.dims and bar.dims[i] and Cover(bar.dims[i], across, tall) or nil
+            local rule = seconds and (seconds .. ":" .. size .. (sizeHigh ~= size and ("x" .. sizeHigh) or "")
+                .. (cover and (":dim " .. across .. (tall ~= across and ("x" .. tall) or "") .. " " .. tostring(bar.dims[i])) or "")) or ""
             if mark.rule ~= rule then
                 local function Set(from)
                     return pcall(function()
                         mark.formatter:ClearBreakpoints()
                         if seconds then
-                            mark.formatter:AddBreakpoint({ threshold = 0, format = Edge(size) })
+                            mark.formatter:AddBreakpoint({ threshold = 0, format = Edge(size, sizeHigh) })
                             mark.formatter:AddBreakpoint({ threshold = seconds, format = from or "" })
                         else
                             mark.formatter:AddBreakpoint({ threshold = 0, format = "" })
@@ -1966,8 +2091,9 @@ end
 -- drawn at BASE, then scaled), as big as Glow size says (spread: the loop's,
 -- as a share of the icon; width: the edge's). Out of a fight only, as the
 -- icons are the game's: one changed in a fight waits for it to end
--- (F:Apply). Each is only set as it changes.
-local function Lit(active, on, size, looping, spread, width)
+-- (F:Apply). Each is only set as it changes. (high: the icon's height,
+-- Icon height; square without.)
+local function Lit(active, on, size, looping, spread, width, high)
     if not active then return end
     if active.on ~= on then
         active.on = on
@@ -1983,10 +2109,10 @@ local function Lit(active, on, size, looping, spread, width)
         active.looping = looping
         loop:SetShown(looping)
     end
-    local across = size * spread
-    if active.spread ~= across then
-        active.spread = across
-        loop:SetSize(across, across)
+    local across, tall = size * spread, (high or size) * spread
+    if active.spread ~= across or active.spreadTall ~= tall then
+        active.spread, active.spreadTall = across, tall
+        loop:SetSize(across, tall)
     end
 end
 
@@ -2007,13 +2133,15 @@ function F:Actives(bar)
     local spread, width = ActiveSize(ns.GlowActiveSize())
     for i = 1, ns.BUFF_SLOTS do
         local holder = bar.holders[i]
-        if holder.slot then Lit(holder.slot.active, bar.actives[i] == true, holder.size or BASE, looping, spread, width) end
+        if holder.slot then
+            Lit(holder.slot.active, bar.actives[i] == true, holder.size or BASE, looping, spread, width, holder.high)
+        end
     end
     -- A packed icon's edge is scaled with its container: kept at least 1
     -- wide on screen, as a fixed slot's is, but never past the usual width.
     local packedWidth = math.max(width, math.min(ns.EDGE_WIDTH, 1 / (bar.appliedScale or 1)))
     for _, parts in ipairs(bar.groupParts) do
-        Lit(parts.active, parts.index ~= nil and bar.actives[parts.index] == true, BASE, looping, spread, packedWidth)
+        Lit(parts.active, parts.index ~= nil and bar.actives[parts.index] == true, BASE, looping, spread, packedWidth, parts.high)
     end
 end
 
@@ -2055,7 +2183,7 @@ local function LowGlow(bar, holder, on)
     end
     host:SetFrameLevel(bar:GetFrameLevel() + 15)
     local size = holder.size or BASE
-    host:SetSize(size, size)
+    host:SetSize(size, holder.high or size) -- (as tall as the spot: Icon height)
     ns.UseGlow(host)
     ns.SetGlow(host, true)
 end

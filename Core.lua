@@ -192,6 +192,7 @@ ns.DEFAULTS = {
     keybindPosition = "BOTTOM", -- where on the icon: BOTTOM, TOPLEFT, TOP or TOPRIGHT
     keybindSize = 100, -- its size, as a share of the automatic size that follows the icon
     keyPressGlow = false, -- a gold border on a Cooldowns/Utility icon while you hold the key that casts it (Bars.lua, Icon details)
+    totemTime = false, -- a totem's icon on a Cooldowns/Utility bar shows its totem's time while it stands (IconAuras.lua, Icon details)
     layoutPreview = true, -- the Layout page draws your icons with the Look page's border, shadow and keybinds
     barScale = 100, -- every bar's icons together, as a share of each bar's own size (the Layout page's All bars)
     growArrows = false, -- while your bars are arranged (unlocked or in Edit Mode), an arrow on each for the way it grows
@@ -538,8 +539,11 @@ for kind, extras in pairs(ns.EXTRAS_OF) do
         ns.BAR_NAMES[key], ns.BAR_KIND[key], ns.AURA_BARS[key] = ns.BAR_NAMES[kind] .. " " .. (i + 1), kind, ns.AURA_BARS[kind]
     end
 end
--- Swap with my form: the Cooldowns and Utility bars only.
-local SWAP_BARS = { cd = true, util = true }
+-- Swap with my form: the Cooldowns and Utility bars, and every Debuffs bar
+-- (a player's idea, Squirt's yes 16 Nov 2026: one debuff shown only in a
+-- certain form). Not Cooldowns 2 or 3 nor Utility 2 or 3 (a spell sits on
+-- one cooldown bar in every form: ns.KeepApart), nor a Buffs bar.
+local SWAP_BARS = { cd = true, util = true, debuff = true, debuff2 = true, debuff3 = true }
 function ns.CanSwap(key)
     return SWAP_BARS[key] == true
 end
@@ -551,8 +555,11 @@ ns.ICON_SIZE = { 50, 150, 100 }
 ns.GLOW_ACTIVE_SIZE = { 50, 150, 100 }
 -- min, max, default. dimOpacity: how much of a dimmed icon shows, in percent
 -- (When ready's and On cooldown's Dim, and Dim when you can't cast it); 40
--- is how dim they always were.
-ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 }, perRow = { 1, 20, 20 }, dimOpacity = { 10, 90, 40 } }
+-- is how dim they always were. heightPct: Icon height (a player's idea:
+-- icons wider or taller than square), an icon's height as a percent of its
+-- size across; 100 is square, as they always were.
+ns.BAR_LIMITS = { size = { 20, 64, 36 }, spacing = { 0, 20, 4 }, perRow = { 1, 20, 20 }, dimOpacity = { 10, 90, 40 },
+    heightPct = { 50, 150, 100 } }
 ns.ROW_GAP = { 0, 20, 0 } -- a layout's space between rows: touching unless you want room
 ns.ICON_GAP = { 0, 20, 0 } -- and between the icons in its rows
 ns.BAR_MAX_SPELLS = 40
@@ -570,7 +577,7 @@ ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- A bar's settings a shared profile carries (its spells are in the profile,
 -- and so is Swap with my form, beside the lists it swaps between). Glow
 -- for more procs (glowProcs) is a cooldown bar's only.
-ns.SHARE_BAR_FIELDS = { "size", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
+ns.SHARE_BAR_FIELDS = { "size", "heightPct", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "showGCD", "selfDebuffs", "grow", "wrap", "point",
     "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom", "glowProcs" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
@@ -756,9 +763,10 @@ local function OwnList(form)
 end
 ns.OwnFormList = OwnList
 
--- A profile's form lists (profile.forms[form][bar], for the Cooldowns and
--- Utility bars), each repaired as a bar's list is; anything else goes. Left
--- as they are while the forms aren't known (Forms.lua not loaded).
+-- A profile's form lists (profile.forms[form][bar], for the Cooldowns,
+-- Utility and Debuffs bars: an extra Debuffs bar's only while the profile
+-- has it), each repaired as a bar's list is; anything else goes. Left as
+-- they are while the forms aren't known (Forms.lua not loaded).
 local function RepairForms(profile)
     if profile.forms == nil or not ns.FORM_LISTS then return end
     if type(profile.forms) ~= "table" then
@@ -770,10 +778,27 @@ local function RepairForms(profile)
             profile.forms[form] = nil
         else
             for key, list in pairs(lists) do
-                if not SWAP_BARS[key] or type(list) ~= "table" then lists[key] = nil else Repair(list) end
+                if not (SWAP_BARS[key] and Present(profile, key)) or type(list) ~= "table" then lists[key] = nil else Repair(list) end
             end
         end
     end
+end
+
+-- The names on any of a bar's lists in a profile: its own, and for a bar
+-- that can swap with your form each form's (a set). after: only those with
+-- an entry before them, which a join can be for.
+local function BarNames(store, key, after)
+    local names = {}
+    local function Add(list)
+        for i, name in ipairs(type(list) == "table" and list or {}) do
+            if not after or i > 1 then names[name] = true end
+        end
+    end
+    Add(store[key])
+    for _, lists in pairs(SWAP_BARS[key] and type(store.forms) == "table" and store.forms or {}) do
+        if type(lists) == "table" then Add(lists[key]) end
+    end
+    return names
 end
 
 -- Spells a later build renamed (Spells.lua S:NewName: Read Ley Line is Read
@@ -901,8 +926,8 @@ local function RepairWarns(profile)
     local warns, kept = type(profile.warnAt) == "table" and profile.warnAt or {}, {}
     for key, set in pairs(warns) do
         if ns.AURA_BARS[key] and Present(profile, key) and type(set) == "table" then
-            local listed, own = {}, {}
-            for _, name in ipairs(profile[key]) do listed[name] = true end
+            -- (A form's list too: Swap with my form on a Debuffs bar.)
+            local listed, own = BarNames(profile, key), {}
             for name, seconds in pairs(set) do
                 if listed[name] and ns.WarnValue(seconds) then own[name] = seconds end
             end
@@ -928,7 +953,8 @@ local function GlowSizeValue(value)
 end
 
 -- Whether a name is on any of a bar's lists in a profile: its own, or for
--- the Cooldowns or Utility bar a form's.
+-- a bar that can swap with your form (Cooldowns, Utility, a Debuffs bar) a
+-- form's.
 local function OnBarLists(store, key, name)
     for _, spell in ipairs(type(store[key]) == "table" and store[key] or {}) do
         if spell == name then return true end
@@ -991,14 +1017,16 @@ local function Lists(profile)
             profile[key] = nil
         end
     end
+    -- Each form's lists, before the choices kept by name below go by them.
+    RepairForms(profile)
     -- The picked icon for a joined group while none is up, the buffs that
     -- glow while they're missing, the debuffs that count their ticks, the
     -- buffs shown only while they're missing and the buffs that glow while
     -- they're up (both a Buffs bar's own), and the entries dimmed until
-    -- their Warn at time: only names on that aura bar's list. Count ticks
-    -- is a Cooldowns or Utility bar's too (an extra one too: a spell's icon
-    -- counting its debuff's ticks, IconAuras.lua): names on its lists, a
-    -- form's too.
+    -- their Warn at time: only names on that aura bar's lists (a form's too,
+    -- on a Debuffs bar: Swap with my form). Count ticks is a Cooldowns or
+    -- Utility bar's too (an extra one too: a spell's icon counting its
+    -- debuff's ticks, IconAuras.lua): names on its lists, a form's too.
     for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers",
         "dimUntilWarn" }) do
         if type(profile[field]) ~= "table" then profile[field] = {} end
@@ -1011,8 +1039,7 @@ local function Lists(profile)
                 or ((field == "onlyWhenMissing" or field == "glowActive" or field == "handOthers") and ns.BAR_KIND[key] ~= "buff") then
                 profile[field][key] = nil
             else
-                local listed = {}
-                for _, name in ipairs(profile[key]) do listed[name] = true end
+                local listed = BarNames(profile, key)
                 for name, on in pairs(set) do
                     if on ~= true or not listed[name] then set[name] = nil end
                 end
@@ -1024,10 +1051,9 @@ local function Lists(profile)
         if not (ns.AURA_BARS[key] and Present(profile, key)) or type(joins) ~= "table" then
             profile.joins[key] = nil
         else
-            local listed = {}
-            for i, name in ipairs(profile[key]) do
-                if i > 1 then listed[name] = true end
-            end
+            -- (After an entry on any of its lists: a bar's joins are every
+            -- form's too, each name joined to the one before it there.)
+            local listed = BarNames(profile, key, true)
             for name, on in pairs(joins) do
                 if on ~= true or not listed[name] then joins[name] = nil end
             end
@@ -1039,13 +1065,13 @@ local function Lists(profile)
             if type(key) ~= "string" or key == "" or value ~= keep then profile[field][key] = nil end
         end
     end
-    RepairForms(profile)
-    -- Swap with my form's ticks (below): the Cooldowns and Utility bars'
-    -- (true each), or none.
+    -- Swap with my form's ticks (below): the Cooldowns, Utility and Debuffs
+    -- bars' (an extra Debuffs bar's while the profile has it), true each, or
+    -- none.
     local ticks = profile.swapForm
     if type(ticks) == "table" then
         for key, on in pairs(ticks) do
-            if not SWAP_BARS[key] or on ~= true then ticks[key] = nil end
+            if not (SWAP_BARS[key] and Present(profile, key)) or on ~= true then ticks[key] = nil end
         end
     end
     profile.swapForm = type(ticks) == "table" and next(ticks) ~= nil and ticks or nil
@@ -1127,7 +1153,8 @@ end
 
 -- Swap with my form ------------------------------------------------------------
 -- Ticked on a Cooldowns or Utility bar (a player's idea: other cooldowns in
--- bear form than in cat form), the bar keeps a list of its own for each
+-- bear form than in cat form), or a Debuffs bar (another player's: one
+-- debuff shown only in a certain form), the bar keeps a list of its own for each
 -- form you take, in your profile beside the normal ones
 -- (profile.forms[form][bar], under the form's list in ns.FORM_LISTS), and
 -- shows the one for the form you're in: the normal one ("Normal") in no
@@ -1146,11 +1173,13 @@ local formEditing -- the list the bar's page is setting up (0 for Normal), or ni
 local STEALTH = 30 -- the game's form for a rogue's Stealth (ROGUE_STEALTH)
 
 -- Whether a bar swaps with your form: ticked in the profile you're on (or
--- the stand-in lists, until the character is known), on a bar that can.
+-- the stand-in lists, until the character is known), on a bar that can and
+-- that it has (an extra Debuffs bar once added).
 local function Swaps(key)
     if not SWAP_BARS[key] then return false end
-    local ticks = (active and db and Profiles()[active] or scratch).swapForm
-    return type(ticks) == "table" and ticks[key] == true
+    local store = active and db and Profiles()[active] or scratch
+    local ticks = store.swapForm
+    return type(ticks) == "table" and ticks[key] == true and Present(store, key)
 end
 
 function ns.Swaps(key)
@@ -1172,12 +1201,13 @@ end
 -- druid ticking it changed a warrior's bars too. Once, as the settings
 -- load: a tick saved that way goes into each profile that already has a
 -- form's list for that bar (each one that has swapped with it), then it's
--- gone from the bars. Profiles that never swapped stay unticked.
+-- gone from the bars. Profiles that never swapped stay unticked. (The
+-- Cooldowns and Utility bars only, the two 1.6.0 had it on.)
 local function MoveSwapTicks()
     local bars = type(db.bars) == "table" and db.bars or {}
     for _, key in ipairs(ns.BASE_BAR_KEYS) do
         local bar = bars[key]
-        local ticked = type(bar) == "table" and rawget(bar, "swapForm") == true and SWAP_BARS[key]
+        local ticked = type(bar) == "table" and rawget(bar, "swapForm") == true and (key == "cd" or key == "util")
         if type(bar) == "table" then rawset(bar, "swapForm", nil) end
         for _, profile in pairs(ticked and Profiles() or {}) do
             local made = false
@@ -1319,25 +1349,23 @@ local OTHER = { cd = "util", util = "cd" }
 -- A form's list for a bar, in a profile (or the stand-in lists), made the
 -- first time it's wanted from the normal one, without what that form can't
 -- cast, nor what the other cooldown bar shows in that form (its own list
--- for it, once made, or its normal one if it doesn't swap).
-local function FormList(store, form, key)
+-- for it, once made, or its normal one if it doesn't swap). peek: one not
+-- made yet is only worked out, as it would be made, and not kept.
+local function FormList(store, form, key, peek)
+    local lists = type(store.forms) == "table" and store.forms[form] or nil
+    if type(lists) == "table" and type(lists[key]) == "table" then return lists[key] end
+    local other, beside, theirs = OTHER[key], {}, nil
+    if other and Swaps(other) then theirs = type(lists) == "table" and lists[other] or nil elseif other then theirs = store[other] end
+    for _, name in ipairs(type(theirs) == "table" and theirs or {}) do beside[name] = true end
+    local list = {}
+    for _, name in ipairs(type(store[key]) == "table" and store[key] or {}) do
+        if not beside[name] and (not ns.Spells or ns.Spells:FormCasts(name, form)) then list[#list + 1] = name end
+    end
+    if peek then return list end
     if type(store.forms) ~= "table" then store.forms = {} end
-    local lists = store.forms[form]
-    if type(lists) ~= "table" then
-        lists = {}
-        store.forms[form] = lists
-    end
-    if type(lists[key]) ~= "table" then
-        local other, beside, theirs = OTHER[key], {}, nil
-        if other and Swaps(other) then theirs = lists[other] elseif other then theirs = store[other] end
-        for _, name in ipairs(type(theirs) == "table" and theirs or {}) do beside[name] = true end
-        local list = {}
-        for _, name in ipairs(type(store[key]) == "table" and store[key] or {}) do
-            if not beside[name] and (not ns.Spells or ns.Spells:FormCasts(name, form)) then list[#list + 1] = name end
-        end
-        lists[key] = list
-    end
-    return lists[key]
+    if type(store.forms[form]) ~= "table" then store.forms[form] = {} end
+    store.forms[form][key] = list
+    return list
 end
 
 -- A bar's list that shows in a form (0 for Normal) as the bars are ticked
@@ -1361,6 +1389,37 @@ function ns.ActiveList(key)
     if form ~= 0 then return FormList(store, form, key) end
     if type(store[key]) ~= "table" then store[key] = {} end
     return store[key]
+end
+
+-- Every list a bar swapping with your form can show, as { form = its list
+-- (0 for Normal), list }: the one it shows now first (made now if it wasn't,
+-- as ns.ActiveList makes it), then Normal, each form you know, and any other
+-- form with a list kept for it. Another form's list not made yet is as it
+-- would be made, and isn't made here. For a Debuffs bar with fixed spots,
+-- which sets up every one of them out of a fight so a change of form in one
+-- shows at once (Buffs.lua F:Layout).
+function ns.SwapLists(key)
+    local store, out, seen = ns.ProfileLists(), {}, {}
+    local function Add(form, make)
+        if seen[form] or not (form == 0 or OwnList(form)) then return end
+        seen[form] = true
+        local list = form == 0 and (type(store[key]) == "table" and store[key] or {}) or FormList(store, form, key, not make)
+        out[#out + 1] = { form = form, list = list }
+    end
+    if not Swaps(key) then
+        Add(0)
+        return out
+    end
+    Add(ns.ShownForm(key), true)
+    Add(0)
+    for _, known in ipairs(ns.KnownForms()) do Add(known.form) end
+    local kept = {}
+    for form, own in pairs(type(store.forms) == "table" and store.forms or {}) do
+        if type(form) == "number" and type(own) == "table" and type(own[key]) == "table" then kept[#kept + 1] = form end
+    end
+    table.sort(kept)
+    for _, form in ipairs(kept) do Add(form) end
+    return out
 end
 
 -- This character's profile (or the stand-in lists) as it is, its normal
@@ -1498,6 +1557,13 @@ end
 function ns.ForgetCountTicks(key, name)
     if ns.AURA_BARS[key] or not ns.CountsTicks(key, name) then return end
     if not OnBarLists(ns.ProfileLists(), key, name) then ns.CountTicks(key)[name] = nil end
+end
+
+-- Whether an entry is still on any of a bar's lists (a form's too): a
+-- Debuffs bar's entry taken off one form's list keeps its choices while
+-- another list has it (Bars.lua Forget).
+function ns.OnBarLists(key, name)
+    return OnBarLists(ns.ProfileLists(), key, name)
 end
 
 -- This character's buffs on a Buffs bar shown only while they're missing
@@ -1726,7 +1792,8 @@ end
 
 -- Extra bars ---------------------------------------------------------------------
 -- Another bar of a kind (Cooldowns 2 and 3, Utility 2 and 3, Buffs 2 and 3,
--- Debuffs 2 and 3), a copy of it in everything but Swap with my form: added
+-- Debuffs 2 and 3), a copy of it in everything but Swap with my form (an
+-- extra Debuffs bar has that too, its own lists for each form): added
 -- by its kind's + Add a bar line in the window's list (Window.lua), two of
 -- each kind and four in all, kept in the profile
 -- beside its list (profile.extraBars[bar] = true), so switching profiles
@@ -1787,7 +1854,9 @@ function ns.AddBar(kind)
     ns.SyncBarKeys()
     if first then
         local from, to = ns.BarData(kind), ns.BarData(key)
-        if from and to then to.size, to.spacing, to.perRow = from.size, from.spacing, from.perRow end
+        if from and to then
+            to.size, to.heightPct, to.spacing, to.perRow = from.size, from.heightPct, from.spacing, from.perRow
+        end
     end
     return true, key
 end
@@ -1804,11 +1873,20 @@ function ns.RemoveBar(key)
     if InCombatLockdown() then return false, "Finish combat first." end
     if not active then return false, "Your profile hasn't loaded yet." end
     local store = ns.ProfileLists()
-    local names = type(store[key]) == "table" and store[key] or {}
+    local names = {}
+    for name in pairs(BarNames(store, key)) do names[#names + 1] = name end
     local extras = type(store.extraBars) == "table" and store.extraBars or {}
     extras[key] = nil
     store.extraBars = next(extras) ~= nil and extras or nil
     store[key] = nil
+    -- An extra Debuffs bar's own lists for each form, and its Swap with my form.
+    for _, lists in pairs(type(store.forms) == "table" and store.forms or {}) do
+        if type(lists) == "table" then lists[key] = nil end
+    end
+    if type(store.swapForm) == "table" then
+        store.swapForm[key] = nil
+        if next(store.swapForm) == nil then store.swapForm = nil end
+    end
     for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers", "warnAt",
         "iconSize", "dimUntilWarn", "lastTrap" }) do
         local sets = store[field]
@@ -2247,7 +2325,7 @@ end
 -- "Where and how big": each bar's spot, grow and wrap directions, icon size,
 -- spacing and icons per row, and the whole Layout page arrangement. The
 -- look (colours, border, font, All bars) stays every character's.
-local PLACE_FIELDS = { "size", "spacing", "perRow", "grow", "wrap", "point", "x", "y" }
+local PLACE_FIELDS = { "size", "heightPct", "spacing", "perRow", "grow", "wrap", "point", "x", "y" }
 
 -- Whether a bar's settings are worth keeping or setting from saved (from):
 -- one of the four always, an extra bar once it has some (one never added
@@ -2474,7 +2552,7 @@ function ns.ImportProfile(text, shared, withLook)
             if type(spell) == "string" then profile.spellLook[spell] = ns.CleanSpellLook(look) end
         end
     end
-    -- Each warned entry's seconds (Lists keeps those on its bar's list).
+    -- Each warned entry's seconds (Lists keeps those on its bar's lists, a form's too).
     if type(shared.warns) == "table" then
         profile.warnAt = {}
         for key, set in pairs(shared.warns) do
@@ -2842,6 +2920,7 @@ function ns.BarData(key)
         if type(old) == "table" then Repair(old) else rawset(bar, "spells", nil) end
     end
     bar.size = Limit(bar.size, ns.BAR_LIMITS.size)
+    bar.heightPct = Limit(bar.heightPct, ns.BAR_LIMITS.heightPct) -- Icon height: square unless you choose
     bar.spacing = Limit(bar.spacing, ns.BAR_LIMITS.spacing)
     -- Bars set to hide when ready before Dim joined it still hide.
     if not ns.WHEN_READY_NAMES[bar.whenReady] then
@@ -2913,6 +2992,29 @@ end
 function ns.IconSize(data)
     local size = math.floor(data.size * ns.Get("barScale") / 100 + .5)
     return math.max(ns.BAR_LIMITS.size[1], size)
+end
+
+-- Icon height (a player's idea: "different size ratio for icons"): a bar's
+-- icons are their size across (width, from ns.IconSize or an icon's own
+-- size) and its Icon height's share of that tall, whole pixels. At 100,
+-- square: the width itself, as always.
+function ns.IconHeight(data, width)
+    local percent = type(data) == "table" and data.heightPct or 100
+    if type(percent) ~= "number" or percent == 100 then return width end
+    return math.max(1, math.floor(width * percent / 100 + .5))
+end
+
+-- The size an icon's text goes by (its countdown, counts and key): its
+-- shorter side, so they fit a short icon. The width while square.
+function ns.IconFace(data, width)
+    return math.min(width, ns.IconHeight(data, width))
+end
+
+-- How tall an icon is for how wide (height over width), for the art's crop
+-- (Style:Shape). 1 while square.
+function ns.IconRatio(data, width)
+    if width <= 0 then return 1 end
+    return ns.IconHeight(data, width) / width
 end
 
 -- Layouts: your bars stacked around Blizzard's Personal Resource Display.

@@ -592,11 +592,12 @@ local function Whole(bar)
     bar.short = false
 end
 
-local function Outline(bar, frames, count, across, rows, size, step, data)
+-- (high: the icons' height, Icon height.)
+local function Outline(bar, frames, count, across, rows, high, step, data)
     local last = count - (rows - 1) * across -- icons in the last row
     if not bar.block or rows < 2 or last >= across then return Whole(bar) end
     local block, tail = bar.block, bar.tail
-    local tall = (rows - 2) * step + size -- from the first row to the last full one
+    local tall = (rows - 2) * step + high -- from the first row to the last full one
     block:ClearAllPoints()
     if data.wrap == "up" then
         block:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
@@ -619,21 +620,23 @@ end
 -- icons and as tall as its biggest, each icon centred in its row's height,
 -- the rows lined up by the bar's grow choice. The bar is at least as big as
 -- its rows would be at its own size, and as room would keep it. No box round
--- a short last row: its icons aren't one size.
+-- a short last row: its icons aren't one size. Each icon is its own size
+-- across and the bar's Icon height of that tall (ns.IconHeight).
 local function Sized(bar, frames, count, data, room, size, spacing)
     local across = math.max(1, math.min(data.perRow, room))
     local lines, under = math.ceil(room / across), spacing + (data.showNames and NAMES or 0)
     local named = data.showNames -- (and under Blizzard's frame, by the row's biggest icon: Style:NameDrop)
-    local widths, heights, widest = {}, {}, across * size + (across - 1) * spacing
+    local widths, heights, biggest, widest = {}, {}, {}, across * size + (across - 1) * spacing
     for line = 1, lines do
         local first, last = (line - 1) * across + 1, math.min(line * across, count)
-        local width, height = 0, size -- a row kept only for room is at the bar's size
-        if first <= last then height = 0 end
+        local width, height, big = 0, ns.IconHeight(data, size), size -- a row kept only for room is at the bar's size
+        if first <= last then height, big = 0, 0 end
         for i = first, last do
             local own = frames[i].ownSize or size
-            width, height = width + own + (i > first and spacing or 0), math.max(height, own)
+            width, height = width + own + (i > first and spacing or 0), math.max(height, ns.IconHeight(data, own))
+            big = math.max(big, own)
         end
-        widths[line], heights[line] = width, height
+        widths[line], heights[line], biggest[line] = width, height, big
         widest = math.max(widest, width)
     end
     local y = 0
@@ -643,7 +646,7 @@ local function Sized(bar, frames, count, data, room, size, spacing)
         for i = first, last do
             local frame = frames[i]
             local own = frame.ownSize or size
-            local inset = (heights[line] - own) / 2
+            local inset = (heights[line] - ns.IconHeight(data, own)) / 2
             if data.grow == "left" then x = x - own end
             frame:ClearAllPoints()
             if data.wrap == "up" then
@@ -653,7 +656,7 @@ local function Sized(bar, frames, count, data, room, size, spacing)
             end
             x = data.grow == "left" and x - spacing or x + own + spacing
         end
-        y = y + heights[line] + (line < lines and under + (named and Style:NameDrop(heights[line]) or 0) or 0)
+        y = y + heights[line] + (line < lines and under + (named and Style:NameDrop(biggest[line]) or 0) or 0)
     end
     Whole(bar)
     return widest, y
@@ -668,11 +671,12 @@ end
 -- and the ones there line up in it.
 function B:Arrange(bar, frames, count, data, room)
     local size, spacing = ns.IconSize(data), data.spacing
+    local high = ns.IconHeight(data, size) -- (Icon height: the rows as tall as the icons)
     room = math.max(room or count, count)
     -- An empty bar keeps room for three icons so it can still be dragged.
     if room < 1 then
         Whole(bar)
-        return 3 * size + 2 * spacing, size
+        return 3 * size + 2 * spacing, high
     end
     for i = 1, count do
         if frames[i].ownSize then return Sized(bar, frames, count, data, room, size, spacing) end
@@ -680,7 +684,7 @@ function B:Arrange(bar, frames, count, data, room)
     local across = math.max(1, math.min(data.perRow, room))
     local rows = math.ceil(room / across)
     -- (Names under icons drawn like Blizzard's go under its frame: Style:NameDrop.)
-    local step = size + spacing + (data.showNames and NAMES + Style:NameDrop(size) or 0)
+    local step = high + spacing + (data.showNames and NAMES + Style:NameDrop(size) or 0)
     local width = across * size + (across - 1) * spacing
     for i = 1, count do
         local row, column = math.floor((i - 1) / across), (i - 1) % across
@@ -702,8 +706,8 @@ function B:Arrange(bar, frames, count, data, room)
         end
     end
     -- (Spots that come and go have no box round them: Steady.)
-    if count < room then Whole(bar) else Outline(bar, frames, count, across, rows, size, step, data) end
-    return width, size + (rows - 1) * step
+    if count < room then Whole(bar) else Outline(bar, frames, count, across, rows, high, step, data) end
+    return width, high + (rows - 1) * step
 end
 
 -- The point a bar is held by: the edge its rows grow away from, so icons
@@ -811,8 +815,12 @@ end
 -- its icons keeps them in place, and its box. (bar: the bar as laid out,
 -- when it has been: a tick on another character's buff in a shared profile
 -- moves nothing here.)
+-- (Nor a Debuffs bar's spots swapping with your form: each form's come and
+-- go in a bar kept the size of the most any form shows.)
 local function Steady(key, data, bar)
-    if ns.AURA_BARS[key] then return ns.BuffBar:Fixed(data) and not ns.BuffBar:Ticked(bar, key, data) end
+    if ns.AURA_BARS[key] then
+        return ns.BuffBar:Fixed(data) and not ns.BuffBar:Ticked(bar, key, data) and not ns.BuffBar:Follows(key, data)
+    end
     return not Hides(data)
 end
 
@@ -1041,13 +1049,15 @@ local function LayoutAuras(bar, data)
     -- Fixed spots go in rows like icons; packed buffs are laid out by the
     -- game in one row (after the spots of buffs ticked Only when missing,
     -- placed by Buffs.lua). With Only show missing the spots showing close
-    -- up, in a bar kept the size of all of them.
+    -- up, in a bar kept the size of all of them; swapping with your form,
+    -- in a bar kept the size of the most any form shows (bar.room), so a
+    -- change of form in a fight never resizes it.
     if ns.BuffBar:Packed(data) then
         local slots, size = bar.count > 0 and bar.count or 3, ns.IconSize(data)
-        bar:SetSize(slots * size + (slots - 1) * data.spacing, size)
+        bar:SetSize(slots * size + (slots - 1) * data.spacing, ns.IconHeight(data, size))
         Whole(bar)
     else
-        bar:SetSize(B:Arrange(bar, bar.spots, #bar.spots, data, bar.count))
+        bar:SetSize(B:Arrange(bar, bar.spots, #bar.spots, data, bar.room or bar.count))
     end
     BarDecor(bar)
     Place(bar)
@@ -1067,8 +1077,10 @@ local function Room(icon)
     Style:KeyRoom(icon.count, icon, icon.shape.rounded and 2 or 1, Numbers(icon.cooldown), icon.cooldown, icon.lift or 0, icon.keyed)
 end
 
--- (Clear of the icon's countdown at its own size: settings per spell.)
+-- (Clear of the icon's countdown at its own size: settings per spell. By
+-- its shorter side as laid out, icon.face: Icon height.)
 local function KeyLook(icon, size)
+    size = icon.face or size
     icon.lift = Style:KeyLook(icon.key, icon, size, Style:CountdownSize(size, icon.look and icon.look.size))
     Room(icon)
 end
@@ -1147,7 +1159,7 @@ do
 
     -- The sides placed, again only when the icon's size or shape changed.
     local function Place(icon)
-        local kit, size = icon.shape, icon.size or icon:GetWidth()
+        local kit, size = icon.shape, icon.face or icon.size or icon:GetWidth() -- (its shorter side: Icon height)
         local rounded = kit ~= nil and kit.rounded == true
         local mask = rounded and PressMask(icon) or nil
         if icon.pressSize == size and icon.pressRounded == rounded then return end
@@ -1280,14 +1292,17 @@ local function Layout(bar)
             -- with everything on it sized for that.
             local own = ns.IconSizeFor(bar.key, name, size)
             icon.size, icon.ownSize = own, own ~= size and own or nil
-            icon:SetSize(own, own)
-            Style:Shape(icon.shape, own)
+            -- That wide and the bar's Icon height of it tall, its art
+            -- cropped to fit; its text by the shorter side (icon.face).
+            icon.face = ns.IconFace(data, own)
+            icon:SetSize(own, ns.IconHeight(data, own))
+            Style:Shape(icon.shape, own, nil, ns.IconRatio(data, own))
             -- Its countdown in the spell's own font and size, if it has them
             -- (settings per spell), else the Look page's.
             icon.look = ns.SpellLook(name)
-            icon.cooldown:SetCountdownFont(Style:Countdown(own, icon.look))
+            icon.cooldown:SetCountdownFont(Style:Countdown(icon.face, icon.look))
             icon.cooldown:SetHideCountdownNumbers(not data.showTimer)
-            icon.count:SetFontObject(Style:Count(own))
+            icon.count:SetFontObject(Style:Count(icon.face))
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
             icon.kind, icon.itemID, icon.slot, icon.current = entry.kind, entry.itemID, entry.slot, entry.current
             -- A spot that showed a spell's global cooldown and now holds an item.
@@ -1599,7 +1614,7 @@ function B:ApplyIconDetails()
             Style:CooldownLook(icon.cooldown)
             if icon.gcd then Style:CooldownLook(icon.gcd) end -- its global cooldown's sweep too, once made
             if own then
-                icon.cooldown:SetCountdownFont(Style:Countdown(own, icon.look))
+                icon.cooldown:SetCountdownFont(Style:Countdown(icon.face or own, icon.look))
                 KeyLook(icon, own)
             end
         end
@@ -1942,8 +1957,9 @@ function B:Kindred(key, a, b)
     return family ~= nil and family == self:Family(b)
 end
 
-function B:Joined(key, index)
-    local spells = ns.BarData(key).spells
+-- (spells: the bar's list it's in, if not the one it shows: a form's.)
+function B:Joined(key, index, spells)
+    spells = spells or ns.BarData(key).spells
     if not (ns.AURA_BARS[key] ~= nil and index > 1 and spells[index] ~= nil) then return false end
     return ns.Joins(key)[spells[index]] == true or self:Kindred(key, spells[index - 1], spells[index])
 end
@@ -1971,16 +1987,40 @@ local function Space(key, name)
 end
 
 -- The bar's entries in order, with joined ones gathered into one group.
-function B:Units(key)
+-- (spells: another of its lists, a form's, in place of the one it shows.)
+function B:Units(key, spells)
+    spells = spells or ns.BarData(key).spells
     local units = {}
-    for i, name in ipairs(ns.BarData(key).spells) do
-        if self:Joined(key, i) and #units > 0 then
+    for i, name in ipairs(spells) do
+        if self:Joined(key, i, spells) and #units > 0 then
             table.insert(units[#units], name)
         else
             units[#units + 1] = { name }
         end
     end
     return units
+end
+
+-- Swap with my form on a Debuffs bar with fixed spots (Buffs.lua F:Layout):
+-- the groups of every list it can show (ns.SwapLists, the one it shows now
+-- first, so that one always has room), each group once, and for each list
+-- (by its form, 0 for Normal) its groups in order, each by its names
+-- joined with "+".
+function B:FormUnits(key)
+    local units, forms, seen = {}, {}, {}
+    for _, each in ipairs(ns.SwapLists(key)) do
+        local ids = {}
+        for _, unit in ipairs(self:Units(key, each.list)) do
+            local id = table.concat(unit, "+")
+            ids[#ids + 1] = id
+            if not seen[id] then
+                seen[id] = true
+                units[#units + 1] = unit
+            end
+        end
+        forms[each.form] = ids
+    end
+    return units, forms
 end
 
 -- How many of an aura bar's slots your entries take: one per icon, so a
@@ -2050,6 +2090,9 @@ local function Forget(key, name)
         ns.ForgetCountTicks(key, name)
     end
     if not (ns.AURA_BARS[key] and name) then return name end
+    -- (Still on another of the bar's lists, a form's on a Debuffs bar
+    -- swapping with your form: its choices stay for it there.)
+    if ns.OnBarLists(key, name) then return name end
     ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
     if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name], ns.GlowActive(key)[name], ns.HandOthers(key)[name] = nil, nil, nil end
     ns.SetWarnAt(key, name, nil)
@@ -3157,8 +3200,9 @@ function B:SetOption(key, field, value)
     -- other from now on keep a spell off both cooldown bars. Ticked, this
     -- bar's form lists kept from before give way to the other bar's;
     -- unticked, its normal list (now in every form) keeps what's on it. Any
-    -- change there lays every bar out again.
-    local apart = field == "swapForm" and ns.KeepApart(value and (key == "cd" and "util" or "cd") or key)
+    -- change there lays every bar out again. (A Debuffs bar's lists are its
+    -- own: nothing to keep apart.)
+    local apart = field == "swapForm" and not ns.AURA_BARS[key] and ns.KeepApart(value and (key == "cd" and "util" or "cd") or key)
     if not self.started then return end
     if apart then return self:Rebuild() end
     -- Swap with my form ticked: the form you're in now, read before the bar
@@ -3215,8 +3259,14 @@ end
 -- Swap with my form: each Cooldowns or Utility bar whose list changed (your
 -- form, or the one its page sets up) laid out again with the new one, at
 -- once and in a fight too: the addon's own icons only, as for an item
--- running out (Relay). Its spot, size and every other setting stay. True
--- when any bar was.
+-- running out (Relay). Its spot, size and every other setting stay. A
+-- Debuffs bar swapping with your form is laid out again out of a fight; in
+-- one, with fixed spots (missing debuffs greyed), the form's spots show at
+-- once, set up with every form's before the fight (Buffs.lua F:ShowForm:
+-- the addon's own frames only, as the times over the cooldown icons move
+-- in a fight); packed, the game lays its icons out, which waits for the
+-- fight to end, as every other change to that bar does. True when any bar
+-- changed now.
 function B:FormChanged()
     if not self.started then return false end
     local changed = false
@@ -3225,6 +3275,15 @@ function B:FormChanged()
         if bar and bar.kind == "cooldown" and ns.ActiveList(key) ~= bar.list then
             Layout(bar)
             changed = true
+        elseif bar and bar.kind == "aura" and bar.holders and ns.ShownForm(key) ~= bar.formShown then
+            if not (inCombat or InCombatLockdown()) then
+                Layout(bar)
+                changed = true
+            elseif ns.BuffBar:ShowForm(bar) then
+                changed = true
+            else
+                bar.pendingLayout = true
+            end
         end
     end
     if not changed then return false end

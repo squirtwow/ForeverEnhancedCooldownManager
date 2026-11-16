@@ -290,6 +290,7 @@ end
 -- its default, which a string leaves out.
 local BAR_CHECKS = {
     size = function(v) return Within(v, ns.BAR_LIMITS.size) end,
+    heightPct = function(v) return Within(v, ns.BAR_LIMITS.heightPct) end,
     spacing = function(v) return Within(v, ns.BAR_LIMITS.spacing) end,
     perRow = function(v) return Within(v, ns.BAR_LIMITS.perRow) end,
     whenReady = function(v) return ns.WHEN_READY_NAMES[v] ~= nil end,
@@ -313,7 +314,8 @@ local BAR_CHECKS = {
     glowProcs = Bool,
 }
 P.BAR_CHECKS = BAR_CHECKS
-local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], spacing = ns.BAR_LIMITS.spacing[3], perRow = ns.BAR_LIMITS.perRow[3],
+local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.heightPct[3], spacing = ns.BAR_LIMITS.spacing[3],
+    perRow = ns.BAR_LIMITS.perRow[3],
     whenReady = "show", onCooldown = "show", dimUnusable = false, dimOpacity = ns.BAR_LIMITS.dimOpacity[3],
     outOfCombat = "show", showMissing = false, onlyMissing = false, greyedNoTarget = false, showNames = false, showTimer = true,
     showAuras = false, showGCD = false, selfDebuffs = false, grow = "centre", wrap = "down",
@@ -458,18 +460,27 @@ end
 -- (Core.lua UseSetup), as they did before, in place of going back to their
 -- default as a setting a string leaves out does. As keep (look -> setting
 -- -> true, bars -> bar -> setting -> true), or nil for a string that
--- carries them all.
+-- carries them all. Icon height (heightPct) the same, carried only since
+-- the update after 1.10.14: a string from then or before leaves each bar's
+-- as it is.
 local CARRIED_AFTER = "1.10.13"
+local HEIGHT_AFTER = "1.10.14"
 local NEW_LOOK = { "pulseResets" }
 local NEW_COOLDOWN = { "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
 local function Kept(version)
-    if ns.CompareVersions(version, CARRIED_AFTER) == 1 then return nil end
+    if ns.CompareVersions(version, HEIGHT_AFTER) == 1 then return nil end
+    local older = ns.CompareVersions(version, CARRIED_AFTER) ~= 1
     local keep = { look = {}, bars = {} }
-    for _, key in ipairs(NEW_LOOK) do keep.look[key] = true end
+    if older then
+        for _, key in ipairs(NEW_LOOK) do keep.look[key] = true end
+    end
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
-        local own = { glowProcs = true }
-        if not ns.AURA_BARS[key] then
-            for _, field in ipairs(NEW_COOLDOWN) do own[field] = true end
+        local own = { heightPct = true }
+        if older then
+            own.glowProcs = true
+            if not ns.AURA_BARS[key] then
+                for _, field in ipairs(NEW_COOLDOWN) do own[field] = true end
+            end
         end
         keep.bars[key] = own
     end
@@ -516,7 +527,8 @@ local function Setup(g, Skip, swap, version)
             if check and check(value) and Fits(field, key) then
                 own[field] = value
             elseif field == "swapForm" and Bool(value) then
-                if value and ns.CanSwap(key) then swap[key] = true end
+                -- (1.6.0 had it on these two only.)
+                if value and (key == "cd" or key == "util") then swap[key] = true end
             else
                 Skip()
             end
@@ -619,24 +631,28 @@ local function Clean(data)
             Skip()
         end
     end
-    -- Each form's own lists for the Cooldowns and Utility bars (Swap with my
-    -- form), only the ones it has, each checked as a bar's is: an entry on
-    -- one of a form's two bars, not both.
+    -- Each form's own lists for the Cooldowns, Utility and Debuffs bars
+    -- (Swap with my form; an extra Debuffs bar's only with it), only the
+    -- ones it has, each checked as a bar's is: an entry on one of a form's
+    -- two cooldown bars, not both, and once on a Debuffs bar's.
     if data.f ~= nil and type(data.f) ~= "table" then Skip() end
     for form, own in pairs(Table(data.f)) do
         if ns.OwnFormList(form) and type(own) == "table" then
             local kept, cooldown = {}, {}
-            for key, values in pairs(own) do
-                if not (ns.CanSwap(key) and type(values) == "table") then Skip() end
+            local function Has(key)
+                return ns.CanSwap(key) and (ns.EXTRAS_OF[key] ~= nil or shared.extras[key] == true)
             end
-            for _, key in ipairs(ns.BASE_BAR_KEYS) do
-                if ns.CanSwap(key) and type(own[key]) == "table" then
-                    local list = {}
+            for key, values in pairs(own) do
+                if not (Has(key) and type(values) == "table") then Skip() end
+            end
+            for _, key in ipairs(ns.ALL_BAR_KEYS) do
+                if Has(key) and type(own[key]) == "table" then
+                    local list, seen = {}, ns.AURA_BARS[key] and {} or cooldown
                     for _, value in ipairs(own[key]) do
-                        local entry = BarEntry(value)
-                        if entry and not cooldown[entry] and #list < ns.BAR_MAX_SPELLS then
+                        local entry = BarEntry(value, key)
+                        if entry and not seen[entry] and #list < ns.BAR_MAX_SPELLS then
                             list[#list + 1] = entry
-                            cooldown[entry], listed[entry] = true, true
+                            seen[entry], listed[entry] = true, true
                         else
                             Skip()
                         end
@@ -651,19 +667,24 @@ local function Clean(data)
             Skip()
         end
     end
-    -- The bars swapping with your form: the Cooldowns and Utility bars, true each.
+    -- The bars swapping with your form: the Cooldowns, Utility and Debuffs
+    -- bars (an extra Debuffs bar with it), true each.
     if data.w ~= nil and type(data.w) ~= "table" then Skip() end
     for key, on in pairs(Table(data.w)) do
-        if ns.CanSwap(key) and on == true then shared.swap[key] = true else Skip() end
+        if ns.CanSwap(key) and shared.lists[key] and on == true then shared.swap[key] = true else Skip() end
     end
     -- On the Buffs and Debuffs bars (an extra one with it), names joined to
-    -- the entry before them.
+    -- the entry before them (on a Debuffs bar's list or a form's).
     for key, joins in pairs(Table(data.j)) do
         if ns.AURA_BARS[key] and shared.lists[key] and type(joins) == "table" then
             local after, set = {}, {}
-            for i, entry in ipairs(shared.lists[key]) do
-                if i > 1 then after[entry] = true end
+            local function After(list)
+                for i, entry in ipairs(Table(list)) do
+                    if i > 1 then after[entry] = true end
+                end
             end
+            After(shared.lists[key])
+            for _, own in pairs(shared.forms) do After(own[key]) end
             for name, on in pairs(joins) do
                 if on == true and after[name] then set[name] = true else Skip() end
             end
@@ -727,12 +748,11 @@ local function Clean(data)
         end
     end
     -- The Buffs and Debuffs bars' warned entries (Warn at): names on that
-    -- bar's list, each a whole number of seconds up to an hour.
+    -- bar's lists (a form's too), each a whole number of seconds up to an hour.
     if data.t ~= nil and type(data.t) ~= "table" then Skip() end
     for key, set in pairs(Table(data.t)) do
         if ns.AURA_BARS[key] and type(set) == "table" then
-            local onBar, kept = {}, {}
-            for _, entry in ipairs(shared.lists[key] or {}) do onBar[entry] = true end
+            local onBar, kept = OnLists(shared.lists, shared.forms, key), {}
             for name, seconds in pairs(set) do
                 if onBar[name] and ns.WarnValue(seconds) then kept[name] = seconds else Skip() end
             end
@@ -1030,7 +1050,8 @@ function P.Export()
     for form, own in pairs(Table(store.forms)) do
         if ns.OwnFormList(form) and type(own) == "table" then
             local lists = {}
-            for _, key in ipairs(ns.BASE_BAR_KEYS) do
+            -- (The bars you have: an extra Debuffs bar's with it.)
+            for _, key in ipairs(ns.BAR_KEYS) do
                 if ns.CanSwap(key) and type(own[key]) == "table" then lists[key] = Listed(own[key]) end
             end
             if next(lists) then forms[form] = lists end
@@ -1075,11 +1096,11 @@ function P.Export()
         if kept then own[name] = kept end
     end
     if next(own) then data.i = own end
-    -- The aura bars' warned entries (Warn at), those on that bar's list.
+    -- The aura bars' warned entries (Warn at), those on that bar's lists (a
+    -- form's too).
     local warns = {}
     for key in pairs(ns.AURA_BARS) do
-        local onBar, set = {}, {}
-        for _, entry in ipairs(data.l[key] or {}) do onBar[entry] = true end
+        local onBar, set = OnLists(data.l, forms, key), {}
         for name, seconds in pairs(ns.WarnAt(key)) do
             if onBar[name] and ns.WarnValue(seconds) then set[name] = seconds end
         end

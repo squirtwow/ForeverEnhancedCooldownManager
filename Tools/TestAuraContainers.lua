@@ -5853,6 +5853,87 @@ end)()
     end
 end)()
 
+-- Totem time (a player's idea, 16 Nov 2026) -------------------------------------------------------
+-- Ticked in Icon details, a totem's icon on a cooldown bar shows its totem's
+-- time while it stands (GetTotemDuration's duration object), with the gold
+-- edge of a buff's time. Which totem stands is read from GetTotemInfo (its
+-- rank's numerals left off), or while that's secret, the last totem of that
+-- element you cast. Off by default: nothing made or heard.
+;(function()
+    Fresh()
+    table.insert(book[2].items, { name = "Strength of Earth Totem", subName = "Rank 1", spellID = 8075, iconID = 136023 })
+    table.insert(book[2].items, { name = "Searing Totem", subName = "Rank 1", spellID = 3599, iconID = 135825 })
+    local standing, up, secret = {}, {}, false -- by slot: the totem's name, and whether its time runs
+    local durations = {}
+    for slot = 1, 4 do durations[slot] = { IsActive = function() return Typed("boolean", up[slot]) end } end
+    _G.GetTotemInfo = function(slot)
+        if secret then return SECRETS.boolean, SECRETS.string, SECRETS.number, SECRETS.number, SECRETS.number, 1, SECRETS.number end
+        local name = standing[slot]
+        return name ~= nil, name or "", name and 100 or 0, name and 300 or 0, 1, 1, 0
+    end
+    _G.GetTotemDuration = function(slot) return durations[slot] end
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B, A = ns.Bars, ns.IconAuras
+    local names = C_Spell.GetSpellName
+    C_Spell.GetSpellName = function(id)
+        if id == 3599 then return "Searing Totem" end
+        return names(id)
+    end
+    B:Assign("Strength of Earth Totem", "cd")
+    B:Assign("Searing Totem", "cd")
+    B:Assign("Moonfire", "cd")
+    local bar = B:Get("cd")
+    local function Icon(name)
+        for i = 1, bar.count do
+            if bar.icons[i].name == name then return bar.icons[i] end
+        end
+    end
+    local earth, fire, moon = Icon("Strength of Earth Totem"), Icon("Searing Totem"), Icon("Moonfire")
+    local function Shows(icon)
+        local parts = icon.totemParts
+        if not parts then return "none" end
+        local set, slot = Last(parts.cooldown, "SetCooldownFromDurationObject"), "-"
+        for i = 1, 4 do if set ~= nil and set == durations[i] then slot = i end end
+        return tostring(S[parts.frame].shown) .. "/" .. slot
+    end
+    local function All() return Shows(earth) .. " " .. Shows(fire) .. " " .. Shows(moon) end
+
+    standing[2], up[2] = "Strength of Earth Totem IV", true
+    Fire("PLAYER_TOTEM_UPDATE", 2)
+    local off = All() .. " " .. tostring(ns.Get("totemTime"))
+
+    ns.Set("totemTime", true)
+    A:ApplyTotems()
+    local ticked = All() .. " " .. tostring(S[earth.totemParts.frame].alpha) .. " " .. tostring(Last(earth.totemParts.art, "SetTexture") or
+        S[earth.totemParts.art].texture)
+    -- Its totem gone: the time goes.
+    standing[2], up[2] = nil, false
+    Fire("PLAYER_TOTEM_UPDATE", 2)
+    local gone = All()
+    Equal(off .. " | " .. ticked .. " | " .. gone, "none none none false | true/2 none none 1 1 | false/2 none none",
+        "off: nothing made; ticked: Strength of Earth's icon shows slot 2's time (rank numerals left off); its totem gone, hidden")
+
+    -- In a fight the slots are secret: your Searing Totem cast says slot 1 is
+    -- it, and the game picks whether its time shows. Nothing secret misused.
+    secret, up[1] = true, SECRET
+    Fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-3-0-0-0-0-0", 3599)
+    Fire("PLAYER_TOTEM_UPDATE", 1)
+    local parts = fire.totemParts
+    Equal(All() .. " " .. tostring(parts and IsSecret(S[parts.frame].alphaFrom)) .. " " .. tostring(parts and S[parts.frame].alphaIf)
+        .. " " .. #SecretMisuse .. " " .. A:TotemReport(), "false/2 true/1 none true 1 0 0 Searing Totem, nil, nil, nil",
+        "secret in a fight: the last totem cast of that element, its time shown as the game says; nothing misused")
+    secret = false
+
+    -- Unticked: every totem time hidden at once, and nothing shown after.
+    ns.Set("totemTime", false)
+    A:ApplyTotems()
+    standing[1], up[1] = "Searing Totem", true
+    Fire("PLAYER_TOTEM_UPDATE", 1)
+    B:Relayout("cd")
+    Equal(All() .. " " .. #printed, "false/2 false/1 none 0", "unticked: hidden, and not shown again; no errors")
+    _G.GetTotemInfo, _G.GetTotemDuration = nil, nil
+end)()
+
 Equal(SecretMisuse[1], nil, "no secret misused anywhere")
 print = _G.print
 io.write("Aura container checks passed: " .. checks .. " assertions.\n")

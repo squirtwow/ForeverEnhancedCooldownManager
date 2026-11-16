@@ -46,9 +46,10 @@ end
 -- with Blizzard's own gold swipe over a buff or debuff that's up, running
 -- as its cooldown items' do, and no edge. Only what changed is set; after
 -- the swipe's colour is set again (recolour: Style:CooldownLook), the gold
--- goes back over it. Out of a fight only.
-local function Draw(parts, size, recolour)
-    Style:Shape(parts.shape, size)
+-- goes back over it. Out of a fight only. ratio: its icon's height over its
+-- width (Icon height), the art cropped to it.
+local function Draw(parts, size, recolour, ratio)
+    Style:Shape(parts.shape, size, nil, ratio)
     local rounded = parts.shape.rounded
     if parts.gold ~= rounded then
         parts.gold = rounded
@@ -69,8 +70,8 @@ function A:Details(bar)
     for _, anchor in ipairs(bar and bar.auraAnchors or {}) do
         for _, parts in ipairs(anchor.parts) do
             Style:CooldownLook(parts.cooldown)
-            Draw(parts, anchor.size or 36, true)
-            parts.cooldown:SetCountdownFont(Style:Countdown(anchor.size or 36, anchor.look))
+            Draw(parts, anchor.size or 36, true, anchor.ratio)
+            parts.cooldown:SetCountdownFont(Style:Countdown(anchor.face or anchor.size or 36, anchor.look))
             Style:AuraNumbers(parts)
         end
     end
@@ -108,8 +109,8 @@ local function Look(anchor)
         -- pieces made now, as the container's icons only take art as they're made.
         local parts = { cooldown = cooldown, count = count, edge = edge, gold = false,
             shape = Style:ShapeKit(button, icon, { cooldown }, true) }
-        Fit(parts, anchor.size or 36, anchor.showTimer ~= false, anchor.look)
-        Draw(parts, anchor.size or 36)
+        Fit(parts, anchor.face or anchor.size or 36, anchor.showTimer ~= false, anchor.look)
+        Draw(parts, anchor.size or 36, nil, anchor.ratio)
         anchor.parts[#anchor.parts + 1] = parts
     end
 end
@@ -298,8 +299,9 @@ local function PlaceTicks(bar, data)
             anchor:SetSize(1, 1)
             anchor:SetPoint("CENTER", UIParent, "BOTTOMLEFT", AWAY, AWAY)
         end
-        -- Its numbers sized for the icon it sits over (its own size, else the bar's).
-        local pace, size = target and slot.pace or nil, target and target.size or base
+        -- Its numbers sized for the icon it sits over (its own size, else the
+        -- bar's; by its shorter side, Icon height).
+        local pace, size = target and slot.pace or nil, ns.IconFace(data, target and target.size or base)
         local drawn = pace and (pace .. ":" .. size) or ""
         if slot.ticks and fight then
             if slot.drawn ~= drawn then bar.auraPending = true end
@@ -341,7 +343,10 @@ local function Place(bar, data)
         end
         -- Its numbers sized for the icon it sits over: that icon's own size
         -- (settings per spell), else the bar's.
+        -- (Icon height: its art cropped to the icon's shape, its numbers by
+        -- the icon's shorter side.)
         local size = target and target.size or base
+        local face, ratio = ns.IconFace(data, size), ns.IconRatio(data, size)
         anchor:ClearAllPoints()
         if target then
             anchor:SetAllPoints(target)
@@ -352,16 +357,18 @@ local function Place(bar, data)
         local look = anchor.look
         if not fight then look = ns.SpellLook(name) end
         if fight and Style:LookKey(ns.SpellLook(name)) ~= Style:LookKey(look) then bar.auraPending = true end
-        if anchor.size ~= size or anchor.showTimer ~= data.showTimer or Style:LookKey(anchor.look) ~= Style:LookKey(look) then
-            anchor.size, anchor.showTimer, anchor.look = size, data.showTimer, look
-            for _, parts in ipairs(anchor.parts) do Fit(parts, size, data.showTimer, look) end
+        if anchor.size ~= size or anchor.face ~= face or anchor.showTimer ~= data.showTimer
+            or Style:LookKey(anchor.look) ~= Style:LookKey(look) then
+            anchor.size, anchor.face, anchor.showTimer, anchor.look = size, face, data.showTimer, look
+            for _, parts in ipairs(anchor.parts) do Fit(parts, face, data.showTimer, look) end
         end
+        anchor.ratio = ratio
         -- Square or like Blizzard's at its icon's size, out of a fight: a
         -- size changed in one waits for it to end.
         for _, parts in ipairs(anchor.parts) do
             if not fight then
-                Draw(parts, size)
-            elseif parts.shape.size ~= size then
+                Draw(parts, size, nil, ratio)
+            elseif parts.shape.size ~= size or (parts.shape.ratio or 1) ~= ratio then
                 bar.auraPending = true
             end
         end
@@ -525,9 +532,9 @@ local function Looping(active, proc)
 end
 
 -- A slot's glow shown, in the Ready glow style picked, the loop round its
--- icon's size. Only what changed is set. Out of a fight only, as the icons
--- are the game's.
-local function Light(active, size, proc)
+-- icon's size (size across, high tall: Icon height). Only what changed is
+-- set. Out of a fight only, as the icons are the game's.
+local function Light(active, size, high, proc)
     if not active.on then
         active.on = true
         active.frame:Show()
@@ -538,16 +545,17 @@ local function Light(active, size, proc)
         for _, strip in ipairs(active.strips) do strip:SetShown(not looping) end
         if active.loop then active.loop:SetShown(looping) end
     end
-    local across = size * GLOW_SPREAD
-    if active.loop and active.spread ~= across then
-        active.spread = across
-        active.loop:SetSize(across, across)
+    local across, tall = size * GLOW_SPREAD, high * GLOW_SPREAD
+    if active.loop and (active.spread ~= across or active.spreadTall ~= tall) then
+        active.spread, active.spreadTall = across, tall
+        active.loop:SetSize(across, tall)
     end
 end
 
 -- Whether Light would change anything on a slot's glow.
-local function Stale(active, size, proc)
-    return not active.on or active.looping ~= Looping(active, proc) or active.loop ~= nil and active.spread ~= size * GLOW_SPREAD
+local function Stale(active, size, high, proc)
+    return not active.on or active.looping ~= Looping(active, proc)
+        or active.loop ~= nil and (active.spread ~= size * GLOW_SPREAD or active.spreadTall ~= high * GLOW_SPREAD)
 end
 
 -- Each glow slot over the icon of the spell it was told about, found by
@@ -577,10 +585,11 @@ local function PlaceGlows(bar)
             anchor:SetPoint("CENTER", UIParent, "BOTTOMLEFT", AWAY, AWAY)
         end
         local active, size = slot.active, target and target.size or base
+        local high = ns.IconHeight(bar.data, size)
         if active and fight then
-            if Stale(active, size, proc) then bar.glowPending = true end
+            if Stale(active, size, high, proc) then bar.glowPending = true end
         elseif active then
-            Light(active, size, proc)
+            Light(active, size, high, proc)
         end
     end
 end
@@ -650,10 +659,201 @@ function A:GlowReport(bar)
     return "  glow for more procs: " .. how .. (bar.glowPending and ", waiting for the fight to end" or "")
 end
 
+-- Totem time ---------------------------------------------------------------------------
+-- (A player's idea: a 5 minute totem's time on its icon, as Blizzard's own
+-- Cooldown Manager shows it; only a totem with a cooldown showed a number.)
+-- With Totem time ticked (Icon details), a totem's icon on a Cooldowns or
+-- Utility bar (an extra one too) shows the time its totem has left while
+-- it stands, with the gold edge of a buff's time. The game hands each totem
+-- slot's time as a duration object (GetTotemDuration, fine in a fight).
+-- Which totem stands in a slot is read from GetTotemInfo, or, while the
+-- game keeps that secret, it's the last totem of that element you cast;
+-- a slot with none then shows nothing, as its time isn't running. The
+-- addon's own frames only, laid over the icon: nothing of Blizzard's is
+-- touched. Off until ticked: then nothing is made or heard.
+local TOTEM_SLOTS = {} -- a totem's name -> its slot (1 fire, 2 earth, 3 water, 4 air)
+for slot, names in ipairs({
+    { "Searing Totem", "Fire Nova Totem", "Magma Totem", "Flametongue Totem", "Frost Resistance Totem" },
+    { "Earthbind Totem", "Stoneclaw Totem", "Stoneskin Totem", "Strength of Earth Totem", "Tremor Totem" },
+    { "Healing Stream Totem", "Mana Spring Totem", "Mana Tide Totem", "Poison Cleansing Totem", "Disease Cleansing Totem",
+        "Fire Resistance Totem" },
+    { "Grounding Totem", "Nature Resistance Totem", "Windfury Totem", "Grace of Air Totem", "Windwall Totem",
+        "Tranquil Air Totem", "Sentry Totem" },
+}) do
+    for _, name in ipairs(names) do TOTEM_SLOTS[name] = slot end
+end
+local TOTEM_COUNT = 4
+-- cast: by slot, the last totem of that element you cast; hearing: the
+-- events listened for; events: their frame, made the first time.
+local totems = { cast = {}, hearing = false }
+
+local function Open(value)
+    return not (issecretvalue and issecretvalue(value))
+end
+
+-- The totem standing in a slot now, by its spell's name, or nil.
+local function Standing(slot)
+    if type(GetTotemInfo) ~= "function" then return nil end
+    local ok, have, name, _, duration, _, _, spellID = pcall(GetTotemInfo, slot)
+    if not ok then return nil end
+    if not (Open(have) and Open(name) and Open(spellID) and Open(duration)) then return totems.cast[slot] end
+    if not have or type(name) ~= "string" or name == "" then return nil end
+    if type(duration) == "number" and duration <= 0 then return nil end
+    local spell = type(spellID) == "number" and spellID > 0 and C_Spell and C_Spell.GetSpellName
+        and C_Spell.GetSpellName(spellID) or nil
+    if type(spell) == "string" and Open(spell) and spell ~= "" then return spell end
+    -- The totem's own name, its rank (IV) left off.
+    return (name:gsub("%s+[IVX]+$", ""))
+end
+
+-- Which slot each standing totem is in, by name.
+local function StandingTotems()
+    local standing = {}
+    for slot = 1, TOTEM_COUNT do
+        local name = Standing(slot)
+        if name then standing[name] = slot end
+    end
+    return standing
+end
+
+-- An icon's totem time, made the first time it's wanted: over the icon, in
+-- the same look as a buff's time over it (Look, above), taking no mouse.
+local function TotemParts(icon)
+    local parts = icon.totemParts
+    if parts then return parts end
+    local frame = CreateFrame("Frame", nil, icon)
+    frame:SetAllPoints(icon)
+    frame:SetFrameLevel(icon:GetFrameLevel() + 4)
+    frame:EnableMouse(false)
+    local edge = frame:CreateTexture(nil, "BACKGROUND")
+    edge:SetPoint("TOPLEFT", -1, 1)
+    edge:SetPoint("BOTTOMRIGHT", 1, -1)
+    edge:SetColorTexture(EDGE[1], EDGE[2], EDGE[3], 1)
+    local art = frame:CreateTexture(nil, "ARTWORK")
+    art:SetAllPoints()
+    Style:Zoom(art)
+    local cooldown = CreateFrame("Cooldown", nil, frame, "CooldownFrameTemplate")
+    cooldown:SetAllPoints(art)
+    cooldown:SetSwipeTexture(Style.FLAT)
+    cooldown:SetReverse(true)
+    cooldown:SetDrawBling(false)
+    Style:CooldownLook(cooldown)
+    -- Its time run out: gone until the next totem.
+    cooldown:SetScript("OnCooldownDone", function() frame:Hide() end)
+    frame:Hide()
+    parts = { frame = frame, art = art, cooldown = cooldown, edge = edge, gold = false,
+        shape = Style:ShapeKit(frame, art, { cooldown }) }
+    icon.totemParts = parts
+    return parts
+end
+
+-- The time left on slot's totem over icon, drawn for its size and its
+-- spell's look. A duration that isn't running (the game keeping the slot
+-- secret and no totem there) shows nothing.
+local function ShowTotem(icon, data, slot)
+    local ok, duration = false, nil
+    if type(GetTotemDuration) == "function" then ok, duration = pcall(GetTotemDuration, slot) end
+    if not (ok and duration) then
+        if icon.totemParts then icon.totemParts.frame:Hide() end
+        return
+    end
+    local parts = TotemParts(icon)
+    local size = icon.size or ns.IconSize(data)
+    Style:CooldownLook(parts.cooldown)
+    Draw(parts, size, true, ns.IconRatio(data, size))
+    parts.cooldown:SetCountdownFont(Style:Countdown(icon.face or size, icon.look))
+    parts.cooldown:SetHideCountdownNumbers(data.showTimer == false)
+    Style:AuraNumbers(parts)
+    local art = icon.spellID and C_Spell.GetSpellTexture(icon.spellID)
+    if art then parts.art:SetTexture(art) end
+    parts.cooldown:SetCooldownFromDurationObject(duration)
+    if parts.frame.SetAlphaFromBoolean and duration.IsActive then
+        -- Secret in a fight: handed to the game as it is.
+        parts.frame:SetAlphaFromBoolean(duration:IsActive(), 1, 0)
+    end
+    parts.frame:Show()
+end
+
+-- One cooldown bar's totem icons: each with its totem's time while it
+-- stands, the rest without. standing: from StandingTotems, or nil for none.
+local function TotemBar(bar, standing)
+    if not (bar and bar.kind == "cooldown" and bar.icons) then return end
+    for i, icon in ipairs(bar.icons) do
+        local slot = standing and i <= (bar.count or 0) and icon.spellID and icon.name
+            and standing[(icon.name:gsub("@.*$", ""))]
+        if slot then
+            ShowTotem(icon, bar.data or ns.BarData(bar.key), slot)
+        elseif icon.totemParts then
+            icon.totemParts.frame:Hide()
+        end
+    end
+end
+
+local function TotemsOn()
+    return ns.Get("totemTime") == true and ns.Bars ~= nil and ns.Bars:Enabled()
+end
+
+-- Every cooldown bar's totem icons again.
+function A:Totems()
+    local standing = TotemsOn() and StandingTotems() or nil
+    for _, key in ipairs(ns.BAR_KEYS) do TotemBar(ns.Bars and ns.Bars:Get(key), standing) end
+end
+
+-- Your totems heard (each slot's changes, and your casts for which totem
+-- went down) only while Totem time is ticked.
+local function HearTotems(on)
+    if totems.hearing == on then return end
+    totems.hearing = on
+    local events = totems.events
+    if not events then
+        if not on then return end
+        events = CreateFrame("Frame")
+        events:SetScript("OnEvent", function(_, event, ...)
+            if event == "UNIT_SPELLCAST_SUCCEEDED" then
+                -- (The unit, the cast's GUID, then its spell ID.)
+                local id = select(3, ...)
+                if not (Open(id) and type(id) == "number") then return end
+                local name = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                local slot = type(name) == "string" and Open(name) and TOTEM_SLOTS[name]
+                if not slot then return end
+                totems.cast[slot] = name
+            end
+            A:Totems()
+        end)
+        totems.events = events
+    end
+    if on then
+        pcall(events.RegisterEvent, events, "PLAYER_TOTEM_UPDATE")
+        pcall(events.RegisterEvent, events, "PLAYER_ENTERING_WORLD")
+        pcall(events.RegisterUnitEvent, events, "UNIT_SPELLCAST_SUCCEEDED", "player")
+    else
+        events:UnregisterAllEvents()
+    end
+end
+
+-- Totem time ticked or unticked (Icon details): heard or not, and every
+-- totem icon shown or cleared at once.
+function A:ApplyTotems()
+    HearTotems(TotemsOn())
+    self:Totems()
+end
+
+-- For the tests: the totem standing in each slot, as read now.
+function A:TotemReport()
+    local list = {}
+    for slot = 1, TOTEM_COUNT do list[slot] = tostring(Standing(slot)) end
+    return table.concat(list, ", ")
+end
+
 -- After a bar's icons are laid out (Bars.lua): made if needed, told what's
 -- where, and placed over the icons. Its glows for more procs first.
 function A:Layout(bar, data)
     if not bar or bar.kind ~= "cooldown" then return end
+    -- Totem time over the icons where they are now (nothing while unticked
+    -- and none was shown).
+    local on = TotemsOn()
+    HearTotems(on)
+    TotemBar(bar, on and StandingTotems() or nil)
     self:ApplyGlows(bar)
     if self:On(bar) and not Create(bar) then
         -- First ticked during a fight: made as it ends.

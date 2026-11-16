@@ -173,19 +173,22 @@ end
 
 -- The preview in the spell's look, at its size on its bar (its own, where
 -- its bar can show one; within the tray), drawn by the calls your bars'
--- icons use.
+-- icons use. As tall as its bar's Icon height makes it (within the tray
+-- too), its art cropped to fit and its numbers by the shorter side.
 local function PaintPanelIcon(icon, bar, name)
     local S = ns.Style
-    local shown = ns.IconSize(ns.BarData(bar))
+    local data = ns.BarData(bar)
+    local shown = ns.IconSize(data)
     if ns.Bars:OwnSizeUsable(bar) then shown = ns.IconSizeFor(bar, name, shown) end
     local size = math.max(24, math.min(PANEL.tray[2] - 12, shown))
-    icon:SetSize(size, size)
-    S:Shape(icon.shape, size)
+    local high = math.max(12, math.min(PANEL.tray[2] - 12, ns.IconHeight(data, size)))
+    icon:SetSize(size, high)
+    S:Shape(icon.shape, size, nil, high / size)
     icon.art:SetTexture(ns.Spells:Icon(name))
     icon.art:SetDesaturated(ns.Spells:Find(name) == nil)
     local cooldown = icon.cooldown
     S:CooldownLook(cooldown)
-    cooldown:SetCountdownFont(S:Countdown(size, ns.SpellLook(name)))
+    cooldown:SetCountdownFont(S:Countdown(math.min(size, high), ns.SpellLook(name)))
     local get = cooldown.GetCountdownFontString
     local numbers = type(get) == "function" and get(cooldown) or nil
     if numbers then S:NumbersAt(numbers, cooldown, 0) end
@@ -250,6 +253,7 @@ local function PackedNote(bar)
     return "This bar is packed: the game lays its icons out at one size. Tick Show missing " .. word
         .. "s greyed to give each its own spot, then its own size."
 end
+ns.PackedSizeNote = PackedNote -- the Layout page's icon size box says the same
 
 local function PanelIconSize(window, dialog, shade, Changed)
     local B = ns.Bars
@@ -1053,20 +1057,37 @@ function ns.BuildBarPage(window, page, width)
         return "This bar's own size. All bars on the Layout page is at " .. scale .. ", so its icons show at "
             .. shown .. (shown <= ns.BAR_LIMITS.size[1] and ", the smallest they go." or ".")
     end)
+    -- Under it, Icon height (a player's idea: "different size ratio for
+    -- icons"): how tall the icons are, as a share of their size across, 100%
+    -- square as always. The art is cropped to fit, never stretched. The
+    -- three sliders under Icon size close up to make room for it.
+    local height = T:Slider(options, "Icon height", ns.BAR_LIMITS.heightPct, 5, 280, function(value)
+        B:SetOption(state.bar, "heightPct", value)
+        window:Refresh()
+    end, sliderLabel)
+    height:SetPoint("TOPLEFT", 0, -23)
+    -- Its value as a share, "100%", with room for it up to the track.
+    height.value:SetWidth(36)
+    local setHeight = height.Set
+    function height:Set(value)
+        setHeight(self, value)
+        self.value:SetText(value .. "%")
+    end
+    window:Hint(height, "How tall your icons are, as a share of their width. 100% is square.")
     local spacing = T:Slider(options, "Spacing", ns.BAR_LIMITS.spacing, 1, 280, function(value)
         B:SetOption(state.bar, "spacing", value)
         window:Refresh()
     end, sliderLabel)
-    spacing:SetPoint("TOPLEFT", 0, -30)
+    spacing:SetPoint("TOPLEFT", 0, -44)
     window:Hint(spacing, "The room between this bar's icons.")
     -- More icons than fit across go on another row. (Not the tray's perRow.)
     local across = T:Slider(options, "Icons per row", ns.BAR_LIMITS.perRow, 1, 280, function(value)
         B:SetOption(state.bar, "perRow", value)
         window:Refresh()
     end, sliderLabel)
-    across:SetPoint("TOPLEFT", 0, -58)
+    across:SetPoint("TOPLEFT", 0, -65)
     window:Hint(across, "How many icons fit across before the next row starts.")
-    page.size, page.spacing, page.across = size, spacing, across
+    page.size, page.height, page.spacing, page.across = size, height, spacing, across
 
     local function Option(label, field, y, note, x)
         local check = T:Check(options, label, function(self)
@@ -1125,12 +1146,24 @@ function ns.BuildBarPage(window, page, width)
     -- Form).
     -- Its words follow the class (ns.SwapWords): "Swap when in Stealth" on a
     -- rogue, "Swap with my stance" on a warrior.
+    -- On a Debuffs bar too (a player's idea: one debuff shown only in a
+    -- certain form), in the right column under your debuffs on you (or
+    -- under the tick count's rows while it shows), off unless ticked. Its
+    -- note says that packed, a change in a fight waits for it to end
+    -- (Buffs.lua F:ShowForm).
     local swapForm = Option("Swap with my form", "swapForm", -129, function()
         local words = ns.SwapWords()
+        local what = ns.AURA_BARS[state.bar] and "debuffs" or "icons"
+        local text
         if words.one then
-            return words.one .. " gets its own icons on this bar, swapped as you go in and out of it."
+            text = words.one .. " gets its own " .. what .. " on this bar, swapped as you go in and out of it."
+        else
+            text = "Each " .. words.what .. " gets its own " .. what .. " on this bar, swapped as you change."
         end
-        return "Each " .. words.what .. " gets its own icons on this bar, swapped as you change."
+        if ns.AURA_BARS[state.bar] and ns.BuffBar:Packed(ns.BarData(state.bar)) then
+            text = text .. " A change in a fight shows once it ends, unless Show missing debuffs greyed is ticked."
+        end
+        return text
     end)
     -- And with it ticked, under it, Editing: whose icons the tray and the
     -- bar show, to set up another form's without changing form. Your form's
@@ -1854,6 +1887,7 @@ function ns.BuildBarPage(window, page, width)
         if clear:IsShown() then another:SetPoint("RIGHT", clear, "LEFT", -6, 0) else another:SetPoint("TOPRIGHT", -16, -12) end
         RefreshTray()
         size:Set(data.size)
+        height:Set(data.heightPct)
         spacing:Set(data.spacing)
         across:Set(data.perRow)
         -- Packed buffs are laid out by the game in one row.
@@ -1912,7 +1946,8 @@ function ns.BuildBarPage(window, page, width)
         showAuras:SetChecked(data.showAuras)
         -- Swap with my form, for a character who knows a form (ticked in
         -- your profile); Editing with it ticked, naming whose icons show.
-        -- (Not on an extra bar: Cooldowns and Utility only.)
+        -- (Cooldowns, Utility and every Debuffs bar: not an extra cooldown
+        -- bar, nor a Buffs bar.)
         local forms, swaps = ns.CanSwap(key) and #ns.KnownForms() > 0, ns.Swaps(key)
         swapForm:SetShown(forms)
         swapForm:SetChecked(swaps)
@@ -1927,6 +1962,20 @@ function ns.BuildBarPage(window, page, width)
         editing:SetShown(picking)
         editing.label:SetShown(picking)
         if picking then editing.name:SetText(ns.FormName(ns.ShownForm(key))) end
+        -- On a Debuffs bar's page, under your debuffs on you in the right
+        -- column, or under the tick count's two rows while they show; Editing
+        -- under it as ever, and the options taller for each.
+        local swapAt = aura and counting and -173 or -129
+        if swapForm.placedAt ~= swapAt then
+            swapForm.placedAt = swapAt
+            swapForm:ClearAllPoints()
+            swapForm:SetPoint("TOPLEFT", 320, swapAt)
+            editing:ClearAllPoints()
+            editing:SetPoint("TOPLEFT", 420, swapAt - 22)
+            editing.label:ClearAllPoints()
+            editing.label:SetPoint("TOPLEFT", 320, swapAt - 26)
+        end
+        if aura then options:SetHeight((counting and OPTIONS_TALL or OPTIONS) + (forms and 22 or 0) + (picking and 22 or 0)) end
         showSelf:SetShown(aura ~= nil)
         showSelf:SetChecked(data.selfDebuffs)
         if aura then

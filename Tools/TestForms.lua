@@ -1596,11 +1596,17 @@ do
     w:Select("util")
     Equal(tostring(tick:GetChecked()) .. " " .. tostring(S[tick].shown) .. " " .. tostring(S[editing].shown), "false true false",
         "Utility's page shows Utility's own, off")
-    for _, key in ipairs({ "buff", "debuff" }) do
-        w:Select(key)
-        Equal(tostring(S[tick].shown) .. " " .. tostring(S[editing].shown), "false false",
-            "not on the " .. key .. " page: auras don't change with your form")
-    end
+    w:Select("buff")
+    Equal(tostring(S[tick].shown) .. " " .. tostring(S[editing].shown), "false false",
+        "not on the Buffs page: your buffs don't change with your form")
+    -- The Debuffs page (a player's idea: one debuff shown only in a certain
+    -- form): its own tick, off, in the right column under your debuffs on
+    -- you; no Editing until it's ticked.
+    w:Select("debuff")
+    local on = S[tick].points[1]
+    Equal(tostring(S[tick].shown) .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(S[editing].shown) .. " | " .. on[1] .. " "
+        .. on[2] .. " " .. on[3], "true false false | TOPLEFT 320 -129",
+        "the Debuffs page: Swap with my form too, off, under your debuffs on you; no Editing")
     Equal(#printed, 0, "no errors")
 end
 
@@ -1916,6 +1922,300 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- A Debuffs bar: each form its own debuffs -----------------------------------------------------------
+-- (A player's idea, Squirt's yes 16 Nov 2026: "one debuff is shown when in a
+-- certain form".) Off unless ticked, on the Debuffs bar's page too. Each
+-- form's own list, made from the normal one without what that form can't
+-- cast. With missing debuffs greyed (fixed spots) every form's spots are
+-- set up out of a fight and only the form's are in sight, each slot
+-- following its spot, so a change of form in one shows at once with
+-- nothing told to the game's container; packed, the game lays its icons
+-- out, so a change in a fight waits for it to end. Each entry's own choices
+-- (Warn at, Count ticks) go with it on every list it's on.
+
+do
+    local BOOK = { { "Moonfire", 8924, "Rank 2" }, { "Rake", 1822, "Rank 1" }, { "Demoralizing Roar", 99, "Rank 1" },
+        { "Faerie Fire", 770, "Rank 1" }, { "Bear Form", 5487 }, { "Cat Form", 768 } }
+    local DEBUFFS = { "Moonfire", "Rake", "Demoralizing Roar", "Faerie Fire" }
+    local NORMAL_SPOTS = "Moonfire 0 | Rake 40 | Demoralizing Roar 80 | Faerie Fire 120"
+    -- A druid with those four on its Debuffs bar, in no form, ticked to swap
+    -- or not, its missing debuffs greyed (fixed) or not (packed).
+    local function Druid(ticked, fixed)
+        local saved = { useBars = true, notesSeen = "dev", helpSeen = true, bars = { debuff = { showMissing = fixed or nil } } }
+        if ticked then saved = Ticked("DRUID", { "debuff" }, saved) end
+        local ns, B = Character("DRUID", BOOK, saved)
+        for _, name in ipairs(DEBUFFS) do B:SetAura("debuff", name, true) end
+        return ns, B, B:Get("debuff")
+    end
+    local function Profile(ns) return ForeverEnhancedCooldownManagerDB.profiles[ns.ProfileName()] end
+    -- The fixed spots in sight, in order, each by its entry and where it
+    -- sits along the bar ("Rake 40").
+    local function Spots(bar)
+        local out = {}
+        for _, holder in ipairs(bar.spots or {}) do
+            local name
+            for i = 1, bar.count do
+                if bar.holders[i] == holder then name = bar.names[i] end
+            end
+            out[#out + 1] = tostring(name) .. " " .. ("%g"):format(S[holder].points[1][4]) .. (S[holder].shown and "" or " hidden")
+        end
+        return table.concat(out, " | ")
+    end
+    -- The other fixed spots, in slot order: each hidden and far off screen
+    -- (its slot with it), else said to be in sight.
+    local function Away(bar)
+        local out, shown = {}, {}
+        for _, holder in ipairs(bar.spots or {}) do shown[holder] = true end
+        for i = 1, bar.count do
+            local holder = bar.holders[i]
+            if not shown[holder] then
+                local p = S[holder].points[1]
+                local gone = not S[holder].shown and p ~= nil and p[4] == -10000 and p[5] == -10000
+                out[#out + 1] = bar.names[i] .. (gone and "" or " IN SIGHT")
+            end
+        end
+        return table.concat(out, ", ")
+    end
+    -- Whether every fixed spot's slot is anchored to its spot and switched
+    -- on with its entry's spells ("all"), else the entries whose aren't.
+    local function Slots(bar)
+        local slots, wrong = S[bar.container].slots, {}
+        for i = 1, bar.count do
+            local slot = slots["b" .. i]
+            if Last(slot.button, "SetAllPoints") ~= bar.holders[i] or not slot.enabled
+                or not (slot.filters and slot.filters.includeSpellIDs) then
+                wrong[#wrong + 1] = bar.names[i]
+            end
+        end
+        return #wrong == 0 and "all" or table.concat(wrong, ", ")
+    end
+    -- A packed bar's icons the game is told about: each switched-on group's entry, in order.
+    local function Packed(bar)
+        local out, groups = {}, S[bar.container].groups
+        for i = 1, bar.groups do
+            local group = groups["g" .. i]
+            if group and group.enabled then out[#out + 1] = tostring(bar.names[i]) end
+        end
+        return table.concat(out, ", ")
+    end
+    -- Each fixed spot's entry with its Warn at and its Count ticks' pace.
+    local function Choices(bar)
+        local out = {}
+        for i = 1, bar.count do out[#out + 1] = bar.names[i] .. " " .. tostring(bar.warns[i]) .. " " .. tostring(bar.tickPaces[i]) end
+        return table.concat(out, ", ")
+    end
+
+    -- Off by default, then ticked on the Debuffs page.
+    do
+        local ns, B, bar = Druid(false, true)
+        Shift(ns, 1)
+        Equal(tostring(ns.Swaps("debuff")) .. " " .. Ticks(Profile(ns)) .. " | " .. Spots(bar) .. " | " .. List(ns, "debuff", 1) .. " "
+            .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM), "false nil | " .. NORMAL_SPOTS .. " | none nil",
+            "off by default: in cat form the Debuffs bar shows its one list, no form's list made, your form not heard")
+        SlashCmdList.FECM("")
+        local w = FECMFrame
+        w:Select("debuff")
+        local page = w.pages.bar
+        local tick, editing, area = page.options.swapForm, page.options.editing, page.optionsArea
+        S[tick].scripts.OnEnter(tick)
+        local note = S[w.note].text
+        S[tick].scripts.OnLeave(tick)
+        Equal(tostring(S[tick].shown) .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(S[editing].shown) .. " " .. S[area].height
+            .. " | " .. note, "true false false 156 | Each form gets its own debuffs on this bar, swapped as you change.",
+            "its page: the tick, off, the options a row taller for it, its note saying what it does")
+        tick:Click()
+        local pick, label = S[editing].points[1], S[editing.label].points[1]
+        Equal(tostring(ns.Swaps("debuff")) .. " " .. Ticks(Profile(ns)) .. " " .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM)
+            .. " | " .. Spots(bar) .. " | " .. Away(bar) .. " | " .. List(ns, "debuff", 1) .. " | " .. tostring(S[editing].shown) .. " "
+            .. S[editing.name].text .. " " .. pick[2] .. " " .. pick[3] .. " " .. label[2] .. " " .. label[3] .. " " .. S[area].height,
+            "true debuff true | Rake 40 | Faerie Fire 80 | Moonfire, Demoralizing Roar | Rake,Faerie Fire | true Cat Form 420 -151 320 -155 178",
+            "ticked in cat form: on in the profile, your form heard, cat form's own list at once (no Moonfire or Demoralizing Roar),"
+                .. " the rest out of sight; Editing under it, the options a row taller again")
+        Equal(Slots(bar) .. " | " .. S[bar].width .. "x" .. S[bar].height, "all | 156x36",
+            "every form's spot has its slot on it, the bar kept wide enough for the most any form shows")
+        -- Counting ticks: under the tick count's two rows instead.
+        B:SetCountTicks("debuff", "Rake", true)
+        w:Refresh()
+        local at = S[tick].points[1]
+        pick = S[editing].points[1]
+        Equal(at[2] .. " " .. at[3] .. " " .. pick[2] .. " " .. pick[3] .. " " .. S[area].height, "320 -173 420 -195 222",
+            "with a debuff counting its ticks: the tick and Editing under the tick count's rows, the options taller for them")
+        -- Editing: Normal's list from cat form, then put back.
+        editing.back:Click()
+        Equal(S[editing.name].text .. " | " .. Spots(bar) .. " | " .. table.concat((B:Mine("debuff")), ","),
+            "Normal | " .. NORMAL_SPOTS .. " | Moonfire,Rake,Demoralizing Roar,Faerie Fire", "Editing on Normal: the bar and tray show it")
+        -- A debuff ticked in the list goes on the list showing: bear form's here.
+        editing.back:Click()
+        Equal(S[editing.name].text .. " | " .. Spots(bar), "Bear Form | Demoralizing Roar 40 | Faerie Fire 80", "Editing on Bear Form")
+        B:SetAura("debuff", "Moonfire", true)
+        Equal(List(ns, "debuff", 5) .. " | " .. List(ns, "debuff") .. " | " .. Spots(bar),
+            "Demoralizing Roar,Faerie Fire,Moonfire | Moonfire,Rake,Demoralizing Roar,Faerie Fire | Demoralizing Roar 20 | Faerie Fire 60"
+                .. " | Moonfire 100", "Moonfire put on in bear form's list: on it alone, the normal list as it was")
+        w:Hide()
+        Equal(tostring(ns.EditingForm()) .. " | " .. Spots(bar), "nil | Rake 40 | Faerie Fire 80", "the window closed: your form's again (cat)")
+        -- Unticked: the one list again, the form lists kept for next time.
+        B:SetOption("debuff", "swapForm", false)
+        Equal(Spots(bar) .. " | " .. Away(bar) .. " | " .. List(ns, "debuff", 5), NORMAL_SPOTS .. " |  | Demoralizing Roar,Faerie Fire,Moonfire",
+            "unticked: the normal list in cat form, every spot in sight; bear form's list kept")
+        Equal(#printed, 0, "no errors")
+    end
+
+    -- Fixed spots: a change of form in a fight shows at once.
+    do
+        local ns, B, bar = Druid(true, true)
+        Equal(Spots(bar) .. " | " .. Away(bar) .. " | " .. Slots(bar) .. " | " .. S[bar].width .. "x" .. S[bar].height,
+            NORMAL_SPOTS .. " |  | all | 156x36", "no form: the normal list, every spot on its slot")
+        lockdown = true
+        Fire("PLAYER_REGEN_DISABLED")
+        local calls, runs = containerCallsInCombat, #ContainerRuns
+        Shift(ns, 1)
+        local cat = Spots(bar) .. " | " .. Away(bar)
+        Shift(ns, 5)
+        local bear = Spots(bar) .. " | " .. Away(bar)
+        Shift(ns, 8)
+        local dire = Spots(bar)
+        Shift(ns, nil)
+        local normal = Spots(bar) .. " | " .. Away(bar)
+        Equal(cat .. " || " .. bear .. " || " .. dire .. " || " .. normal, "Rake 40 | Faerie Fire 80 | Moonfire, Demoralizing Roar || "
+            .. "Demoralizing Roar 40 | Faerie Fire 80 | Moonfire, Rake || Demoralizing Roar 40 | Faerie Fire 80 || " .. NORMAL_SPOTS .. " | ",
+            "in a fight: cat form's debuffs at once, then bear form's (dire bear form too), then all of them out of form; the rest"
+                .. " hidden off screen")
+        Equal(tostring(containerCallsInCombat - calls) .. " " .. tostring(#ContainerRuns - runs) .. " | " .. Slots(bar) .. " | "
+            .. S[bar].width .. "x" .. S[bar].height .. " " .. tostring(bar.pendingLayout), "0 0 | all | 156x36 nil",
+            "nothing told to the game's container and none of its code run in the addon's, each slot still on its spot, the bar's"
+                .. " size kept, nothing waiting for the fight's end")
+        -- The game's icon for Rake, up on your target in cat form, sits on Rake's spot.
+        Shift(ns, 1)
+        S[bar.container].Update({ { id = 1822, harmful = true, mine = true } })
+        local lit
+        for i = 1, bar.count do
+            if S[S[bar.container].slots["b" .. i].button].shown then lit = i end
+        end
+        Equal(tostring(lit and bar.names[lit]) .. " " .. tostring(lit and S[bar.holders[lit]].shown) .. " "
+            .. tostring(lit and ("%g"):format(S[bar.holders[lit]].points[1][4])), "Rake true 40",
+            "Rake up on your target in cat form: the game's icon in Rake's spot, in sight")
+        lockdown = false
+        Fire("PLAYER_REGEN_ENABLED")
+        NextFrame(ns)
+        Equal(Spots(bar) .. " | " .. Away(bar), "Rake 40 | Faerie Fire 80 | Moonfire, Demoralizing Roar", "the fight over: still cat form's")
+        Equal(#printed, 0, "no errors")
+    end
+
+    -- Warn at and Count ticks, each form's.
+    do
+        local ns, B, bar = Druid(true, true)
+        Shift(ns, 1)
+        B:SetWarnAt("debuff", "Rake", 3)
+        B:SetCountTicks("debuff", "Rake", true)
+        Shift(ns, 5)
+        B:SetWarnAt("debuff", "Demoralizing Roar", 10)
+        Shift(ns, nil)
+        B:SetCountTicks("debuff", "Moonfire", true)
+        local all = "Moonfire nil 3, Rake 3 3, Demoralizing Roar 10 nil, Faerie Fire nil nil"
+        Equal(Choices(bar), all, "set in cat, bear and no form: each entry's Warn at and Count ticks on its spot")
+        lockdown = true
+        Fire("PLAYER_REGEN_DISABLED")
+        Shift(ns, 1)
+        Equal(Spots(bar) .. " | " .. Choices(bar), "Rake 40 | Faerie Fire 80 | " .. all,
+            "in a fight in cat form: Rake's spot warns at 3 and counts its ticks, as set up before the fight")
+        Shift(ns, 5)
+        Equal(Spots(bar) .. " | " .. Choices(bar), "Demoralizing Roar 40 | Faerie Fire 80 | " .. all, "and in bear form, Demoralizing Roar's at 10")
+        lockdown = false
+        Fire("PLAYER_REGEN_ENABLED")
+        -- Taken off the normal list: still on cat form's, its choices kept for it there, over a reload too.
+        Shift(ns, nil)
+        B:SetAura("debuff", "Rake", false)
+        local profile = Profile(ns)
+        Equal(List(ns, "debuff") .. " | " .. List(ns, "debuff", 1) .. " | " .. tostring(profile.warnAt.debuff.Rake) .. " "
+            .. tostring(profile.countTicks.debuff.Rake), "Moonfire,Demoralizing Roar,Faerie Fire | Rake,Faerie Fire | 3 true",
+            "taken off the normal list: still on cat form's, its Warn at and Count ticks kept")
+        local saved = ForeverEnhancedCooldownManagerDB
+        local ns2, B2 = Character("DRUID", {}, saved, nil, nil, BOOK)
+        profile = saved.profiles[ns2.ProfileName()]
+        Shift(ns2, 1)
+        local bar2 = B2:Get("debuff")
+        Equal(tostring(profile.warnAt.debuff.Rake) .. " " .. tostring(profile.countTicks.debuff.Rake) .. " | " .. Spots(bar2) .. " | "
+            .. Choices(bar2), "3 true | Rake 20 | Faerie Fire 60 | Rake 3 3, Faerie Fire nil nil, Moonfire nil 3, Demoralizing Roar 10 nil",
+            "kept over a reload, on a form's list only, and shown in cat form (the bar kept the size of three now, the most any"
+                .. " form shows)")
+        B2:SetAura("debuff", "Rake", false)
+        Equal(tostring(profile.warnAt and profile.warnAt.debuff and profile.warnAt.debuff.Rake) .. " " .. tostring(profile.countTicks.debuff.Rake),
+            "nil nil", "off its last list: its choices go with it")
+        Equal(#printed, 0, "no errors")
+    end
+
+    -- Packed: the game lays its icons out, so a change in a fight waits for it to end.
+    do
+        local ns, B, bar = Druid(true, false)
+        Equal(Packed(bar) .. " | " .. tostring(bar.formSpots), "Moonfire, Rake, Demoralizing Roar, Faerie Fire | nil",
+            "packed, no form: every debuff on the normal list, no form's spots set up")
+        Shift(ns, 1)
+        Equal(Packed(bar) .. " | " .. List(ns, "debuff", 1), "Rake, Faerie Fire | Rake,Faerie Fire",
+            "packed, cat form out of a fight: its own list at once")
+        lockdown = true
+        Fire("PLAYER_REGEN_DISABLED")
+        local calls = containerCallsInCombat
+        Shift(ns, 5)
+        Equal(Packed(bar) .. " | " .. tostring(bar.pendingLayout) .. " " .. tostring(containerCallsInCombat - calls) .. " | "
+            .. table.concat((B:Mine("debuff")), ","), "Rake, Faerie Fire | true 0 | Demoralizing Roar,Faerie Fire",
+            "bear form in a fight: the game's icons stay cat form's until it ends, nothing told to the container; its list is bear form's")
+        lockdown = false
+        Fire("PLAYER_REGEN_ENABLED")
+        NextFrame(ns)
+        Equal(Packed(bar) .. " | " .. tostring(bar.pendingLayout), "Demoralizing Roar, Faerie Fire | nil", "the fight over: bear form's")
+        SlashCmdList.FECM("")
+        FECMFrame:Select("debuff")
+        local tick = FECMFrame.pages.bar.options.swapForm
+        S[tick].scripts.OnEnter(tick)
+        local note = S[FECMFrame.note].text
+        S[tick].scripts.OnLeave(tick)
+        Equal(note .. " | " .. tostring(#note * 5.6 <= 2 * 560), "Each form gets its own debuffs on this bar, swapped as you change."
+            .. " A change in a fight shows once it ends, unless Show missing debuffs greyed is ticked. | true",
+            "its note says so, within two lines of the footer")
+        FECMFrame:Hide()
+        Equal(#printed, 0, "no errors")
+    end
+
+    -- An extra Debuffs bar swaps too; the extra cooldown bars and Buffs bars never.
+    do
+        local ns, B = Druid(false, true)
+        B:AddBar("debuff")
+        B:SetOption("debuff2", "swapForm", true)
+        B:SetAura("debuff2", "Moonfire", true)
+        Shift(ns, 1)
+        Equal(tostring(ns.Swaps("debuff2")) .. " " .. tostring(ns.CanSwap("debuff2")) .. " " .. tostring(ns.CanSwap("cd2")) .. " "
+            .. tostring(ns.CanSwap("buff")) .. " | " .. List(ns, "debuff2", 1) .. " " .. List(ns, "debuff2"), "true true false false | empty Moonfire",
+            "Debuffs 2 ticked: cat form's own list (no Moonfire); never on Cooldowns 2 or a Buffs bar")
+        B:RemoveBar("debuff2")
+        local profile = Profile(ns)
+        Equal(Ticks(profile) .. " " .. tostring(profile.forms[1].debuff2) .. " " .. tostring(ns.Swaps("debuff2")), "nil nil false",
+            "removed: its tick and its forms' lists go with it")
+        Equal(#printed, 0, "no errors")
+    end
+
+    -- Saved: repaired, and nothing moved from 1.6.0's settings.
+    do
+        Environment()
+        Load({ useBars = true, chars = { ["Player-1-0001"] = "Mine" }, bars = { debuff = { swapForm = true } },
+            profiles = { Mine = { debuff = { "Rake" }, swapForm = { debuff = true, debuff2 = true, buff = true },
+                forms = { [1] = { debuff = { "Rake", 7, "Shred Bleed" }, debuff2 = { "Rake" }, buff = { "Thorns" } } },
+                warnAt = { debuff = { ["Shred Bleed"] = 5, Gone = 5 } }, countTicks = { debuff = { ["Shred Bleed"] = true, Gone = true } },
+                joins = { debuff = { ["Shred Bleed"] = true, Rake = true } } },
+                Other = { debuff = { "Rake" }, forms = { [5] = { debuff = { "Rake" } } } } } })
+        local db = ForeverEnhancedCooldownManagerDB
+        local mine = db.profiles.Mine
+        Equal(Ticks(mine) .. " " .. Ticks(db.profiles.Other) .. " | " .. table.concat(mine.forms[1].debuff, ",") .. " "
+            .. tostring(mine.forms[1].debuff2) .. " " .. tostring(mine.forms[1].buff) .. " | " .. tostring(mine.warnAt.debuff["Shred Bleed"])
+            .. " " .. tostring(mine.warnAt.debuff.Gone) .. " " .. tostring(mine.countTicks.debuff["Shred Bleed"]) .. " "
+            .. tostring(mine.countTicks.debuff.Gone) .. " | " .. tostring(mine.joins.debuff["Shred Bleed"]) .. " " .. tostring(mine.joins.debuff.Rake),
+            "debuff nil | Rake,Shred Bleed nil nil | 5 nil true nil | true nil",
+            "kept over a reload: the Debuffs bar's tick and its form's list (Debuffs 2's and a Buffs bar's gone: no such bar, none for"
+                .. " buffs), each choice for a name on its lists (a form's too), a join after an entry on one; 1.6.0's settings never"
+                .. " move a tick onto the Debuffs bar")
+        Equal(#printed, 0, "no errors")
+    end
+end
+
 -- Saved, repaired, copied and kept ------------------------------------------------------------------
 
 do
@@ -1933,8 +2233,8 @@ do
     local db = ForeverEnhancedCooldownManagerDB
     Equal(tostring(ns.Swaps("cd")) .. " " .. tostring(ns.Swaps("util")) .. " " .. tostring(ns.Swaps("buff"))
         .. " " .. tostring(ns.Swaps("debuff")) .. " | " .. Ticks(db.profiles.Mine), "false true false false | util",
-        "kept over a reload: only true is on, never on the Buffs or Debuffs bar, and Utility's tick moved into the profile"
-            .. " with a Utility list for a form")
+        "kept over a reload: only true is on, never on the Buffs bar (nor the Debuffs bar from 1.6.0's settings, which had"
+            .. " none), and Utility's tick moved into the profile with a Utility list for a form")
     local left = {}
     for _, key in ipairs(ns.BAR_KEYS) do left[#left + 1] = tostring(rawget(db.bars[key], "swapForm")) end
     Equal(table.concat(left, " ") .. " " .. tostring(db.bars.cd.onlyForm), "nil nil nil nil nil",

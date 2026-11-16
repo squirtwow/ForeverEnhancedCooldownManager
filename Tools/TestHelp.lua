@@ -4388,6 +4388,50 @@ end)()
     Equal(#printed, 0, "no errors from Glow for more procs")
 end)()
 
+-- Icon height on every bar page ----------------------------------------------------------------------------
+-- (A player's idea: icons wider or taller than square.) A slider right under
+-- Icon size, 100% (square) by default and shown as a share, its note in one
+-- line of the footer; Spacing and Icons per row closed up under it (each a
+-- slider's height apart), all clear of each other and of the rows under
+-- them. Each bar its own; on a packed Buffs page too (only Icons per row
+-- hides there).
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("cd")
+    local bp = w.pages.bar
+    local height = bp.height
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local function Top(control) return S[control].points[1][3] end
+    local apart = true
+    for _, pair in ipairs({ { bp.size, height }, { height, bp.spacing }, { bp.spacing, bp.across } }) do
+        apart = apart and Top(pair[1]) - Top(pair[2]) >= S[pair[1]].height
+    end
+    local note = Note(height)
+    Equal(table.concat({ tostring(height:IsVisible()), S[height.label].text, S[height.value].text, Top(bp.size), Top(height),
+        Top(bp.spacing), Top(bp.across), tostring(apart), Fit.Problems(bp) }, " "), "true Icon height 100% -2 -23 -44 -65 true ",
+        "right under Icon size, 100% by default, Spacing and Icons per row closed up under it, clear of everything else")
+    Equal(note .. " " .. tostring(Fit.Wide(note, S[w.note].template) <= S[w.note].width),
+        "How tall your icons are, as a share of their width. 100% is square. true", "its note in one line of the footer")
+    height:Choose(150)
+    local cd = ns.BarData("cd").heightPct .. " " .. S[height.value].text .. " " .. S[ns.Bars:Get("cd").icons[1]].height
+    w:Select("util")
+    local util = tostring(height:IsVisible()) .. " " .. S[height.value].text .. " " .. ns.BarData("util").heightPct
+    w:Select("buff")
+    local buff = tostring(height:IsVisible()) .. " " .. tostring(bp.across:IsVisible()) .. " " .. Fit.Problems(bp)
+    w:Select("cd")
+    height:Choose(10)
+    local low = ns.BarData("cd").heightPct .. " " .. S[height.value].text
+    height:Choose(100)
+    Equal(cd .. " | " .. util .. " | " .. buff .. " | " .. low .. " | " .. ns.BarData("cd").heightPct, "150 150% 54 | true 100% 100 |"
+        .. " true false  | 50 50% | 100", "dragged: the bar's own, its icons that tall; Utility's still 100%; on the packed Buffs"
+        .. " page too, clear of the rest; never under 50%")
+    Equal(#printed, 0, "no errors from Icon height")
+end)()
+
 -- The Import box: the line saying what a string holds never runs into the
 -- name box under it, for a big preset with every option (the FECM Setups
 -- website's, TestShare's "A big setup in one string") and with some left out

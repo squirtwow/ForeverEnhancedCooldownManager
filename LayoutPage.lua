@@ -3,10 +3,10 @@
 -- scale with your own icons in it, and (Live preview) the border, shadow and
 -- keybinds the Look page gives them. Drag a spell from your spellbook onto a
 -- row to add it, and an icon onto another to swap them (in its row or
--- another); hover a row for - and + (how many icons fit across) and the
--- arrows (up or down the stack, past the display). All bars sizes every bar
--- together, and Show grow arrows marks which way each grows while you
--- arrange them.
+-- another); click an icon for its own size; hover a row for - and + (how
+-- many icons fit across) and the arrows (up or down the stack, past the
+-- display). All bars sizes every bar together, and Show grow arrows marks
+-- which way each grows while you arrange them.
 local _, ns = ...
 local T = ns.Theme
 
@@ -185,6 +185,80 @@ local function Thumbnail(card, preset)
         Tiles(across, -Width(across) / 2)
         y = y - tile - 2
     end
+end
+
+-- An icon's own size from its tile (Squirt's pick, 16 Nov 2026) ---------------------------------
+-- A click on one of your icons opens a small box beside it: the spell's
+-- name, Size (50% to 150% of its bar's Icon size) and Reset. It sets the
+-- same size as the spell panel on its bar's page (B:SetOwnSize), so the two
+-- always agree; 100% is the bar's own, so then none is kept. Only that icon
+-- changes on your bars, the rest making room; the tiles here stay as drawn.
+-- On a packed Buffs or Debuffs bar Size is greyed, saying why. A window
+-- pop-up (ns.PagePopup): one at a time, gone on Escape, a click elsewhere,
+-- another page or the window closing; and here as the page hides, the icon
+-- is dragged, or a refresh finds its tile no longer holds it.
+local SIZE_BOX_W, SIZE_BOX_H, SIZE_GAP = 220, 58, 6
+
+local function SizeBox(window)
+    local B, base = ns.Bars, ns.ICON_SIZE[3]
+    local box = ns.PagePopup(window, SIZE_BOX_W, SIZE_BOX_H)
+    local title = T:Heading(box, "")
+    title:SetPoint("TOPLEFT", 10, -10)
+    title:SetWidth(SIZE_BOX_W - 20 - 60)
+    title:SetWordWrap(false)
+    local reset = T:Button(box, "Reset", 54, 18)
+    reset:SetPoint("TOPRIGHT", -8, -6)
+    -- 100% keeps no size: the bar's own.
+    local size = T:Slider(box, "Size", ns.ICON_SIZE, 5, SIZE_BOX_W - 20, function(value)
+        if box.key then B:SetOwnSize(box.key, box.name, value ~= base and value or nil) end
+    end, 40)
+    size:SetPoint("TOPLEFT", 10, -30)
+    size.value:SetWidth(36)
+    local set = size.Set
+    function size:Set(value)
+        set(self, value)
+        self.value:SetText(value .. "%")
+    end
+    reset:SetScript("OnClick", function()
+        if not box.key then return end
+        B:SetOwnSize(box.key, box.name, nil)
+        size:Set(base)
+    end)
+    window:Hint(box, "This icon's own size. Escape or a click elsewhere closes this.")
+    window:Hint(size, function()
+        if box.key and not B:OwnSizeUsable(box.key) then return ns.PackedSizeNote(box.key) end
+        return "How big this icon is: 100% is the bar's Icon size. The rest of the bar makes room for it."
+    end)
+    window:Hint(reset, "Back to the bar's Icon size.")
+    box.title, box.size, box.reset = title, size, reset
+
+    -- Kept up to date as the page refreshes, and closed once its tile no
+    -- longer holds its icon (stays: false closes it anyway).
+    function box:Sync(stays)
+        if not self:IsOpen() then return end
+        local tile = self.tile
+        if not (stays and self.row:IsShown() and tile:IsShown() and tile.name == self.name) then return self:Close() end
+        size:Set(ns.OwnSize(self.key, self.name) or base)
+        size:SetUsable(B:OwnSizeUsable(self.key))
+    end
+    -- Opened beside a tile: to its right, or its left where the window's
+    -- edge is too close. Clicked again, it closes.
+    function box:Toggle(row, tile)
+        if self:IsOpen() and self.tile == tile and self.name == tile.name then return self:Close() end
+        self.row, self.tile, self.key, self.name = row, tile, row.key, tile.name
+        local entry = ns.Spells:Find(tile.name)
+        title:SetText((entry and entry.name or tile.name):upper())
+        self:ClearAllPoints()
+        local right, edge = tile:GetRight(), window:GetRight()
+        if type(right) == "number" and type(edge) == "number" and right + SIZE_GAP + SIZE_BOX_W > edge - 8 then
+            self:SetPoint("RIGHT", tile, "LEFT", -SIZE_GAP, 0)
+        else
+            self:SetPoint("LEFT", tile, "RIGHT", SIZE_GAP, 0)
+        end
+        self:Open(tile)
+        self:Sync(true)
+    end
+    return box
 end
 
 function ns.BuildLayoutPage(window, page, width, height)
@@ -549,6 +623,10 @@ function ns.BuildLayoutPage(window, page, width, height)
         return "Your resource display is already at the " .. (delta < 0 and "top." or "bottom.")
     end
 
+    -- A click on an icon: its own size, in a box beside it (SizeBox).
+    local sizeBox = SizeBox(window)
+    page.sizeBox = sizeBox
+
     -- An icon being dragged follows the cursor: onto another icon the two
     -- swap places (in its row or another), onto another row it moves there,
     -- anywhere else it comes off its bar.
@@ -656,11 +734,12 @@ function ns.BuildLayoutPage(window, page, width, height)
         end
     end
     -- The window closing mid-drag drops nothing, and no icon is left on the
-    -- cursor for next time.
+    -- cursor for next time. An icon's size box goes too.
     page:HookScript("OnHide", function()
         picked = nil
         ghost:Hide()
         Track()
+        sizeBox:Close()
     end)
 
     -- A tile's key, when it has one to show (worked out as it's drawn). Text
@@ -683,10 +762,12 @@ function ns.BuildLayoutPage(window, page, width, height)
         tile.shape = ns.Style:ShapeKit(tile, tile.texture) -- square, or like your icons drawn like Blizzard's
         tile:RegisterForDrag("LeftButton")
         tile:SetScript("OnDragStart", function(self)
-            -- Nothing is still held from a drag that never landed.
+            -- Nothing is still held from a drag that never landed, and no
+            -- icon's size box stays up.
             picked = nil
             ghost:Hide()
             Track()
+            sizeBox:Close()
             if not self.name then return end
             picked = { bar = row.key, name = self.name }
             ghost.texture:SetTexture(self.texture:GetTexture())
@@ -706,18 +787,22 @@ function ns.BuildLayoutPage(window, page, width, height)
         -- debuff found by the search goes in this spot.
         tile:SetScript("OnReceiveDrag", function() B:Dropped(row.key) end)
         tile.drop = row.key -- held over it, the footer says what dropping does
+        -- Otherwise a click keeps the row's buttons up, and on an icon opens
+        -- its size box (or closes it, clicked again).
         tile:SetScript("OnClick", function(self)
             if placing then return Place(row.key, self.name and B:Index(row.key, self.name)) end
             if B:Dropped(row.key) then return end
             selected = row.key
             window:Refresh()
+            if self.name then sizeBox:Toggle(row, self) end
         end)
         tile:SetScript("OnEnter", function() ShowButtons(row) end)
         tile:SetScript("OnLeave", function() ShowButtons(row) end)
         window:Hint(tile, function(self)
             if placing then return PlaceNote(row.key, self.name) end
             local entry = self.name and ns.Spells:Find(self.name)
-            return entry and (entry.name .. ". Drag it onto another icon to swap them, to another row, or off to remove it.") or HINT
+            return entry and (entry.name .. ". Click to change its size. Drag it onto another icon to swap them, to another row,"
+                .. " or off to remove it.") or HINT
         end)
         row.tiles[i] = tile
         return tile
@@ -843,14 +928,18 @@ function ns.BuildLayoutPage(window, page, width, height)
     -- page and their keys, as on your bars: keys on the Cooldowns and Utility
     -- rows only, and only on tiles big enough to read them. Empty spots stay
     -- plain.
-    local function Fill(row, size, fromRight)
+    -- (high: the tiles' height, as your icons' Icon height; their art cropped
+    -- to it, and their keys sized by the shorter side, face.)
+    local function Fill(row, size, fromRight, high)
         local data, entries = ns.BarData(row.key), Entries(row.key)
+        high = high or size
+        local face = math.min(size, high)
         local live = ns.Get("layoutPreview")
         local border, shadow = ns.Style:DecorFor("icon", true)
-        local keys = live and not ns.AURA_BARS[row.key] and ns.Style:KeyReadable(size)
+        local keys = live and not ns.AURA_BARS[row.key] and ns.Style:KeyReadable(face)
         for i = 1, data.perRow do
             local tile = Tile(row, i)
-            tile:SetSize(size, size)
+            tile:SetSize(size, high)
             tile:ClearAllPoints()
             local offset = (i - 1) * (size + TILE_GAP)
             if fromRight then
@@ -863,7 +952,7 @@ function ns.BuildLayoutPage(window, page, width, height)
             -- Drawn like your icons (square, or like Blizzard's: Icon
             -- details' Icons) where drawn in your look and big enough to
             -- read, as keys are; square otherwise, and while empty.
-            ns.Style:Shape(tile.shape, size, not (live and name ~= nil and ns.Style:KeyReadable(size)))
+            ns.Style:Shape(tile.shape, size, not (live and name ~= nil and ns.Style:KeyReadable(face)), high / size)
             if name then
                 -- A spell you haven't learned yet: its own icon, greyed.
                 tile.texture:SetTexture(ns.Spells:Icon(name))
@@ -877,12 +966,12 @@ function ns.BuildLayoutPage(window, page, width, height)
             ns.Style:ShowDecor(tile.decor, filled and border, filled and shadow)
             -- The same calls as your bars' icons, the tile as the icon.
             tile.keyed = keys and name ~= nil
-            ns.Style:KeyLook(tile.key, tile, size, ns.Style:CountdownSize(size))
+            ns.Style:KeyLook(tile.key, tile, face, ns.Style:CountdownSize(face))
             ShowKey(tile)
             tile:Show()
         end
         for i = data.perRow + 1, #row.tiles do row.tiles[i]:Hide() end
-        row.strip:SetSize(data.perRow * size + (data.perRow - 1) * TILE_GAP, size)
+        row.strip:SetSize(data.perRow * size + (data.perRow - 1) * TILE_GAP, high)
         -- Round the whole bar: your icons in this row, not the empty spots.
         local count = math.min(#entries, data.perRow)
         local boxed = live and count > 0
@@ -904,11 +993,12 @@ function ns.BuildLayoutPage(window, page, width, height)
     end
 
     -- A row across the middle, its name on the left and buttons on the right.
-    local function Stacked(row, y, tile)
+    -- (high: its tiles' height, Icon height.)
+    local function Stacked(row, y, tile, high)
         row.place = "stack"
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", box, "TOPLEFT", 8, -y)
-        row:SetSize(boxWidth, tile)
+        row:SetSize(boxWidth, high)
         row.strip:ClearAllPoints()
         row.strip:SetPoint("CENTER")
         row.name:ClearAllPoints()
@@ -919,11 +1009,11 @@ function ns.BuildLayoutPage(window, page, width, height)
         row.buttons:SetPoint("RIGHT", -8, 0)
         row.more:ClearAllPoints()
         row.more:SetPoint("LEFT", row.strip, "RIGHT", 6, 0)
-        Fill(row, tile, false)
+        Fill(row, tile, false, high)
     end
 
     -- A row beside the display: tiles against it, name and buttons outside.
-    local function Beside(row, side, y, tile, lineHeight, displayWidth, gap)
+    local function Beside(row, side, y, tile, lineHeight, displayWidth, gap, high)
         row.place = side
         local rowWidth = (boxWidth - displayWidth) / 2 - gap
         row:ClearAllPoints()
@@ -948,7 +1038,7 @@ function ns.BuildLayoutPage(window, page, width, height)
             row.buttons:SetPoint("RIGHT", -8, 0)
             row.more:SetPoint("LEFT", row.strip, "RIGHT", 6, 0)
         end
-        Fill(row, tile, side == "left")
+        Fill(row, tile, side == "left", high)
     end
 
     local function Draw()
@@ -962,6 +1052,8 @@ function ns.BuildLayoutPage(window, page, width, height)
         for _, side in ipairs({ "left", "right" }) do if In(layout[side]) then sides[side] = layout[side] end end
         -- Each bar's icons at their size on screen (All bars included).
         local function Size(key) return ns.IconSize(ns.BarData(key)) end
+        -- And how tall (Icon height): the rows as tall as the bars' icons.
+        local function High(key) return ns.IconHeight(ns.BarData(key), Size(key)) end
         local function Real(key)
             local data = ns.BarData(key)
             return data.perRow * Size(key) + (data.perRow - 1) * data.spacing
@@ -986,26 +1078,27 @@ function ns.BuildLayoutPage(window, page, width, height)
         end
         for _, key in pairs(sides) do middle = middle + layout.gap + Real(key) end
         local line = displayTall
-        for _, key in pairs(sides) do line = math.max(line, Size(key)) end
+        for _, key in pairs(sides) do line = math.max(line, High(key)) end
         local tall = math.max(line, (line + displayTall) / 2 + (castRoom and 4 + castRoom or 0))
         for _, list in ipairs({ above, below }) do
-            for _, key in ipairs(list) do tall = tall + Size(key) + layout.gap end
+            for _, key in ipairs(list) do tall = tall + High(key) + layout.gap end
         end
         local scale = math.min(SCALE, (boxWidth - 2 * EDGE) / math.max(1, widest, middle),
             (boxHeight - 2 * CLEAR) / math.max(1, tall))
         local function Tile(key) return math.max(6, math.floor(Size(key) * scale)) end
+        local function TileHigh(key) return math.max(6, math.floor(High(key) * scale)) end
         local gap = math.floor(layout.gap * scale + .5)
         local displayWidth = math.floor(displayReal * scale)
         local displayHeight = math.max(6, math.floor(displayTall * scale + .5))
         local sideTile = 0
-        for _, key in pairs(sides) do sideTile = math.max(sideTile, Tile(key)) end
+        for _, key in pairs(sides) do sideTile = math.max(sideTile, TileHigh(key)) end
         local lineHeight = math.max(displayHeight, sideTile)
         local castHeight = castRoom and math.max(3, math.floor(castRoom * scale + .5)) or 0
         local castGap = castRoom and math.max(1, math.floor(4 * scale + .5)) or 0
         local lineBottom = math.max(lineHeight, (lineHeight + displayHeight) / 2 + castGap + castHeight)
         local total = lineBottom
         for _, list in ipairs({ above, below }) do
-            for _, key in ipairs(list) do total = total + Tile(key) + gap end
+            for _, key in ipairs(list) do total = total + TileHigh(key) + gap end
         end
         for _, row in pairs(rows) do row:Hide() end
         local function Draws(row)
@@ -1016,8 +1109,8 @@ function ns.BuildLayoutPage(window, page, width, height)
         end
         local y = math.max(CLEAR, math.floor((boxHeight - total) / 2))
         for _, key in ipairs(above) do
-            Stacked(Draws(Row(key)), y, Tile(key))
-            y = y + Tile(key) + gap
+            Stacked(Draws(Row(key)), y, Tile(key), TileHigh(key))
+            y = y + TileHigh(key) + gap
         end
         -- The cast bar over the display (if chosen) takes the same room at the
         -- top of its line as it otherwise does at the bottom.
@@ -1030,7 +1123,9 @@ function ns.BuildLayoutPage(window, page, width, height)
         display.power:SetHeight(math.max(2, displayHeight - math.ceil(displayHeight * .6) - 1))
         -- Switched off, it's drawn faintly where it would be.
         display:SetAlpha(L:DisplayOff() and .3 or 1)
-        for side, key in pairs(sides) do Beside(Draws(Row(key)), side, lineTop, Tile(key), lineHeight, displayWidth, gap) end
+        for side, key in pairs(sides) do
+            Beside(Draws(Row(key)), side, lineTop, Tile(key), lineHeight, displayWidth, gap, TileHigh(key))
+        end
         castStrip:SetShown(castRoom ~= nil)
         if castRoom then
             castStrip:ClearAllPoints()
@@ -1045,8 +1140,8 @@ function ns.BuildLayoutPage(window, page, width, height)
         end
         y = y + lineBottom + gap
         for _, key in ipairs(below) do
-            Stacked(Draws(Row(key)), y, Tile(key))
-            y = y + Tile(key) + gap
+            Stacked(Draws(Row(key)), y, Tile(key), TileHigh(key))
+            y = y + TileHigh(key) + gap
         end
         local health, power = ns.ColourKey("prdHealth"), ns.ColourKey("prdPower")
         T:Fill(display.health, health ~= "default" and ns.Style:BarColour(health) or HEALTH)
@@ -1072,6 +1167,9 @@ function ns.BuildLayoutPage(window, page, width, height)
         drag:SetText(placing and ("Click a spot in the Debuffs row for " .. placing .. ".") or DRAG)
         search:SetShown(placing == nil)
         cancel:SetShown(placing ~= nil)
+        -- An icon's size box, while its tile still holds it (and no debuff
+        -- waits for its spot).
+        sizeBox:Sync(placing == nil)
     end
 
     -- Below the box: the display, the size of all your bars, and the space

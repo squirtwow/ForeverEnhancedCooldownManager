@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.15
+
+### Added
+- Icon height: make your bars' icons wider or taller than square.
+- Totem time: totem icons show how long your totem has left.
+- Swap with my form now works on the Debuffs bar too.
+- Layout page: click an icon to change just that icon's size.
+
+### Fixed
+- Demonic Sacrifice no longer glows as missing while your demon's buff is up.
+
 ## 1.10.14
 
 ### Added

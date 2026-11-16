@@ -1762,6 +1762,226 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- The Layout page's icon size box ---------------------------------------------------------------------------
+-- (Squirt's pick, 16 Nov 2026.) A click on an icon's tile opens a small box
+-- beside it: the spell's name, Size (50% to 150%) and Reset. The same size
+-- as the spell panel's (100% keeps none); greyed on a packed Debuffs bar,
+-- saying why. One at a time; gone on Escape, a click elsewhere, the page
+-- hiding, the icon dragged or its tile no longer holding it. Placing a found
+-- debuff still places.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire", "Wrath" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    local B = ns.Bars
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("layout")
+    local lp = w.pages.layout
+    local box, cd = lp.sizeBox, lp.rows.cd
+    local wrath = cd.tiles[2]
+    local function Open() return tostring(box:IsShown()) .. " " .. tostring(box:IsOpen()) end
+    local tileSize = S[wrath].width .. "x" .. S[wrath].height
+    Equal(Open() .. " | " .. H.Note(cd.tiles[1]), "false false | Moonfire. Click to change its size. Drag it onto another icon to swap"
+        .. " them, to another row, or off to remove it.", "closed until clicked; an icon's note says a click changes its size")
+    -- Clicked: beside it, at the bar's size; Escape and a click elsewhere close it.
+    wrath:Click()
+    local at = S[box].points[1]
+    Equal(Open() .. " " .. box.key .. " " .. box.name .. " " .. S[box.title].text .. " " .. S[box.size.value].text .. " "
+        .. tostring(box.size.usable ~= false) .. " | " .. at[1] .. " " .. tostring(at[2] == wrath) .. " " .. at[3] .. " " .. at[4] .. " | "
+        .. tostring(rawequal(_G.FECMFrame, box)) .. " " .. tostring(S[box].events.GLOBAL_MOUSE_DOWN) .. " | " .. H.Note(box.size),
+        "true true cd Wrath WRATH 100% true | LEFT true RIGHT 6 | true true | How big this icon is: 100% is the bar's Icon size."
+        .. " The rest of the bar makes room for it.", "Wrath clicked: its box opens beside it at the bar's size, Escape's and a click's")
+    -- 130%: Wrath alone on your bar, the tile as drawn; the bar's page agrees.
+    box.size:Choose(130)
+    local icons = B:Get("cd").icons
+    Equal(tostring(ns.OwnSize("cd", "Wrath")) .. " " .. S[box.size.value].text .. " " .. S[icons[1]].width .. " " .. S[icons[2]].width
+        .. " " .. S[wrath].width .. "x" .. S[wrath].height, "130 130% 36 47 " .. tileSize,
+        "130%: Wrath's own size kept, 47 across on the bar, Moonfire still 36, the Layout tile as it was")
+    -- 100% keeps none; Reset back to the bar's.
+    box.size:Choose(100)
+    local hundred = tostring(ns.OwnSize("cd", "Wrath")) .. " " .. tostring(ns.ProfileLists().iconSize)
+    box.size:Choose(75)
+    local seventyFive = tostring(ns.OwnSize("cd", "Wrath"))
+    box.reset:Click()
+    Equal(hundred .. " | " .. seventyFive .. " | " .. tostring(ns.OwnSize("cd", "Wrath")) .. " " .. S[box.size.value].text .. " "
+        .. S[icons[2]].width .. " " .. tostring(box:IsShown()), "nil nil | 75 | nil 100% 36 true",
+        "100%: none kept; Reset: back to the bar's size, the box still up")
+    -- Another icon: the one box moves there. Clicked again, it closes.
+    cd.tiles[1]:Click()
+    local moved = Open() .. " " .. box.name .. " " .. tostring(S[box].points[1][2] == cd.tiles[1])
+    cd.tiles[1]:Click()
+    Equal(moved .. " | " .. Open(), "true true Moonfire true | false false", "Moonfire clicked: the box moves to it; clicked again, it closes")
+    -- Escape closes it alone; a click on it stays, anywhere else closes it.
+    wrath:Click()
+    CloseSpecialWindows()
+    local escaped = Open() .. " " .. tostring(w:IsShown()) .. " " .. tostring(rawequal(_G.FECMFrame, w))
+    wrath:Click()
+    S[box].mouseOver = true
+    Fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    local stays = Open()
+    S[box].mouseOver = false
+    Fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    Equal(escaped .. " | " .. stays .. " | " .. Open(), "false false true true | true true | false false",
+        "Escape: the box goes, the window stays; a click on it keeps it, elsewhere closes it")
+    -- Dragged: it goes (the icon let go on its own row stays put).
+    wrath:Click()
+    S[wrath].scripts.OnDragStart(wrath)
+    local dragged = Open()
+    S[cd].mouseOver = true
+    S[wrath].scripts.OnDragStop(wrath)
+    S[cd].mouseOver = false
+    Equal(dragged .. " | " .. table.concat(ns.BarData("cd").spells, " "), "false false | Moonfire Wrath", "the icon dragged: the box goes")
+    -- Its tile no longer holding it: gone on the next refresh.
+    wrath:Click()
+    B:Assign("Wrath", nil)
+    w:Refresh()
+    Equal(tostring(wrath.name) .. " " .. Open(), "nil false false", "Wrath taken off its bar: the box goes as the page refreshes")
+    -- The page hiding takes it.
+    cd.tiles[1]:Click()
+    local before = Open()
+    lp:Hide()
+    local hidden = Open()
+    lp:Show()
+    Equal(before .. " | " .. hidden, "true true | false false", "the page hiding takes it")
+    w:Select("layout")
+    -- A packed Debuffs bar: Size greyed, saying why; fixed spots: usable.
+    B:SetAura("debuff", "Moonfire", true)
+    w:Refresh()
+    local debuffs = lp.rows.debuff
+    debuffs.tiles[1]:Click()
+    local packed = box.key .. " " .. box.name .. " " .. tostring(box.size.usable) .. " | " .. H.Note(box.size)
+    B:SetOption("debuff", "showMissing", true)
+    w:Refresh()
+    Equal(packed .. " | " .. tostring(box.size.usable), "debuff Moonfire false | This bar is packed: the game lays its icons out at one"
+        .. " size. Tick Show missing debuffs greyed to give each its own spot, then its own size. | true",
+        "packed: Size greyed, saying why; with fixed spots it's usable")
+    B:SetOption("debuff", "showMissing", false)
+    -- A found debuff waiting for its spot: the box goes, and a click on an
+    -- icon puts the debuff there, no box.
+    S[lp.search].scripts.OnEditFocusGained(lp.search)
+    lp.search:SetText("fae")
+    S[lp.search].scripts.OnTextChanged(lp.search, true)
+    lp.found[1]:Click()
+    local picking = Open()
+    debuffs.tiles[1]:Click()
+    Equal(picking .. " | " .. table.concat(ns.BarData("debuff").spells, ",") .. " " .. Open(), "false false | Faerie Fire,Moonfire false false",
+        "placing: the box goes, and a click on an icon places the debuff, opening nothing")
+    Equal(tostring(lp.drawError) .. " " .. #printed, "nil 0", "no errors")
+end)()
+
+-- Icon height ---------------------------------------------------------------------------------------------
+-- (A player's idea: "different size ratio for icons, adjustable length and
+-- width".) Each of your own bars' icons can be wider or taller than square:
+-- Icon height, a percent of the icon's size across, 100 (square) unless
+-- moved, so nothing changes for anyone who doesn't. The art is cropped to
+-- fit, never stretched; the swipe, glow and text follow the icon's box; the
+-- rows, the bar, the game's packed icons and a layout's stack go by the
+-- real height.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire", "Wrath", "Overpower" } } } })
+    local B, L = ns.Bars, ns.Layout
+    local cd = B:Get("cd")
+    local moon = cd.icons[1]
+    local function Coords(texture)
+        local c = S[texture].last.SetTexCoord
+        return ("%.3f %.3f %.3f %.3f"):format(c[1], c[2], c[3], c[4])
+    end
+    local function Box(frame) return ("%gx%g"):format(S[frame].width, S[frame].height) end
+    local function Row()
+        local out = {}
+        for i = 1, cd.count do out[i] = Box(cd.icons[i]) .. " " .. H.At(cd.icons[i]) end
+        return table.concat(out, "; ") .. " | " .. Box(cd)
+    end
+    local before = Row()
+    Equal(ns.BarData("cd").heightPct .. " | " .. before .. " | " .. Coords(moon.texture) .. " " .. ("%g"):format(moon.shape.ratio),
+        "100 | 36x36 TOPLEFT 0 0; 36x36 TOPLEFT 40 0; 36x36 TOPLEFT 80 0 | 116x36 | 0.080 0.920 0.080 0.920 1",
+        "off by default: 100%, square icons laid out exactly as before, the art zoomed as always")
+    -- Taller: the art's sides cropped, not stretched; the swipe on the art;
+    -- the countdown as on a 36 icon (its shorter side).
+    B:SetOption("cd", "heightPct", 150)
+    Equal(Row() .. " | " .. Coords(moon.texture) .. " | " .. tostring(Last(moon.cooldown, "SetAllPoints") == moon.texture) .. " "
+        .. tostring(Last(moon.cooldown, "SetCountdownFont")), "36x54 TOPLEFT 0 0; 36x54 TOPLEFT 40 0; 36x54 TOPLEFT 80 0 | 116x54 |"
+        .. " 0.220 0.780 0.080 0.920 | true FECMFont18",
+        "150%: 36 across and 54 tall, the bar as tall; the art's sides cropped to fit, the swipe on it, the countdown by its width")
+    -- Wider than tall: the top and bottom cropped; the countdown and the
+    -- proc glow follow the box.
+    B:SetOption("cd", "heightPct", 50)
+    ns.SetGlow(moon, true)
+    local glow = Box(moon.glow)
+    ns.SetGlow(moon, false)
+    Equal(Row() .. " | " .. Coords(moon.texture) .. " | " .. tostring(Last(moon.cooldown, "SetCountdownFont")) .. " " .. glow,
+        "36x18 TOPLEFT 0 0; 36x18 TOPLEFT 40 0; 36x18 TOPLEFT 80 0 | 116x18 | 0.080 0.920 0.290 0.710 | FECMFont11 50.4x25.2",
+        "50%: 36 across and 18 tall; the art's top and bottom cropped, the countdown by its height, the proc glow round the box")
+    -- Two rows of tall icons: the second a row's height and the spacing under the first.
+    B:SetOption("cd", "heightPct", 150)
+    B:SetOption("cd", "perRow", 2)
+    Equal(Row(), "36x54 TOPLEFT 0 0; 36x54 TOPLEFT 40 0; 36x54 TOPLEFT 20 -58 | 76x112",
+        "two rows of tall icons: the second 54 plus the spacing under the first, nothing overlapping")
+    B:SetOption("cd", "perRow", 20)
+    -- An icon's own size too: as tall for its width.
+    B:SetOwnSize("cd", "Wrath", 150)
+    Equal(Row(), "36x54 TOPLEFT 0 -13.5; 54x81 TOPLEFT 40 0; 36x54 TOPLEFT 98 -13.5 | 134x81",
+        "with an icon's own size: Wrath 54 across and 81 tall, the row as tall as Wrath, the others centred in it")
+    B:SetOwnSize("cd", "Wrath", nil)
+    -- Drawn like Blizzard's: the whole art, its sides cropped; Blizzard's
+    -- mask is on the art, so it stretches with the icon.
+    ns.Set("iconStyle", "blizzard")
+    B:ApplyIconDetails()
+    Equal(tostring(moon.shape.rounded) .. " " .. Coords(moon.texture) .. " " .. tostring(Last(moon.shape.mask, "SetAllPoints") == moon.texture)
+        .. " " .. Box(moon), "true 0.167 0.833 0.000 1.000 true 36x54",
+        "drawn like Blizzard's: the whole art with its sides cropped, Blizzard's mask on the art and stretching with it")
+    ns.Set("iconStyle", "square")
+    B:ApplyIconDetails()
+    Equal(Coords(moon.texture), "0.220 0.780 0.080 0.920", "square again: zoomed and cropped")
+    -- Back to 100%: exactly as before.
+    B:SetOption("cd", "heightPct", 100)
+    Equal(Row() .. " | " .. Coords(moon.texture), before .. " | 0.080 0.920 0.080 0.920", "back to 100%: square and laid out as before")
+
+    -- The Debuffs bar, packed: the game's icons, made at the bar's height,
+    -- sized again as it changes, out of a fight only.
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetAura("debuff", "Wrath", true)
+    local debuff = B:Get("debuff")
+    local parts = debuff.groupParts[1]
+    local square = Box(parts.button) .. " " .. Box(debuff)
+    B:SetOption("debuff", "heightPct", 50)
+    Equal(square .. " | " .. Box(parts.button) .. " " .. Box(debuff) .. " " .. Coords(parts.shape.art) .. " "
+        .. tostring(Last(parts.cooldown, "SetCountdownFont")), "36x36 76x36 | 36x18 76x18 0.080 0.920 0.290 0.710 FECMFont11",
+        "packed: each of the game's icons 36 across and 18 tall, the bar as tall, the art cropped, the countdown by its height")
+    lockdown = true
+    Fire("PLAYER_REGEN_DISABLED")
+    B:SetOption("debuff", "heightPct", 150)
+    local waiting = Box(parts.button)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(waiting .. " " .. Box(parts.button) .. " " .. Box(debuff), "36x18 36x54 76x54", "in a fight the game's icons wait for it to end")
+    -- Fixed spots: the spot and the game's icon in it, as tall, both cropped.
+    B:SetOption("debuff", "showMissing", true)
+    local holder = debuff.holders[1]
+    Equal(Box(holder) .. " " .. Coords(holder.icon) .. " " .. Coords(holder.slot.shape.art) .. " " .. Box(debuff),
+        "36x54 0.220 0.780 0.080 0.920 0.220 0.780 0.080 0.920 76x54", "fixed spots: as tall, the greyed art and the game's icon cropped")
+    B:SetOption("debuff", "showMissing", false)
+
+    -- A layout: the bar under a taller one moves down by its real height.
+    B:Assign("Overpower", "util")
+    L:Apply("pyramid")
+    local util = B:Get("util")
+    local function Under() return ("%g"):format(S[util].points[1][5] - S[debuff].points[1][5]) end
+    B:SetOption("util", "heightPct", 100)
+    local flat = Under()
+    B:SetOption("util", "heightPct", 150)
+    Equal(flat .. " " .. Under() .. " " .. Box(util), "36 54 36x54",
+        "in a layout: the Debuffs bar under Utility moves down by Utility's real height, so nothing overlaps")
+    -- And the Layout page draws its row as tall.
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("layout")
+    local tile = w.pages.layout.rows.util.tiles[1]
+    Equal(tostring(S[tile].height > S[tile].width) .. " " .. tostring(math.abs(S[tile].height / S[tile].width - 1.5) < .1),
+        "true true", "the Layout page's tiles as tall for their width")
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- Buffs 2 and Debuffs 2 go by their kind ------------------------------------------------------------
 -- (A review's checks: each place that asks a bar's kind, tried on an extra
 -- bar beside the bar it's a copy of.) Passives and spells added by name;
@@ -2675,6 +2895,15 @@ end)()
     B:SetOption("cd", "size", 64)
     Frame()
     Equal(Lit(moon) .. " " .. S[moon].width .. " " .. S[strip].height, "4 64 4", "a 64 icon: 4 wide")
+    -- Icon height: still on the art's edges as the icon is now, as wide as
+    -- on an icon of its shorter side.
+    B:SetOption("cd", "heightPct", 50)
+    Frame()
+    local edge = S[strip].points
+    Equal(Lit(moon) .. " " .. S[moon].width .. "x" .. S[moon].height .. " " .. S[strip].height .. " "
+        .. tostring(edge[1][2] == moon.texture and edge[2][2] == moon.texture), "4 64x32 2 true",
+        "Icon height 50%: lit round the 64 by 32 icon's art, 2 wide as on a 32 icon")
+    B:SetOption("cd", "heightPct", 100)
     B:SetOption("cd", "size", 36)
     Frame()
 

@@ -103,16 +103,19 @@ EraUI.
   one you carry, switching as your bags change
 - Keybinds on the icons: the key that casts each spell, at the bottom or a top
   corner, in the size you pick (off by default)
-- Per bar: icon size, spacing, icons per row, which way it grows, show, dim or
-  hide when ready, spell names, countdown numbers, and show, fade or hide out of
-  combat
+- Key press glow: a gold border on an icon while you hold down its key (off by
+  default)
+- Per bar: icon size and height, spacing, icons per row, which way it grows,
+  show, dim or hide when ready, spell names, countdown numbers, and show, fade
+  or hide out of combat
 - On cooldown: show, dim or hide each icon while it cools down, on the
   Cooldowns and Utility bars. With Dim when you can't cast it, icons dim while
   you lack the mana, rage, energy or range, and Dimmed icons sets how dim (off
   by default)
 - Swap with my form: each form, stance or Stealth gets its own icons on the
   Cooldowns and Utility bars, swapped as you change, in a fight too (off by
-  default)
+  default). The Debuffs bars have it too: in a fight it swaps at once with
+  missing debuffs greyed; packed, the change shows once the fight ends
 - Your choice of font and bar texture on the Look page. Game font shows
   Chinese, Korean and Russian names, and is picked for you if your game is in
   one
@@ -134,6 +137,7 @@ EraUI.
 - Change it row by row: how many icons fit across, which bar goes in which row
   and where the display sits; drag icons between rows, onto each other to swap them, or off to remove them;
   take a whole bar out; Reset or Undo
+- Click an icon to change just that icon's size
 - All bars: one slider sizes every bar together; Live preview shows your look
   and keybinds on the icons
 - Grow arrows show which way each bar grows while you move them

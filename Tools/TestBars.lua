@@ -9789,6 +9789,12 @@ do
     Equal(turn .. " | " .. tostring(B:Add("debuff", "Entangling Roots")) .. " " .. Watches("Entangling Roots", 339, 19975, 19970)
         .. " | " .. chilled, "true true true true true true | true true true true | true true true true",
         "Turn Undead lit by Turn Evil's turn, Entangling Roots by Nature's Grasp's roots, Chilled by Frost and Ice Armor's")
+    -- Demonic Sacrifice (a player's report: it glowed as missing while up):
+    -- the buff is the sacrificed demon's own spell, one per demon.
+    _G.UnitClass = function() return "Warlock", "WARLOCK" end
+    B:Add("buff", "Demonic Sacrifice")
+    Equal(Watches("Demonic Sacrifice", 18788, 18789, 18790, 18791, 18792), "true true true true true",
+        "Demonic Sacrifice lit by each demon's buff (imp, voidwalker, succubus, felhunter)")
 end
 search:SetText("")
 S[search].scripts.OnEditFocusLost(search)
@@ -12042,8 +12048,8 @@ end)()
     local onTile = Move(cd, tile)
     Over(nil, tile)
     local tileBack = Move(tile, cd)
-    Equal(onTile .. " | " .. tileBack, "Moonfire. Drag it onto another icon to swap them, to another row, or off to remove it. | " .. HINT,
-        "row to an icon and back: the icon's note, then the row's")
+    Equal(onTile .. " | " .. tileBack, "Moonfire. Click to change its size. Drag it onto another icon to swap them, to another row, or off"
+        .. " to remove it. | " .. HINT, "row to an icon and back: the icon's note, then the row's")
     Over(nil, cd)
     Leave(cd)
 
@@ -12080,8 +12086,8 @@ end)()
     Equal(NoteOf(cd.tiles[1], cd) .. " | " .. NoteOf(cd), "Debuffs go in the Debuffs row. | Debuffs go in the Debuffs row.",
         "and another row's icons and the row itself say it can't go there")
     lp.cancel:Click()
-    Equal(NoteOf(cd.tiles[1], cd) .. " | " .. NoteOf(cd), "Moonfire. Drag it onto another icon to swap them, to another row, or off to remove it. | " .. HINT,
-        "cancelled, their usual notes")
+    Equal(NoteOf(cd.tiles[1], cd) .. " | " .. NoteOf(cd), "Moonfire. Click to change its size. Drag it onto another icon to swap them,"
+        .. " to another row, or off to remove it. | " .. HINT, "cancelled, their usual notes")
     B:SetAura("debuff", "Moonfire", false)
     lp:Refresh()
     -- The display's arrows sit 8 to its right: the strip under them spans

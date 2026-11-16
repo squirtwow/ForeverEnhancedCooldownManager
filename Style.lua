@@ -465,22 +465,55 @@ function S:Away(kit, away)
     if kit.frame then kit.frame:SetShown(kit.rounded and not away) end
 end
 
+-- The part of an icon's art an icon shows: whole while rounded, zoomed past
+-- its bevel while square, then (Icon height: ratio, its height over its
+-- width) its long side cut back evenly at both ends, so the art keeps its
+-- shape on an icon wider or taller than square rather than stretching.
+-- Left, right, top, bottom.
+function S:Coords(ratio, rounded)
+    local left, right, top, bottom = 0, 1, 0, 1
+    if not rounded then left, right, top, bottom = S.ZOOM[1], S.ZOOM[2], S.ZOOM[3], S.ZOOM[4] end
+    ratio = ratio or 1
+    if ratio < 1 then
+        local middle, half = (top + bottom) / 2, (bottom - top) * ratio / 2
+        top, bottom = middle - half, middle + half
+    elseif ratio > 1 then
+        local middle, half = (left + right) / 2, (right - left) / ratio / 2
+        left, right = middle - half, middle + half
+    end
+    return left, right, top, bottom
+end
+
 -- The art's coordinates as it's drawn now: whole while rounded, zoomed past
--- its bevel while square (again after new art: the Layout page's tiles).
+-- its bevel while square (again after new art: the Layout page's tiles),
+-- cropped for its icon's height (S:Coords).
 function S:Crop(kit)
-    if kit.rounded then kit.art:SetTexCoord(0, 1, 0, 1) else self:Zoom(kit.art) end
+    local ratio = kit.ratio or 1
+    if ratio == 1 then
+        if kit.rounded then kit.art:SetTexCoord(0, 1, 0, 1) else self:Zoom(kit.art) end
+        return
+    end
+    kit.art:SetTexCoord(self:Coords(ratio, kit.rounded))
 end
 
 -- Draws an icon as picked at size (its frame's; nil keeps the last), or
 -- square whatever's picked (square: a Layout page tile too small or empty).
--- Only a change is set, and nothing at all while it stays square.
-function S:Shape(kit, size, square)
+-- ratio: its height over its width (Icon height; nil keeps the last, 1 at
+-- first), its art cropped to it; drawn like Blizzard's, the mask and frame
+-- stretch with the icon. Only a change is set, and nothing at all while it
+-- stays square.
+function S:Shape(kit, size, square, ratio)
     if not kit then return end
     kit.size = size or kit.size
+    local cropped = kit.ratio or 1
+    kit.ratio = ratio or cropped
     local rounded = not square and kit.size ~= nil and self:Rounded()
     if rounded and not (kit.mask or kit.refused) then Pieces(kit) end
     if kit.refused then rounded = false end
-    if kit.rounded == rounded and (not rounded or kit.drawn == kit.size) then return end
+    if kit.rounded == rounded and (not rounded or kit.drawn == kit.size) then
+        if kit.ratio ~= cropped then self:Crop(kit) end
+        return
+    end
     kit.rounded = rounded
     local art, owner = kit.art, kit.owner
     art:ClearAllPoints()

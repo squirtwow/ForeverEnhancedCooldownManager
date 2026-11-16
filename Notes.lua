@@ -10,6 +10,20 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.15",
+        sections = {
+            { "Added", {
+                "Icon height: make your bars' icons wider or taller than square.",
+                "Totem time: totem icons show how long your totem has left.",
+                "Swap with my form now works on the Debuffs bar too.",
+                "Layout page: click an icon to change just that icon's size.",
+            } },
+            { "Fixed", {
+                "Demonic Sacrifice no longer glows as missing while your demon's buff is up.",
+            } },
+        },
+    },
+    {
         version = "1.10.14",
         sections = {
             { "Added", {

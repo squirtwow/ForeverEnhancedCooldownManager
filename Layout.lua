@@ -282,7 +282,8 @@ function L:Stack()
         if In(layout, key) then
             local data = Grow(key, side, "down")
             local x = side == "left" and display.x - display.width / 2 - gap or display.x + display.width / 2 + gap
-            B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + ns.IconSize(data) / 2)
+            -- (The first row's middle level with the display's: as tall as its icons, Icon height.)
+            B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + ns.IconHeight(data, ns.IconSize(data)) / 2)
         end
     end
     return true

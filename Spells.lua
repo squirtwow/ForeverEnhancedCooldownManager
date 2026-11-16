@@ -109,7 +109,12 @@ local following = {}
 -- player missed Shadow Vulnerability): the talent turns each rank into Turn
 -- Evil's of that rank (1328374 to 1328372, checked against build 70938's
 -- data), so the target carries those instead.
+-- And Demonic Sacrifice (2026-11-16, a player's report: it glowed as missing
+-- while up): the sacrificed demon's buff is a spell of its own, one per
+-- demon (imp, voidwalker, succubus, felhunter), checked against build
+-- 70938's data.
 local EXTRA_IDS = {
+    ["Demonic Sacrifice"] = { 18789, 18790, 18791, 18792 },
     ["Judgement of the Crusader"] = { 21183 },
     ["Charge"] = { 7922, 25999 },
     ["Intercept"] = { 20253, 20614, 20615 },
