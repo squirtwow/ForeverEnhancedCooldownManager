@@ -487,7 +487,8 @@ local function Environment(keepCVars)
     }
     if not keepCVars then cvars = {} end
     Book(false)
-    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 } }
+    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 },
+        UnitAuraSoundTrigger = { Added = 0, ApplicationsIncreased = 1, Removed = 2 } }
     _G.C_SpellBook = {
         GetNumSpellBookSkillLines = function() return #book end,
         GetSpellBookSkillLineInfo = function(line)
@@ -560,6 +561,12 @@ local function Environment(keepCVars)
     -- (AuraReads). As on Forever: in a fight it finds none, even with them
     -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
     PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    -- The game's own aura sounds (Play a sound, Sound on procs): each call
+    -- kept as a line (AuraSoundCalls: "add <unit> <spellID> <file> <channel>
+    -- <throttle>", "remove <id>", " fight" after either made in one), each
+    -- add given the next ID; with AuraSoundRefuse (text) every add errors,
+    -- kept as "refused <unit> <spellID>" so an add asked again shows.
+    AuraSoundCalls, AuraSoundRefuse, NextAuraSound = {}, nil, 0
     _G.C_UnitAuras = {
         GetPlayerAuraBySpellID = function(id)
             assert(type(id) == "number", "a spell ID")
@@ -568,6 +575,23 @@ local function Environment(keepCVars)
             if lockdown or not aura then return nil end
             if rawequal(aura, SECRET) then return SECRET end
             return { spellId = id }
+        end,
+        AddAuraSound = function(trigger, info)
+            assert(trigger == 0, "the Added trigger")
+            assert(type(info) == "table" and type(info.unitToken) == "string" and type(info.spellID) == "number", "a unit and a spell ID")
+            local throttle = info.throttleSeconds
+            assert(throttle == nil or (type(throttle) == "number" and throttle >= 0 and throttle <= 5), "a throttle of 0 to 5 seconds")
+            if AuraSoundRefuse then
+                AuraSoundCalls[#AuraSoundCalls + 1] = ("refused %s %d%s"):format(info.unitToken, info.spellID, lockdown and " fight" or "")
+                error(AuraSoundRefuse)
+            end
+            AuraSoundCalls[#AuraSoundCalls + 1] = ("add %s %d %s %s %s%s"):format(info.unitToken, info.spellID,
+                tostring(info.soundFileID or info.soundFileName), tostring(info.outputChannel), tostring(throttle), lockdown and " fight" or "")
+            NextAuraSound = NextAuraSound + 1
+            return NextAuraSound
+        end,
+        RemoveAuraSound = function(id)
+            AuraSoundCalls[#AuraSoundCalls + 1] = "remove " .. tostring(id) .. (lockdown and " fight" or "")
         end,
     }
     -- And whether the game keeps one spell's aura secret (SpellAurasSecret[id]:
@@ -1159,7 +1183,7 @@ function H.Sane(ns, shared)
     local function ID(v) return type(v) == "number" and v == math.floor(v) and v >= 1 and v <= 2147483647 end
     local known = { lists = true, forms = true, swap = true, joins = true, only = true, pick = true, style = true, added = true,
         looks = true, warns = true, setup = true, count = true, picks = true, skipped = true, name = true, version = true,
-        extras = true, sizes = true, traps = true, options = true, glowSize = true }
+        extras = true, sizes = true, traps = true, options = true, glowSize = true, sounds = true }
     for k in pairs(shared) do
         if not known[k] then return "an unknown key " .. tostring(k) end
     end
@@ -1318,6 +1342,25 @@ function H.Sane(ns, shared)
             end
         end
     end
+    -- Play a sound: the Buffs and Debuffs bars' only, names on that bar's
+    -- lists (a form's too), never a weapon enchant, one of the pulse's
+    -- sounds but None each.
+    if type(shared.sounds) ~= "table" then return "sounds" end
+    local soundKeys = {}
+    for _, key in ipairs(ns.PULSE_SOUND_KEYS) do soundKeys[key] = key ~= "none" or nil end
+    for key, set in pairs(shared.sounds) do
+        if not ns.AURA_BARS[key] or not shared.lists[key] or type(set) ~= "table" then return "sounds on " .. tostring(key) end
+        local listed = {}
+        for _, v in ipairs(shared.lists[key]) do listed[v] = true end
+        for _, lists in pairs(shared.forms) do
+            for _, v in ipairs(lists[key] or {}) do listed[v] = true end
+        end
+        for name, v in pairs(set) do
+            if not listed[name] or not soundKeys[v] or name:find("^hand:") or ns.WEAPON_ENCHANTS[name] then
+                return "a sound " .. tostring(name)
+            end
+        end
+    end
     -- An icon's own size: a bar it has, names on that bar's lists (a form's
     -- too), a whole percent from 50 to 150 each.
     if type(shared.sizes) ~= "table" then return "sizes" end
@@ -1354,7 +1397,7 @@ function H.Sane(ns, shared)
     -- Count ticks only for one that ticks, Others only for a hand's enchant.
     if type(shared.options) ~= "table" then return "options" end
     local kinds = { countTicks = { debuff = true, cd = true, util = true }, glowMissing = { buff = true, debuff = true },
-        glowActive = { buff = true }, handOthers = { buff = true }, dimUntilWarn = { buff = true, debuff = true },
+        glowActive = { buff = true, debuff = true }, handOthers = { buff = true }, dimUntilWarn = { buff = true, debuff = true },
         missingPicks = { buff = true, debuff = true } }
     for field, sets in pairs(shared.options) do
         if not kinds[field] or type(sets) ~= "table" then return "an option " .. tostring(field) end
@@ -1502,7 +1545,7 @@ end
 -- Settings a shared profile never carries: parts on by default (a string
 -- never switches one back on), and the window's own. (The parts it
 -- switches on are ns.SHARE_PARTS.)
-H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
+H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "oocIgnoreTarget", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
     "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew",
     "keybindsPlain", "totemTime" }
 -- Every part a string can switch on, in order, with its letter.
@@ -2205,8 +2248,8 @@ end
         k = { cd = { Moonfire = true, Wrath = true, Gone = true }, buff = { Thorns = true }, util = "x" },
         -- Cooldowns (none), not true: 2.
         o = { cd = { Moonfire = true }, buff = { Thorns = 1 }, debuff = { ["Faerie Fire"] = true } },
-        -- Debuffs (none), Buffs 2 (it hasn't one): 2.
-        v = { debuff = { Moonfire = true }, buff = { Clearcasting = true }, buff2 = { Thorns = true } },
+        -- Cooldowns (none), Buffs 2 (it hasn't one): 2. (Debuffs kept.)
+        v = { debuff = { Moonfire = true }, buff = { Clearcasting = true }, buff2 = { Thorns = true }, cd = { Moonfire = true } },
         -- Thorns (not a hand's enchant), Off hand (not on the list): 2.
         h = { buff = { Thorns = true, ["hand:main"] = true, ["hand:off"] = true } },
         -- Cooldowns (none), a bar by number: 2.
@@ -2215,7 +2258,7 @@ end
         e = "evil", s = 300 }))
     Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. Options(odd.options) .. " " .. tostring(odd.glowSize),
         '|14 {["countTicks"]={["cd"]={["Moonfire"]=true}},["dimUntilWarn"]={["buff"]={["Thorns"]=true}},'
-        .. '["glowActive"]={["buff"]={["Clearcasting"]=true}},["glowMissing"]={["debuff"]={["Faerie Fire"]=true}},'
+        .. '["glowActive"]={["buff"]={["Clearcasting"]=true},["debuff"]={["Moonfire"]=true}},["glowMissing"]={["debuff"]={["Faerie Fire"]=true}},'
         .. '["handOthers"]={["buff"]={["hand:main"]=true}}} nil', "odd ones left out and counted; only what can be kept")
     P.Import("Odd", odd, false)
     Equal(Options(db.profiles.Odd) .. " " .. tostring(B:CountsTicks("cd", "Wrath")) .. " " .. tostring(B:HandOthers("buff", "Thorns")),
@@ -2357,7 +2400,8 @@ end)()
         glowMissing = { buff = { Thorns = true, ["Mark of the Wild"] = true }, debuff = { ["Faerie Fire"] = true } },
         glowActive = { buff = { Clearcasting = true, ["Nature's Grace"] = true } }, handOthers = { buff = { ["hand:main"] = true } },
         dimUntilWarn = { debuff = { Moonfire = true, ["Insect Swarm"] = true } },
-        missingPicks = { buff = { ["Mark of the Wild"] = true }, debuff = { ["Insect Swarm"] = true } }, glowActiveSize = 120 }
+        missingPicks = { buff = { ["Mark of the Wild"] = true }, debuff = { ["Insect Swarm"] = true } }, glowActiveSize = 120,
+        auraSound = { buff = { Thorns = "bell", Clearcasting = "fanfare" }, debuff = { Moonfire = "chime", Rip = "warhorn" } } }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, keybinds = true, castBar = true, pulse = true, prdText = true,
         barStyle = "split", font = "barlow", chars = { ["Player-1-0001"] = "Big" }, profiles = { Big = profile },
         bars = { cd = { glowProcs = true, tickAt = "BOTTOM", tickColour = "gold", size = 44 }, util = { glowProcs = true, tickFrom = 0 },
@@ -2377,7 +2421,7 @@ end)()
     -- Each thing the profile has beside the string's: whether they match.
     local same = {}
     for _, pair in ipairs({ { "onlyWhenMissing", "only" }, { "warnAt", "warns" }, { "iconSize", "sizes" }, { "lastTrap", "traps" },
-        { "joins", "joins" } }) do
+        { "joins", "joins" }, { "auraSound", "sounds" } }) do
         same[#same + 1] = pair[1] .. "=" .. tostring(Sets(mine[pair[1]]) == Sets(shared[pair[2]]))
     end
     for _, field in ipairs({ "countTicks", "glowMissing", "glowActive", "handOthers", "dimUntilWarn", "missingPicks" }) do
@@ -2388,12 +2432,12 @@ end)()
     same[#same + 1] = "glowActiveSize=" .. tostring(mine.glowActiveSize == shared.glowSize)
     Equal(table.concat({ H.Sane(ns, shared) .. "|" .. shared.skipped, tostring(#text <= P.MAX_TEXT), table.concat(same, " "),
         tostring(shared.setup.bars.cd.glowProcs) .. " " .. tostring(shared.setup.bars.util.glowProcs) }, " | "),
-        "|0 | true | onlyWhenMissing=true warnAt=true iconSize=true lastTrap=true joins=true countTicks=true glowMissing=true"
-        .. " glowActive=true handOthers=true dimUntilWarn=true missingPicks=true spellLook=true forms=true glowActiveSize=true | true true",
-        "read back with every option the profile has and nothing left out, within the longest string read")
+        "|0 | true | onlyWhenMissing=true warnAt=true iconSize=true lastTrap=true joins=true auraSound=true countTicks=true"
+        .. " glowMissing=true glowActive=true handOthers=true dimUntilWarn=true missingPicks=true spellLook=true forms=true glowActiveSize=true"
+        .. " | true true", "read back with every option the profile has and nothing left out, within the longest string read")
     Equal(P.Describe(shared), "Holds 30 bar entries and 12 pulse ticks, with icons for 3 forms, own countdowns for 3 spells, low-time"
-        .. " warnings for 5 auras, own sizes for 4 icons, the trap you last laid shown on 1 icon, 19 icon options and its look and layout.",
-        "said in one line")
+        .. " warnings for 5 auras, own sizes for 4 icons, the trap you last laid shown on 1 icon, 23 icon options and its look and layout.",
+        "said in one line (each sound one of the icon options)")
     io.write("Share: a big setup with every option on is " .. #text .. " letters as a string.\n")
     character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
     local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
@@ -2972,6 +3016,99 @@ end)()
     Equal(tostring(ok) .. " " .. ns2.BarData("util").heightPct .. " " .. ns2.BarData("cd").heightPct .. " "
         .. tostring(ns2.ProfileShare.Export() == text) .. " " .. #printed, "true 130 100 true 0",
         "imported with its look: Utility at 130%, Cooldowns at 100% as the string has it, the same string back")
+end)()
+
+-- Play a sound and Sound on procs in profiles and strings ----------------------------------------------
+-- (A player's idea, 17 Nov 2026.) Each aura bar's entries that play a sound go
+-- with the profile under y (bar -> name -> sound key), those on that bar's
+-- lists (a form's too), never a weapon enchant: read back the same, counted
+-- among the icon options, imported into the new profile with or without the
+-- look, and shared back as the very same string; none ticked, the string is
+-- exactly as before. A string from before has none. In an edited one, None,
+-- a sound this version doesn't have, a name not on the list, a weapon
+-- enchant, a bar with none or anything not a table is left out and counted.
+-- Sound on procs goes with the look: a string from 1.10.15 or before says
+-- nothing of it, so with its look yours stays; one made since that leaves it
+-- out has it off, as every setting a string leaves out.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    B:AddBar("debuff")
+    B:SetAura("debuff2", "Wrath", true)
+    local plain = P.Export()
+    B:SetAuraSound("buff", "Thorns", "warhorn")
+    B:SetAuraSound("debuff", "Moonfire", "chime")
+    B:SetAuraSound("debuff2", "Wrath", "bell")
+    local text = P.Export()
+    local shared = P.Read(text)
+    local SOUNDS = '{["buff"]={["Thorns"]="warhorn"},["debuff"]={["Moonfire"]="chime"},["debuff2"]={["Wrath"]="bell"}}'
+    B:SetAuraSound("buff", "Thorns", nil)
+    B:SetAuraSound("debuff", "Moonfire", nil)
+    B:SetAuraSound("debuff2", "Wrath", nil)
+    local back = P.Export()
+    Equal(table.concat({ H.Sane(ns, shared) .. "|" .. shared.skipped, H.Text(shared.sounds), tostring(text ~= plain), tostring(back == plain),
+        tostring(P.Read(plain).sounds and next(P.Read(plain).sounds)) }, " ") .. " | " .. P.Describe(shared), "|0 " .. SOUNDS
+        .. " true true nil | Holds 3 bar entries, with an extra bar, 3 icon options and its look and layout.",
+        "Share: each entry's sound goes with the profile, Debuffs 2's too, said among the icon options; none ticked, the string as before")
+    -- Imported without its look, then with it: the new profile has them, the same string back.
+    local ok = P.Import("Theirs", shared, false)
+    local without = tostring(ok) .. " " .. ns.ProfileName() .. " " .. H.Text(db.profiles.Theirs.auraSound) .. " "
+        .. tostring(B:AuraSound("buff", "Thorns")) .. " " .. tostring(P.Export() == text)
+    P.Import("Theirs too", shared, true)
+    Equal(without .. " | " .. H.Text(db.profiles["Theirs too"].auraSound) .. " " .. tostring(B:AuraSound("debuff2", "Wrath")),
+        "true Theirs " .. SOUNDS .. " warhorn true | " .. SOUNDS .. " bell", "imported with or without its look: the new profile has"
+        .. " them, and shares the very same string back")
+    -- A string from before them: none, nothing left out.
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = { "Thorns", "hand:main" }, debuff = { "Moonfire", "Rip" } } end
+    local old = P.Read(H.String({ a = "1.10.15", l = Lists() }))
+    P.Import("Old string", old, false)
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. H.Text(old.sounds) .. " " .. tostring(db.profiles["Old string"].auraSound) .. " "
+        .. tostring(B:AuraSound("buff", "Thorns")), "|0 {} nil nil", "a string from before them: none, nothing left out")
+    -- Edited: only a sound this version has, on a name on that bar's list, never a weapon enchant.
+    local odd = P.Read(H.String({ l = Lists(), y = { buff = { Thorns = "none", ["hand:main"] = "chime" },
+        debuff = { Moonfire = "kazoo", Gone = "bell", Rip = "gold", [7] = "bell" }, cd = { Moonfire = "chime" }, debuff2 = { Wrath = "bell" },
+        buff2 = "x" } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. H.Text(odd.sounds), '|8 {["debuff"]={["Rip"]="gold"}}',
+        "None, a sound it doesn't have, a hand, a name not on the list, not a name, a Cooldowns bar, a bar it hasn't and not a table:"
+        .. " left out and counted")
+    local wrong = P.Read(H.String({ l = Lists(), y = "Thorns" }))
+    Equal(H.Sane(ns, wrong) .. "|" .. wrong.skipped .. " " .. H.Text(wrong.sounds), "|1 {}", "not a table: left out, and counted")
+
+    -- Sound on procs: in the look while ticked; from a string from 1.10.15
+    -- or before (or with no version) yours stays; from one made since that
+    -- leaves it out, off; carried, as the string has it.
+    ns.Set("pulseProcSound", true)
+    local look = P.Read(P.Export()).setup.look
+    local function Made(version, settings)
+        return P.Read(H.String({ a = version, l = Lists(), g = { s = settings or {}, b = { cd = { whenReady = "dim" } }, l = {}, k = {} } }))
+    end
+    local function Took(name, shared, before)
+        ns.Set("pulseProcSound", before ~= false)
+        P.Import(name, shared, true)
+        return tostring(ns.Get("pulseProcSound"))
+    end
+    local results = {}
+    for _, version in ipairs({ "1.10.15", "1.10.14", "1.10.13", "1.9.9" }) do results[#results + 1] = Took("Old " .. version, Made(version)) end
+    results[#results + 1] = Took("No version", P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {} } })))
+    for _, version in ipairs({ "1.10.16", "1.11.0", "dev" }) do results[#results + 1] = Took("New " .. version, Made(version)) end
+    results[#results + 1] = Took("Carried", Made("dev", { pulseProcSound = true }), false)
+    results[#results + 1] = Took("Carried old", Made("1.10.15", { pulseProcSound = false }))
+    Equal(tostring(look.pulseProcSound) .. " | " .. table.concat(results, " "), "true | true true true true true false false false true false",
+        "in the look while ticked; from 1.10.15 or before yours stays, from since it's off unless carried; carried, as the string has it")
+    -- The look settings strings from 1.10.13 and 1.10.14 left yours, still do.
+    ns.Set("pulseResets", true)
+    B:SetOption("util", "heightPct", 130)
+    P.Import("Still old", Made("1.10.13"), true)
+    local still = tostring(ns.Get("pulseResets")) .. " " .. ns.BarData("util").heightPct
+    B:SetOption("util", "heightPct", 130)
+    P.Import("Still 1.10.15", Made("1.10.15"), true)
+    Equal(still .. " | " .. tostring(ns.Get("pulseResets")) .. " " .. ns.BarData("util").heightPct .. " " .. #printed, "true 130 | false 100 0",
+        "a 1.10.13 string keeps Early resets and Icon height as before; a 1.10.15 one keeps only Sound on procs")
 end)()
 
 -- Import makes a new profile, and leaves yours as it is ----------------------------------------------

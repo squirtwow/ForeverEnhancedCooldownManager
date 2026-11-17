@@ -485,7 +485,8 @@ local function Environment(keepCVars)
     }
     if not keepCVars then cvars = {} end
     Book(false)
-    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 } }
+    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 },
+        UnitAuraSoundTrigger = { Added = 0, ApplicationsIncreased = 1, Removed = 2 } }
     _G.C_SpellBook = {
         GetNumSpellBookSkillLines = function() return #book end,
         GetSpellBookSkillLineInfo = function(line)
@@ -558,6 +559,12 @@ local function Environment(keepCVars)
     -- (AuraReads). As on Forever: in a fight it finds none, even with them
     -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
     PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    -- The game's own aura sounds (Play a sound, Sound on procs): each call
+    -- kept as a line (AuraSoundCalls: "add <unit> <spellID> <file> <channel>
+    -- <throttle>", "remove <id>", " fight" after either made in one), each
+    -- add given the next ID; with AuraSoundRefuse (text) every add errors,
+    -- kept as "refused <unit> <spellID>" so an add asked again shows.
+    AuraSoundCalls, AuraSoundRefuse, NextAuraSound = {}, nil, 0
     _G.C_UnitAuras = {
         GetPlayerAuraBySpellID = function(id)
             assert(type(id) == "number", "a spell ID")
@@ -566,6 +573,23 @@ local function Environment(keepCVars)
             if lockdown or not aura then return nil end
             if rawequal(aura, SECRET) then return SECRET end
             return { spellId = id }
+        end,
+        AddAuraSound = function(trigger, info)
+            assert(trigger == 0, "the Added trigger")
+            assert(type(info) == "table" and type(info.unitToken) == "string" and type(info.spellID) == "number", "a unit and a spell ID")
+            local throttle = info.throttleSeconds
+            assert(throttle == nil or (type(throttle) == "number" and throttle >= 0 and throttle <= 5), "a throttle of 0 to 5 seconds")
+            if AuraSoundRefuse then
+                AuraSoundCalls[#AuraSoundCalls + 1] = ("refused %s %d%s"):format(info.unitToken, info.spellID, lockdown and " fight" or "")
+                error(AuraSoundRefuse)
+            end
+            AuraSoundCalls[#AuraSoundCalls + 1] = ("add %s %d %s %s %s%s"):format(info.unitToken, info.spellID,
+                tostring(info.soundFileID or info.soundFileName), tostring(info.outputChannel), tostring(throttle), lockdown and " fight" or "")
+            NextAuraSound = NextAuraSound + 1
+            return NextAuraSound
+        end,
+        RemoveAuraSound = function(id)
+            AuraSoundCalls[#AuraSoundCalls + 1] = "remove " .. tostring(id) .. (lockdown and " fight" or "")
         end,
     }
     -- And whether the game keeps one spell's aura secret (SpellAurasSecret[id]:
@@ -4038,12 +4062,13 @@ end)()
     ns = Load(saved)
     Equal(tostring(ns.CountTicks("debuff").Moonfire), "nil", "taken off the bar: no longer kept")
     -- The old test's settings (/ccm ticks) go, and the command with them.
-    saved.devTickTest, saved.devTickProbe, saved.devTickPace = true, {}, {}
+    saved.devTickTest, saved.devTickProbe, saved.devTickPace, saved.devSoundLog = true, {}, {}, { "last session's line" }
     Fresh()
     Game()
     ns = Load(saved)
     Equal(tostring(saved.devTickTest) .. " " .. tostring(saved.devTickProbe) .. " " .. tostring(saved.devTickPace) .. " "
-        .. tostring(ns.ToggleTickTest), "nil nil nil nil", "the old test's settings cleared")
+        .. tostring(ns.ToggleTickTest) .. " " .. tostring(saved.devSoundLog), "nil nil nil nil nil",
+        "the old test's settings cleared, and last session's aura sound log")
     _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = util, enum[1], enum[2]
     Equal(#printed, 0, "no errors")
 end)()
@@ -5153,7 +5178,7 @@ end)()
 -- Glow while active: a buff's icon glows while it's up ---------------------------------------------
 -- Ticked buff by buff in its own panel on a Buffs page (Buffs 2 too), off by
 -- default. Every Buffs bar icon (each fixed slot's and each packed group's,
--- not the edge slots' nor your debuffs on you, and none on the Debuffs bar)
+-- not the edge slots' nor your debuffs on you; the Debuffs bar's too)
 -- gets a hidden frame inside the game's icon as it's made, with no scripts:
 -- the Look page's gold edge, and a proc loop on the addon's own see-through
 -- texture handed to the game once, which the game plays as the icon shows.
@@ -5250,9 +5275,9 @@ end)()
     end
     Equal(table.concat({ counts.b, counts.w, tostring(box.slots.w1 ~= nil), counts.g, counts.self, debuffs, tostring(S[active.frame].shown),
         tostring(S[active.loop].shown), tostring(S[active.loop].parent == active.frame), tostring(S[active.frame].parent == box.slots.b1.button),
-        #bad }, " "), "16 0 true 30 0 0 false true true true 0",
-        "made with each fixed slot's and packed group's icon, hidden, no scripts, the loop handed over once each; none on edge slots,"
-        .. " your debuffs on you or the Debuffs bar")
+        #bad }, " "), "16 0 true 30 0 26 false true true true 0",
+        "made with each fixed slot's and packed group's icon, hidden, no scripts, the loop handed over once each; none on edge slots"
+        .. " or your debuffs on you; the Debuffs bar's icons too")
     Equal(table.concat({ tostring(Last(art, "SetAtlas")), tostring(S[art].alpha), tostring(Last(group, "SetLooping")), #anims,
         S[anims[1]].kind, tostring(Last(anims[1], "SetFromAlpha")) .. "-" .. tostring(Last(anims[1], "SetToAlpha")), S[anims[2]].kind,
         tostring(Last(anims[2], "SetFlipBookRows")) .. "x" .. tostring(Last(anims[2], "SetFlipBookColumns")) .. "/"
@@ -5260,12 +5285,34 @@ end)()
         "UI-HUD-ActionBar-Proc-Loop-Flipbook 0 REPEAT 2 Alpha 1-1 FlipBook 6x5/30 1 true",
         "the loop: the game's proc loop art on the addon's own texture, see-through until the game plays it, round and round")
 
-    -- Off by default: none shown. Not on the Debuffs bar, nor for a spell
+    -- Off by default: none shown. Not on a Cooldowns bar, nor for a spell
     -- not on the bar.
-    Equal(Glowing() .. "|" .. tostring(B:GlowsActive("buff", "Clearcasting")) .. " " .. tostring(B:SetGlowActive("debuff", "Moonfire", true))
+    Equal(Glowing() .. "|" .. tostring(B:GlowsActive("buff", "Clearcasting")) .. " " .. tostring(B:GlowsActive("debuff", "Moonfire"))
         .. " " .. tostring(B:SetGlowActive("buff", "Wrath", true)) .. " " .. tostring(B:SetGlowActive("cd", "Moonfire", true)) .. " "
-        .. tostring(B:ActiveUsable("debuff", "Moonfire")), "|false false false false false",
-        "off at first; not on the Debuffs bar, nor a spell off the Buffs bar")
+        .. tostring(B:SetGlowActive("debuff", "Wrath", true)), "|false false false false false",
+        "off at first; not on a Cooldowns bar, nor a spell off its bar")
+
+    -- On the Debuffs bar too (a player's idea: a proc-like debuff such as
+    -- Shadow Vulnerability glowing while it's on the target): its icon glows,
+    -- kept in the profile, off again unticked.
+    local dbar = B:Get("debuff")
+    local function DebuffGlowing()
+        local out = {}
+        for i = 1, ns.BUFF_SLOTS do
+            local active = dbar.holders[i].slot and dbar.holders[i].slot.active
+            if active and S[active.frame].shown then out[#out + 1] = "b" .. i end
+        end
+        for _, parts in ipairs(dbar.groupParts) do
+            if parts.active and S[parts.active.frame].shown then out[#out + 1] = "g" .. tostring(parts.index) end
+        end
+        table.sort(out)
+        return out[1] or ""
+    end
+    local dset = tostring(B:SetGlowActive("debuff", "Moonfire", true)) .. " " .. tostring(B:ActiveUsable("debuff", "Moonfire")) .. " "
+        .. tostring(ns.GlowActive("debuff").Moonfire) .. " " .. DebuffGlowing()
+    B:SetGlowActive("debuff", "Moonfire", false)
+    Equal(dset .. " | " .. DebuffGlowing() .. " " .. tostring(ns.GlowActive("debuff").Moonfire) .. " " .. Glowing(), "true true true b1 |  nil ",
+        "Debuffs bar: Moonfire ticked glows, kept; unticked: gone; the Buffs bar's untouched")
 
     -- Clearcasting ticked, packed: its icons' glow shown, only its.
     Equal(tostring(B:SetGlowActive("buff", "Clearcasting", true)) .. " " .. tostring(ns.GlowActive("buff").Clearcasting) .. " "
@@ -5396,8 +5443,10 @@ end)()
     box = S[bar.container]
     store = db.profiles[own].glowActive
     Equal(table.concat({ tostring(B:GlowsActive("buff", "Clearcasting")), Glowing(), tostring(store.buff.Wrath), tostring(store.buff.Thorns),
-        tostring(store.debuff), tostring(store.cd), Handed(box.slots.b2.button) }, " "), "true b2 g2 nil nil nil nil 1",
-        "after a reload: still ticked and shown, made with the new icons; a name off the bar, anything but true and other bars dropped")
+        tostring(store.debuff and store.debuff.Moonfire), tostring(store.cd), Handed(box.slots.b2.button) }, " "), "true b2 g2 nil nil true nil 1",
+        "after a reload: still ticked and shown, made with the new icons; a name off the bar, anything but true and a Cooldowns bar's dropped;"
+        .. " the Debuffs bar's kept")
+    store.debuff = nil
     B:SetAura("buff", "Clearcasting", false)
     B:SetAura("buff", "Clearcasting", true)
     Equal(tostring(B:GlowsActive("buff", "Clearcasting")) .. " " .. Glowing(), "false ", "taken off and put back: no longer ticked")
@@ -5600,6 +5649,381 @@ end)()
             "nil nil 0 true true 0 glow while active: edge only, the game took no loop 0",
             "a game " .. (mode == "none" and "without shown animations" or "turning the loop down") .. ": the edge alone, shown with its icon")
     end
+end)()
+
+-- Play a sound: a buff or debuff plays a sound as it lands -------------------------------------------
+-- (A player's idea, 17 Nov 2026.) Ticked entry by entry in its own panel on a
+-- Buffs or Debuffs page, off by default. The game plays it: each ticked
+-- entry's spell IDs registered with the game's aura sounds on the unit its
+-- bar watches (you, or your target), as its sound's file, at most once a
+-- second, at the pulse's volume (Sound Effects, or Master). Only after
+-- logging in and never in a fight: a change then waits for it to end. A
+-- change lets go of all of them first, then registers what's wanted; nothing
+-- changed, no calls. None with Use my bars off, for a bar taken out of the
+-- layout, a weapon enchant, or a game without them. Kept per profile, over a
+-- reload (the IDs the game gave let go of as the addon loads) and in a copy;
+-- gone with its entry and a removed extra bar. One spell a bar and a proc
+-- both want: once, with the bar's sound.
+
+;(function()
+    -- Every file the bars need, with the pulse (the sounds' files, and the procs).
+    local FILES = { "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
+        "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua",
+        "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
+    local CHIME, BELL, GOLD, TRILL, JACKPOT = 7466072, 7466126, 7467072, 7466945, 7466955
+    -- The IDs the mock game gave, mirrored from its calls, and those still registered.
+    local given, live = 0, {}
+    local function Start(saved, beforeLogin)
+        Fresh()
+        given, live = 0, {}
+        _G.PlaySound = function() end
+        local ns = {}
+        _G.ForeverEnhancedCooldownManagerDB = saved
+        for _, file in ipairs(FILES) do assert(loadfile(file))("ForeverEnhancedCooldownManager", ns) end
+        Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
+        if not beforeLogin then
+            Fire("PLAYER_LOGIN")
+            Fire("PLAYER_ENTERING_WORLD")
+        end
+        return ns
+    end
+    -- The calls since the last ask, then forgotten: how many of ours were let
+    -- go, any other let go, "KEPT" if an add came while one of ours was still
+    -- registered, then each add in order.
+    local function Calls()
+        local removed, stray, adds, kept, last = 0, {}, {}, false, nil
+        for _, call in ipairs(AuraSoundCalls) do
+            local id = tonumber(call:match("^remove (%d+)"))
+            if id then
+                if live[id] then live[id], removed = nil, removed + 1 else stray[#stray + 1] = call end
+            else
+                if last ~= "add" and next(live) then kept = true end
+                given = given + 1
+                live[given] = true
+                adds[#adds + 1] = call
+            end
+            last = id and "remove" or "add"
+        end
+        for i = #AuraSoundCalls, 1, -1 do AuraSoundCalls[i] = nil end
+        local parts = {}
+        if removed > 0 then parts[#parts + 1] = "removed " .. removed end
+        if #stray > 0 then parts[#parts + 1] = table.concat(stray, ", ") end
+        if kept then parts[#parts + 1] = "KEPT" end
+        if #adds > 0 then parts[#parts + 1] = table.concat(adds, ", ") end
+        return table.concat(parts, " | ")
+    end
+    -- The adds expected for entries ({ unit, name, file, ids } each: its
+    -- entry's IDs unless given; the first for a spell two want), in the
+    -- registry's order ("unit:id" as text), with the channel; after
+    -- "removed n" when n of ours go first.
+    local function Adds(ns, entries, channel, removed)
+        local keys, lines = {}, {}
+        for _, entry in ipairs(entries) do
+            for _, id in ipairs(entry[4] or ns.Spells:Find(entry[2]).ids) do
+                local at = entry[1] .. ":" .. id
+                if not lines[at] then
+                    keys[#keys + 1] = at
+                    lines[at] = ("add %s %d %d %s 1"):format(entry[1], id, entry[3], channel or "SFX")
+                end
+            end
+        end
+        table.sort(keys)
+        local out = {}
+        for i, at in ipairs(keys) do out[i] = lines[at] end
+        return (removed and removed > 0 and ("removed " .. removed .. " | ") or "") .. table.concat(out, ", ")
+    end
+    local function Live()
+        local n = 0
+        for _ in pairs(live) do n = n + 1 end
+        return n
+    end
+    -- The IDs saved for the next load, and those registered now, as text.
+    local function SavedIDs()
+        return table.concat(ForeverEnhancedCooldownManagerDB.auraSoundIDs or {}, ",")
+    end
+    local function LiveIDs()
+        local ids = {}
+        for id in pairs(live) do ids[#ids + 1] = id end
+        table.sort(ids)
+        return table.concat(ids, ",")
+    end
+
+    -- Off by default: none kept, nothing registered after logging in with
+    -- entries on both bars.
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("buff", "Clearcasting", true)
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(Calls() .. "|" .. tostring(ns.ProfileLists().auraSound) .. " " .. tostring(B:AuraSound("buff", "Thorns")) .. " "
+        .. tostring(ForeverEnhancedCooldownManagerDB.auraSoundIDs) .. " " .. tostring(ns.Get("pulseProcSound")),
+        "|nil nil nil false", "off by default: none kept, nothing registered, Sound on procs off")
+
+    -- Thorns ticked: one chime per spell ID its icon watches (every rank),
+    -- on you, at Sound Effects, at most once a second; the IDs saved.
+    local set = tostring(B:SetAuraSound("buff", "Thorns", "chime"))
+    Equal(set .. " " .. tostring(B:AuraSound("buff", "Thorns")) .. " " .. tostring(ns.ProfileLists().auraSound.buff.Thorns) .. " | " .. Calls(),
+        "true chime chime | " .. Adds(ns, { { "player", "Thorns", CHIME } }), "Thorns ticked: kept, each of its IDs registered on you")
+    Equal(SavedIDs() .. " " .. Live(), LiveIDs() .. " 6", "the IDs the game gave saved, in order")
+
+    -- Moonfire on the Debuffs bar: on your target. All of ours go first.
+    B:SetAuraSound("debuff", "Moonfire", "chime")
+    Equal(Calls(), Adds(ns, { { "player", "Thorns", CHIME }, { "target", "Moonfire", CHIME } }, nil, 6),
+        "Moonfire ticked: on your target; every one of ours let go first, then all registered again")
+    -- Debuffs 2: its own tick, on your target too. A spell on both
+    -- Debuffs bars plays the first bar's sound, once.
+    B:AddBar("debuff")
+    B:SetAura("debuff2", "Moonfire", true)
+    local added = Calls()
+    B:SetAuraSound("debuff2", "Moonfire", "bell")
+    local both = Calls()
+    local before = Live()
+    B:SetAuraSound("debuff", "Moonfire", nil)
+    Equal(added .. "|" .. both .. "|" .. Calls(), "||" .. Adds(ns, { { "player", "Thorns", CHIME }, { "target", "Moonfire", BELL } },
+        nil, before), "Debuffs 2: added and ticked on Moonfire too, nothing new (the first bar's chime wins); unticked there, its bell")
+    B:SetAuraSound("debuff2", "Moonfire", nil)
+    B:RemoveBar("debuff2")
+    B:SetAuraSound("debuff", "Moonfire", "chime")
+    Calls()
+
+    -- Another sound: every one of ours let go before the first add.
+    before = Live()
+    B:SetAuraSound("buff", "Thorns", "bell")
+    Equal(Calls(), Adds(ns, { { "player", "Thorns", BELL }, { "target", "Moonfire", CHIME } }, nil, before),
+        "Thorns' sound now Bell: all let go, then registered with its new file")
+
+    -- Nothing changed, nothing asked: the bars laid out again, a setup
+    -- change, a loading screen, the pulse applied.
+    B:Rebuild()
+    B:Changed()
+    Fire("PLAYER_ENTERING_WORLD")
+    for _, fn in ipairs(timers) do fn() end
+    ns.Pulse:Apply()
+    Equal(Calls(), "", "nothing changed: no calls")
+
+    -- Play at Master volume (the Cooldown pulse page): registered again, at Master.
+    ns.Set("pulseMaster", true)
+    ns.Pulse:Apply()
+    before = Live()
+    local master = Calls()
+    ns.Set("pulseMaster", false)
+    ns.Pulse:Apply()
+    Equal(master .. " || " .. Calls(), Adds(ns, { { "player", "Thorns", BELL }, { "target", "Moonfire", CHIME } }, "Master", before)
+        .. " || " .. Adds(ns, { { "player", "Thorns", BELL }, { "target", "Moonfire", CHIME } }, nil, before),
+        "Play at Master volume: all again at Master; off, at Sound Effects")
+
+    -- In a fight: a tick or a rebuild waits for it to end; nothing asked meanwhile.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    set = tostring(B:SetAuraSound("buff", "Thorns", "chime"))
+    B:Rebuild()
+    B:SetAuraSound("debuff", "Moonfire", "gold")
+    local fight = Calls() .. "|" .. tostring(B:AuraSound("buff", "Thorns")) .. " "
+        .. tostring(ns.DebugReport():match("Aura sounds:[^\n]-waiting (%a+)"))
+    lockdown = false
+    before = Live()
+    Fire("PLAYER_REGEN_ENABLED")
+    local after = Calls()
+    Equal(set .. " " .. fight .. " | " .. after, "true |chime true | " .. Adds(ns, { { "player", "Thorns", CHIME },
+        { "target", "Moonfire", GOLD } }, nil, before), "in a fight: kept, nothing asked, the debug line says it waits; as it ends,"
+        .. " registered once")
+    Equal(tostring(after:find("fight", 1, true)) .. " " .. tostring(ns.DebugReport():match("Aura sounds:[^\n]-waiting (%a+)")), "nil false",
+        "no call made in the fight; nothing waits now")
+
+    -- Use my bars off: all let go. On: back. A bar taken out of the layout:
+    -- its sounds go; put back, back.
+    before = Live()
+    ns.SetBars(false)
+    B:Rebuild()
+    local off = Calls()
+    ns.SetBars(true)
+    B:Rebuild()
+    local on = Calls()
+    Equal(off .. " || " .. on, "removed " .. before .. " || " .. Adds(ns, { { "player", "Thorns", CHIME }, { "target", "Moonfire", GOLD } }),
+        "Use my bars off: all let go; on: all back")
+    before = Live()
+    ns.Layout:TakeOut("buff")
+    local out = Calls()
+    local mid = Live()
+    ns.Layout:PutBack("buff")
+    Equal(out .. " || " .. Calls(), Adds(ns, { { "target", "Moonfire", GOLD } }, nil, before) .. " || "
+        .. Adds(ns, { { "player", "Thorns", CHIME }, { "target", "Moonfire", GOLD } }, nil, mid),
+        "Buffs taken out of the layout: its sounds go; put back: back")
+
+    -- Joined: only the ticked entry's own IDs, not the icon's other buff's.
+    B:SetJoined("buff", 2, true)
+    local joined = Calls()
+    before = Live()
+    B:SetAuraSound("buff", "Clearcasting", "trill")
+    Equal(joined .. " || " .. Calls(), " || " .. Adds(ns, { { "player", "Thorns", CHIME }, { "player", "Clearcasting", TRILL },
+        { "target", "Moonfire", GOLD } }, nil, before), "joined: nothing new; Clearcasting ticked: its own IDs alone, its own sound")
+    before = Live()
+    B:SetAuraSound("buff", "Thorns", nil)
+    Equal(Calls(), Adds(ns, { { "player", "Clearcasting", TRILL }, { "target", "Moonfire", GOLD } }, nil, before),
+        "Thorns unticked in the joined icon: Clearcasting's alone")
+    B:SetJoined("buff", 2, false)
+    Calls()
+
+    -- A bar's sound and a proc's on the same spell: once, the bar's.
+    ns.Set("pulse", true)
+    ns.Set("pulseProcs", true)
+    ns.Set("pulseProcSound", true)
+    ns.Set("pulseSound", "jackpot")
+    ns.SetPulsePick("proc:16870", true)
+    ns.SetPulsePick("proc:16886", true)
+    before = Live()
+    local bars = #ns.Spells:Find("Clearcasting").ids + #ns.Spells:Find("Moonfire").ids
+    ns.Pulse:Apply()
+    Equal(Calls() .. " | " .. tostring(ns.DebugReport():match("wanted: [^|]*")), Adds(ns, { { "player", "Clearcasting", TRILL },
+        { "player", "Nature's Grace", JACKPOT, { 16886 } }, { "player", "Clearcasting", JACKPOT, { 16870 } }, { "target", "Moonfire", GOLD } },
+        nil, before) .. " | wanted: bars " .. bars .. ", procs 2 ",
+        "procs with Sound on procs: Nature's Grace's jackpot; Clearcasting once, with the bar's trill")
+    ns.Set("pulseProcSound", false)
+    before = Live()
+    ns.Pulse:Apply()
+    Equal(Calls(), Adds(ns, { { "player", "Clearcasting", TRILL }, { "target", "Moonfire", GOLD } }, nil, before),
+        "Sound on procs off: the procs' gone")
+    ns.Set("pulse", false)
+    ns.Pulse:Apply()
+    Calls()
+
+    -- Swap with my form: an entry on a form's list not showing is
+    -- registered too (a change of form comes in a fight), and its tick is
+    -- kept across forms.
+    local swap = Start({ useBars = true, notesSeen = "dev", helpSeen = true, chars = { [character.guid] = "Mine" },
+        profiles = { Mine = { cd = {}, util = {}, buff = {}, debuff = { "Wrath" }, swapForm = { debuff = true },
+            forms = { [5] = { debuff = { "Moonfire" } } }, auraSound = { debuff = { Moonfire = "bell", Gone = "bell", Wrath = "none" } } } } })
+    local SB = swap.Bars
+    -- You change form (its ID, nil for none), and the next frame comes.
+    local function Shift(form)
+        Form = form
+        Fire("UPDATE_SHAPESHIFT_FORM")
+        local run = SB.driver and S[SB.driver].scripts.OnUpdate
+        if run then run(SB.driver, 0) end
+    end
+    local unshown = table.concat(swap.BarData("debuff").spells, ",") .. " " .. Calls()
+    Shift(5)
+    local inForm = table.concat(swap.BarData("debuff").spells, ",") .. " " .. tostring(SB:AuraSound("debuff", "Moonfire")) .. " " .. Calls()
+    SB:SetAuraSound("debuff", "Moonfire", "chime")
+    local changed = Calls()
+    Shift(nil)
+    Equal(unshown .. " || " .. inForm .. " || " .. changed .. " || " .. tostring(SB:AuraSound("debuff", "Moonfire")) .. " " .. Calls() .. " "
+        .. tostring(swap.ProfileLists().auraSound.debuff.Gone) .. " " .. tostring(swap.ProfileLists().auraSound.debuff.Wrath),
+        "Wrath " .. Adds(swap, { { "target", "Moonfire", BELL } }) .. " || Moonfire bell  || "
+        .. Adds(swap, { { "target", "Moonfire", CHIME } }, nil, #swap.Spells:Find("Moonfire").ids) .. " || chime  nil nil",
+        "Swap with my form: Moonfire on Bear Form's list registered while Normal shows; ticked there, kept back in Normal;"
+        .. " the form changes ask nothing; a name off the lists and None dropped")
+
+    -- Taken off its list: forgotten, so put back it starts unticked. An
+    -- extra bar removed: its sounds with it.
+    ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAuraSound("buff", "Thorns", "chime")
+    Calls()
+    before = Live()
+    B:SetAura("buff", "Thorns", false)
+    local gone = Calls() .. " " .. tostring(ns.ProfileLists().auraSound)
+    B:SetAura("buff", "Thorns", true)
+    Equal(gone .. " | " .. tostring(B:AuraSound("buff", "Thorns")) .. " " .. Calls(), "removed " .. before .. " nil | nil ",
+        "taken off: let go and forgotten; put back: unticked, nothing registered")
+    B:AddBar("buff")
+    B:SetAura("buff2", "Walk on Air", true)
+    B:SetAuraSound("buff2", "Walk on Air", "gold")
+    local second = Calls()
+    before = Live()
+    B:RemoveBar("buff2")
+    Equal(second .. " || " .. Calls() .. " " .. tostring(ns.ProfileLists().auraSound), Adds(ns, { { "player", "Walk on Air", GOLD } })
+        .. " || removed " .. before .. " nil", "Buffs 2: its own sound on you; removed: let go, none kept")
+
+    -- Never a weapon enchant: a hand, a named poison. Nor a Cooldowns bar.
+    B:SetAura("buff", "hand:main", true)
+    local spells = ns.BarData("buff").spells
+    spells[#spells + 1] = "Instant Poison"
+    B:Changed()
+    Equal(table.concat({ tostring(B:SoundUsable("buff", "hand:main")), tostring(B:SetAuraSound("buff", "hand:main", "chime")),
+        tostring(B:SoundUsable("buff", "Instant Poison")), tostring(B:SetAuraSound("buff", "Instant Poison", "chime")),
+        tostring(B:SetAuraSound("cd", "Moonfire", "chime")), tostring(B:SetAuraSound("buff", "Thorns", "none")),
+        tostring(B:SetAuraSound("buff", "Thorns", "kazoo")), tostring(ns.ProfileLists().auraSound), Calls() }, " "),
+        "false false false false false false false nil ", "a hand, a poison, a Cooldowns bar, None or no such sound: refused, nothing kept or asked")
+    B:SetAura("buff", "Instant Poison", false)
+    B:SetAura("buff", "hand:main", false)
+
+    -- Over a reload: kept; the IDs saved last time let go as the addon loads,
+    -- before any is registered, and none registered until you're logged in.
+    B:SetAuraSound("buff", "Thorns", "chime")
+    Calls()
+    local db = ForeverEnhancedCooldownManagerDB
+    -- Logging out or reloading: every one of ours let go, so none outlives
+    -- the session if the addon isn't loaded next time; the saved IDs stay.
+    before = Live()
+    local kept = SavedIDs()
+    Fire("PLAYER_LOGOUT")
+    Equal(Calls() .. " | " .. tostring(kept ~= "" and SavedIDs() == kept) .. " | " .. tostring(db.devSoundLog),
+        "removed " .. before .. " | true | nil",
+        "logging out or reloading: every one of ours let go, the saved IDs kept for the next load, no log kept")
+    db.auraSoundIDs = { 41, 42 }
+    db.devSoundLog = { "last session's line" }
+    ns = Start(db, true)
+    B = ns.Bars
+    local loading = table.concat(AuraSoundCalls, ", ") .. " " .. tostring(db.auraSoundIDs) .. " " .. tostring(db.devSoundLog)
+    for i = #AuraSoundCalls, 1, -1 do AuraSoundCalls[i] = nil end
+    Fire("PLAYER_LOGIN")
+    Fire("PLAYER_ENTERING_WORLD")
+    Equal(loading .. " | " .. Calls() .. " | " .. SavedIDs() .. " | " .. tostring(db.devSoundLog) .. " " .. tostring(ns.DevSoundLog),
+        "remove 41, remove 42 nil nil | " .. Adds(ns, { { "player", "Thorns", CHIME } }) .. " | " .. LiveIDs() .. " | nil nil",
+        "a reload: the saved IDs let go as it loads, a development build's log gone; registered again once logged in, the new IDs saved, nothing logged")
+    local own = ns.ProfileName()
+    ns.CopyProfile("Raid")
+    Equal(tostring(ns.ProfileName()) .. " " .. tostring(B:AuraSound("buff", "Thorns")) .. " " .. Calls(), "Raid chime ",
+        "a copy of the profile keeps it; the same sounds, nothing asked")
+    ns.UseProfile(own)
+    Calls()
+
+    -- Turned down by the game: nothing kept, counted in /ccm debug with its
+    -- first error, and not asked again until something changes.
+    ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    AuraSoundRefuse = "blocked"
+    B:SetAuraSound("buff", "Thorns", "chime")
+    local report = tostring(ns.DebugReport():match("Aura sounds:[^\n]*"))
+    -- The first try: each of Thorns' IDs asked once, and refused.
+    local tried = 0
+    for _, call in ipairs(AuraSoundCalls) do
+        if call:match("^refused player %d+$") then tried = tried + 1 end
+    end
+    tried = tried .. "/" .. #AuraSoundCalls
+    for i = #AuraSoundCalls, 1, -1 do AuraSoundCalls[i] = nil end
+    B:Rebuild()
+    B:Changed()
+    Fire("PLAYER_ENTERING_WORLD")
+    for _, fn in ipairs(timers) do fn() end
+    local again = #AuraSoundCalls .. " " .. tostring(ForeverEnhancedCooldownManagerDB.auraSoundIDs)
+    AuraSoundRefuse = nil
+    B:Rebuild()
+    local still = #AuraSoundCalls
+    B:SetAuraSound("debuff", "Moonfire", "bell")
+    Equal(report:gsub("first error [^)]*blocked", "first error blocked") .. " | " .. tried .. " " .. again .. " " .. still .. " | " .. Calls(),
+        "Aura sounds: 0 on, 6 refused (first error blocked) | wanted: bars 6, procs 0 | game can true | waiting false | channel SFX"
+        .. " | ticked: buff Thorns chime | 6/6 0 nil 0 | " .. Adds(ns, { { "player", "Thorns", CHIME }, { "target", "Moonfire", BELL } }),
+        "refused: each ID tried once, none on, counted with its first error; not asked again by a rebuild or a loading screen until a"
+        .. " change; then all registered")
+    Equal(tostring(ns.DebugReport():match("Aura sounds:[^\n]*")), "Aura sounds: " .. Live() .. " on, 0 refused | wanted: bars " .. Live()
+        .. ", procs 0 | game can true | waiting false | channel SFX | ticked: buff Thorns chime; debuff Moonfire bell",
+        "/ccm debug: the count on, each owner's, and the entries ticked")
+
+    -- A game without them: no tick, no calls, no errors.
+    ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    _G.C_UnitAuras.AddAuraSound = nil
+    B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    Equal(table.concat({ tostring(B:SoundUsable("buff", "Thorns")), tostring(B:SetAuraSound("buff", "Thorns", "chime")),
+        tostring(B:AuraSound("buff", "Thorns")), Calls(), tostring(ns.DebugReport():match("Aura sounds:[^\n]-game can (%a+)")) }, " "),
+        "false false nil  false",
+        "a game without aura sounds: refused, nothing asked")
+    Equal(#printed, 0, "no errors")
 end)()
 
 -- Trinket 1's buff lights its spot -------------------------------------------------------------------

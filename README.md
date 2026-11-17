@@ -90,6 +90,10 @@ EraUI.
 - Glow when missing: tick it beside a buff and its icon glows while the buff is
   missing, like a Seal that fell off; beside a debuff of yours, it glows while
   the debuff is missing from the enemy you target (off by default)
+- Glow while active: tick it in a buff's or debuff's own panel and its icon
+  glows like a proc while it's up (off by default)
+- Play a sound: tick it in a buff's or debuff's own panel and pick a sound; the
+  game plays it as that buff or debuff lands, in a fight too (off by default)
 - Only when missing: tick it beside a buff and its icon shows only while that
   buff is missing from you (off by default)
 - Count ticks: tick it beside a debuff and its icon counts its ticks like
@@ -107,7 +111,8 @@ EraUI.
   default)
 - Per bar: icon size and height, spacing, icons per row, which way it grows,
   show, dim or hide when ready, spell names, countdown numbers, and show, fade
-  or hide out of combat
+  or hide out of combat. Stay hidden with an enemy targeted (General page) keeps
+  faded or hidden bars that way until combat (off by default)
 - On cooldown: show, dim or hide each icon while it cools down, on the
   Cooldowns and Utility bars. With Dim when you can't cast it, icons dim while
   you lack the mana, rage, energy or range, and Dimmed icons sets how dim (off
@@ -150,6 +155,9 @@ EraUI.
   bags can pulse too
 - Each one pulses Quick or Long, each style with its own size, time and sound:
   15 sounds to pick from, played at your Master volume if you like
+- Procs too: your class's procs, like Clearcasting, pulse the moment they land,
+  and with Sound on procs they play their style's sound too (both off by
+  default)
 - How see-through it is, how big it grows, a border and shadow, and where on
   your screen it shows
 - If Forever Enhanced Cooldown Pulse is installed too, only one of the two

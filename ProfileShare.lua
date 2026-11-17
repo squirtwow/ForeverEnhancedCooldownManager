@@ -362,10 +362,11 @@ local LAYOUT_DEFAULTS = { on = false, gap = ns.ROW_GAP[3], spacing = ns.ICON_GAP
 -- bar -> name -> true), each entry's own ticks (ns.SHARE_TICKS, each under
 -- its letter: k Count ticks, o Glow when missing, v Glow while active, h
 -- Others only, d Dim until Warn at, e the entry a joined icon shows while
--- none is up; bar -> name -> true) and how big the buffs' glows while up
--- are (s: Glow size, a percent).
+-- none is up; bar -> name -> true), how big the buffs' glows while up
+-- are (s: Glow size, a percent) and each entry's sound (y: bar -> name ->
+-- sound key, Play a sound).
 local KNOWN = { n = true, a = true, l = true, f = true, w = true, j = true, m = true, p = true, q = true, c = true, g = true,
-    i = true, t = true, x = true, z = true, r = true, s = true }
+    i = true, t = true, x = true, z = true, r = true, s = true, y = true }
 for _, tick in ipairs(ns.SHARE_TICKS) do KNOWN[tick.code] = true end
 local MAX_LOOKS = 200 -- entries with a look of their own
 
@@ -410,7 +411,7 @@ end
 local NEEDS = {
     countTicks = function(name) return ns.Bars ~= nil and ns.Bars:TickPace(name) ~= nil end,
     handOthers = function(name) return ns.Spells.HAND_KEYS ~= nil and ns.Spells.HAND_KEYS[name] == true end,
-    glowActive = function(name, _, list, joins) return IconHasBuff(list, joins, name) end,
+    glowActive = function(name, key, list, joins) return ns.BAR_KIND[key] ~= "buff" or IconHasBuff(list, joins, name) end,
     dimUntilWarn = function(name, key, list, joins) return ns.BAR_KIND[key] ~= "buff" or IconHasBuff(list, joins, name) end,
 }
 local function Can(field, name, key, list, joins)
@@ -462,20 +463,26 @@ end
 -- -> true, bars -> bar -> setting -> true), or nil for a string that
 -- carries them all. Icon height (heightPct) the same, carried only since
 -- the update after 1.10.14: a string from then or before leaves each bar's
--- as it is.
+-- as it is. And Sound on procs (pulseProcSound) in the look, carried only
+-- since the update after 1.10.15.
 local CARRIED_AFTER = "1.10.13"
 local HEIGHT_AFTER = "1.10.14"
+local SOUND_AFTER = "1.10.15"
 local NEW_LOOK = { "pulseResets" }
+local NEWER_LOOK = { "pulseProcSound" }
 local NEW_COOLDOWN = { "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
 local function Kept(version)
-    if ns.CompareVersions(version, HEIGHT_AFTER) == 1 then return nil end
+    if ns.CompareVersions(version, SOUND_AFTER) == 1 then return nil end
     local older = ns.CompareVersions(version, CARRIED_AFTER) ~= 1
+    local tall = ns.CompareVersions(version, HEIGHT_AFTER) ~= 1
     local keep = { look = {}, bars = {} }
+    for _, key in ipairs(NEWER_LOOK) do keep.look[key] = true end
     if older then
         for _, key in ipairs(NEW_LOOK) do keep.look[key] = true end
     end
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
-        local own = { heightPct = true }
+        local own = {}
+        if tall then own.heightPct = true end
         if older then
             own.glowProcs = true
             if not ns.AURA_BARS[key] then
@@ -586,7 +593,7 @@ local function Clean(data)
         if not KNOWN[key] then Skip() end
     end
     local shared = { lists = {}, forms = {}, swap = {}, joins = {}, only = {}, pick = {}, style = {}, added = {}, looks = {}, warns = {},
-        extras = {}, sizes = {}, traps = {}, options = {}, count = 0, picks = 0 }
+        sounds = {}, extras = {}, sizes = {}, traps = {}, options = {}, count = 0, picks = 0 }
     -- Its extra bars (Extra bars, Core.lua): the keys this version knows,
     -- true each, four at most (Cooldowns 3 and the like too; a version from
     -- before them counts those as left out).
@@ -761,6 +768,25 @@ local function Clean(data)
             Skip()
         end
     end
+    -- The Buffs and Debuffs bars' entries that play a sound (Play a sound):
+    -- a bar the string has, names on its lists (a form's too), never a
+    -- weapon enchant (no aura's), each one of the pulse's sounds but None.
+    if data.y ~= nil and type(data.y) ~= "table" then Skip() end
+    for key, set in pairs(Table(data.y)) do
+        if shared.lists[key] and ns.AURA_BARS[key] and type(set) == "table" then
+            local onBar, kept = OnLists(shared.lists, shared.forms, key), {}
+            for name, sound in pairs(set) do
+                if type(name) == "string" and onBar[name] and not Enchant(name) and ns.AuraSoundValue(sound) then
+                    kept[name] = sound
+                else
+                    Skip()
+                end
+            end
+            if next(kept) then shared.sounds[key] = kept end
+        else
+            Skip()
+        end
+    end
     -- Each icon's own size (settings per spell): a bar the string has, names
     -- on its lists (a form's too), each a percent this version keeps.
     if data.z ~= nil and type(data.z) ~= "table" then Skip() end
@@ -827,7 +853,7 @@ local function Clean(data)
 end
 
 -- A pasted string's profile: { name, lists, forms, swap, joins, only, pick,
--- style, added, looks, warns, extras, sizes, traps, options (each entry's
+-- style, added, looks, warns, sounds, extras, sizes, traps, options (each entry's
 -- own ticks: field -> bar -> name -> true), glowSize (or nil), setup (or
 -- nil), count (entries on its bars), picks, skipped }; or nil
 -- and why not (nil only, for an empty box). The string is read from its
@@ -890,12 +916,15 @@ function P.Describe(shared)
     end
     if traps > 0 then with[#with + 1] = ("the trap you last laid shown on %d %s"):format(traps, traps == 1 and "icon" or "icons") end
     -- Each entry's own ticks, all counted together (Count ticks, the glows,
-    -- Others only, Dim until Warn at, a joined icon's shown entry).
+    -- Others only, Dim until Warn at, a joined icon's shown entry, Play a sound).
     local options = 0
     for _, sets in pairs(shared.options or {}) do
         for _, set in pairs(sets) do
             for _ in pairs(set) do options = options + 1 end
         end
+    end
+    for _, set in pairs(shared.sounds or {}) do
+        for _ in pairs(set) do options = options + 1 end
     end
     if options > 0 then with[#with + 1] = ("%d icon %s"):format(options, options == 1 and "option" or "options") end
     if shared.setup then with[#with + 1] = "its look and layout" end
@@ -1107,6 +1136,17 @@ function P.Export()
         if next(set) then warns[key] = set end
     end
     if next(warns) then data.t = warns end
+    -- The aura bars' entries that play a sound (Play a sound), those on that
+    -- bar's lists (a form's too), never a weapon enchant.
+    local sounds = {}
+    for key in pairs(ns.AURA_BARS) do
+        local onBar, set = OnLists(data.l, forms, key), {}
+        for name, sound in pairs(ns.AuraSounds(key)) do
+            if onBar[name] and not Enchant(name) and ns.AuraSoundValue(sound) then set[name] = sound end
+        end
+        if next(set) then sounds[key] = set end
+    end
+    if next(sounds) then data.y = sounds end
     -- Each icon's own size, for those on its bar's lists (a form's too).
     local sizes = {}
     for key, set in pairs(Table(store.iconSize)) do

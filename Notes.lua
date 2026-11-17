@@ -10,6 +10,17 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.16",
+        sections = {
+            { "Added", {
+                "Play a sound: a buff or debuff can play a sound when it lands, in a fight too.",
+                "Sound on procs: proc pulses can play your pulse sound.",
+                "Glow while active now works on debuffs too, like a proc.",
+                "Stay hidden with an enemy targeted: hidden bars stay hidden until combat.",
+            } },
+        },
+    },
+    {
         version = "1.10.15",
         sections = {
             { "Added", {

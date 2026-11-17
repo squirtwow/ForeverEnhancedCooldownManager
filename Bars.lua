@@ -1650,9 +1650,12 @@ end
 
 -- Bars come back in full in combat, with an enemy targeted, while unlocked
 -- and while Edit Mode is open; otherwise each follows its out-of-combat
--- choice. A hidden answer about the target counts as an enemy.
+-- choice. A hidden answer about the target counts as an enemy. With Stay
+-- hidden with an enemy targeted ticked (General page), the target doesn't
+-- bring them back.
 local function Awake()
     if inCombat or unlocked or editMode then return true end
+    if ns.Get("oocIgnoreTarget") then return false end
     local hostile = UnitExists("target") and UnitCanAttack("player", "target")
     if not Open(hostile) then return true end
     return hostile and true or false
@@ -1825,6 +1828,9 @@ local function Rebuild()
     B:UpdateShown()
     B:RefreshAll()
     if ns.Layout then ns.Layout:Stack() end
+    -- Play a sound: the ticked entries as they are now, told to the game
+    -- (out of a fight, Buffs.lua F:BarSounds).
+    ns.BuffBar:BarSounds()
 end
 
 -- After a change of yours (a bar's entries, a profile, the bars turned on or
@@ -2075,7 +2081,7 @@ end
 
 -- An aura bar's entry gone from its list (not just moved along it): its own
 -- choices go with it (the icon shown faded, Glow when missing, Count ticks,
--- Only when missing, Glow while active, Warn at, Dim until Warn at), so
+-- Only when missing, Glow while active, Play a sound, Warn at, Dim until Warn at), so
 -- putting it back starts afresh, as after a reload (Core.lua Lists). Any
 -- bar's: its own countdown look too (settings per spell), once none of your
 -- lists has it.
@@ -2094,7 +2100,9 @@ local function Forget(key, name)
     -- swapping with your form: its choices stay for it there.)
     if ns.OnBarLists(key, name) then return name end
     ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
-    if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name], ns.GlowActive(key)[name], ns.HandOthers(key)[name] = nil, nil, nil end
+    ns.GlowActive(key)[name] = nil
+    ns.SetAuraSound(key, name, nil)
+    if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name], ns.HandOthers(key)[name] = nil, nil end
     ns.SetWarnAt(key, name, nil)
     ns.DimUntilWarn(key)[name] = nil
     return name
@@ -2797,16 +2805,43 @@ end
 -- Glow while active: a buff on a Buffs bar (Buffs 2 too) whose icon glows
 -- while it's up, like a proc, so it's hard to miss. The glow sits inside the
 -- game's own icon for it, so it shows with that icon, in a fight too
--- (Buffs.lua F:Actives); a change shows once out of a fight.
+-- (Buffs.lua F:Actives); a change shows once out of a fight. On a Debuffs
+-- bar too (a player's idea: a proc-like debuff glowing while it's up).
 function B:SetGlowActive(key, name, on)
-    if ns.BAR_KIND[key] ~= "buff" or not IndexOf(key, name) then return false end
+    if not ns.AURA_BARS[key] or not IndexOf(key, name) then return false end
     ns.GlowActive(key)[name] = on and true or nil
     self:Changed()
     return true
 end
 
 function B:GlowsActive(key, name)
-    return ns.BAR_KIND[key] == "buff" and ns.GlowActive(key)[name] == true
+    return ns.AURA_BARS[key] ~= nil and ns.GlowActive(key)[name] == true
+end
+
+-- Play a sound (a player's idea): an entry on a Buffs or Debuffs bar that plays
+-- one of the pulse's sounds the moment its buff lands on you or its debuff
+-- on your target, in a fight too (the game plays it: Buffs.lua). Only for an
+-- entry with an aura: never a Main hand or Off hand, a poison, a shaman's
+-- weapon, a Firestone or Spellstone or a scroll's imbue. Nor where the game
+-- has no aura sounds.
+function B:SoundUsable(key, name)
+    if not (ns.AURA_BARS[key] and IndexOf(key, name) and ns.BuffBar:CanSound()) then return false end
+    local found = ns.Spells:Find(name)
+    return found ~= nil and found.ids ~= nil and not (found.hand or ns.WEAPON_ENCHANTS[found.name])
+end
+
+-- Its sound's key, or nil while unticked.
+function B:AuraSound(key, name)
+    return ns.AURA_BARS[key] and ns.AuraSounds(key)[name] or nil
+end
+
+-- Ticks it with a sound's key, or unticks it with nil. Nothing on screen
+-- changes, so the bars aren't laid out again: the game is told at once, or
+-- once out of a fight. False where it can't play one.
+function B:SetAuraSound(key, name, sound)
+    if not self:SoundUsable(key, name) or (sound ~= nil and not ns.AuraSoundValue(sound)) then return false end
+    if ns.SetAuraSound(key, name, sound) then ns.BuffBar:BarSounds() end
+    return true
 end
 
 -- Others only: a Main hand or Off hand enchant on a Buffs bar that isn't lit
@@ -2884,7 +2919,9 @@ end
 -- Judged as Buffs.lua F:Layout does, by your own in the icon; with none of
 -- yours in it (another character's), by them all.
 function B:ActiveUsable(key, name)
-    if ns.BAR_KIND[key] ~= "buff" or not self:WarnUsable(key, name) then return false end
+    if not ns.AURA_BARS[key] or not self:WarnUsable(key, name) then return false end
+    -- (A Debuffs bar's entry always has the game's icon while it's up.)
+    if ns.BAR_KIND[key] ~= "buff" then return IndexOf(key, name) ~= nil end
     local data = ns.BarData(key)
     local first, last = Group(key, IndexOf(key, name))
     local yours, all = nil, false

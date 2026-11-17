@@ -520,6 +520,37 @@ test('your buffs are read only by Only show missing and Warn at, out of combat, 
   assert.equal(count(buffs, /OnYou\(/g), 2, 'OnYou defined once, asked from F:Check only');
 });
 
+// Play a sound and Sound on procs (a player's idea, 17 Nov 2026): the game's
+// own aura sounds, which it plays itself as an aura lands, in a fight too.
+// Registered in one place, Buffs.lua's F:ApplySounds, and never in a fight:
+// its one add comes after the fight check that sends it away. All of ours
+// are let go of there, and as you log out or reload. Every call to
+// them goes through pcall (a check that they're there aside), and Buffs.lua
+// asks C_UnitAuras for nothing else but your buffs (above). The old name for
+// them (AddPrivateAuraAppliedSound) is nowhere. Tools/TestAuraContainers.lua
+// and Tools/TestPulse.lua check what they do on the mock game.
+test('aura sounds: registered from Buffs.lua only, out of a fight, through pcall', () => {
+  assert.deepEqual(where(/AddAuraSound|RemoveAuraSound/), ['Buffs.lua'], 'one file registers aura sounds');
+  const buffs = code['Buffs.lua'];
+  assert.equal(count(buffs, /pcall\(api\.AddAuraSound, /g), 1, 'one add, through pcall');
+  const uses = [...buffs.matchAll(/[\w.(]*\b(?:AddAuraSound|RemoveAuraSound)\b/g)].map(match => match[0]);
+  assert.ok(uses.length >= 4, 'its uses found');
+  assert.deepEqual(uses.filter(use => !/^(type\(api\.|pcall\(api\.|pcall\(C_UnitAuras\.)(Add|Remove)AuraSound$/.test(use)), [],
+    'each through pcall, or only checked for');
+  const apply = buffs.match(/\nfunction F:ApplySounds\(\)\r?\n([\s\S]*?)\r?\nend\r?\n/)?.[1] ?? '';
+  const fight = apply.indexOf('if InCombatLockdown() then'), add = apply.indexOf('pcall(api.AddAuraSound, ');
+  assert.ok(fight >= 0 && add > fight, 'the add in F:ApplySounds, after its fight check');
+  assert.match(apply.slice(fight, add), /^if InCombatLockdown\(\) then[\s\S]*?\r?\n\s+return\r?\n\s+end/, 'which sends it away in a fight');
+  // Removed (LetGo) only from F:ApplySounds, after its fight check, and as you log out or reload.
+  assert.ok(apply.indexOf('LetGo(') > fight, 'all of ours let go in F:ApplySounds after its fight check');
+  assert.equal(count(buffs, /\bLetGo\(/g), 3, 'LetGo made once, called from two places');
+  assert.match(buffs, /if event == "PLAYER_LOGOUT" then return LetGo\(/, 'all let go of as you log out or reload');
+  const asked = [...new Set([...buffs.matchAll(/C_UnitAuras\.(\w+)/g)].map(match => match[1]))].sort();
+  assert.deepEqual(asked.filter(name => !['GetPlayerAuraBySpellID', 'AddAuraSound', 'RemoveAuraSound'].includes(name)), [],
+    'nothing else asked of C_UnitAuras');
+  assert.deepEqual(where(/AddPrivateAuraAppliedSound/), [], 'never the old name');
+});
+
 // Nothing the addon reads is ever run as code: a shared profile is taken
 // apart a character at a time (ProfileShare.lua). No way of running text is
 // anywhere in what it ships, nor named in a string, and the share strings'

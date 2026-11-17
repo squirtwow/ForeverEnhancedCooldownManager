@@ -2618,53 +2618,63 @@ local function BuildGeneral(window, page)
     window:Hint(families, "Only one Seal, Aura or Aspect, or Curse, Bane, Sting or Judgement, can be up, so side by side"
         .. " they're one icon on Buffs and Debuffs.")
     window.groupFamilies = families
-    Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left. Move and arrange them on the Layout page.", 34, -56)
+    -- Under them (a player's idea, off unless ticked): out of combat, bars
+    -- set to Fade or Hide stay that way with an enemy targeted.
+    local ignoreTarget = T:Check(page, "Stay hidden with an enemy targeted", function(self)
+        ns.Set("oocIgnoreTarget", self:GetChecked())
+        B:UpdateShown()
+    end)
+    ignoreTarget:SetPoint("TOPLEFT", 16, -58)
+    window:Hint(ignoreTarget, "Out of combat, bars set to Fade or Hide stay faded or hidden with an enemy targeted."
+        .. " They still come back in combat.")
+    window.oocIgnoreTarget = ignoreTarget
+    Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left. Move and arrange them on the Layout page.", 34, -78)
 
-    T:Heading(page, "Minimap button"):SetPoint("TOPLEFT", 16, -96)
+    T:Heading(page, "Minimap button"):SetPoint("TOPLEFT", 16, -118)
     local minimap = T:Check(page, "Show the minimap button", function(self)
         ns.Set("minimap", self:GetChecked())
         if ns.MinimapButton then ns.MinimapButton:Apply() end
     end)
-    minimap:SetPoint("TOPLEFT", 16, -116)
+    minimap:SetPoint("TOPLEFT", 16, -138)
     window:Hint(minimap, "A button on the minimap for these settings. Off, Options > AddOns and /ccm still open them.")
     window.minimap = minimap
     local free = T:Check(page, "Free-floating", function(self)
         if ns.MinimapButton then ns.MinimapButton:SetFree(self:GetChecked()) end
     end)
-    free:SetPoint("TOPLEFT", 260, -116)
+    free:SetPoint("TOPLEFT", 260, -138)
     window:Hint(free, "Drag the button anywhere on the screen, not just round the minimap. It shows even with the minimap hidden.")
     window.minimapFree = free
     Detail(page, "Click it for these settings, right-click for What's new, and drag it round the minimap, or anywhere while it's free-floating.",
-        34, -136)
+        34, -158)
 
     -- Updates: a line in chat when a newer version is out (Core.lua's update
     -- notices).
-    T:Heading(page, "Updates"):SetPoint("TOPLEFT", 16, -176)
+    T:Heading(page, "Updates"):SetPoint("TOPLEFT", 16, -198)
     local updates = T:Check(page, "Tell me when an update is out", function(self)
         ns.Set("updateNotice", self:GetChecked())
     end)
-    updates:SetPoint("TOPLEFT", 16, -196)
+    updates:SetPoint("TOPLEFT", 16, -218)
     window:Hint(updates, "A line in chat, once a session, when a newer version is out. It uses a hidden chat channel,"
         .. " which takes one of your chat channel slots.")
     window.updateNotice = updates
     local noNews = T:Check(page, "No What's new pop-up", function(self)
         ns.Set("noWhatsNew", self:GetChecked())
     end)
-    noNews:SetPoint("TOPLEFT", 300, -196)
+    noNews:SetPoint("TOPLEFT", 300, -218)
     window:Hint(noNews, "What's new stops opening by itself after an update. The What's new button and /ccm new still show it.")
     window.noWhatsNew = noNews
-    Detail(page, "Versions are swapped with your guild, your group, players nearby and a hidden chat channel.", 34, -216)
+    Detail(page, "Versions are swapped with your guild, your group, players nearby and a hidden chat channel.", 34, -238)
 
     -- Help: the tour of the basics, as a first install offers it, and the
     -- Discord for bugs and ideas.
-    T:Heading(page, "Help"):SetPoint("TOPLEFT", 16, -256)
+    T:Heading(page, "Help"):SetPoint("TOPLEFT", 16, -278)
     local tour = T:Button(page, "Take the tour", 110, 22)
-    tour:SetPoint("TOPLEFT", 16, -274)
+    tour:SetPoint("TOPLEFT", 16, -296)
     tour:SetScript("OnClick", function() if ns.Tour then ns.Tour:Start() end end)
     window:Hint(tour, "A short tour of this window, a page at a time. /ccm tour starts it too.")
     window.tour = tour
     local discord = T:Button(page, "Discord", 80, 22)
-    discord:SetPoint("TOPLEFT", 134, -274)
+    discord:SetPoint("TOPLEFT", 134, -296)
     discord:SetScript("OnClick", ns.ShowDiscord)
     window:Hint(discord, "The Discord invite, ready to copy: bugs, ideas and help.")
     window.discord = discord
@@ -2673,9 +2683,9 @@ local function BuildGeneral(window, page)
     helpAbout:SetText("A tour of the basics, or the Discord for bugs and ideas.")
 
     -- More from Squirt: the author's other addons, and a way to open them.
-    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -316)
+    T:Heading(page, "More from Squirt"):SetPoint("TOPLEFT", 16, -338)
     local more = CreateFrame("Frame", nil, page, "BackdropTemplate")
-    more:SetPoint("TOPLEFT", 16, -336)
+    more:SetPoint("TOPLEFT", 16, -358)
     more:SetSize(WIDTH - NAV - 34, 74)
     T:Flat(more, T.PANEL, T.BORDER)
     local moreIcon = more:CreateTexture(nil, "ARTWORK")
@@ -2720,6 +2730,7 @@ local function BuildGeneral(window, page)
             or "Get it on CurseForge or GitHub: click one for its link.")
         bars:SetChecked(B:Enabled())
         families:SetChecked(ns.Get("groupFamilies"))
+        ignoreTarget:SetChecked(ns.Get("oocIgnoreTarget"))
         minimap:SetChecked(ns.Get("minimap"))
         free:SetChecked(ns.Get("minimapFree"))
         updates:SetChecked(ns.Get("updateNotice"))

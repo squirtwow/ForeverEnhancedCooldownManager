@@ -489,7 +489,8 @@ local function Environment(keepCVars)
     }
     if not keepCVars then cvars = {} end
     Book(false)
-    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 } }
+    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 },
+        UnitAuraSoundTrigger = { Added = 0, ApplicationsIncreased = 1, Removed = 2 } }
     _G.C_SpellBook = {
         GetNumSpellBookSkillLines = function() return #book end,
         GetSpellBookSkillLineInfo = function(line)
@@ -562,6 +563,12 @@ local function Environment(keepCVars)
     -- (AuraReads). As on Forever: in a fight it finds none, even with them
     -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
     PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    -- The game's own aura sounds (Play a sound, Sound on procs): each call
+    -- kept as a line (AuraSoundCalls: "add <unit> <spellID> <file> <channel>
+    -- <throttle>", "remove <id>", " fight" after either made in one), each
+    -- add given the next ID; with AuraSoundRefuse (text) every add errors,
+    -- kept as "refused <unit> <spellID>" so an add asked again shows.
+    AuraSoundCalls, AuraSoundRefuse, NextAuraSound = {}, nil, 0
     _G.C_UnitAuras = {
         GetPlayerAuraBySpellID = function(id)
             assert(type(id) == "number", "a spell ID")
@@ -570,6 +577,23 @@ local function Environment(keepCVars)
             if lockdown or not aura then return nil end
             if rawequal(aura, SECRET) then return SECRET end
             return { spellId = id }
+        end,
+        AddAuraSound = function(trigger, info)
+            assert(trigger == 0, "the Added trigger")
+            assert(type(info) == "table" and type(info.unitToken) == "string" and type(info.spellID) == "number", "a unit and a spell ID")
+            local throttle = info.throttleSeconds
+            assert(throttle == nil or (type(throttle) == "number" and throttle >= 0 and throttle <= 5), "a throttle of 0 to 5 seconds")
+            if AuraSoundRefuse then
+                AuraSoundCalls[#AuraSoundCalls + 1] = ("refused %s %d%s"):format(info.unitToken, info.spellID, lockdown and " fight" or "")
+                error(AuraSoundRefuse)
+            end
+            AuraSoundCalls[#AuraSoundCalls + 1] = ("add %s %d %s %s %s%s"):format(info.unitToken, info.spellID,
+                tostring(info.soundFileID or info.soundFileName), tostring(info.outputChannel), tostring(throttle), lockdown and " fight" or "")
+            NextAuraSound = NextAuraSound + 1
+            return NextAuraSound
+        end,
+        RemoveAuraSound = function(id)
+            AuraSoundCalls[#AuraSoundCalls + 1] = "remove " .. tostring(id) .. (lockdown and " fight" or "")
         end,
     }
     -- And whether the game keeps one spell's aura secret (SpellAurasSecret[id]:
@@ -1210,7 +1234,7 @@ do
     Equal(tostring(page.add) .. " " .. tostring(page.slider.pulseMin) .. " " .. tostring(ns.Get("pulseMin")) .. " " .. tostring(P.Add),
         "nil nil nil nil", "no Cooldowns from slider, and no box to add a spell by name")
     Equal(S[page.about].text, "tick the ones you want to pulse, then pick Quick or Long for each", "the list says what to do")
-    local controls = { page.master, page.previewButton, page.move, page.reset, page.shadow, page.items, page.volume }
+    local controls = { page.master, page.previewButton, page.move, page.reset, page.shadow, page.items, page.volume, page.procSound }
     for _, pills in ipairs({ page.edit, page.sound, page.border }) do
         for _, button in ipairs(pills.buttons) do controls[#controls + 1] = button end
     end
@@ -1220,7 +1244,10 @@ do
         local hint = Note(control)
         if type(hint) == "string" and #hint > 10 and hint:find("\226\128\148") == nil then plain = plain + 1 end
     end
-    Equal(plain .. "/" .. #controls, "21/21", "every control says what it does on hover, no dashes")
+    Equal(plain .. "/" .. #controls, "22/22", "every control says what it does on hover, no dashes")
+    -- Sound on procs: off by default.
+    Equal(tostring(ns.Get("pulseProcSound")) .. " " .. tostring(page.procSound.checked) .. " " .. S[page.procSound.text].text,
+        "false false Sound on procs", "Sound on procs off by default")
     -- See-through: 80% leaves a tenth (the user's pick, once the far end),
     -- and past it, fainter still.
     local shown = {}
@@ -2065,9 +2092,10 @@ do
         end
         return #rects .. " | " .. table.concat(outside, ", ") .. " | " .. table.concat(overlaps, ", ")
     end
+    -- (Sound on procs, in the left column's free row since 17 Nov 2026, is the 17th.)
     for i, style in ipairs({ "Quick", "Long" }) do
         page.edit.buttons[i]:Click()
-        Equal(Laid(), "16 |  | ", style .. " under Edit: every tick, label, choice and slider inside the options, none on another")
+        Equal(Laid(), "17 |  | ", style .. " under Edit: every tick, label, choice and slider inside the options, none on another")
     end
     page.edit.buttons[1]:Click()
 
@@ -3471,11 +3499,13 @@ end)()
     Equal(tostring(lns.Get("pulseProcs")) .. " " .. tostring(page.procs.checked) .. " " .. tostring(page.procs.usable) .. " " .. #containers
         .. " " .. tostring(Rows(page):find("PROCS", 1, true)) .. " | " .. S[page.procs.text].text .. " | " .. Note(page.procs),
         "false false true 0 nil | Procs too | Your class's procs, like Clearcasting or Missile Barrage: a pulse the moment one lands, in a"
-        .. " fight too. Procs pulse without a sound.",
+        .. " fight too.",
         "off by default: its tick free, saying what it does, not marked experimental; no container made, no Procs in the list")
     local function Spot(control) local p = S[control].points[1]; return p[1] .. " " .. p[2] .. " " .. p[3] end
     Equal(Spot(page.items) .. " | " .. Spot(page.procs) .. " | " .. Spot(page.volume) .. " | " .. S[page.options].height,
         "TOPLEFT 312 -94 | TOPLEFT 312 -116 | TOPLEFT 312 -138 | 156", "right under Trinkets and potions too, Master volume moved down, the options taller")
+    Equal(Spot(page.procSound) .. " | " .. Spot(page.resets), "TOPLEFT 0 -138 | TOPLEFT 0 -116",
+        "Sound on procs in the left column's free row, under Early resets too, level with Master volume")
 
     -- On, for a mage: his four procs by name, each keyed by its buff's ID.
     page.procs:Click()
@@ -3488,8 +3518,8 @@ end)()
     local barrage = RowFor(page, "proc:400589")
     Equal(S[barrage.long].text .. "| " .. Note(barrage.check) .. " | " .. Note(barrage.style.buttons[2]),
         "| Tick to pulse when Missile Barrage lands. | Once ticked, Missile Barrage pulses Quick. Click for Long. Each style has"
-        .. " its own size and time, set under Edit above. Procs pulse without a sound.",
-        "no cooldown beside it; its tick and switch say what they do, a proc's style without a sound")
+        .. " its own size, time and sound, set under Edit above. Procs play their sound only with Sound on procs ticked.",
+        "no cooldown beside it; its tick and switch say what they do, a proc's sound only with Sound on procs")
 
     -- Ticked: the container, made now, and slot p1 told Missile Barrage's two buffs.
     barrage.check:Click()
@@ -3733,6 +3763,156 @@ end)()
         "reloaded with Missile Barrage up: shown at once, unseen, for the quiet and a Quick pulse, then seen again")
     _G.ForeverPulseLink = nil
     Equal(#printed, 0, "no errors from proc pulses")
+end)()
+
+-- Sound on procs: a ticked proc's style's sound as it lands ----------------------------------------
+-- (A player's idea, 17 Nov 2026.) Off by default. Ticked, each ticked proc's
+-- buff IDs are registered with the game's own aura sounds on you, as its
+-- style's sound's file (none for a style set to None), at the pulse's
+-- volume, at most once a second: the game plays it as the proc lands, in a
+-- fight too. Only while proc pulses run here (not with the pulse running in
+-- Forever Enhanced Cooldown Pulse, nor with Procs too off), never before
+-- you're logged in nor in a fight (a change then waits for it to end); the
+-- IDs saved last session let go of as the addon loads. Greyed with why on a
+-- game without aura sounds; one line in /ccm debug.
+
+;(function()
+    local function Mage(saved, bare)
+        Environment()
+        BlizzardFrames()
+        PulseGame()
+        if bare then _G.C_UnitAuras.AddAuraSound = nil end
+        _G.UnitClass = function() return "Mage", "MAGE" end
+        _G.FECMFrame, _G.FECMTour, _G.FECMNotes, _G.ForeverPulseLink = nil, nil, nil, nil
+        local lns = LoadAll(saved)
+        Tick(lns.Pulse)
+        lns.ShowWindow()
+        FECMFrame:Select("pulse")
+        return lns, FECMFrame.pages.pulse
+    end
+    -- The aura sound calls since the last ask, then forgotten: the removes
+    -- (in order), then the adds as made; said if a remove came after an add.
+    local function Calls()
+        local removes, adds, order = {}, {}, ""
+        for _, call in ipairs(AuraSoundCalls) do
+            if call:find("^remove") then
+                if #adds > 0 then order = " (a remove after an add)" end
+                removes[#removes + 1] = call
+            else
+                adds[#adds + 1] = call
+            end
+        end
+        for i = #AuraSoundCalls, 1, -1 do AuraSoundCalls[i] = nil end
+        table.sort(removes)
+        for _, call in ipairs(adds) do removes[#removes + 1] = call end
+        return table.concat(removes, ", ") .. order
+    end
+    local function Line(lns) return tostring(lns.DebugReport():match("Aura sounds:[^\n]*")) end
+    local function Saved() return table.concat(ForeverEnhancedCooldownManagerDB.auraSoundIDs or {}, ",") end
+    -- Missile Barrage ticked Long (its sound Bell), Clearcasting Quick (its sound None).
+    local function Settings(more)
+        local saved = { notesSeen = "dev", helpSeen = true, pulse = true, pulseProcs = true, pulseLongSound = "bell", pulseSound = "none",
+            chars = { [character.guid] = "Mine" }, profiles = { Mine = { pulsePick = { ["proc:400589"] = true, ["proc:12536"] = true },
+                pulseStyle = { ["proc:400589"] = "long" } } } }
+        for key, value in pairs(more or {}) do saved[key] = value end
+        return saved
+    end
+    local BARRAGE = "add player 1326083 7466126 %s 1, add player 400589 7466126 %s 1"
+
+    local lns, page = Mage(Settings())
+    Equal(tostring(lns.Get("pulseProcSound")) .. " " .. tostring(page.procSound.checked) .. " " .. tostring(page.procSound.usable) .. " | "
+        .. Calls() .. " | " .. Line(lns), "false false true |  | Aura sounds: 0 on, 0 refused | wanted: bars 0, procs 0 | game can true"
+        .. " | waiting false | channel SFX | ticked: none", "off by default: usable, nothing registered")
+    page.procSound:Click()
+    Equal(tostring(lns.Get("pulseProcSound")) .. " | " .. Calls() .. " | " .. Saved() .. " | " .. Line(lns), "true | " .. BARRAGE:format("SFX", "SFX")
+        .. " | 1,2 | Aura sounds: 2 on, 0 refused | wanted: bars 0, procs 2 | game can true | waiting false | channel SFX | ticked: none",
+        "ticked: Missile Barrage's two buffs on you with Long's Bell, at most once a second; Clearcasting's Quick has none; the IDs saved")
+    -- Play at Master volume: registered again at Master; off, at Sound Effects.
+    page.volume:Click()
+    local master = Calls()
+    page.volume:Click()
+    Equal(master .. " | " .. Calls(), "remove 1, remove 2, " .. BARRAGE:format("Master", "Master") .. " | remove 3, remove 4, "
+        .. BARRAGE:format("SFX", "SFX"), "Play at Master volume: all again at Master; off, at Sound Effects")
+    -- Quick given a sound: Clearcasting's too, in the registry's order.
+    lns.Set("pulseSound", "zippy")
+    lns.Pulse:Apply()
+    Equal(Calls(), "remove 5, remove 6, add player 12536 7467027 SFX 1, " .. BARRAGE:format("SFX", "SFX"),
+        "Quick's sound Zippy: Clearcasting plays it too")
+    lns.Set("pulseSound", "none")
+    lns.Pulse:Apply()
+    Calls()
+
+    -- In a fight: unticked, then ticked again, nothing asked until it ends.
+    lockdown = true
+    Fire("PLAYER_REGEN_DISABLED")
+    page.procSound:Click()
+    local fight = Calls() .. "|" .. tostring(lns.Get("pulseProcSound")) .. " " .. tostring(lns.DebugReport():match("Proc pulse:[^\n]-pending (%a+)"))
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    local ended = Calls()
+    lockdown = true
+    page.procSound:Click()
+    local again = Calls()
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight .. " | " .. ended .. " | " .. again .. " | " .. Calls(), "|false true | remove 10, remove 11 |  | " .. BARRAGE:format("SFX", "SFX"),
+        "in a fight: unticked, nothing asked, it waits; as it ends, let go; ticked in the next, registered as that one ends")
+
+    -- Running in Forever Enhanced Cooldown Pulse: none here (that one plays
+    -- its own); back, registered again. Procs too off: none.
+    ForeverPulseLink:Register("ForeverEnhancedCooldownPulse", { name = "Forever Enhanced Cooldown Pulse", rank = 5,
+        IsOn = function() return true end, Refresh = function() end })
+    local there = Calls()
+    ForeverPulseLink.owners.ForeverEnhancedCooldownPulse = nil
+    ForeverPulseLink:Notify("ForeverEnhancedCooldownPulse")
+    local back = Calls()
+    page.procs:Click()
+    local procsOff = Calls()
+    page.procs:Click()
+    Equal(there .. " | " .. back .. " | " .. procsOff .. " | " .. Calls(), "remove 12, remove 13 | " .. BARRAGE:format("SFX", "SFX")
+        .. " | remove 14, remove 15 | " .. BARRAGE:format("SFX", "SFX"), "the pulse running in the other addon: let go here, back when it's"
+        .. " here again; Procs too unticked: let go, ticked: back")
+
+    -- Turned down by the game: none on, counted with its first error in /ccm
+    -- debug; not asked again by the pulse applied again or a loading screen.
+    page.procSound:Click()
+    Calls()
+    AuraSoundRefuse = "blocked"
+    page.procSound:Click()
+    local refused = Line(lns):gsub("first error [^)]*blocked", "first error blocked") .. " | " .. Calls()
+    lns.Pulse:Apply()
+    Fire("PLAYER_ENTERING_WORLD")
+    Tick(lns.Pulse)
+    AuraSoundRefuse = nil
+    Equal(refused .. " | " .. Calls(), "Aura sounds: 0 on, 2 refused (first error blocked) | wanted: bars 0, procs 2 | game can true"
+        .. " | waiting false | channel SFX | ticked: none | refused player 1326083, refused player 400589 | ",
+        "refused: each tried once, none on, counted with the first error, nothing kept; not asked again for the same")
+    Equal(#printed, 0, "no errors")
+
+    -- Reloaded: the IDs saved last session let go as the addon loads, and
+    -- nothing registered before you're logged in, even with the procs applied.
+    Environment()
+    BlizzardFrames()
+    PulseGame()
+    _G.UnitClass = function() return "Mage", "MAGE" end
+    _G.FECMFrame, _G.FECMTour, _G.FECMNotes, _G.ForeverPulseLink = nil, nil, nil, nil
+    local rns = {}
+    _G.ForeverEnhancedCooldownManagerDB = Settings({ pulseProcSound = true, auraSoundIDs = { 41, 42 } })
+    for _, file in ipairs(FILES) do assert(loadfile(file))("ForeverEnhancedCooldownManager", rns) end
+    Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
+    rns.Pulse:Apply()
+    local loading = table.concat(AuraSoundCalls, ", ") .. " " .. tostring(ForeverEnhancedCooldownManagerDB.auraSoundIDs)
+    for i = #AuraSoundCalls, 1, -1 do AuraSoundCalls[i] = nil end
+    Fire("PLAYER_LOGIN")
+    Equal(loading .. " | " .. Calls() .. " | " .. Saved(), "remove 41, remove 42 nil | " .. BARRAGE:format("SFX", "SFX") .. " | 1,2",
+        "a reload: last session's IDs let go as it loads, nothing registered until logged in, then the new IDs saved")
+
+    -- A game without aura sounds: greyed, saying why; nothing asked.
+    local bns, bpage = Mage(Settings({ pulseProcSound = true }), true)
+    Equal(table.concat({ tostring(bpage.procSound.checked), tostring(bpage.procSound.usable), Calls(), tostring(bns.Pulse:CanSound()) }, " ")
+        .. " | " .. Note(bpage.procSound) .. " | " .. tostring(Line(bns):match("game can %a+")) .. " " .. #printed, "true false  false | Your game"
+        .. " can't play proc sounds. | game can false 0", "no aura sounds: greyed, saying why, nothing asked, no errors")
+    _G.ForeverPulseLink = nil
 end)()
 
 Equal(#printed, 0, "no errors")

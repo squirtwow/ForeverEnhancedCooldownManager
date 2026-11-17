@@ -489,7 +489,8 @@ local function Environment(keepCVars)
     }
     if not keepCVars then cvars = {} end
     Book(false)
-    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 } }
+    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 },
+        UnitAuraSoundTrigger = { Added = 0, ApplicationsIncreased = 1, Removed = 2 } }
     _G.C_SpellBook = {
         GetNumSpellBookSkillLines = function() return #book end,
         GetSpellBookSkillLineInfo = function(line)
@@ -562,6 +563,12 @@ local function Environment(keepCVars)
     -- (AuraReads). As on Forever: in a fight it finds none, even with them
     -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
     PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    -- The game's own aura sounds (Play a sound, Sound on procs): each call
+    -- kept as a line (AuraSoundCalls: "add <unit> <spellID> <file> <channel>
+    -- <throttle>", "remove <id>", " fight" after either made in one), each
+    -- add given the next ID; with AuraSoundRefuse (text) every add errors,
+    -- kept as "refused <unit> <spellID>" so an add asked again shows.
+    AuraSoundCalls, AuraSoundRefuse, NextAuraSound = {}, nil, 0
     _G.C_UnitAuras = {
         GetPlayerAuraBySpellID = function(id)
             assert(type(id) == "number", "a spell ID")
@@ -570,6 +577,23 @@ local function Environment(keepCVars)
             if lockdown or not aura then return nil end
             if rawequal(aura, SECRET) then return SECRET end
             return { spellId = id }
+        end,
+        AddAuraSound = function(trigger, info)
+            assert(trigger == 0, "the Added trigger")
+            assert(type(info) == "table" and type(info.unitToken) == "string" and type(info.spellID) == "number", "a unit and a spell ID")
+            local throttle = info.throttleSeconds
+            assert(throttle == nil or (type(throttle) == "number" and throttle >= 0 and throttle <= 5), "a throttle of 0 to 5 seconds")
+            if AuraSoundRefuse then
+                AuraSoundCalls[#AuraSoundCalls + 1] = ("refused %s %d%s"):format(info.unitToken, info.spellID, lockdown and " fight" or "")
+                error(AuraSoundRefuse)
+            end
+            AuraSoundCalls[#AuraSoundCalls + 1] = ("add %s %d %s %s %s%s"):format(info.unitToken, info.spellID,
+                tostring(info.soundFileID or info.soundFileName), tostring(info.outputChannel), tostring(throttle), lockdown and " fight" or "")
+            NextAuraSound = NextAuraSound + 1
+            return NextAuraSound
+        end,
+        RemoveAuraSound = function(id)
+            AuraSoundCalls[#AuraSoundCalls + 1] = "remove " .. tostring(id) .. (lockdown and " fight" or "")
         end,
     }
     -- And whether the game keeps one spell's aura secret (SpellAurasSecret[id]:

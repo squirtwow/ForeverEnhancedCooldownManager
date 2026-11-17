@@ -151,6 +151,8 @@ function ns.DebugReport()
     if ns.Style then Warns(Add) end
     -- The Cooldown pulse's procs: what the game took, and what it keeps secret.
     if ns.Pulse and ns.Pulse.ProcReport then ns.Pulse:ProcReport(Add) end
+    -- Play a sound and Sound on procs: what the game took, and what's ticked.
+    if ns.BuffBar and ns.BuffBar.SoundReport then Add(ns.BuffBar:SoundReport()) end
     Heals(Add)
     if ns.Style then Fonts(Add) end
     if ns.Bars and ns.Bars.Report then ns.Bars:Report(Add, Say) end

@@ -57,6 +57,9 @@ ns.DEFAULTS = {
     -- On the Buffs and Debuffs bars, one family's one-at-a-time spells side
     -- by side are one icon (Seals, Curses...; General page; a player's idea).
     groupFamilies = true,
+    -- Out of combat, an enemy targeted doesn't bring bars set to Fade or Hide
+    -- back (General page; a player's idea): off unless ticked.
+    oocIgnoreTarget = false,
     listItems = false, -- show trinkets and bag items in the /ccm spell list
     listRanks = false, -- show every rank you know as its own row
     listTicked = false, -- show only the spells on the bar whose page it is (a player's idea)
@@ -164,6 +167,7 @@ ns.DEFAULTS = {
     pulseItems = true, -- your trinkets, and items on your Cooldowns and Utility bars, are listed too
     pulseProcs = false, -- your class's procs are listed too, each pulsing as it lands
     pulseResets = false, -- a cooldown a talent brings back early pulses too
+    pulseProcSound = false, -- Sound on procs: each ticked proc plays its style's sound as it lands (the game plays it)
     pulseX = 0, -- where it sits: from the middle of the screen
     pulseY = 0,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
@@ -310,6 +314,11 @@ ns.PULSE_SOUND_KEYS = { "none", "chime", "bell", "trill", "shimmerBell", "magicC
 ns.PULSE_SOUND_NAMES = { none = "None", chime = "Chime", bell = "Bell", trill = "Bell trill", shimmerBell = "Shimmer bell",
     magicChimes = "Magic chimes", shimmer = "Shimmer", zippy = "Zippy magic", synth = "Synth", pipe = "Pitch pipe", brass = "Brass",
     warhorn = "War horn", fanfare = "Fanfare", gold = "Gold", jackpot = "Jackpot bell", anvil = "Anvil" }
+-- Play a sound's choices (an entry on a Buffs or Debuffs bar, Bars.lua
+-- B:SetAuraSound): the pulse's sounds but None, as unticked is none.
+local AURA_SOUNDS = {}
+for _, key in ipairs(ns.PULSE_SOUND_KEYS) do AURA_SOUNDS[key] = key ~= "none" or nil end
+function ns.AuraSoundValue(value) return type(value) == "string" and AURA_SOUNDS[value] == true end
 ns.PULSE_STYLE_KEYS = { "quick", "long" }
 ns.PULSE_STYLE_NAMES = { quick = "Quick", long = "Long" }
 -- The display's health and power text: where on each bar, what each spot
@@ -457,7 +466,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "iconStyle", "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
     "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",
-    "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseResets", "pulseX", "pulseY" }
+    "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseResets", "pulseProcSound", "pulseX", "pulseY" }
 -- And each colour's custom one, kept beside it.
 for _, key in ipairs(ns.COLOUR_SETTINGS) do ns.SHARE_LOOK[#ns.SHARE_LOOK + 1] = key .. "Custom" end
 -- The parts a shared profile carries the ones on of (ProfileShare.lua), each
@@ -495,7 +504,7 @@ ns.SHARE_PARTS = {
 ns.SHARE_TICKS = {
     { field = "countTicks", code = "k", kinds = { debuff = true, cd = true, util = true } }, -- Count ticks
     { field = "glowMissing", code = "o", kinds = { buff = true, debuff = true } }, -- Glow when missing
-    { field = "glowActive", code = "v", kinds = { buff = true } }, -- Glow while active
+    { field = "glowActive", code = "v", kinds = { buff = true, debuff = true } }, -- Glow while active
     { field = "handOthers", code = "h", kinds = { buff = true } }, -- Others only, on a hand's enchant
     { field = "dimUntilWarn", code = "d", kinds = { buff = true, debuff = true } }, -- Dim until Warn at
     { field = "missingPicks", code = "e", kinds = { buff = true, debuff = true } }, -- the entry a joined icon shows while none is up
@@ -862,10 +871,11 @@ local function RenameSpells(profile)
     for field in pairs(PULSE_LISTS) do RenameSet(profile[field]) end
     if type(profile.spellLook) == "table" then RenameSet(profile.spellLook) end
     -- And each entry's own choices kept by bar: Warn at, its size, Show the
-    -- trap I last laid, and its ticks (Count ticks, the glows, Only when
-    -- missing, Others only, Dim until Warn at, a joined icon's shown entry).
-    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing",
-        "glowActive", "handOthers", "dimUntilWarn" }) do
+    -- trap I last laid, Play a sound, and its ticks (Count ticks, the glows,
+    -- Only when missing, Others only, Dim until Warn at, a joined icon's
+    -- shown entry).
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound", "missingPicks", "glowMissing", "countTicks",
+        "onlyWhenMissing", "glowActive", "handOthers", "dimUntilWarn" }) do
         for _, set in pairs(type(profile[field]) == "table" and profile[field] or {}) do
             if type(set) == "table" then RenameSet(set) end
         end
@@ -935,6 +945,24 @@ local function RepairWarns(profile)
         end
     end
     profile.warnAt = next(kept) ~= nil and kept or nil
+end
+
+-- A profile's sounds (Play a sound): only an aura bar's it has, only names
+-- on that bar's lists (a form's too), each one of the pulse's sounds but
+-- None. A profile with none keeps no table for them.
+local function RepairSounds(profile)
+    if profile.auraSound == nil then return end
+    local sets, kept = type(profile.auraSound) == "table" and profile.auraSound or {}, {}
+    for key, set in pairs(sets) do
+        if ns.AURA_BARS[key] and Present(profile, key) and type(set) == "table" then
+            local listed, own = BarNames(profile, key), {}
+            for name, sound in pairs(set) do
+                if listed[name] and ns.AuraSoundValue(sound) then own[name] = sound end
+            end
+            if next(own) ~= nil then kept[key] = own end
+        end
+    end
+    profile.auraSound = next(kept) ~= nil and kept or nil
 end
 
 -- An icon's own size (settings per spell): a whole percent of its bar's
@@ -1036,7 +1064,7 @@ local function Lists(profile)
                     if on ~= true or not OnBarLists(profile, key, name) then set[name] = nil end
                 end
             elseif not (ns.AURA_BARS[key] and Present(profile, key)) or type(set) ~= "table"
-                or ((field == "onlyWhenMissing" or field == "glowActive" or field == "handOthers") and ns.BAR_KIND[key] ~= "buff") then
+                or ((field == "onlyWhenMissing" or field == "handOthers") and ns.BAR_KIND[key] ~= "buff") then
                 profile[field][key] = nil
             else
                 local listed = BarNames(profile, key)
@@ -1077,6 +1105,7 @@ local function Lists(profile)
     profile.swapForm = type(ticks) == "table" and next(ticks) ~= nil and ticks or nil
     RepairLooks(profile)
     RepairWarns(profile)
+    RepairSounds(profile)
     RepairSizes(profile)
     RepairTraps(profile)
     if not GlowSizeValue(profile.glowActiveSize) then profile.glowActiveSize = nil end
@@ -1705,6 +1734,53 @@ function ns.SetWarnAt(key, name, seconds)
     return true
 end
 
+-- Play a sound (a player's idea): an aura bar's entry
+-- that plays one of the pulse's sounds the moment its buff or debuff lands,
+-- picked in the panel its tray icon opens (the game plays it, Buffs.lua).
+-- Kept by bar and entry, as the sound's key, only once one is ticked
+-- (profile.auraSound[key][name] = "chime"), so a profile from before loads
+-- unchanged.
+local function AuraSoundSets(make)
+    local store = ns.ProfileLists()
+    if type(store.auraSound) ~= "table" then
+        if not make then return nil end
+        store.auraSound = {}
+    end
+    return store.auraSound
+end
+
+-- An aura bar's entries that play a sound (name -> sound key), to read:
+-- none kept gives an empty table of its own.
+function ns.AuraSounds(key)
+    local sets = AuraSoundSets(false)
+    local set = sets and sets[key]
+    return type(set) == "table" and set or {}
+end
+
+-- Sets (or with nil, clears) an entry's sound on an aura bar. True when it
+-- changed. Whether it can play one is the caller's (Bars.lua B:SetAuraSound).
+function ns.SetAuraSound(key, name, sound)
+    if not (ns.AURA_BARS[key] and Present(ns.ProfileLists(), key)) or type(name) ~= "string"
+        or (sound ~= nil and not ns.AuraSoundValue(sound)) then
+        return false
+    end
+    if ns.AuraSounds(key)[name] == sound then return false end
+    local sets = AuraSoundSets(sound ~= nil)
+    if not sets then return false end
+    if type(sets[key]) ~= "table" then sets[key] = {} end
+    sets[key][name] = sound
+    if next(sets[key]) == nil then sets[key] = nil end
+    if next(sets) == nil then ns.ProfileLists().auraSound = nil end
+    return true
+end
+
+-- The IDs the game gave for the sounds registered now (Buffs.lua F:ApplySounds),
+-- kept so the next load can let go of any the game still holds after a reload.
+function ns.SaveAuraSounds(ids)
+    if not db then return end
+    db.auraSoundIDs = type(ids) == "table" and #ids > 0 and ids or nil
+end
+
 -- An entry gone from a list: its look goes too once no list of yours has it
 -- (a form's included), so putting it back starts afresh, as after a reload.
 function ns.ForgetSpellLook(name)
@@ -1863,7 +1939,7 @@ end
 
 -- Removes an extra bar from the profile you're on, with its list and its
 -- entries' choices there (joins, picks, glow, ticks, only when missing,
--- Warn at and Dim until Warn at, icon sizes, Show the trap I last laid); a
+-- Warn at and Dim until Warn at, Play a sound, icon sizes, Show the trap I last laid); a
 -- look goes once no list of yours has its entry.
 -- Its settings and place stay, for when one is added again. True, or false
 -- and why not. Bars.lua B:RemoveBar empties its frame.
@@ -1888,11 +1964,11 @@ function ns.RemoveBar(key)
         if next(store.swapForm) == nil then store.swapForm = nil end
     end
     for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers", "warnAt",
-        "iconSize", "dimUntilWarn", "lastTrap" }) do
+        "iconSize", "dimUntilWarn", "lastTrap", "auraSound" }) do
         local sets = store[field]
         if type(sets) == "table" then sets[key] = nil end
     end
-    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap" }) do
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound" }) do
         if type(store[field]) == "table" and next(store[field]) == nil then store[field] = nil end
     end
     for _, name in ipairs(names) do ns.ForgetSpellLook(name) end
@@ -2146,9 +2222,9 @@ local function Duplicate(from)
     -- And how big its buffs' glows while they're up are (Glow size).
     profile.glowActiveSize = GlowSizeValue(from.glowActiveSize) and from.glowActiveSize or nil
     -- And each warned entry's seconds (Warn at N seconds left), each icon's
-    -- own size and each trap ticked Show the trap I last laid (Lists checks
-    -- them).
-    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap" }) do
+    -- own size, each trap ticked Show the trap I last laid and each entry's
+    -- sound (Play a sound) (Lists checks them).
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound" }) do
         if type(from[field]) == "table" then
             profile[field] = {}
             for key, set in pairs(from[field]) do
@@ -2557,6 +2633,13 @@ function ns.ImportProfile(text, shared, withLook)
         profile.warnAt = {}
         for key, set in pairs(shared.warns) do
             if ns.AURA_BARS[key] and type(set) == "table" then profile.warnAt[key] = CopySet(set) end
+        end
+    end
+    -- Each entry's sound (Play a sound; Lists keeps those on its bar's lists, a form's too).
+    if type(shared.sounds) == "table" then
+        profile.auraSound = {}
+        for key, set in pairs(shared.sounds) do
+            if ns.AURA_BARS[key] and type(set) == "table" then profile.auraSound[key] = CopySet(set) end
         end
     end
     local custom, yours = ns.CustomSpells(), NamesInUse()
@@ -3453,6 +3536,10 @@ local function Load()
     if ns.firstInstall then db.welcomeDue = true end
     db.probe = nil -- results of a development check the released addon doesn't have
     db.devTickTest, db.devTickProbe, db.devTickPace = nil, nil, nil -- and of the tick count's test (/ccm ticks)
+    db.devSoundLog = nil -- and a development build's aura sound log
+    local saved = db.auraSoundIDs
+    db.auraSoundIDs = nil
+    if ns.BuffBar then ns.BuffBar:DropSavedSounds(saved) end -- sounds the game may still hold from before a reload, let go before any are made
     db.session = nil -- a login count earlier builds kept
     db.pulseMin, db.pulseAdd = nil, nil -- the Cooldown pulse's first test build: a shortest cooldown, and spells added by name
     db.pulseSkip = nil -- and its second: items pulsed unless unticked
@@ -3528,5 +3615,7 @@ loader:SetScript("OnEvent", function(self, event, name)
             if ns.Skin and ns.Skin.started then ns.Skin:ApplySpellLooks() end
         end
         if ns.NameUnknownProfile() and ns.window and ns.window:IsShown() then ns.window:Refresh() end
+        -- Play a sound and Sound on procs: registered with the game only from now on (Buffs.lua).
+        if ns.BuffBar then ns.BuffBar:SoundsReady() end
     end
 end)

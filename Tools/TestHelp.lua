@@ -487,7 +487,8 @@ local function Environment(keepCVars)
     }
     if not keepCVars then cvars = {} end
     Book(false)
-    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 } }
+    _G.Enum = { SpellBookSpellBank = { Player = 0 }, SpellBookItemType = { Spell = 1, FutureSpell = 2, Flyout = 3 },
+        UnitAuraSoundTrigger = { Added = 0, ApplicationsIncreased = 1, Removed = 2 } }
     _G.C_SpellBook = {
         GetNumSpellBookSkillLines = function() return #book end,
         GetSpellBookSkillLineInfo = function(line)
@@ -560,6 +561,12 @@ local function Environment(keepCVars)
     -- (AuraReads). As on Forever: in a fight it finds none, even with them
     -- up, and C_Secrets says auras are secret then (AurasSecret: out of one).
     PlayerAuras, AuraReads, AurasSecret = {}, 0, false
+    -- The game's own aura sounds (Play a sound, Sound on procs): each call
+    -- kept as a line (AuraSoundCalls: "add <unit> <spellID> <file> <channel>
+    -- <throttle>", "remove <id>", " fight" after either made in one), each
+    -- add given the next ID; with AuraSoundRefuse (text) every add errors,
+    -- kept as "refused <unit> <spellID>" so an add asked again shows.
+    AuraSoundCalls, AuraSoundRefuse, NextAuraSound = {}, nil, 0
     _G.C_UnitAuras = {
         GetPlayerAuraBySpellID = function(id)
             assert(type(id) == "number", "a spell ID")
@@ -568,6 +575,23 @@ local function Environment(keepCVars)
             if lockdown or not aura then return nil end
             if rawequal(aura, SECRET) then return SECRET end
             return { spellId = id }
+        end,
+        AddAuraSound = function(trigger, info)
+            assert(trigger == 0, "the Added trigger")
+            assert(type(info) == "table" and type(info.unitToken) == "string" and type(info.spellID) == "number", "a unit and a spell ID")
+            local throttle = info.throttleSeconds
+            assert(throttle == nil or (type(throttle) == "number" and throttle >= 0 and throttle <= 5), "a throttle of 0 to 5 seconds")
+            if AuraSoundRefuse then
+                AuraSoundCalls[#AuraSoundCalls + 1] = ("refused %s %d%s"):format(info.unitToken, info.spellID, lockdown and " fight" or "")
+                error(AuraSoundRefuse)
+            end
+            AuraSoundCalls[#AuraSoundCalls + 1] = ("add %s %d %s %s %s%s"):format(info.unitToken, info.spellID,
+                tostring(info.soundFileID or info.soundFileName), tostring(info.outputChannel), tostring(throttle), lockdown and " fight" or "")
+            NextAuraSound = NextAuraSound + 1
+            return NextAuraSound
+        end,
+        RemoveAuraSound = function(id)
+            AuraSoundCalls[#AuraSoundCalls + 1] = "remove " .. tostring(id) .. (lockdown and " fight" or "")
         end,
     }
     -- And whether the game keeps one spell's aura secret (SpellAurasSecret[id]:
@@ -2012,6 +2036,9 @@ end)()
 -- note saying what it does, or greyed with why on a game without the
 -- containers; the list's Procs header, a proc row's tick and switch, each
 -- note within two lines of the footer; the title row's longest with procs.
+-- Sound on procs (a player's idea) in the left column's free row, under Early
+-- resets too and level with Master volume, clear of both, its note within
+-- two lines too; greyed with why on a game without aura sounds.
 ;(function()
     local ns = Start({ notesSeen = "dev", helpSeen = true, pulse = true, pulseProcs = true })
     for _, timer in ipairs(timers) do timer() end
@@ -2037,16 +2064,35 @@ end)()
         "Procs too and Master volume clear of each other and everything else, the title row's longest with procs too")
     Equal(tostring(header ~= nil) .. " " .. #rows .. " " .. S[first.name].text .. " | " .. Note(page.procs) .. " | " .. Note(first.check) .. " | "
         .. Note(rows[2].check) .. " | " .. Note(first.style.buttons[2]),
-        "true 2 Clearcasting | Your class's procs, like Clearcasting or Missile Barrage: a pulse the moment one lands, in a fight too. Procs pulse"
-        .. " without a sound. | Untick to leave Clearcasting out. | Tick to pulse when Nature's Grace lands. |"
-        .. " Clearcasting pulses Quick. Click for Long. Each style has its own size and time, set under Edit above. Procs pulse without a sound.",
+        "true 2 Clearcasting | Your class's procs, like Clearcasting or Missile Barrage: a pulse the moment one lands, in a fight too."
+        .. " | Untick to leave Clearcasting out. | Tick to pulse when Nature's Grace lands. | Clearcasting pulses Quick. Click for Long."
+        .. " Each style has its own size, time and sound, set under Edit above. Procs play their sound only with Sound on procs ticked.",
         "a Procs header and the druid's two named procs; the tick, a row's tick and its switch say what they do, not marked experimental")
     clear = Fits(Note(page.procs)) and Fits(Note(rows[2].check)) and Fits(Note(first.style.buttons[2]))
     Equal(tostring(clear), "true", "each note within two lines of the footer")
+    -- Sound on procs: under Early resets too, level with Master volume, clear
+    -- of both; off, saying what it does in two lines at most.
+    Equal(table.concat({ S[page.procSound.text].text, tostring(page.procSound:GetChecked()), tostring(page.procSound.usable),
+        tostring(Fit.Clear(page.resets, page.procSound)), tostring(Fit.Clear(page.procSound, page.volume)), tostring(Fits(Note(page.procSound))) },
+        " ") .. " | " .. Note(page.procSound), "Sound on procs false true true true true | Each ticked proc plays its style's sound as it lands,"
+        .. " in a fight too. Pick each style's sound under Edit above.", "Sound on procs: clear of Early resets too and Master volume, off,"
+        .. " saying what it does within two lines")
+    page.procSound:Click()
+    Equal(tostring(ns.Get("pulseProcSound")) .. " " .. Note(first.style.buttons[2]) .. " | " .. Fit.Problems(page), "true Clearcasting pulses"
+        .. " Quick. Click for Long. Each style has its own size, time and sound, set under Edit above. | ", "ticked: the switch no longer says how")
+    page.procSound:Click()
+    -- A game without aura sounds: greyed, saying why.
+    local add = C_UnitAuras.AddAuraSound
+    _G.C_UnitAuras.AddAuraSound = nil
+    w:Refresh()
+    Equal(tostring(page.procSound.usable) .. " " .. Note(page.procSound) .. " | " .. tostring(page.procs.usable), "false Your game can't play"
+        .. " proc sounds. | true", "greyed on a game without aura sounds, saying why; Procs too still usable")
+    _G.C_UnitAuras.AddAuraSound = add
     -- A game without the containers: greyed, saying why.
     _G.CustomAuraContainerSlotDefaultOptions = nil
     w:Refresh()
-    Equal(tostring(page.procs.usable) .. " " .. Note(page.procs) .. " | " .. Fit.Problems(page), "false Your game can't show proc pulses. | ",
+    Equal(tostring(page.procs.usable) .. " " .. Note(page.procs) .. " | " .. tostring(page.procSound.usable) .. " " .. Note(page.procSound)
+        .. " | " .. Fit.Problems(page), "false Your game can't show proc pulses. | false Your game can't show proc pulses. | ",
         "greyed on a game that can't, saying why, still clear of the rest")
     _G.CustomAuraContainerSlotDefaultOptions = {}
     Equal(#printed, 0, "no errors")
@@ -3532,6 +3578,8 @@ end)()
         .. " Cooldowns (Moonfire's debuff ticks), Defaults greyed")
     Equal(tostring(panel.active:IsVisible()) .. " " .. tostring(panel.glowSize:IsVisible()) .. " " .. tostring(panel.glowSizeLabel:IsVisible()),
         "false false false", "no Glow while active on Cooldowns, nor its Glow size")
+    Equal(tostring(panel.sound:IsVisible()) .. " " .. tostring(panel.soundPick:IsVisible()), "false false",
+        "no Play a sound on Cooldowns: it's for the Buffs and Debuffs bars' auras")
     Equal(Font(preview.cooldown) .. " " .. S[preview].width .. " " .. tostring(Last(preview.cooldown, "SetCooldown", 2)) .. " "
         .. tostring(S[preview.cooldown].scripts.OnCooldownDone ~= nil) .. " " .. tostring(S[preview.art].texture == ns.Spells:Icon("Moonfire")),
         "FECMFont18 36 75 true true", "the preview: its icon at the bar's size, its countdown going round and round")
@@ -3652,8 +3700,19 @@ end)()
         .. " Manager. The Buffs and Debuffs bars change once you're out of combat.",
         "its own ticks as on its row: Glow when missing greyed until missing debuffs show greyed, Count ticks with its pace")
     Check(panel, "Debuffs, two ticks")
-    Equal(tostring(panel.active:IsVisible()) .. " " .. tostring(panel.glowSize:IsVisible()), "false false",
-        "no Glow while active on the Debuffs page, nor its Glow size: they're for buffs")
+    Equal(tostring(panel.active:IsVisible()) .. " " .. tostring(panel.glowSize:IsVisible()) .. " | " .. Note(panel.active), "true true"
+        .. " | Its icon glows while the debuff is on your target, like a proc, so you can't miss it.",
+        "Glow while active on the Debuffs page too (a player's idea), with its Glow size")
+    -- Play a sound (a player's idea) under Glow size, unticked; on the Debuffs
+    -- page its hover says another player's same debuff plays it too. With
+    -- Count ticks, Glow while active and Glow size showing too: ten rows
+    -- (the note's), and the panel still fits.
+    local noteRow = ("%.2f"):format((-S[panel.note].points[1][3] - (42 + 64 + 14) - 4) / 26)
+    Equal(table.concat({ tostring(panel.sound:IsVisible()), tostring(panel.sound:GetChecked()), tostring(panel.soundPick:IsVisible()),
+        noteRow }, " ") .. " | " .. Note(panel.sound), "true false true 10.00 | Plays a sound the moment this debuff lands on your"
+        .. " target, in a fight too. Another player's same debuff plays it too: the game can't tell whose it is.",
+        "Play a sound on the Debuffs page too, saying any player's same debuff plays it; ten rows")
+    Check(panel, "Debuffs, Play a sound")
     panel.ticks:Click()
     Equal(tostring(B:CountsTicks("debuff", "Moonfire")) .. " " .. tostring(panel.ticks:GetChecked()) .. " " .. tostring(RowOf("Moonfire").ticks:GetChecked()),
         "true true true", "Count ticks from the panel: on the bar, and on its row in the list")
@@ -3768,7 +3827,7 @@ end)()
         .. " while the buff is on you, like a proc, so you can't miss it. Best for short procs. | true true",
         "Only when missing unticked: usable, saying what it does; ticked, kept for Thorns")
     Equal(unticked .. " | " .. tostring(panel.glowSize.usable) .. " | " .. Note(panel.glowSize), "false | Tick Glow while active first:"
-        .. " this sizes its glow. | 100 100% | true | How big the glow is round every buff that glows while it's up, not just this one:"
+        .. " this sizes its glow. | 100 100% | true | How big the glow is round every buff or debuff that glows while it's up, not just this one:"
         .. " 100% is its usual size.", "Glow size: greyed until the tick is ticked (nothing kept meanwhile), then usable,"
         .. " saying it's every glowing buff's (seen in game, no experimental)")
     Check(panel, "Buffs, three ticks")
@@ -3781,6 +3840,56 @@ end)()
     Equal(small .. " | " .. ns.GlowActiveSize() .. " " .. S[panel.glowSize.value].text .. " " .. tostring(S[panel].shown), "50 50 50% | 150 150% true",
         "Glow size 50%, then 150%: kept in the profile, the panel still open")
     Check(panel, "Buffs, Glow size 150%")
+    -- Play a sound (a player's idea) in the row under Glow size: its tick,
+    -- unticked, and beside it its sound's name between two arrows, Chime,
+    -- greyed until ticked, saying so. Ticked, Chime is kept and plays; the
+    -- arrows step through the sounds (never None), playing each; its name
+    -- plays it again. Ten rows, and the panel still fits.
+    local heard, playSound = {}, _G.PlaySound
+    _G.PlaySound = function(kit, channel) heard[#heard + 1] = kit .. " " .. tostring(channel) end
+    local glowY, pick = S[panel.glowSize].points[1][3], panel.soundPick
+    pick.next:Click()
+    Equal(table.concat({ tostring(panel.sound:IsVisible()), S[panel.sound.text].text, tostring(panel.sound:GetChecked()), tostring(pick:IsVisible()),
+        S[pick.name].text, tostring(S[pick].alpha), Row(panel.sound), Row(pick), tostring(Fit.Clear(panel.sound, pick)), #heard,
+        tostring(B:AuraSound("buff", "Thorns")) }, " ") .. " | " .. Note(panel.sound) .. " | " .. Note(pick.next),
+        "true Play a sound false true Chime 0.45 16," .. (glowY - 28) .. " 150," .. (glowY - 26) .. " true 0 nil | Plays a sound the moment"
+        .. " this buff lands on you, in a fight too. | Tick Play a sound first, then pick its sound here.",
+        "Play a sound under Glow size, unticked, its sound greyed beside it saying so; the arrows do nothing yet")
+    Check(panel, "Buffs, Play a sound")
+    panel.sound:Click()
+    local soundTicked = table.concat({ tostring(B:AuraSound("buff", "Thorns")), tostring(panel.sound:GetChecked()), S[pick.name].text,
+        tostring(S[pick].alpha), table.concat(heard, ",") }, " ") .. " | " .. Note(pick.back)
+    pick.next:Click()
+    local stepped = tostring(B:AuraSound("buff", "Thorns")) .. " " .. S[pick.name].text
+    pick.back:Click()
+    pick.back:Click()
+    local wrapped = tostring(B:AuraSound("buff", "Thorns")) .. " " .. S[pick.name].text
+    pick.play:Click()
+    Equal(soundTicked .. " | " .. stepped .. " | " .. wrapped .. " | " .. table.concat(heard, ","), "chime true Chime 1 316447 SFX | The sound"
+        .. " it plays. The arrows step through them and play each one; click its name to hear it again. Play at Master volume on the"
+        .. " Cooldown pulse page counts here too. | bell Bell | anvil Anvil | 316447 SFX,316493 SFX,316447 SFX,316528 SFX,316528 SFX",
+        "ticked: Chime kept and played once; > Bell, played; < twice, Chime then round to Anvil (never None); its name plays it again")
+    Check(panel, "Buffs, Play a sound ticked")
+    -- Each of its hovers says what it does, within two lines of the footer, no dashes.
+    local plain = 0
+    for _, control in ipairs({ panel.sound, pick.back, pick.play, pick.next }) do
+        local hint = Note(control)
+        if #hint > 10 and not hint:find("\226\128[\147\148]") and Fits(hint) then plain = plain + 1 end
+    end
+    panel.sound:Click()
+    local soundOff = table.concat({ tostring(B:AuraSound("buff", "Thorns")), #heard, tostring(ns.ProfileLists().auraSound), S[pick.name].text,
+        tostring(S[pick].alpha) }, " ")
+    -- A game without aura sounds: no row.
+    local add = C_UnitAuras.AddAuraSound
+    _G.C_UnitAuras.AddAuraSound = nil
+    w:Refresh()
+    local without = tostring(panel.sound:IsVisible()) .. " " .. tostring(pick:IsVisible())
+    Check(panel, "Buffs, no aura sounds")
+    _G.C_UnitAuras.AddAuraSound = add
+    w:Refresh()
+    _G.PlaySound = playSound
+    Equal(plain .. " | " .. soundOff .. " | " .. without, "4 | nil 5 nil Chime 0.45 | false false", "every hover plain and within two lines;"
+        .. " unticked: none kept, nothing played, Chime greyed again; a game without aura sounds: no row")
     B:SetOption("buff", "onlyMissing", true)
     w:Refresh()
     local greyed = tostring(panel.active.usable) .. " " .. tostring(panel.active:GetChecked()) .. " | " .. Note(panel.active)
@@ -3813,6 +3922,8 @@ end)()
         .. " while it's up.", "Main hand enchant: Glow while active greyed, saying why")
     Equal(tostring(panel.dim.usable) .. " | " .. Note(panel.dim), "false | Not for a weapon enchant: its spot is the addon's own, not the"
         .. " game's.", "Main hand enchant: Dim until Warn at greyed, saying why")
+    Equal(tostring(panel.sound:IsVisible()) .. " " .. tostring(panel.soundPick:IsVisible()), "false false",
+        "Main hand enchant: no Play a sound (a weapon enchant has no aura for the game to hear)")
     Check(panel, "Buffs, Main hand enchant")
     bp.icons[1]:Click()
     B:SetAura("buff", "hand:main", false)

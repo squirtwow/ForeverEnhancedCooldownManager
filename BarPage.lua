@@ -95,6 +95,9 @@ end
 -- Glow while active, in a buff's own panel: what it does, or why it can't.
 local function ActiveNote(bar, name)
     local B = ns.Bars
+    if ns.BAR_KIND[bar] == "debuff" then
+        return "Its icon glows while the debuff is on your target, like a proc, so you can't miss it."
+    end
     if name and not B:ActiveUsable(bar, name) then
         if ns.BarData(bar).onlyMissing then
             return "Not with Only show missing: a buff has no icon while it's on you, so nothing to glow."
@@ -143,7 +146,7 @@ end
 -- own ticks from the spell list, so they're there without scrolling to its
 -- row. Like the Look page's panels its shade leaves the footer clear, so
 -- each control still says what it does there. Made the first time it opens.
-local PANEL = { width = 470, at = 96, row = 26, own = 84, tray = { 42, 64 } }
+local PANEL = { width = 470, at = 96, row = 26, own = 84, tray = { 42, 64 }, soundAt = 150, sound = 160 }
 local PANEL_TIME = 75 -- the preview's cooldown, round and round: past a minute, then seconds
 local PANEL_NOTE = "On every bar it's on, and on Blizzard's icon for it while the look is on the Cooldown Manager."
 local PANEL_AURAS = " The Buffs and Debuffs bars change once you're out of combat."
@@ -394,9 +397,76 @@ local function PanelGlowSize(window, dialog, shade, Changed)
     window:Hint(size, function()
         if not B:ActiveUsable(shade.bar, shade.name) then return ActiveNote(shade.bar, shade.name) end
         if not B:GlowsActive(shade.bar, shade.name) then return "Tick Glow while active first: this sizes its glow." end
-        return "How big the glow is round every buff that glows while it's up, not just this one: 100% is its usual size."
+        return "How big the glow is round every buff or debuff that glows while it's up, not just this one: 100% is its usual size."
     end)
     return label, size, Usable
+end
+
+-- Play a sound (a player's idea), in a buff's or debuff's own panel, right
+-- under Glow while active: its tick, then beside it the sound's name between
+-- two arrows, which step through the pulse's sounds (not None: unticked is
+-- none) and play each one; its name plays it again. Greyed until ticked.
+local function PanelSound(window, dialog, shade, Changed)
+    local B = ns.Bars
+    local tick = T:Check(dialog, "Play a sound", function(self)
+        if B:SetAuraSound(shade.bar, shade.name, self:GetChecked() and "chime" or nil) and self:GetChecked() then
+            ns.Pulse:PlaySound("chime")
+        end
+        Changed()
+    end)
+    window:Hint(tick, function()
+        if ns.BAR_KIND[shade.bar] == "debuff" then
+            return "Plays a sound the moment this debuff lands on your target, in a fight too. Another player's same debuff plays it"
+                .. " too: the game can't tell whose it is."
+        end
+        return "Plays a sound the moment this buff lands on you, in a fight too."
+    end)
+    local picker = CreateFrame("Frame", nil, dialog, "BackdropTemplate")
+    picker:SetSize(PANEL.sound, 20)
+    T:Flat(picker, T.FIELD, T.CONTROL_BORDER)
+    local function Step(by)
+        local now = B:AuraSound(shade.bar, shade.name)
+        if not now then return end
+        local keys, at = ns.PULSE_SOUND_KEYS, 2
+        for i, key in ipairs(keys) do
+            if key == now then at = i end
+        end
+        -- (From 2 on: None is first, and never picked here.)
+        local key = keys[(at - 2 + by) % (#keys - 1) + 2]
+        B:SetAuraSound(shade.bar, shade.name, key)
+        ns.Pulse:PlaySound(key)
+        Changed()
+    end
+    picker.back = T:Square(picker, "<")
+    picker.back:SetPoint("LEFT", 1, 0)
+    picker.back:SetScript("OnClick", function() Step(-1) end)
+    picker.next = T:Square(picker, ">")
+    picker.next:SetPoint("RIGHT", -1, 0)
+    picker.next:SetScript("OnClick", function() Step(1) end)
+    picker.play = CreateFrame("Button", nil, picker)
+    picker.play:SetSize(PANEL.sound - 2 * 18 - 8, 18)
+    picker.play:SetPoint("CENTER")
+    picker.play:SetScript("OnClick", function()
+        local now = B:AuraSound(shade.bar, shade.name)
+        if now then ns.Pulse:PlaySound(now) end
+    end)
+    picker.name = T:Text(picker.play, "GameFontHighlightSmall")
+    picker.name:SetPoint("CENTER")
+    picker.name:SetJustifyH("CENTER")
+    for _, button in ipairs({ picker.back, picker.play, picker.next }) do
+        window:Hint(button, function()
+            if not picker.usable then return "Tick Play a sound first, then pick its sound here." end
+            return "The sound it plays. The arrows step through them and play each one; click its name to hear it again."
+                .. " Play at Master volume on the Cooldown pulse page counts here too."
+        end)
+    end
+    -- Its sound's name, greyed until it's ticked.
+    function picker:Paint(key, usable)
+        self.name:SetText(ns.PULSE_SOUND_NAMES[key] or "")
+        self:SetAlpha(usable and 1 or .45)
+        self.usable = usable
+    end
+    return tick, picker
 end
 
 -- Warn at N seconds left (a player's idea: Siphon Life with 3 seconds left,
@@ -483,11 +553,12 @@ end
 
 -- Which of its own ticks the entry has on its bar: Glow when missing on the
 -- Buffs and Debuffs bars, Only when missing and Glow while active on Buffs,
--- Count ticks on Debuffs for one that ticks; Count ticks for a spell whose
--- debuff ticks, Show reagent count for a spell that uses one, and Show the
--- trap I last laid for a trap, on Cooldowns and Utility. Each shown and set
--- as its row in the list is (Glow while active and the Cooldowns and
--- Utility bars' own have no row there).
+-- Count ticks on Debuffs for one that ticks, Play a sound on both for one
+-- with an aura; Count ticks for a spell whose debuff ticks, Show reagent
+-- count for a spell that uses one, and Show the trap I last laid for a
+-- trap, on Cooldowns and Utility. Each shown and set as its row in the list
+-- is (Glow while active, Play a sound and the Cooldowns and Utility bars'
+-- own have no row there).
 local function PaintTicks(shade, bar, name)
     local B = ns.Bars
     local aura, kind = ns.AURA_BARS[bar] ~= nil, ns.BAR_KIND[bar] -- (an extra bar goes by its kind)
@@ -508,14 +579,18 @@ local function PaintTicks(shade, bar, name)
     shade.reagents:SetChecked(B:ShowsReagents(name))
     shade.others:SetChecked(B:HandOthers(bar, name))
     shade.trap:SetChecked(B:ShowsLastTrap(bar, name))
+    -- Play a sound, and its sound beside it (Chime until one's picked).
+    local sound = B:AuraSound(bar, name)
+    shade.sound:SetChecked(sound ~= nil)
+    shade.soundPick:Paint(sound or "chime", sound ~= nil)
     -- (On a Cooldowns or Utility bar a spell's alone, a fixed rank's too: an
     -- item puts no debuff on anyone.)
     local spell = entry and (entry.kind == "spell" or entry.kind == "rank")
     local ticks = B:TickPace(name) ~= nil and (kind == "debuff" or not aura and spell)
     return { aura and shade.glow or nil, kind == "buff" and shade.only or nil,
-        ticks and shade.ticks or nil, kind == "buff" and shade.active or nil,
+        ticks and shade.ticks or nil, aura and shade.active or nil,
         B:UsesReagent(bar, name) and shade.reagents or nil, kind == "buff" and entry and entry.hand and shade.others or nil,
-        not aura and ns.Spells:Trap(name) and shade.trap or nil }
+        not aura and ns.Spells:Trap(name) and shade.trap or nil, aura and B:SoundUsable(bar, name) and shade.sound or nil }
 end
 
 local function SpellPanel(window)
@@ -572,6 +647,7 @@ local function SpellPanel(window)
     At(shade.ownIcon, PANEL.at, 2, 2)
     At(shade.iconSize, PANEL.at + PANEL.own, 2)
     shade.glow, shade.only, shade.ticks, shade.active, shade.reagents, shade.others, shade.trap = PanelTicks(window, dialog, shade, Changed)
+    shade.sound, shade.soundPick = PanelSound(window, dialog, shade, Changed)
     shade.tickLook = PanelTickLook(window, dialog, shade, Changed)
     shade.glowSizeLabel, shade.glowSize, shade.glowSizeUsable = PanelGlowSize(window, dialog, shade, Changed)
     shade.warnLabel, shade.warn = PanelWarn(window, dialog, shade)
@@ -635,9 +711,9 @@ local function SpellPanel(window)
             self.dim:SetUsable(B:DimUsable(bar, name))
             rows = rows + 1
         end
-        for _, tick in ipairs({ self.glow, self.only, self.active, self.ticks, self.reagents, self.others, self.trap }) do
+        for _, tick in ipairs({ self.glow, self.only, self.active, self.sound, self.ticks, self.reagents, self.others, self.trap }) do
             local on = tick == shown[1] or tick == shown[2] or tick == shown[3] or tick == shown[4] or tick == shown[5]
-                or tick == shown[6] or tick == shown[7]
+                or tick == shown[6] or tick == shown[7] or tick == shown[8]
             tick:SetShown(on)
             if on then
                 At(tick, 16, rows, 2)
@@ -654,6 +730,11 @@ local function SpellPanel(window)
                     self.glowSize:SetUsable(self.glowSizeUsable())
                     rows = rows + 1
                 end
+            end
+            -- Play a sound's sound, beside its tick in the same row.
+            if tick == self.sound then
+                self.soundPick:SetShown(on)
+                if on then At(self.soundPick, PANEL.soundAt, rows - 1) end
             end
             -- A ticked Count ticks on a Cooldowns or Utility bar: its bar's
             -- tick count, Start at 1 and On the edge beside it, the spots
@@ -1344,8 +1425,12 @@ function ns.BuildBarPage(window, page, width)
         "Lights a spell while a proc that empowers it is on you, where the game lights nothing: Shadow Bolt with Nightfall's"
             .. " Shadow Trance.")
     -- Out of combat: show, fade or hide. The footer explains when bars come back.
-    local outOfCombat = Pills("Out of combat", 320, 0, 156, ns.OUT_OF_COMBAT, ns.OUT_OF_COMBAT_NAMES, "outOfCombat",
-        "Out of combat. Bars come back in full in combat, with an enemy targeted, while unlocked, and in Edit Mode.")
+    local outOfCombat = Pills("Out of combat", 320, 0, 156, ns.OUT_OF_COMBAT, ns.OUT_OF_COMBAT_NAMES, "outOfCombat", function()
+        if ns.Get("oocIgnoreTarget") then
+            return "Out of combat. Bars come back in full in combat, while unlocked, and in Edit Mode."
+        end
+        return "Out of combat. Bars come back in full in combat, with an enemy targeted, while unlocked, and in Edit Mode."
+    end)
     local grow = Pills("Grow", 320, -63, 156, ns.GROW, ns.GROW_NAMES, "grow",
         "Which way a row grows as icons come and go: from its centre, or from its right or left edge.")
     local wrap = Pills("New rows", 320, -85, 110, ns.WRAP, ns.WRAP_NAMES, "wrap",

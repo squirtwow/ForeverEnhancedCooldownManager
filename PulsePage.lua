@@ -293,10 +293,16 @@ local function BuildOptions(window, page, inner)
     page.procs = Tick("Procs too", "pulseProcs", COLUMN, -116, function()
         if not P:CanProcs() then return "Your game can't show proc pulses." end
         return "Your class's procs, like Clearcasting or Missile Barrage: a pulse the moment one lands, in a fight too."
-            .. " Procs pulse without a sound."
     end)
     page.resets = Tick("Early resets too", "pulseResets", 0, -116,
         "A pulse when a talent brings a cooldown back early, like a reset after a parry or dodge.")
+    -- Sound on procs (a player's idea): the game plays each ticked proc's style's
+    -- sound as it lands (Pulse.lua's ProcSounds); greyed while it can't.
+    page.procSound = Tick("Sound on procs", "pulseProcSound", 0, -138, function()
+        if not P:CanProcs() then return "Your game can't show proc pulses." end
+        if not P:CanSound() then return "Your game can't play proc sounds." end
+        return "Each ticked proc plays its style's sound as it lands, in a fight too. Pick each style's sound under Edit above."
+    end)
     page.volume = Tick("Play at Master volume", "pulseMaster", COLUMN, -138,
         "Plays the sound at your Master volume, so you hear it with Sound Effects down or off. Your sound settings don't change.")
 end
@@ -362,7 +368,7 @@ local function BuildList(window, page, inner)
         end)
         row.style:SetPoint("RIGHT", -4, 0)
         -- Says how it pulses now (once ticked, if it isn't), and what this one
-        -- picks. A proc's style has no sound.
+        -- picks. A proc plays its style's sound only with Sound on procs.
         for _, button in ipairs(row.style.buttons) do
             window:Hint(button, function()
                 local name, now = row.name:GetText() or "", P:StyleOf(row.key)
@@ -370,7 +376,8 @@ local function BuildList(window, page, inner)
                 if not row.check:GetChecked() then said = "Once ticked, " .. said end
                 if button.key ~= now then said = said .. " Click for " .. ns.PULSE_STYLE_NAMES[button.key] .. "." end
                 if row.proc then
-                    return said .. " Each style has its own size and time, set under Edit above. Procs pulse without a sound."
+                    return said .. " Each style has its own size, time and sound, set under Edit above."
+                        .. (ns.Get("pulseProcSound") and "" or " Procs play their sound only with Sound on procs ticked.")
                 end
                 return said .. " Each style has its own size, time and sound, set under Edit above."
             end)
@@ -485,6 +492,8 @@ function ns.BuildPulsePage(window, page, width)
         self.items:SetChecked(ns.Get("pulseItems"))
         self.procs:SetChecked(ns.Get("pulseProcs"))
         self.procs:SetUsable(P:CanProcs())
+        self.procSound:SetChecked(ns.Get("pulseProcSound"))
+        self.procSound:SetUsable(P:CanProcs() and P:CanSound())
         self.resets:SetChecked(ns.Get("pulseResets"))
         self.volume:SetChecked(ns.Get("pulseMaster"))
         self.previewButton:SetLabel("Preview " .. Editing())

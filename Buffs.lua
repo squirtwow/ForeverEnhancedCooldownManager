@@ -583,7 +583,7 @@ local function SlotLook(holder, key)
     return function(button)
         button:SetAllPoints(holder)
         holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, ns.BAR_KIND[key] == "debuff", holder.look,
-            ns.BAR_KIND[key] == "buff", holder.high)
+            ns.AURA_BARS[key] ~= nil, holder.high)
     end
 end
 
@@ -596,7 +596,7 @@ local function GroupLook(bar, index)
         local high = bar.groupHigh or BASE
         button:SetSize(BASE, high)
         local parts = Look(button, BASE, bar.data.showTimer, true, ns.BAR_KIND[bar.key] == "debuff" and index ~= nil,
-            index and bar.looks and bar.looks[index] or nil, ns.BAR_KIND[bar.key] == "buff" and index ~= nil, high)
+            index and bar.looks and bar.looks[index] or nil, ns.AURA_BARS[bar.key] ~= nil and index ~= nil, high)
         parts.index, parts.button, parts.high = index, button, high
         bar.groupParts[#bar.groupParts + 1] = parts
         if parts.ticks then
@@ -1526,8 +1526,8 @@ function F:Layout(bar, data)
     -- Only when missing: the Buffs bar's, and not with Only show missing.
     local flags = self:Flagged(bar.key, data) and ns.OnlyWhenMissing(bar.key) or {}
     local warns, dims = ns.WarnAt(bar.key), ns.DimUntilWarn(bar.key)
-    -- Glow while active: a Buffs bar's own.
-    local actives = ns.BAR_KIND[bar.key] == "buff" and ns.GlowActive(bar.key) or {}
+    -- Glow while active: a Buffs or Debuffs bar's own.
+    local actives = ns.AURA_BARS[bar.key] and ns.GlowActive(bar.key) or {}
     -- A packed bar's slots sit in its container, scaled with the packed
     -- icons, so their numbers are sized as those icons' are (Icon height:
     -- as tall as those, fitHigh).
@@ -2163,6 +2163,204 @@ function F:ActiveReport(bar, i)
     -- And its Glow size, when it isn't the usual one.
     local percent = ns.GlowActiveSize()
     return " | glow while active: " .. how .. (percent ~= ns.GLOW_ACTIVE_SIZE[3] and (", size " .. percent .. "%") or "")
+end
+
+-- Play a sound -----------------------------------------------------------------------
+-- (A player's idea.) A ticked entry on a Buffs or
+-- Debuffs bar plays one of the pulse's sounds the moment its buff lands on
+-- you or its debuff on your target; with Sound on procs, a ticked proc plays
+-- its style's sound (Pulse.lua). The addon can't see an aura land in a
+-- fight, and needn't: each spell is registered with the game's own aura
+-- sounds on the unit its bar watches, and the game plays the file itself as
+-- the aura is added, in a fight too, at most once a second. One list of
+-- what's wanted, from two owners: the bars' (F:BarSounds) and the procs'
+-- (Pulse.lua). For a spell both want on one unit the bars' sound wins, so
+-- none is registered twice. Registered only after logging in, and never in
+-- a fight: a change then waits for it to end. A change lets go of all of
+-- ours first, then registers what's wanted now; nothing changed, nothing is
+-- asked. One the game refuses isn't asked again until something changes, or
+-- a reload. All of ours are let go of as you log out or reload, and the IDs
+-- the game gave are saved (Core.lua ns.SaveAuraSounds), so the next load lets
+-- go of any the game still holds too. Every call through pcall.
+local SOUND_OWNERS = { "bars", "procs" } -- the first wins a spell both want
+local auraSounds = { owners = {}, live = {}, applied = nil, pending = false, barsLate = false, ready = false, refused = 0, error = nil }
+
+-- Whether the game has the aura sounds.
+function F:CanSound()
+    local api = C_UnitAuras
+    return type(api) == "table" and type(api.AddAuraSound) == "function" and type(api.RemoveAuraSound) == "function"
+end
+
+-- Every one of ours let go of.
+local function LetGo()
+    local api = C_UnitAuras
+    for _, id in pairs(auraSounds.live) do
+        pcall(api.RemoveAuraSound, id)
+    end
+    auraSounds.live = {}
+end
+
+-- A frame of its own (the bars' driver rests while they're off): it waits
+-- for a fight's end, and as you log out or reload lets go of every one of
+-- ours, so none outlives the session even when the addon isn't there next
+-- time (turned off, or an older version). The saved IDs stay, and the next
+-- load lets go of them too, in case the game kept any.
+local function Watch()
+    local watch = auraSounds.watch
+    if not watch then
+        watch = CreateFrame("Frame")
+        watch:SetScript("OnEvent", function(self, event)
+            if event == "PLAYER_LOGOUT" then return LetGo() end
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            if auraSounds.barsLate then F:BarSounds() else F:ApplySounds() end
+        end)
+        auraSounds.watch = watch
+    end
+    return watch
+end
+
+-- Waits for the fight's end.
+local function SoundsLater()
+    Watch():RegisterEvent("PLAYER_REGEN_ENABLED")
+end
+
+-- What's wanted now ("unit:spellID" -> sound key), the first owner's for a
+-- spell two want; its keys in order; the channel (Play at Master volume on
+-- the Cooldown pulse page); and all of it as one line, to tell a change.
+local function SoundsWanted()
+    local wanted, keys = {}, {}
+    for _, owner in ipairs(SOUND_OWNERS) do
+        for at, sound in pairs(auraSounds.owners[owner] or {}) do
+            if wanted[at] == nil then wanted[at], keys[#keys + 1] = sound, at end
+        end
+    end
+    table.sort(keys)
+    local channel = ns.Get("pulseMaster") and "Master" or "SFX"
+    local parts = { channel }
+    for _, at in ipairs(keys) do parts[#parts + 1] = at .. "=" .. wanted[at] end
+    return wanted, keys, channel, table.concat(parts, ",")
+end
+
+-- Tells the game what's wanted now, if that changed: every one of ours let
+-- go, then each registered as its file (Pulse.lua P.SOUND_FILES), once a
+-- second at most.
+function F:ApplySounds()
+    if not (auraSounds.ready and self:CanSound()) then return end
+    local wanted, keys, channel, signature = SoundsWanted()
+    if signature == auraSounds.applied then return end -- no change, no calls
+    if InCombatLockdown() then
+        auraSounds.pending = true
+        SoundsLater()
+        return
+    end
+    auraSounds.pending, auraSounds.applied = false, signature
+    LetGo() -- every one of ours goes first
+    auraSounds.refused, auraSounds.error = 0, nil
+    local api = C_UnitAuras
+    local trigger = Enum and Enum.UnitAuraSoundTrigger and Enum.UnitAuraSoundTrigger.Added or 0
+    local ids = {}
+    for _, at in ipairs(keys) do
+        local unit, spell = at:match("^(%a+):(%d+)$")
+        local file = ns.Pulse and ns.Pulse.SOUND_FILES[wanted[at]]
+        if unit and file then
+            local ok, id = pcall(api.AddAuraSound, trigger, { unitToken = unit, spellID = tonumber(spell), soundFileID = file,
+                outputChannel = channel, throttleSeconds = 1 })
+            if ok and Open(id) and type(id) == "number" then
+                auraSounds.live[at], ids[#ids + 1] = id, id
+            else
+                local why = ok and "no id" or tostring(id)
+                auraSounds.refused, auraSounds.error = auraSounds.refused + 1, auraSounds.error or why
+            end
+        end
+    end
+    table.sort(ids)
+    ns.SaveAuraSounds(ids)
+    if #ids > 0 then Watch():RegisterEvent("PLAYER_LOGOUT") end -- let go of as you log out or reload
+end
+
+-- An owner's sounds ("unit:spellID" -> sound key), told to the game now or
+-- once a fight ends.
+function F:SetSounds(owner, wanted)
+    auraSounds.owners[owner] = wanted
+    self:ApplySounds()
+end
+
+-- Logged in: from now on the game is told (Core.lua, PLAYER_LOGIN).
+function F:SoundsReady()
+    auraSounds.ready = true
+    self:BarSounds()
+end
+
+-- As the addon loads: the IDs saved last session (Core.lua), which the game
+-- may still hold after a reload, let go before any are made.
+function F:DropSavedSounds(ids)
+    if type(ids) ~= "table" or not self:CanSound() then return end
+    for _, id in ipairs(ids) do
+        if type(id) == "number" then
+            pcall(C_UnitAuras.RemoveAuraSound, id)
+        end
+    end
+end
+
+-- The bars' sounds: each ticked entry's spell IDs (every rank and family
+-- member, as its icon watches), on the unit its bar watches. All of a bar's
+-- lists count (a form's too: Swap with my form), as a change of form comes
+-- in a fight, when nothing can be registered. None while Use my bars is
+-- off, for a bar taken out of your layout, for a weapon enchant (no aura's),
+-- or for an entry not for this character. (Bars.lua's Rebuild asks again
+-- after every change.)
+function F:BarSounds()
+    if InCombatLockdown() then
+        auraSounds.barsLate = true
+        SoundsLater()
+        return
+    end
+    auraSounds.barsLate = false
+    local wanted = {}
+    if ns.Bars:Enabled() and self:CanSound() then
+        for _, key in ipairs(ns.BAR_KEYS) do
+            local aura = ns.AURA_BARS[key]
+            if aura and not (ns.Layout and ns.Layout:IsHidden(key)) then
+                local set, names = ns.AuraSounds(key), {}
+                for name in pairs(set) do names[#names + 1] = name end
+                table.sort(names)
+                for _, name in ipairs(names) do
+                    local found = ns.Spells:Find(name)
+                    if found and found.ids and not (found.hand or ENCHANTS[found.name]) and ns.OnBarLists(key, name)
+                        and ns.Spells:ForMe(name, key) then
+                        for _, id in ipairs(found.ids) do
+                            local at = aura.unit .. ":" .. id
+                            if wanted[at] == nil then wanted[at] = set[name] end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    self:SetSounds("bars", wanted)
+end
+
+-- For /ccm debug: how many the game took and refused (and its first
+-- error), what each owner wants, whether the game has them, whether a
+-- change waits for a fight to end, the channel, and the entries ticked.
+function F:SoundReport()
+    local on, counts = 0, {}
+    for _ in pairs(auraSounds.live) do on = on + 1 end
+    for _, owner in ipairs(SOUND_OWNERS) do
+        counts[owner] = 0
+        for _ in pairs(auraSounds.owners[owner] or {}) do counts[owner] = counts[owner] + 1 end
+    end
+    local ticked = {}
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if ns.AURA_BARS[key] then
+            for name, sound in pairs(ns.AuraSounds(key)) do ticked[#ticked + 1] = key .. " " .. name .. " " .. sound end
+        end
+    end
+    table.sort(ticked)
+    return ("Aura sounds: %d on, %d refused%s | wanted: bars %d, procs %d | game can %s | waiting %s | channel %s | ticked: %s"):format(
+        on, auraSounds.refused, auraSounds.error and (" (first error " .. auraSounds.error .. ")") or "", counts.bars, counts.procs,
+        tostring(self:CanSound()), tostring(auraSounds.pending or auraSounds.barsLate), ns.Get("pulseMaster") and "Master" or "SFX",
+        #ticked > 0 and table.concat(ticked, "; ") or "none")
 end
 
 -- Out of a fight, a warned buff's spot glows (the Look page's ready glow)

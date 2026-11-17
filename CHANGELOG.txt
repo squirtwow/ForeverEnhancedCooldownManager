@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.16
+
+### Added
+- Play a sound: a buff or debuff can play a sound when it lands, in a fight too.
+- Sound on procs: proc pulses can play your pulse sound.
+- Glow while active now works on debuffs too, like a proc.
+- Stay hidden with an enemy targeted: hidden bars stay hidden until combat.
+
 ## 1.10.15
 
 ### Added

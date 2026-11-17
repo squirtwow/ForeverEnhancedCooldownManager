@@ -30,7 +30,8 @@
 --
 -- Procs can pulse too, the moment one lands (Procs, below): the game plays
 -- those itself, in its own aura container, as your Buffs bar shows your
--- buffs, so they take no turns with the cooldowns and play no sound.
+-- buffs, so they take no turns with the cooldowns. With Sound on procs the
+-- game plays their sound too (Buffs.lua's Play a sound).
 --
 -- Forever Enhanced Cooldown Pulse is this same pulse as an addon of its
 -- own: with both installed, only one of them pulses, so a cooldown never
@@ -151,6 +152,10 @@ P.SOUNDS = {
     jackpot = 316717, -- Jackpot Bell
     anvil = 316528, -- Anvil Strike
 }
+-- The same sounds as files, for the sounds the game plays itself as an aura lands (C_UnitAuras.AddAuraSound takes a file, not a kit): each kit's one file (SoundKitEntry, Forever's data).
+P.SOUND_FILES = { chime = 7466072, bell = 7466126, trill = 7466945, shimmerBell = 7467100, magicChimes = 7467025, shimmer = 7467098,
+    zippy = 7467027, synth = 7466092, pipe = 7466138, brass = 7466965, warhorn = 7466967, fanfare = 7467082, gold = 7467072,
+    jackpot = 7466955, anvil = 7466899 }
 P.QUIET = 2 -- seconds after logging in, a reload or a loading screen with no pulses
 P.AGAIN = 3 -- the same cooldown done again this soon is the same one, told twice
 P.WAITING = 3 -- pulses waiting their turn at most; any more are let go
@@ -833,7 +838,9 @@ end
 -- pulse again. One already up would pulse again whenever the container
 -- looks at all your buffs afresh, so those moments are hushed (Hush, below).
 -- Used up before the pulse ends, its icon goes and the pulse with it. No
--- sound and no turns with the cooldowns: the addon never hears one land.
+-- turns with the cooldowns: the addon never hears one land. Its sound, with
+-- Sound on procs, is the game's too: each ticked proc's buff IDs registered
+-- with its style's sound (ProcSounds, below; Buffs.lua's Play a sound).
 -- The look is made only as a slot is added (Buffs.lua F.Add and F.Guard),
 -- nothing of the addon's runs as the game plays it (no scripts), and
 -- nothing is written on the game's icons or container; of the container
@@ -873,6 +880,13 @@ end
 function P:ProcsOn()
     return ns.Get("pulseProcs") == true and self:On() and self:CanProcs()
 end
+
+-- Sound on procs: the game's aura sounds, which the Buffs and Debuffs bars'
+-- Play a sound uses too, so here they go through those bars' registry
+-- (Buffs.lua), and the procs' code is word for word Forever Enhanced
+-- Cooldown Pulse's.
+function P:CanSound() return ns.BuffBar ~= nil and ns.BuffBar:CanSound() end
+function P:SetSounds(owner, wanted) if ns.BuffBar then ns.BuffBar:SetSounds(owner, wanted) end end
 
 -- Your class's procs, by name: each one's key ("proc:" and its first buff
 -- ID, the same in every language, and never a spell's name), name, icon,
@@ -1124,23 +1138,38 @@ local function Assign(wanted)
     PlaceProcs()
 end
 
+-- Sound on procs: each ticked proc's style's sound (none for a style set to None), for each of its buff's spell IDs, on you.
+local function ProcSounds(wanted)
+    local sounds = {}
+    if ns.Get("pulseProcSound") ~= true or not P:CanSound() then return sounds end
+    for _, entry in ipairs(wanted) do
+        local file = P.SOUND_FILES[P:Sound(entry.style)]
+        if file then
+            for _, id in ipairs(entry.ids) do sounds["player:" .. id] = P:Sound(entry.style) end
+        end
+    end
+    return sounds
+end
+
 -- The procs ticked, told to the game (none while proc pulses are off, or
--- the pulse runs in Forever Enhanced Cooldown Pulse). Never in a fight: then
--- it waits for it to end. Nothing is made until a proc is ticked; a failure
--- is reported once, and proc pulses stop for the session.
+-- the pulse runs in Forever Enhanced Cooldown Pulse), and their sounds with
+-- Sound on procs. Never in a fight: then it waits for it to end. Nothing is
+-- made until a proc is ticked; a failure is reported once, and proc pulses
+-- stop for the session (their sounds don't need the container, so go on).
 function P:ApplyProcs()
     if InCombatLockdown() then
         procs.pending = true
         return
     end
     procs.pending = nil
-    if procs.error then return end
     local wanted = {}
     if self:ProcsOn() then
         for _, entry in ipairs(self:Procs()) do
             if entry.on then wanted[#wanted + 1] = entry end
         end
     end
+    self:SetSounds("procs", ProcSounds(wanted))
+    if procs.error then return end
     if not procs.container and #wanted == 0 then return end
     local ok, err = pcall(Assign, wanted)
     if not ok then
