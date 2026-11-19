@@ -10,6 +10,22 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.17",
+        sections = {
+            { "Added", {
+                "Totems bar for shamans: your totems' time left, red when out of range.",
+                "Display width: set your resource display to an exact width (Layout page).",
+                "Combo points can be taller or shorter, and can go above the display.",
+                "Show only when I can't afford it: a bar's icons stay hidden until you lack the mana, rage or energy.",
+            } },
+            { "Fixed", {
+                "Well Fed and other food buffs now show in the Buffs search.",
+                "Well Fed from Prowler Steak, Sunrise Omelette and feasts now lights the Well Fed icon.",
+                "Stormstrike's cooldown matches the game's new 8 seconds.",
+            } },
+        },
+    },
+    {
         version = "1.10.16",
         sections = {
             { "Added", {

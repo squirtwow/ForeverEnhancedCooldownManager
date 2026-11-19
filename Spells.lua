@@ -1282,6 +1282,27 @@ local function OnlyAuras(ids)
     return true
 end
 
+-- Buffs no one learns that are one buff in several IDs (Well Fed from any
+-- food, Food, Drink), by the game's name for them: name -> first ID. The add
+-- box finds them by name, as it does the spells someone learns (ns.RANKS).
+-- Made the first time it's needed, and again if the list itself changes.
+local auraNames, auraNamesFrom = nil, nil
+local function AuraNames()
+    if auraNames and auraNamesFrom == ns.AURA_FAMILIES then return auraNames end
+    local found, ranks = {}, ns.RANKS or {}
+    for _, ids in ipairs(ns.AURA_FAMILIES or {}) do
+        if OnlyAuras(ids) then
+            for _, id in ipairs(ids) do
+                local name = C_Spell.GetSpellName and Text(C_Spell.GetSpellName(id))
+                if name and not ranks[name] and not found[name] then found[name] = id end
+            end
+        end
+    end
+    -- Nothing named yet: try again next time rather than keep an empty list.
+    if next(found) then auraNames, auraNamesFrom = found, ns.AURA_FAMILIES end
+    return found
+end
+
 -- Whether an entry on a bar is for you. One profile can serve every class and
 -- race: each character passes over what only other characters can have, which
 -- stays in the profile for them. Anything in your own spellbook, procs or bags
@@ -1513,6 +1534,8 @@ function S:Suggest(text, limit)
     for name, ids in pairs(ns.RANKS or {}) do Consider(name, nil, ids[#ids], false, IconID(ids)) end
     -- The scrolls' imbues (Imbue Flame), for the Buffs bar (B:WouldShow).
     for name, id in pairs(ns.IMBUE_SPELLS or {}) do Consider(name, nil, id, false) end
+    -- Food buffs no one learns (Well Fed), for the Buffs bar too.
+    for name, id in pairs(AuraNames()) do Consider(name, nil, id, false) end
     -- Passives with an aura of their own too (Plainsrunning's speed buff): the
     -- spellbook passes over them, and that aura can go on the Buffs or Debuffs
     -- bar. Where one can't go, the caller turns it away (S:AddNote,
@@ -1581,6 +1604,11 @@ function S:Resolve(text, bar)
     -- An imbue a scroll puts on (Imbue Flame): a spell the game won't find by
     -- a name you don't know (Buffs.lua).
     for name, id in pairs(ns.IMBUE_SPELLS or {}) do
+        if name:lower() == lower then return name, { id } end
+    end
+    -- A food buff no one learns (Well Fed): by any food's ID, as the game
+    -- won't find it by name while it isn't on you.
+    for name, id in pairs(AuraNames()) do
         if name:lower() == lower then return name, { id } end
     end
     local info = C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(text)

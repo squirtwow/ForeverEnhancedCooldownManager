@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70938';
+const BUILD = '1.60.1.70959';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = process.argv[2];
 assert(cache, 'Pass a cache directory');
@@ -810,8 +810,8 @@ for (const name of [...aurasByName.keys()].sort()) {
 // the ranks of an aura the class spells don't list (above: a totem's buff,
 // a talent's aura, a warlock's pet's), where one rank is a spell a
 // character can learn, a totem's buff, or an aura a spell above leads to;
-// and the buffs food and drink give (Item ClassID 0, SubclassID 5: an
-// item's spell, ItemEffect, or what it sets off), by name. Every food's
+// and the buffs food and drink give (Item ClassID 0, SubclassID 5, and
+// below: an item's spell, ItemEffect, or what it sets off), by name. Every food's
 // Well Fed is one buff, whichever food it came from, though each stat has
 // an ID of its own; so are Food and Drink while you eat or drink. Left out
 // when the entry of its name watches every rank already: its spells in
@@ -830,9 +830,32 @@ for (const ids of rankFamilies.values()) {
     }
 }
 const FOOD_AND_DRINK = { ClassID: 0, SubclassID: 5 };
-const foods = new Set((await table('Item')).filter(row => +row.ClassID === FOOD_AND_DRINK.ClassID
+const itemRows = await table('Item');
+const foods = new Set(itemRows.filter(row => +row.ClassID === FOOD_AND_DRINK.ClassID
     && +row.SubclassID === FOOD_AND_DRINK.SubclassID).map(row => +row.ID));
 const itemSpells = new Map((await table('ItemEffect')).map(row => [+row.ID, +row.SpellID]));
+const itemEffects = await table('ItemXItemEffect');
+// What eating and drinking cast (Food, Drink, Nutritious Food), by name. A
+// consumable filed elsewhere that casts one of them is food too (build
+// 70959: Prowler Steak and Sunrise Omelette are "Other", SubclassID 8, and
+// their Food gives a Well Fed of its own).
+const foodSpellNames = new Set(itemEffects.filter(row => foods.has(+row.ItemID))
+    .map(row => names.get(itemSpells.get(+row.ItemEffectID))).filter(Boolean));
+const consumables = new Set(itemRows.filter(row => +row.ClassID === FOOD_AND_DRINK.ClassID).map(row => +row.ID));
+for (const row of itemEffects) {
+    if (consumables.has(+row.ItemID) && foodSpellNames.has(names.get(itemSpells.get(+row.ItemEffectID)))) foods.add(+row.ItemID);
+}
+// Food a feast's table casts: Grand Lobster Banquet and Specklefin Feast put
+// out a game object, which these tables don't link to a spell, and eating
+// there casts this Food (its Well Fed lasts 45 min). The build fails once
+// it's renamed or an item casts it itself, so the list goes when it isn't
+// needed.
+const FEAST_FOOD = [1225774];
+const castByItems = new Set(itemEffects.map(row => itemSpells.get(+row.ItemEffectID)));
+for (const id of FEAST_FOOD) {
+    assert(foodSpellNames.has(names.get(id)) && !castByItems.has(id),
+        `${names.get(id)} (${id}): renamed or an item casts it now, so drop it from FEAST_FOOD`);
+}
 const foodBuffs = new Map();
 function eaten(id, depth) {
     if (shownAura(id) && reach.get(id).buff && !passive(id)) {
@@ -842,10 +865,11 @@ function eaten(id, depth) {
     }
     if (depth < 2) for (const then of triggers.get(id) || []) eaten(then, depth + 1);
 }
-for (const row of await table('ItemXItemEffect')) {
+for (const row of itemEffects) {
     const spell = foods.has(+row.ItemID) && itemSpells.get(+row.ItemEffectID);
     if (spell) eaten(spell, 0);
 }
+for (const id of FEAST_FOOD) eaten(id, 0);
 for (const [name, ids] of foodBuffs) {
     if (ids.size > 1 && !groups.has(name) && name && !/[\\"\n]/.test(name)) families.push([...ids].sort((a, b) => a - b));
 }

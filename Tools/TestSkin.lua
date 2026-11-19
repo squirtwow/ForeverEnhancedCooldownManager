@@ -6,9 +6,10 @@
 -- or calling any of Blizzard's own methods, fails the test. The only size changes allowed
 -- are a Tracked Bar's own status bar height, inside its unchanged item frame,
 -- the height of the Personal Resource Display's extra mana bar, and the
--- display's width while a layout matches it to your rows (the widths its own
--- Bar Width setting changes). The one read allowed is whether the display's
--- bars show, to put the addon's combo points under the lowest. Raid Timers
+-- display's width while a layout matches it to your rows, or while you set
+-- your own (Layout page) (the widths its own Bar Width setting changes). The
+-- one read allowed is whether the display's bars show, to put the addon's
+-- combo points under the lowest or over the top one. Raid Timers
 -- follow the same rules on Blizzard's countdown (TimerTracker), raid warnings
 -- (RaidWarningFrame) and boss cast bars: only the cosmetic setters each part
 -- allows, never their text, nothing that shows or hides them, and never the
@@ -1260,6 +1261,8 @@ local function PRD(bare)
         blizzardCalling = was
     end
     frame.UpdateAlternatePowerBar = function() end
+    -- Edit Mode's Hide Health Bar: only the health bar's container hides.
+    frame.SetHideHealth = function(self, hide) S[self.HealthBarsContainer].shown = not hide end
     -- The room Blizzard leaves between its bars: a getter the addon may read.
     frame.GetBarPadding = function() return 4 end
     -- Edit Mode's bar height, for both power bars.
@@ -2264,6 +2267,32 @@ wanted = nil
 ns.Resource:Match()
 Equal(Widths(), "200,200,200,200,200", "Blizzard's own width back when it stops")
 Equal(#printed, 0, "no errors while matching")
+-- A width of your own (Layout page, a player's idea) with no layout: only
+-- the same five widths (the seals fail anything else), never in combat,
+-- Match winning while it's in charge, and Blizzard's back once it's off.
+ns.Set("prdOwnWidth", true)
+ns.Set("prdWidth", 260)
+ns.Resource:Match()
+Equal(Widths(), "260,260,260,260,260", "your own width: the five widths Bar Width changes, nothing else")
+prd:UpdateBarWidth()
+Equal(Widths(), "260,260,260,260,260", "and again after Blizzard sets its own")
+wanted = 300
+ns.Resource:Match()
+local matching = Widths()
+wanted = nil
+ns.Resource:Match()
+Equal(matching .. " | " .. Widths(), "300,300,300,300,300 | 260,260,260,260,260", "Match wins while it's in charge, then yours again")
+combat = true
+ns.Set("prdWidth", 240)
+ns.Resource:Match()
+Equal(Widths() .. " " .. tostring(ns.Resource.pendingMatch), "260,260,260,260,260 true", "your own width waits for the fight to end")
+combat = false
+ns.Resource:Match()
+Equal(Widths(), "240,240,240,240,240", "then changes")
+ns.Set("prdOwnWidth", false)
+ns.Resource:Match()
+Equal(Widths(), "200,200,200,200,200", "unticked: Blizzard's own width back")
+Equal(#printed, 0, "no errors with your own width")
 
 -- Combo points under the display: the addon's own, since Forever's display
 -- has none. Off by default.
@@ -2341,6 +2370,30 @@ Equal(tostring(S[row].shown) .. " " .. ComboHears(), "true " .. COMBO_SHOWN, "ba
 S[prd.AlternatePowerBar].shown = false
 prd:UpdatePowerBar()
 Equal(S[row].points[1][2] == prd.PowerBar, true, "under the energy bar when it's the lowest")
+-- Over the display at a height of your own (a player's idea): on the health
+-- bar's container, Blizzard's padding apart, reading only whether it shows
+-- and the padding (the seals fail anything else); over the power bar with
+-- Hide Health Bar. Back under, as tall as the power bar, after.
+do
+    ns.Set("prdComboAt", "above")
+    ns.Set("prdComboHeight", 14)
+    ns.Resource:Apply()
+    local p1, p2 = S[row].points[1], S[row].points[2]
+    Equal(table.concat({ p1[1], tostring(p1[2] == prd.HealthBarsContainer), p1[3], p1[5], p2[1], tostring(p2[2] == prd.HealthBarsContainer),
+        p2[3], p2[5], S[row].height, S[prd.ClassFrameContainer].alpha }, " "), "BOTTOMLEFT true TOPLEFT 4 BOTTOMRIGHT true TOPRIGHT 4 14 0",
+        "over the health bar, Blizzard's padding apart, 14 tall, the game's own still see-through")
+    -- Edit Mode's Hide Health Bar calls nothing else the row hears.
+    prd:SetHideHealth(true)
+    local hidden = tostring(S[row].points[1][2] == prd.PowerBar)
+    prd:SetHideHealth(false)
+    Equal(hidden .. " " .. tostring(S[row].points[1][2] == prd.HealthBarsContainer), "true true",
+        "Hide Health Bar: over the power bar at once, and back over the health bar as it shows")
+    ns.Set("prdComboAt", "below")
+    ns.Set("prdComboHeight", 0)
+    ns.Resource:Apply()
+    Equal(tostring(S[row].points[1][2] == prd.PowerBar) .. " " .. S[row].points[1][1] .. " " .. S[row].height .. " " .. #printed,
+        "true TOPLEFT 12 0", "back under the lowest bar, as tall as the power bar")
+end
 -- Darkness and thick edges on each segment: its own track, the shine split
 -- where its fill ends, and a second pixel inside its edge, so the segments
 -- and the gaps between them stay as they are.

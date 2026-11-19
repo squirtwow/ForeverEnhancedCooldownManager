@@ -154,8 +154,16 @@ function ns.DebugReport()
     -- Play a sound and Sound on procs: what the game took, and what's ticked.
     if ns.BuffBar and ns.BuffBar.SoundReport then Add(ns.BuffBar:SoundReport()) end
     Heals(Add)
+    -- The display's width: Match, your own width, and the width it has now.
+    local power = _G.PersonalResourceDisplayFrame and _G.PersonalResourceDisplayFrame.PowerBar
+    local read, width = false, nil
+    if power then read, width = pcall(power.GetWidth, power) end
+    Add(("Resource display: match %s (in charge %s), own width %s %s, width now %s, pending %s"):format(tostring(ns.Get("prdMatch")),
+        tostring(ns.Layout ~= nil and ns.Layout:MatchWidth() ~= nil), tostring(ns.Get("prdOwnWidth")), tostring(ns.Get("prdWidth")),
+        read and Say(width) or "none", tostring(ns.Resource ~= nil and ns.Resource.pendingMatch == true)))
     if ns.Style then Fonts(Add) end
     if ns.Bars and ns.Bars.Report then ns.Bars:Report(Add, Say) end
+    if ns.Totems and ns.Totems.Report then ns.Totems:Report(Add, Say) end
     return table.concat(lines, "\n")
 end
 

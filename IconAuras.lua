@@ -27,8 +27,12 @@ function A:Available()
     return CustomAuraContainerSlotDefaultOptions ~= nil
 end
 
+-- (Not on a bar set to Show only when I can't afford it, a player's idea:
+-- these slots sit on the bar, not in the icon, so they'd show over icons
+-- the game keeps hidden. Their choice is kept.)
 function A:On(bar)
-    return bar and bar.kind == "cooldown" and bar.data and bar.data.showAuras == true and self:Available()
+    return bar and bar.kind == "cooldown" and bar.data and bar.data.showAuras == true and not bar.data.onlyShort
+        and self:Available()
 end
 
 -- Sizes an overlay's numbers for its icon, and shows or hides the
@@ -317,7 +321,8 @@ end
 function A:TickReport(bar, name)
     local B = ns.Bars
     if not (bar and B:CountsTicks(bar.key, name)) then return "" end
-    local how = not self:On(bar) and "Show buff and debuff time is off" or "no slot yet"
+    local how = bar.data and bar.data.onlyShort and "off with Show only when I can't afford it"
+        or not self:On(bar) and "Show buff and debuff time is off" or "no slot yet"
     for _, slot in ipairs(self:On(bar) and bar.tickSlots or {}) do
         if slot.name == name then
             how = slot.ticks and ("slot " .. slot.key .. ", rule " .. tostring(slot.ticks.rule)) or "the game can't draw it"
@@ -456,9 +461,10 @@ local function LitBy(id)
 end
 
 -- Whether a bar's icons glow for more procs: a cooldown bar, ticked, on a
--- game with the containers.
+-- game with the containers. Not with Show only when I can't afford it (A:On).
 function A:GlowsOn(bar)
-    return bar ~= nil and bar.kind == "cooldown" and bar.data ~= nil and bar.data.glowProcs == true and self:Available()
+    return bar ~= nil and bar.kind == "cooldown" and bar.data ~= nil and bar.data.glowProcs == true and not bar.data.onlyShort
+        and self:Available()
 end
 
 -- The icons that glow for a proc now, in order, each name once: its name
@@ -647,6 +653,8 @@ function A:GlowReport(bar)
     local how
     if not self:Available() then
         how = "none (the game can't)"
+    elseif bar.data.onlyShort then
+        how = "off with Show only when I can't afford it"
     elseif A.glowError then
         how = "couldn't start: " .. A.glowError
     elseif #told == 0 then

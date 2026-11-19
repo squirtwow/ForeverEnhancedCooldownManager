@@ -22,6 +22,7 @@ Buffs.lua
 IconAuras.lua
 Bars.lua
 Pulse.lua
+Totems.lua
 Layout.lua
 Theme.lua
 BarPage.lua
@@ -29,6 +30,8 @@ LayoutPage.lua
 CastBarPage.lua
 RaidTimersPage.lua
 PulsePage.lua
+TotemsPage.lua
+ComboSetUp.lua
 ProfileShare.lua
 ProfileMenu.lua
 Window.lua

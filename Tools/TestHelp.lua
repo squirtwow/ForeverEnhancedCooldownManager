@@ -961,7 +961,7 @@ local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
-        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
+        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ComboSetUp.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
@@ -1016,7 +1016,7 @@ end
 -- Every file in the order the .toc loads them (Tools/TestRules.mjs checks the .toc).
 local FILES = { "Core.lua", "SquirtVersions.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "RaidTimers.lua", "Ranks.lua", "Forms.lua", "Spells.lua",
     "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua", "Pulse.lua", "Layout.lua", "Theme.lua", "BarPage.lua",
-    "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
+    "LayoutPage.lua", "CastBarPage.lua", "RaidTimersPage.lua", "PulsePage.lua", "ComboSetUp.lua", "ProfileShare.lua", "ProfileMenu.lua", "Window.lua",
     "Tour.lua", "MinimapButton.lua", "Notes.lua", "Debug.lua" }
 -- A fresh game, logged in with these saved settings (nil: a first install).
 local function Start(saved)
@@ -1610,11 +1610,12 @@ end)()
 -- The Layout page's foot: every label with room ----------------------------------------------------
 -- On a screenshot of the game Live preview's label ran into Row spacing's. Live
 -- preview is now the drawing's own tick, in its box's bottom left corner,
--- level with Unlock bars; under the box, three rows: Show grow arrows and
--- All bars, Show the Personal Resource Display and Row spacing, Match the
--- resource display and Icon spacing. All bars' longer label has room before
--- its track, which lines up with the spacing sliders'. The title row's
--- words stay clear of Undo and Reset, whatever it says.
+-- level with Unlock bars; under the box, four rows: Own display width and
+-- Display width (a player's idea; the slider only while the tick is on),
+-- Show grow arrows and All bars, Show the Personal Resource Display and Row
+-- spacing, Match the resource display and Icon spacing. All bars' longer
+-- label has room before its track, which lines up with the other sliders'.
+-- The title row's words stay clear of Undo and Reset, whatever it says.
 
 ;(function()
     local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
@@ -1625,27 +1626,39 @@ end)()
     local page = w.pages.layout
     local L = ns.Layout
     Equal(Fit.Problems(page), "", "at the start: every label clear of the next control, all inside the page")
-    -- Under the box: three rows, each tick level with its slider, clear of it.
+    Equal(tostring(page.ownWidth:IsVisible()) .. " " .. tostring(page.ownWidth:GetChecked()) .. " " .. S[page.ownWidth.text].text .. " "
+        .. tostring(page.displayWidth:IsVisible()), "true false Own display width false", "Own display width off, its slider hidden")
+    page.ownWidth:Click()
+    Equal(tostring(page.displayWidth:IsVisible()) .. " " .. S[page.displayWidth.label].text .. " " .. tostring(S[page.displayWidth.value].text)
+        .. " | " .. Fit.Problems(page), "true Display width 200 | ", "ticked: the slider shows at 200, everything still clear")
+    -- Under the box: four rows, each tick level with its slider, clear of it.
     local function Middle(obj)
         local _, t, _, b = Fit.Rect(obj)
         return (t + b) / 2
     end
     Equal(tostring(Middle(page.growArrows) == Middle(page.allBars)) .. " " .. tostring(Middle(page.shown) == Middle(page.spacing)) .. " "
-        .. tostring(Middle(page.match) == Middle(page.iconSpacing)), "true true true", "each tick level with its slider")
+        .. tostring(Middle(page.match) == Middle(page.iconSpacing)) .. " " .. tostring(Middle(page.ownWidth) == Middle(page.displayWidth)) .. " "
+        .. tostring(Fit.Clear(page.ownWidth, page.displayWidth) and Fit.Clear(page.ownWidth, page.growArrows)
+            and Fit.Clear(page.displayWidth, page.allBars) and Fit.Clear(page.ownWidth, page.box) and Fit.Clear(page.displayWidth, page.box)),
+        "true true true true true", "each tick level with its slider, Own display width's row clear of Show grow arrows, All bars and the box")
     local tracks = {}
     local pageLeft = Fit.Rect(page)
-    for _, slider in ipairs({ page.allBars, page.spacing, page.iconSpacing }) do tracks[#tracks + 1] = Num(Fit.Rect(slider.track) - pageLeft) end
+    for _, slider in ipairs({ page.displayWidth, page.allBars, page.spacing, page.iconSpacing }) do
+        tracks[#tracks + 1] = Num(Fit.Rect(slider.track) - pageLeft)
+    end
     local _, _, _, boxBottom = Fit.Rect(page.box)
+    local _, widthTop = Fit.Rect(page.displayWidth)
     local _, allTop = Fit.Rect(page.allBars)
-    Equal(table.concat(tracks, " ") .. " " .. Num(allTop - boxBottom), "482.00 482.00 482.00 10.00", "the tracks lined up, All bars 10 under the box")
+    Equal(table.concat(tracks, " ") .. " " .. Num(widthTop - boxBottom) .. " " .. Num(allTop - widthTop), "482.00 482.00 482.00 482.00 10.00 22.00",
+        "the tracks lined up, Display width 10 under the box, All bars a row under it")
     -- Each slider's label clear of its track, which its thumb reaches 5
     -- back over at the lowest, and each value clear of the thumb at the
     -- highest, inside its own room.
     local tight = {}
-    for _, slider in ipairs({ page.allBars, page.spacing, page.iconSpacing }) do
+    for _, slider in ipairs({ page.displayWidth, page.allBars, page.spacing, page.iconSpacing }) do
         local label, track = S[slider.label], S[slider.track].points
         if Fit.Wide(label.text, label.template) + 5 + 3 > track[1][2] then tight[#tight + 1] = label.text end
-        for _, value in ipairs({ "0", "20", "50", "150" }) do
+        for _, value in ipairs({ "0", "20", "50", "150", "400" }) do
             local shown = S[slider.value]
             if Fit.Wide(value, shown.template) + 5 > -track[2][2] or Fit.Wide(value, shown.template) > shown.width then
                 tight[#tight + 1] = label.text .. " at " .. value
@@ -1990,6 +2003,10 @@ end)()
     Equal(tostring(bp.options.swapForm:IsVisible()) .. " " .. tostring(bp.options.editing:IsVisible()) .. " "
         .. S[bp.options.editing.name].text, "true true Defensive Stance", "(the tick and Editing, on its longest name, checked there)")
     ns.SetEditingForm(nil)
+    -- (Swap with my form off for the full bars: with Editing showing, Show
+    -- only when I can't afford it goes a row lower, so the list shows one
+    -- row less then.)
+    ns.Bars:SetOption("cd", "swapForm", false)
     -- A full bar (40 icons): the Cooldowns tray takes three rows, closer
     -- than an aura bar's, so under its taller options the spell list still
     -- shows two rows and more; the Buffs tray four, under its shorter ones.
@@ -2441,6 +2458,76 @@ end)()
     Equal(table.concat(found, " | "), "", "in every state: every piece inside the panel and none on another, the panel under the title bar and clear of the footer")
     _G.BreakUpLargeNumbers, _G.AbbreviateNumbers = nil, nil
     Equal(#printed, 0, "no errors")
+end)()
+
+-- Combo points: the Look page's tick, and Set up's pop-up ---------------------------------------------
+-- (A player's idea: their height and spot.) The tick now says Combo points,
+-- with Set up beside it, right of it and left of the text's tick, both inside
+-- the choices, which stay 198 tall. Set up opens a small pop-up under it, on
+-- screen and inside the window: its heading, Reset, Height, Spot and its
+-- pills inside it and none on another. Every hover fits two lines of the
+-- footer. Clicked again, it closes.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local function Note(control)
+        S[control].scripts.OnEnter(control)
+        local text = S[w.note].text
+        S[control].scripts.OnLeave(control)
+        return text
+    end
+    local setUp = w.comboSetUpButton
+    local _, comboTop, comboRight, comboBottom = Fit.Rect(w.combo)
+    local setLeft, setTop, setRight, setBottom = Fit.Rect(setUp)
+    local textLeft = Fit.Rect(w.prdText)
+    local _, optionsTop, _, optionsBottom = Fit.Rect(w.lookOptions)
+    Equal(table.concat({ S[w.combo.text].text, S[setUp.label].text, tostring(setLeft > comboRight), tostring(setRight < textLeft),
+        tostring(setTop >= optionsTop and setBottom <= optionsBottom), Num(setTop + setBottom - comboTop - comboBottom),
+        tostring(S[w.lookOptions].height) }, " "), "Combo points Set up true true true -2.00 198",
+        "the tick's shorter label, Set up right of it, left of the text's tick, inside the choices (1 up), which stay 198 tall")
+    Equal(Note(w.combo) .. " | " .. Note(setUp), "Five segments as wide as the display, for rogues and druids in cat form. The game's own go"
+        .. " see-through while these show. Set up: their height and spot. | How tall the combo points are, and whether they go under or"
+        .. " over the display.", "the tick's and Set up's hovers")
+    setUp:Click()
+    local pop = w.comboSetUp
+    -- While it's up the window's name stands for it (Escape closes it alone);
+    -- measured from the window itself.
+    local escape = _G.FECMFrame
+    _G.FECMFrame = w
+    local pl, pt, pr, pb = Fit.Rect(pop)
+    local _, _, _, setBottomNow = Fit.Rect(setUp)
+    Equal(table.concat({ tostring(pop:IsVisible()), Num(pl - setLeft), Num(pt - setBottomNow), tostring(pl >= 0 and pr <= 820 and pt >= 0 and pb <= 560),
+        S[pop.title].text, S[pop.reset.label].text, S[pop.height.label].text, S[pop.spotLabel].text,
+        S[pop.spot.buttons[1].label].text, S[pop.spot.buttons[2].label].text }, " "),
+        "true 0.00 4.00 true COMBO POINTS Reset Height Spot Below Above", "under Set up, inside the window, each part named")
+    local found = {}
+    local parts = { { pop.title, "heading" }, { pop.reset, "Reset" }, { pop.height, "Height" }, { pop.spotLabel, "Spot" }, { pop.spot, "pills" } }
+    for i, part in ipairs(parts) do
+        local l, t, r, b = Fit.Rect(part[1])
+        if l < pl or r > pr or t < pt or b > pb then found[#found + 1] = part[2] .. " out of the pop-up" end
+        for j = i + 1, #parts do
+            if not Fit.Clear(part[1], parts[j][1]) then found[#found + 1] = part[2] .. " on " .. parts[j][2] end
+        end
+    end
+    local label, track = S[pop.height.label], S[pop.height.track].points
+    if Fit.Wide(label.text, label.template) + 5 + 3 > track[1][2] then found[#found + 1] = "Height's label on its track" end
+    for _, control in ipairs({ pop, pop.reset, pop.height, pop.spot.buttons[1], pop.spot.buttons[2], w.combo, setUp }) do
+        local hint = type(control.hint) == "function" and control.hint(control) or control.hint
+        if Fit.Wide(hint, "GameFontHighlightSmall") > 2 * S[w.note].width then found[#found + 1] = "a hover over two lines: " .. hint end
+    end
+    Equal(table.concat(found, "; ") .. " | " .. tostring(escape == pop), " | true",
+        "every part inside the pop-up and none on another; every hover in two lines; Escape is the pop-up's")
+    _G.FECMFrame = escape
+    Equal(Note(pop.reset) .. " | " .. Note(pop.height) .. " | " .. Note(pop.spot.buttons[1]) .. " | " .. Note(pop.spot.buttons[2]),
+        "As tall as your power bar again, under the display. | How tall the combo points are. Until you move this, they're as tall as"
+        .. " your power bar. | Under the display's lowest bar, as before. | Over the display's health bar. Rows above, and your cast"
+        .. " bar when it's set above too, go over them.", "each part's hover")
+    setUp:Click()
+    Equal(tostring(pop:IsVisible()) .. " " .. #printed, "false 0", "clicked again, it closes; no errors")
 end)()
 
 -- The Set up panel goes when another page takes the window ----------------------------------------
@@ -4497,6 +4584,81 @@ end)()
         "true true | true false false | false  | false | false false",
         "ticked: Cooldowns' own, Utility's stays off; not on the Buffs or Debuffs pages; unticked again")
     Equal(#printed, 0, "no errors from Glow for more procs")
+end)()
+
+-- Show only when I can't afford it on the Cooldowns and Utility pages ------------------------------
+-- (A player's idea.) A tick in the right column under New rows, off by
+-- default, each bar its own; under Editing while that shows (Swap with my
+-- form), the options a row taller then. Ticked, Dim when you can't cast it,
+-- When ready, On cooldown and Dimmed icons are greyed, each saying why on
+-- hover, their choices kept. Every note in two lines of the footer. Not on
+-- the Buffs or Debuffs pages. Clear of everything else on the page.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("cd")
+    local bp = w.pages.bar
+    local opts = bp.options
+    local tick = opts.onlyShort
+    local SHORT = "Not with Show only when I can't afford it: an icon there shows in full or not at all."
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local function Fits(text) return Fit.Wide(text, S[w.note].template) <= 2 * S[w.note].width end
+    local function At(control)
+        local p = S[control].points[1]
+        return p[1] .. " " .. p[2] .. " " .. p[3]
+    end
+    local height = math.floor(S[bp.optionsArea].height)
+    local note = Note(tick)
+    Equal(table.concat({ tostring(tick:IsVisible()), S[tick.text].text, tostring(tick:GetChecked()), At(tick),
+        tostring(ns.BarData("cd").onlyShort), Fit.Problems(bp) }, " "),
+        "true Show only when I can't afford it false TOPLEFT 320 -151 false ",
+        "on the Cooldowns page under New rows, off by default, clear of everything else")
+    Equal(note .. " " .. tostring(Fits(note)), "This bar's icons stay hidden, and one shows only while you haven't the mana, rage or energy"
+        .. " to cast it. When ready, On cooldown and Dim don't apply here. true", "its note says what it does in two lines of the footer")
+    -- Ticked: the others greyed, saying why, their choices kept.
+    ns.Bars:SetOption("cd", "whenReady", "hide")
+    tick:Click()
+    local show = opts.whenReady.buttons[1] -- (clicked, it would change the choice)
+    local held = table.concat({ tostring(ns.BarData("cd").onlyShort), tostring(tick:GetChecked()), tostring(opts.dimUnusable.usable),
+        tostring(opts.dimOpacity.usable), tostring(opts.whenReady.held == SHORT), tostring(opts.onCooldown.held == SHORT),
+        tostring(S[opts.whenReady].alpha), tostring(S[opts.onCooldown.label].alpha) }, " ")
+    local hovers = table.concat({ tostring(Note(opts.dimUnusable) == SHORT), tostring(Note(opts.dimOpacity) == SHORT),
+        tostring(Note(show) == SHORT), tostring(Note(opts.onCooldown.buttons[3]) == SHORT), tostring(Fits(SHORT)) }, " ")
+    show:Click()
+    Equal(held .. " | " .. hovers .. " | " .. ns.BarData("cd").whenReady .. " " .. tostring(w.said == SHORT) .. " " .. Fit.Problems(bp),
+        "true true false false true true 0.4 0.4 | true true true true true | hide true ",
+        "ticked: Dim, Dimmed icons, When ready and On cooldown greyed, each hover saying why in two lines; a click on a choice"
+            .. " says so and keeps yours")
+    -- Utility has its own; not on the Buffs or Debuffs pages.
+    w:Select("util")
+    local util = tostring(tick:IsVisible()) .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(opts.dimUnusable.usable)
+        .. " " .. tostring(opts.whenReady.held)
+    w:Select("buff")
+    local buff = tostring(tick:IsVisible()) .. " " .. Fit.Problems(bp)
+    w:Select("debuff")
+    local debuff = tostring(tick:IsVisible())
+    Equal(util .. " | " .. buff .. " | " .. debuff, "true false true nil | false  | false",
+        "Utility's own, unticked there; not on the Buffs or Debuffs pages")
+    -- Swap with my form ticked (a druid with Bear Form): under Editing, the options a row taller.
+    table.insert(book[2].items, { name = "Bear Form", spellID = 5487, iconID = 132276 })
+    ns.Spells:Stale()
+    ns.Bars:SetOption("cd", "swapForm", true)
+    w:Select("cd")
+    Equal(table.concat({ tostring(opts.editing:IsVisible()), At(tick), tostring(math.floor(S[bp.optionsArea].height) - height),
+        Fit.Problems(bp) }, " "), "true TOPLEFT 320 -195 22 ", "with Editing showing: under it, the options 22 taller, clear of everything")
+    ns.Bars:SetOption("cd", "swapForm", false)
+    w:Select("util")
+    w:Select("cd")
+    local back = At(tick) .. " " .. tostring(math.floor(S[bp.optionsArea].height) - height)
+    tick:Click()
+    Equal(table.concat({ back, tostring(ns.BarData("cd").onlyShort), tostring(opts.dimUnusable.usable),
+        tostring(opts.dimOpacity.usable), tostring(opts.whenReady.held), tostring(S[opts.whenReady].alpha) }, " "),
+        "TOPLEFT 320 -151 0 false true false nil 1",
+        "Swap with my form off: back in its spot; unticked: the others usable again (Dimmed icons greyed while nothing dims)")
+    Equal(#printed, 0, "no errors from Show only when I can't afford it")
 end)()
 
 -- Icon height on every bar page ----------------------------------------------------------------------------

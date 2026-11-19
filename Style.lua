@@ -1150,4 +1150,5 @@ end
 function S:ApplyDetails()
     if ns.Bars and ns.Bars.started then ns.Bars:ApplyIconDetails() end
     if ns.Skin and ns.Skin.started then ns.Skin:ApplyIconDetails() end
+    if ns.Totems then ns.Totems:Restyle() end -- and the Totems bar's (Totems.lua)
 end

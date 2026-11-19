@@ -964,7 +964,7 @@ local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
-        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
+        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ComboSetUp.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
@@ -1449,7 +1449,7 @@ do
 
     -- /ccm debug says so, for the bar ticked.
     local report = ns.DebugReport()
-    Equal(select(2, report:gsub("dimmed icons 40%%, global cooldown shown\n", "")), 1, "the debug report says so, for Cooldowns only")
+    Equal(select(2, report:gsub("dimmed icons 40%%, global cooldown shown, show only when I can't afford it false\n", "")), 1, "the debug report says so, for Cooldowns only")
 
     -- A spot that turns into an item: its sweep cleared, and not fed.
     itemCount[118] = 1

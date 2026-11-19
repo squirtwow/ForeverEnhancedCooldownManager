@@ -25,6 +25,7 @@ const COPIES = [
   ['TestRoles.lua', '-- Roles: the game around it'],
   ['TestForms.lua', '-- Forms: the game around it'],
   ['TestExtraBars.lua', '-- Extra bars: the game around it'],
+  ['TestTotems.lua', '-- Totems: the game around it'],
 ];
 
 // A test file in three: its opening comment, the mock game, then its tests.

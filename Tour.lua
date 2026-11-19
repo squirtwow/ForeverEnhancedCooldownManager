@@ -729,6 +729,31 @@ local HELP = {
         target = function(w) return w.pages.cast.parts end,
         side = "right",
     },
+    -- The Totems page (TotemsPage.lua, shamans only): on, the range warning, moving it.
+    {
+        page = "totems",
+        when = function(w) return w ~= nil and w.pages.totems ~= nil end,
+        title = "Turn it on",
+        text = "Your totems on a bar of their own, one spot for each element. Off until you tick it.",
+        target = function(w) return w.pages.totems.master end,
+        side = "below",
+    },
+    {
+        page = "totems",
+        when = function(w) return w ~= nil and w.pages.totems ~= nil end,
+        title = "Red when out of range",
+        text = "A totem that buffs you turns red while you're out of its range. Totems that don't buff you never do.",
+        target = function(w) return w.pages.totems.range end,
+        side = "below",
+    },
+    {
+        page = "totems",
+        when = function(w) return w ~= nil and w.pages.totems ~= nil end,
+        title = "Put it anywhere",
+        text = "Move hides this window and shows a box over the bar: drag it, then click Done.",
+        target = function(w) return w.pages.totems.move end,
+        side = "below",
+    },
     {
         page = "general",
         title = "Minimap button",

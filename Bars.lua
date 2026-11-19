@@ -48,9 +48,15 @@ end
 -- you can't cast, one you can't cast now (blue, grey or red) is never more
 -- than dimmed; a hidden one stays hidden. Dimming and hiding wait while the
 -- bars are being arranged (unlocked, or in Edit Mode), so every icon on
--- them can be seen in full.
-local function Alphas(data, cantCast)
+-- them can be seen in full. On a bar set to Show only when I can't afford
+-- it (a player's idea), an icon shows in full while short (short: the game
+-- says its spell lacks the mana, rage or energy) and is hidden otherwise.
+local function Alphas(data, cantCast, short)
     if unlocked or editMode then return 1, 1 end
+    if data.onlyShort then
+        local shown = short and 1 or 0
+        return shown, shown
+    end
     local dim = (type(data.dimOpacity) == "number" and data.dimOpacity or DIM) / 100
     local cooling = data.onCooldown == "dim" and dim or SHOWN[data.onCooldown] or 1
     local ready = data.whenReady == "dim" and dim or SHOWN[data.whenReady] or 1
@@ -61,7 +67,7 @@ end
 -- Whether a bar hides its icons while ready or while cooling down, so they
 -- come and go.
 local function Hides(data)
-    local cooling, ready = Alphas(data, false)
+    local cooling, ready = Alphas(data, false, false)
     return cooling == 0 or ready == 0
 end
 
@@ -340,6 +346,32 @@ local function Fade(icon, active, cooling, ready)
     icon:SetAlphaFromBoolean(active, cooling, ready)
 end
 
+-- Show only when I can't afford it (a player's idea): while the game keeps
+-- whether you lack the mana secret, the icon is handed that answer as it is
+-- (shown while short, hidden while not) and nothing here sets its opacity
+-- until the answer is open again. A client that can't do that hides it.
+-- Every icon shows in full while the bars are being arranged.
+local function ShortFromGame(icon, answer)
+    if unlocked or editMode then
+        icon.shortSecret = nil
+        return Alpha(icon, 1)
+    end
+    icon.shortSecret = true
+    if icon.SetAlphaFromBoolean then
+        icon.alpha = nil
+        icon:SetAlphaFromBoolean(answer, 1, 0)
+    else
+        Alpha(icon, 0)
+    end
+end
+
+-- Such an icon's opacity from an open answer: in full while short (or while
+-- arranging), hidden otherwise; left alone while the game holds it.
+local function ShortAlpha(icon)
+    if icon.shortSecret then return end
+    Alpha(icon, (unlocked or editMode or icon.short) and 1 or 0)
+end
+
 -- Trinkets and bag items. Their cooldowns come back as plain numbers; if the
 -- game ever hides them in combat, the icon simply keeps its last state.
 -- Whether one can be used now is read first: on a bar that dims what you
@@ -353,6 +385,8 @@ local function RefreshItem(icon, data, follows)
     end
     Tint(icon, tint)
     icon.cantCast = tint ~= TINT.ready
+    -- (Show only when I can't afford it: an answer the game keeps secret counts as not short.)
+    icon.short, icon.shortSecret = Open(noMana) and noMana == true, nil
     SetGlow(icon, false)
     local start, duration
     if icon.kind == "slot" then
@@ -364,7 +398,7 @@ local function RefreshItem(icon, data, follows)
         local active = start > 0 and duration > 1.5
         if active then icon.cooldown:SetCooldown(start, duration) else icon.cooldown:Clear() end
         icon.texture:SetDesaturated(active)
-        local cooling, ready = Alphas(data, icon.cantCast)
+        local cooling, ready = Alphas(data, icon.cantCast, icon.short)
         Alpha(icon, active and cooling or ready)
     end
     local count
@@ -378,31 +412,33 @@ local function RefreshItem(icon, data, follows)
 end
 
 -- An icon that only counts what you carry (your ammo, your Soul Shards):
--- the count, greyed at 0, never cooling down.
-local function Counted(icon, count)
+-- the count, greyed at 0, never cooling down. In full, but hidden (unless
+-- the bars are being arranged) on a bar set to Show only when I can't
+-- afford it, as it costs nothing.
+local function Counted(icon, data, count)
     if Open(count) and type(count) == "number" then
         icon.count:SetText(count)
         icon.texture:SetDesaturated(count == 0)
     end
     icon.cooldown:Clear()
-    Alpha(icon, 1)
+    Alpha(icon, data.onlyShort and (Alphas(data, false, false)) or 1)
     Tint(icon, TINT.ready)
     -- Never "can't cast". Icons are reused by place, so this clears what a
     -- spell or item there before left for the debug report.
-    icon.cantCast = false
+    icon.cantCast, icon.short, icon.shortSecret = false, false, nil
     SetGlow(icon, false)
 end
 
 -- Your ammunition: how many you carry, greyed when you're out.
-local function RefreshAmmo(icon)
+local function RefreshAmmo(icon, data)
     local texture = GetInventoryItemTexture("player", icon.slot)
     if texture then icon.texture:SetTexture(texture) end
-    Counted(icon, GetInventoryItemID("player", icon.slot) and GetInventoryItemCount("player", icon.slot) or 0)
+    Counted(icon, data, GetInventoryItemID("player", icon.slot) and GetInventoryItemCount("player", icon.slot) or 0)
 end
 
 -- Your Soul Shards in your bags (not the bank).
-local function RefreshShards(icon)
-    Counted(icon, C_Item.GetItemCount(icon.itemID, false, false))
+local function RefreshShards(icon, data)
+    Counted(icon, data, C_Item.GetItemCount(icon.itemID, false, false))
 end
 
 -- Whether an icon shows an item (your ammunition, your Soul Shards) rather
@@ -484,10 +520,15 @@ end
 local function SpellCooldown(icon, data)
     local id = icon.spellID
     if wanding and icon.readID == id then
-        if not icon.ended then return end
+        -- (Show only when I can't afford it never waits on the cooldown.)
+        if not icon.ended then
+            if data.onlyShort then ShortAlpha(icon) end
+            return
+        end
         icon.ended = nil
         icon.texture:SetDesaturated(false)
-        local _, ready = Alphas(data, icon.cantCast)
+        if data.onlyShort then return ShortAlpha(icon) end
+        local _, ready = Alphas(data, icon.cantCast, icon.short)
         Alpha(icon, ready)
         return
     end
@@ -500,8 +541,11 @@ local function SpellCooldown(icon, data)
         active = duration:IsActive()
         icon.texture:SetDesaturated(active)
         -- The same either way is set as it is; otherwise the game picks.
-        local cooling, ready = Alphas(data, icon.cantCast)
-        if cooling == ready then
+        -- (Show only when I can't afford it: the cooldown never matters.)
+        local cooling, ready = Alphas(data, icon.cantCast, icon.short)
+        if data.onlyShort then
+            ShortAlpha(icon)
+        elseif cooling == ready then
             Alpha(icon, ready)
         elseif icon.SetAlphaFromBoolean then
             Fade(icon, active, cooling, ready)
@@ -511,7 +555,7 @@ local function SpellCooldown(icon, data)
     else
         icon.cooldown:Clear()
         icon.texture:SetDesaturated(false)
-        Alpha(icon, 1)
+        if data.onlyShort then ShortAlpha(icon) else Alpha(icon, 1) end
     end
     if data.showGCD then
         Global(icon, active)
@@ -525,8 +569,9 @@ end
 -- changed (usable, in or out of range, a glow, a new target). These answers
 -- are open in a fight (only the cooldown is secret); one the game hides
 -- counts as castable. True when whether you can cast it changed: the icon is
--- tinted (blue, grey or red) now and wasn't, or the other way round.
-local function SpellState(icon, hasTarget)
+-- tinted (blue, grey or red) now and wasn't, or the other way round; or
+-- whether you lack the mana for it (short) changed.
+local function SpellState(icon, hasTarget, data)
     local id = icon.spellID
     local usable, noMana = C_Spell.IsSpellUsable(id)
     local inRange
@@ -542,9 +587,14 @@ local function SpellState(icon, hasTarget)
     -- ability the game doesn't light (Overpower after a dodge), once usable.
     SetGlow(icon, Overlayed(id) or (icon.reactive and Open(usable) and usable == true) or false)
     local cantCast = tint ~= TINT.ready
-    if icon.cantCast == cantCast then return false end
-    icon.cantCast = cantCast
-    return true
+    local short = Open(noMana) and noMana == true
+    -- Show only when I can't afford it (a player's idea): an answer the game keeps secret is handed to it as it is.
+    local wasSecret = icon.shortSecret
+    if data.onlyShort and not Open(noMana) then ShortFromGame(icon, noMana) else icon.shortSecret = nil end
+    -- (Open again after the game held it: set from the open answer.)
+    local changed = icon.cantCast ~= cantCast or icon.short ~= short or (wasSecret and not icon.shortSecret) or false
+    icon.cantCast, icon.short = cantCast, short
+    return changed
 end
 
 -- One icon: all of it, or just its cooldown ("cooldown") or its colour and
@@ -552,11 +602,11 @@ end
 -- colour goes first: on a bar that dims what you can't cast, a change there
 -- sets the icon's opacity again, with its cooldown.
 local function RefreshIcon(icon, data, hasTarget, follows, part)
-    if icon.kind == "ammo" then return RefreshAmmo(icon) end
-    if icon.kind == "shards" then return RefreshShards(icon) end
+    if icon.kind == "ammo" then return RefreshAmmo(icon, data) end
+    if icon.kind == "shards" then return RefreshShards(icon, data) end
     if ITEM_KINDS[icon.kind] then return RefreshItem(icon, data, follows) end
-    local changed = part ~= "cooldown" and SpellState(icon, hasTarget)
-    if part ~= "state" or (changed and data.dimUnusable) then SpellCooldown(icon, data) end
+    local changed = part ~= "cooldown" and SpellState(icon, hasTarget, data)
+    if part ~= "state" or (changed and (data.dimUnusable or data.onlyShort)) then SpellCooldown(icon, data) end
     ReagentCount(icon)
 end
 
@@ -1481,9 +1531,10 @@ function B:Report(add, say)
                         .. ", heard " .. tostring(traps.hearing)) or ""
                     -- (Count ticks, when ticked: its pace and its count's slot.)
                     add(("  %d. %s | %s %s | reactive %s | usable %s, no mana %s | glow %s (%s%s) | size %s | range watched %s"
-                        .. " | can't cast %s%s%s"):format(i, say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID),
+                        .. " | can't cast %s | short %s%s%s%s"):format(i, say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID),
                         tostring(icon.reactive), say(usable), say(noMana), tostring(glow:IsShown()), glow.proc and "proc" or "edge", loop,
-                        say(icon:GetWidth()), tostring(icon.ranged == true), tostring(icon.cantCast == true), trap,
+                        say(icon:GetWidth()), tostring(icon.ranged == true), tostring(icon.cantCast == true),
+                        tostring(icon.short), icon.shortSecret and " (game's own)" or "", trap,
                         ns.IconAuras:TickReport(bar, icon.name)))
                 end
             end
@@ -1496,9 +1547,9 @@ function B:Report(add, say)
                         say(GetShapeshiftFormID and GetShapeshiftFormID()), say(IsStealthed and IsStealthed()),
                         ns.FormName(ns.ShownForm(key)), ns.ShownForm(key) ~= ns.FormNow() and " (picked on its page)" or ""))
                 end
-                add(("  when ready %s, on cooldown %s, dim when you can't cast it %s, dimmed icons %s%%%s"):format(
+                add(("  when ready %s, on cooldown %s, dim when you can't cast it %s, dimmed icons %s%%%s, show only when I can't afford it %s"):format(
                     tostring(data.whenReady), tostring(data.onCooldown), tostring(data.dimUnusable), tostring(data.dimOpacity),
-                    data.showGCD and ", global cooldown shown" or ""))
+                    data.showGCD and ", global cooldown shown" or "", tostring(data.onlyShort == true)))
                 -- Glow for more procs, while ticked: what it watches, or why not.
                 local glows = ns.IconAuras:GlowReport(bar)
                 if glows then add(glows) end
@@ -1531,6 +1582,7 @@ function B:ApplyDecor()
         ns.BuffBar:HolderDecor(bar)
         GroupDecor(bar)
     end
+    if ns.Totems then ns.Totems:Restyle() end -- and the Totems bar's (Totems.lua)
 end
 
 -- The ready glow picked on the Look page, on every icon at once, those not
@@ -1574,6 +1626,7 @@ function B:ApplyFont()
         for _, icon in ipairs(bar.icons or {}) do icon.label:SetFontObject(font) end
         for _, holder in ipairs(bar.holders or {}) do holder.label:SetFontObject(font) end
     end
+    if ns.Totems then ns.Totems:Restyle() end -- and the Totems bar's names
 end
 
 -- Keybinds placed and sized as chosen on the Look page (each icon at the
@@ -1716,6 +1769,8 @@ function B:UpdateShown()
             BarDecor(bar)
         end
     end
+    -- The Totems bar too (Edit Mode and unlocking reach it, your bars on or off).
+    if ns.Totems then ns.Totems:UpdateShown() end
 end
 
 -- The grow arrows switched on or off on the Layout page.
@@ -1756,6 +1811,7 @@ function B:SetUnlocked(value)
     if ns.Layout then ns.Layout:Stack() end
     -- A cast bar set free drags with them.
     if ns.CastBar then ns.CastBar:ShowMover() end
+    if ns.Totems then ns.Totems:ShowMover() end -- and the Totems bar
 end
 
 -- Every icon on the Cooldowns and Utility bars: in full, or one part of each
@@ -3264,6 +3320,7 @@ end
 function B:SetScale(percent)
     local limits = ns.BAR_SCALE
     ns.Set("barScale", math.max(limits[1], math.min(limits[2], math.floor(percent + .5))))
+    if ns.Totems then ns.Totems:Restyle() end -- the Totems bar's size goes by it too
     if not self.started then return end
     if self:Enabled() or next(bars) then
         for _, key in ipairs(ns.BAR_KEYS) do Layout(bars[key] or NewBar(key)) end

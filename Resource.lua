@@ -3,9 +3,10 @@
 -- Blizzard's colour or one of yours. Some specs get a second mana bar under
 -- the main one: it's hidden while the main bar is mana too, so it never just
 -- repeats it, and half as tall in bear, cat and other forms. While a layout
--- stacks your bars around it, it can be as wide as your widest row. Combo
--- points, which Forever's display leaves out, can go under it, and your
--- health and power as text on its bars.
+-- stacks your bars around it, it can be as wide as your widest row, or a
+-- width of your own (Layout page, a player's idea). Combo points, which
+-- Forever's display leaves out, can go under or over it, and your health
+-- and power as text on its bars.
 -- Visual only. Blizzard still decides what shows and where: only colours,
 -- textures, sizes and the addon's own pieces change, and no key is ever
 -- written on Blizzard's frames.
@@ -304,7 +305,9 @@ end
 -- the addon draws its own under the display's lowest bar: five segments as wide as the display, in
 -- the Tracked Bars design and texture and a colour of your choice. Flat by
 -- default, so they stay sharp at any size, and they stretch or shrink with the
--- display.
+-- display. Their height and spot are yours to pick (a player's idea, the
+-- Look page's Set up): as tall as the power bar or 3 to 30, under the
+-- display or over its health bar.
 -- Rogues, and druids in cat form. The count can be secret in combat, so each
 -- segment is a bar from i - 1 to i handed the count as it is: the game fills
 -- it, and the addon never reads the number.
@@ -408,9 +411,25 @@ local function ComboWanted()
     return power == ENERGY
 end
 
+-- The power bar's height, while the game gives a plain one; else 8.
+local function PowerHeight(frame)
+    local height = frame and frame.PowerBar and frame.PowerBar:GetHeight()
+    if type(height) == "number" and not (issecretvalue and issecretvalue(height)) and height > 0 then return height end
+    return 8
+end
+
+-- How tall the combo points are: your own height (3 to 30), or the power
+-- bar's while it's 0 (a saved 1 or 2 counts as 0).
+function R:ComboHeight()
+    local own = ns.Get("prdComboHeight")
+    if type(own) == "number" and own >= ns.COMBO_HEIGHT_LOW then return own end
+    return PowerHeight(_G.PersonalResourceDisplayFrame)
+end
+
 -- A row under the lowest bar that shows, Blizzard's own padding apart, as
--- tall as the power bar (or half, as the extra mana bar is in forms).
-local function Underneath(row, frame, half)
+-- tall as the power bar (or half, as the extra mana bar is in forms), or
+-- the height given.
+local function Underneath(row, frame, half, height)
     local below = frame.PowerBar
     local extra = frame.AlternatePowerBar
     if extra and extra:IsShown() and not extraHidden then below = extra end
@@ -419,9 +438,34 @@ local function Underneath(row, frame, half)
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -padding)
     row:SetPoint("TOPRIGHT", below, "BOTTOMRIGHT", 0, -padding)
-    local height = frame.PowerBar and frame.PowerBar:GetHeight()
-    height = type(height) == "number" and height > 0 and height or 8
-    row:SetHeight(half and math.max(2, math.floor(height / 2 + .5)) or height)
+    if height then
+        row:SetHeight(height)
+    else
+        local full = PowerHeight(frame)
+        row:SetHeight(half and math.max(2, math.floor(full / 2 + .5)) or full)
+    end
+end
+
+-- A row over the top bar that shows (the health bar, or the power bar with
+-- Edit Mode's Hide Health Bar), Blizzard's own padding apart, this tall.
+-- Reads only which bars show and the padding, as Underneath does. Hands back
+-- which bar it sat on, so a change of bar moves the layout too.
+local function Over(row, frame, height)
+    local health, power, extra = frame.HealthBarsContainer, frame.PowerBar, frame.AlternatePowerBar
+    local top, name = frame, "frame"
+    if health and health:IsShown() then
+        top, name = health, "health"
+    elseif power and power:IsShown() then
+        top, name = power, "power"
+    elseif extra and extra:IsShown() and not extraHidden then
+        top, name = extra, "extra"
+    end
+    local padding = type(frame.GetBarPadding) == "function" and frame:GetBarPadding() or 4
+    row:ClearAllPoints()
+    row:SetPoint("BOTTOMLEFT", top, "TOPLEFT", 0, padding)
+    row:SetPoint("BOTTOMRIGHT", top, "TOPRIGHT", 0, padding)
+    row:SetHeight(height)
+    return name
 end
 
 -- Your points now, handed straight to the segments.
@@ -469,16 +513,26 @@ local function ComboListen()
     end
 end
 
--- Shows or hides the row and puts it in place; a layout makes room for it.
+-- Shows or hides the row and puts it in place, under the display or over
+-- it, at its height; a layout makes room for it, and moves again when its
+-- spot or height changes while it shows.
 local function ComboUpdate()
     local frame = _G.PersonalResourceDisplayFrame
     if not (frame and combo) then return end
     local want = ComboWanted()
-    if want then Underneath(combo, frame) end
+    local moved = false
+    if want then
+        local height, above = R:ComboHeight(), ns.Get("prdComboAt") == "above"
+        local on = "below"
+        if above then on = "above " .. Over(combo, frame, height) else Underneath(combo, frame, false, height) end
+        local spot = on .. " " .. height
+        moved = spot ~= combo.spot
+        combo.spot = spot
+    end
     MuteClassFrame(frame, want)
     combo:SetShown(want)
     ComboPoints()
-    local changed = want ~= comboShown
+    local changed = want ~= comboShown or moved
     comboShown = want
     ComboListen()
     if changed then Restack() end
@@ -932,9 +986,10 @@ end
 local matched
 
 -- As wide as your widest row while a layout holds your bars (and the choice
--- is on): the same widths Blizzard's own Bar Width setting changes, set
--- after Blizzard sets its own. Otherwise its width is Blizzard's again.
--- Never in combat; it waits for the fight to end.
+-- is on), or else as wide as your own width while that's ticked: the same
+-- widths Blizzard's own Bar Width setting changes, set after Blizzard sets
+-- its own. Otherwise its width is Blizzard's again. Never in combat; it
+-- waits for the fight to end.
 function R:Match()
     local frame = _G.PersonalResourceDisplayFrame
     if not frame then return end
@@ -944,6 +999,8 @@ function R:Match()
     end
     self.pendingMatch = nil
     local want = ns.Layout and ns.Layout:MatchWidth()
+    -- Or a width of your own (Layout page, a player's idea) while nothing matches it to your rows.
+    if not want and ns.Get("prdOwnWidth") then want = ns.Get("prdWidth") end
     local width
     if want then
         local own = frame:GetEffectiveScale()
@@ -960,11 +1017,12 @@ function R:Match()
     end
 end
 
--- Blizzard has just set its own width (Edit Mode): a layout puts the match
--- back, and moves anything beside the display.
+-- Blizzard has just set its own width (Edit Mode): the match or your own
+-- width goes back on, and anything beside the display moves (without a
+-- layout, Stack only does that and places the cast bar).
 local function Rematch()
     matched = nil
-    if ns.Layout and ns.Layout:Active() then
+    if ns.Layout then
         ns.Layout:Stack()
     elseif ns.CastBar then
         ns.CastBar:Place()
@@ -1019,7 +1077,7 @@ local function Hook()
     -- handed back to Blizzard's call (Edit Mode's setters carry on after).
     local hooked = Safely(Changed)
     for _, method in ipairs({ "UpdatePowerBar", "UpdateAlternatePowerBar", "SetPowerBarHeight", "SetBarPadding",
-        "SetHidePower", "SetHideAltPower" }) do
+        "SetHidePower", "SetHideAltPower", "SetHideHealth" }) do
         if type(frame[method]) == "function" then hooksecurefunc(frame, method, hooked) end
     end
     if type(frame.UpdateBarWidth) == "function" then hooksecurefunc(frame, "UpdateBarWidth", Safely(Rematch)) end

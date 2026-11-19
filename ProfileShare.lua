@@ -312,6 +312,7 @@ local BAR_CHECKS = {
     -- Custom's own colour beside it: six hex digits as kept, or none.
     tickCustom = function(v) return v == "" or ns.Hex(v) == v end,
     glowProcs = Bool,
+    onlyShort = Bool,
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.heightPct[3], spacing = ns.BAR_LIMITS.spacing[3],
@@ -320,11 +321,13 @@ local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.h
     outOfCombat = "show", showMissing = false, onlyMissing = false, greyedNoTarget = false, showNames = false, showTimer = true,
     showAuras = false, showGCD = false, selfDebuffs = false, grow = "centre", wrap = "down",
     tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false, tickCustom = "",
-    glowProcs = false }
--- A bar setting only some bars have, and which: Glow for more procs is a
--- cooldown bar's (Cooldowns, Utility, and their extra bars). On any other
--- bar a string's is left out and counted, and Share never writes one.
-local BAR_FITS = { glowProcs = function(key) return not ns.AURA_BARS[key] end }
+    glowProcs = false, onlyShort = false }
+-- A bar setting only some bars have, and which: Glow for more procs and Show
+-- only when I can't afford it are a cooldown bar's (Cooldowns, Utility, and
+-- their extra bars). On any other bar a string's is left out and counted,
+-- and Share never writes one.
+local BAR_FITS = { glowProcs = function(key) return not ns.AURA_BARS[key] end,
+    onlyShort = function(key) return not ns.AURA_BARS[key] end }
 local function Fits(field, key)
     local fits = BAR_FITS[field]
     return not fits or fits(key)
@@ -464,24 +467,34 @@ end
 -- carries them all. Icon height (heightPct) the same, carried only since
 -- the update after 1.10.14: a string from then or before leaves each bar's
 -- as it is. And Sound on procs (pulseProcSound) in the look, carried only
--- since the update after 1.10.15.
+-- since the update after 1.10.15. And the display's own width and the
+-- combo points' height and spot in the look, and a cooldown bar's Show only
+-- when I can't afford it (players' ideas), carried only since the update
+-- after 1.10.16.
 local CARRIED_AFTER = "1.10.13"
 local HEIGHT_AFTER = "1.10.14"
 local SOUND_AFTER = "1.10.15"
+local IDEAS_AFTER = "1.10.16"
 local NEW_LOOK = { "pulseResets" }
 local NEWER_LOOK = { "pulseProcSound" }
+local NEWEST_LOOK = { "prdOwnWidth", "prdWidth", "prdComboHeight", "prdComboAt" }
 local NEW_COOLDOWN = { "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
 local function Kept(version)
-    if ns.CompareVersions(version, SOUND_AFTER) == 1 then return nil end
+    if ns.CompareVersions(version, IDEAS_AFTER) == 1 then return nil end
     local older = ns.CompareVersions(version, CARRIED_AFTER) ~= 1
     local tall = ns.CompareVersions(version, HEIGHT_AFTER) ~= 1
+    local quiet = ns.CompareVersions(version, SOUND_AFTER) ~= 1
     local keep = { look = {}, bars = {} }
-    for _, key in ipairs(NEWER_LOOK) do keep.look[key] = true end
+    for _, key in ipairs(NEWEST_LOOK) do keep.look[key] = true end
+    if quiet then
+        for _, key in ipairs(NEWER_LOOK) do keep.look[key] = true end
+    end
     if older then
         for _, key in ipairs(NEW_LOOK) do keep.look[key] = true end
     end
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
         local own = {}
+        if not ns.AURA_BARS[key] then own.onlyShort = true end
         if tall then own.heightPct = true end
         if older then
             own.glowProcs = true
@@ -1265,7 +1278,7 @@ P.EXTRAS = {
     { key = "ticks", label = "Cast bar tick marks", settings = { "castTicks" }, about = "Tick marks on channelled spells." },
     { key = "latency", label = "Cast bar latency", settings = { "castLatency" }, about = "Your latency at the end of each cast." },
     { key = "combo", label = "Combo points", settings = { "prdCombo" }, classes = { ROGUE = true, DRUID = true },
-        about = "Combo points under your energy bar." },
+        about = "Combo points on your resource display." },
     { key = "energy", label = "Energy bar in other forms", settings = { "prdEnergy" }, classes = { DRUID = true } },
     { key = "tidy", label = "Tidy extra mana bar", settings = { "prdHideRepeat" }, classes = { DRUID = true } },
 }

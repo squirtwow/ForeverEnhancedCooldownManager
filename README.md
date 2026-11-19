@@ -163,6 +163,16 @@ EraUI.
 - If Forever Enhanced Cooldown Pulse is installed too, only one of the two
   pulses runs at a time
 
+## Totems bar
+- For shamans: your four totems on a bar of their own, one spot for each element.
+  Find it under More in the settings (off by default)
+- An element with no totem down shows greyed. A totem down shows its icon and
+  the time it has left, in a fight too
+- Red when out of range (off by default): a totem that buffs you, like Strength
+  of Earth, turns red while you're out of its range
+- Icon size, height, spacing, icons per row, the order of the elements, names,
+  countdown numbers, out of combat show, fade or hide, and drag it anywhere
+
 ## Raid Timers
 - Blizzard's pull and battleground start countdown, raid warnings, boss emotes
   and boss cast bars, restyled to match your bars. Find it under More in the

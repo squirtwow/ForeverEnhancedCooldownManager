@@ -4,7 +4,8 @@
 -- each row's width can change, bars can swap rows (the rows keep their
 -- shape) and the display can move up or down the stack. The addon only reads
 -- where the display is (Edit Mode places it) and, if asked, widens its bars
--- to your widest row (Resource.lua). A bar dragged by hand leaves the layout.
+-- to your widest row or a width of your own (Resource.lua). A bar dragged by
+-- hand leaves the layout.
 local _, ns = ...
 
 local L = {}
@@ -223,12 +224,12 @@ end
 -- you've asked for space between them. A bar with nothing on it takes no
 -- room, unless the bars are unlocked. The Buffs and Debuffs bars catch up
 -- after a fight. Without a layout, only the cast bar is put under the display,
--- and the display gets Blizzard's width back if it was matched to your rows
--- (Use my bars unticked, say).
+-- once the display has your own width, or Blizzard's back if it was matched
+-- to your rows (Use my bars unticked, say), so the cast bar takes it.
 function L:Stack()
     if not self:Active() then
-        if ns.CastBar then ns.CastBar:Place() end
         if ns.Resource then ns.Resource:Match() end
+        if ns.CastBar then ns.CastBar:Place() end
         return false
     end
     if InCombatLockdown() then self.pending = true end
@@ -507,12 +508,14 @@ function L:MoveDisplay(delta)
     return true
 end
 
--- Your bars stay where they are, and the display gets Blizzard's width back.
+-- Your bars stay where they are, and the display gets Blizzard's width or
+-- your own back, the cast bar following it (its own frame: fine in a fight).
 function L:TurnOff()
     local layout = ns.LayoutData()
     if not (layout and layout.on) then return end
     layout.on = false
     if ns.Resource then ns.Resource:Match() end
+    if ns.CastBar then ns.CastBar:Place() end
 end
 
 -- A bar dragged by hand.
@@ -542,7 +545,11 @@ function L:Start()
     end
     events:SetScript("OnEvent", function(_, event, name)
         if event == "PLAYER_REGEN_ENABLED" then
-            if ns.Resource and ns.Resource.pendingMatch then ns.Resource:Match() end
+            if ns.Resource and ns.Resource.pendingMatch then
+                ns.Resource:Match()
+                -- Without a layout, the cast bar takes the display's new width too.
+                if not L:Active() and ns.CastBar then ns.CastBar:Place() end
+            end
             if L.pending then
                 L.pending = nil
                 L:Stack()

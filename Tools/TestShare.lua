@@ -961,7 +961,7 @@ local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
-        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
+        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ComboSetUp.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
@@ -1441,6 +1441,10 @@ function H.Sane(ns, shared)
             if field == "glowProcs" and (type(v) ~= "boolean" or key:find("^buff") or key:find("^debuff")) then
                 return "glow for more procs on " .. key
             end
+            -- Show only when I can't afford it: the same.
+            if field == "onlyShort" and (type(v) ~= "boolean" or key:find("^buff") or key:find("^debuff")) then
+                return "show only when I can't afford it on " .. key
+            end
         end
     end
     local layoutKeys = { on = true, preset = true, base = true, left = true, right = true, gap = true, spacing = true,
@@ -1547,7 +1551,8 @@ end
 -- switches on are ns.SHARE_PARTS.)
 H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "oocIgnoreTarget", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
     "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew",
-    "keybindsPlain", "totemTime" }
+    "keybindsPlain", "totemTime", "totemBar", "totemSize", "totemHeight", "totemSpacing", "totemPerRow", "totemGrow", "totemWrap",
+    "totemOutOfCombat", "totemTimer", "totemNames", "totemRange", "totemOrder", "totemX", "totemY" }
 -- Every part a string can switch on, in order, with its letter.
 H.PARTS = "useBars=u prdCombo=c prdEnergy=e prdText=t keybinds=k keyPressGlow=g castBar=b swingTimer=s castBatch=h castTicks=m"
     .. " castLatency=l pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q"
@@ -1587,7 +1592,7 @@ do
     end
     Equal(table.concat(fields, ","), "size,heightPct,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
         .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,showGCD,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,"
-        .. "tickFrom,tickEdge,tickCustom,glowProcs",
+        .. "tickFrom,tickEdge,tickCustom,glowProcs,onlyShort",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
     -- Every bar setting a bar keeps is shared (ns.BarData), Glow for more
     -- procs too since 15 Nov 2026: none left behind.
@@ -3109,6 +3114,133 @@ end)()
     P.Import("Still 1.10.15", Made("1.10.15"), true)
     Equal(still .. " | " .. tostring(ns.Get("pulseResets")) .. " " .. ns.BarData("util").heightPct .. " " .. #printed, "true 130 | false 100 0",
         "a 1.10.13 string keeps Early resets and Icon height as before; a 1.10.15 one keeps only Sound on procs")
+end)()
+
+-- The display's own width and the combo points' height and spot in a string ---------------------------
+-- (Players' ideas.) Each goes in the look only when it isn't its default,
+-- so a string from anyone who never touched them is exactly as before, and
+-- comes back the same on import. A string from 1.10.16 or before (or with no
+-- version) says nothing of them, so with its look yours stay; one made since
+-- that leaves them out has them at their defaults. Odd values are left out
+-- and counted.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:Assign("Moonfire", "cd")
+    local KEYS = { "prdOwnWidth", "prdWidth", "prdComboHeight", "prdComboAt" }
+    local function Now()
+        local list = {}
+        for _, key in ipairs(KEYS) do list[#list + 1] = tostring(ns.Get(key)) end
+        return table.concat(list, " ")
+    end
+    local plain = P.Export()
+    local look = P.Read(plain).setup.look
+    local none = tostring(look.prdOwnWidth) .. " " .. tostring(look.prdWidth) .. " " .. tostring(look.prdComboHeight) .. " " .. tostring(look.prdComboAt)
+    ns.Set("prdOwnWidth", true)
+    ns.Set("prdWidth", 260)
+    ns.Set("prdComboHeight", 14)
+    ns.Set("prdComboAt", "above")
+    local text = P.Export()
+    local shared = P.Read(text)
+    local carried = {}
+    for _, key in ipairs(KEYS) do carried[#carried + 1] = tostring(shared.setup.look[key]) end
+    Equal(none .. " | " .. H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. table.concat(carried, " ") .. " " .. tostring(text ~= plain),
+        "nil nil nil nil | |0 true 260 14 above true", "left out at their defaults; carried once set")
+    -- Imported with its look on another account: the same, and the same string back.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local ok = ns2.ProfileShare.Import("Wide", ns2.ProfileShare.Read(text), true)
+    local got = {}
+    for _, key in ipairs(KEYS) do got[#got + 1] = tostring(ns2.Get(key)) end
+    Equal(tostring(ok) .. " " .. table.concat(got, " ") .. " " .. tostring(ns2.ProfileShare.Export() == text), "true true 260 14 above true",
+        "imported with its look: each as the string has it, and the same string back")
+    -- Older strings keep yours; one made since that leaves them out: defaults.
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } end
+    local function Made(version, settings)
+        return P.Read(H.String({ a = version, l = Lists(), g = { s = settings or {}, b = {}, l = {}, k = {} } }))
+    end
+    local function Took(name, from)
+        ns.Set("prdOwnWidth", true)
+        ns.Set("prdWidth", 260)
+        ns.Set("prdComboHeight", 14)
+        ns.Set("prdComboAt", "above")
+        P.Import(name, from, true)
+        return Now()
+    end
+    local results = {}
+    for _, version in ipairs({ "1.10.16", "1.10.15", "1.9.9" }) do results[#results + 1] = Took("Old " .. version, Made(version)) end
+    results[#results + 1] = Took("No version", P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {} } })))
+    for _, version in ipairs({ "1.10.17", "1.11.0", "dev" }) do results[#results + 1] = Took("New " .. version, Made(version)) end
+    results[#results + 1] = Took("Carried old", Made("1.10.16", { prdWidth = 180, prdComboAt = "below" }))
+    Equal(table.concat(results, ", "), "true 260 14 above, true 260 14 above, true 260 14 above, true 260 14 above, false 200 0 below,"
+        .. " false 200 0 below, false 200 0 below, true 180 14 below",
+        "from 1.10.16 or before yours stay; made since, left out: the defaults; carried: as the string has it")
+    -- Odd values: left out and counted.
+    local bad = Made("dev", { prdOwnWidth = "yes", prdWidth = 401, prdComboHeight = 31, prdComboAt = "middle" })
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.look.prdWidth) .. " " .. tostring(bad.setup.look.prdComboAt),
+        "|4 nil nil", "not a tick, past 400, past 30, not a spot: left out and counted")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Show only when I can't afford it in a string -----------------------------------------------------------
+-- (A player's idea.) A cooldown bar's tick goes in the string while on, is
+-- left out while off, and comes with the look. A string from 1.10.16 or
+-- before (or with no version) says nothing of it, so with its look yours
+-- stays; one made since that leaves it out has it off. Anything but true or
+-- false, and the Buffs and Debuffs bars' (which have none): left out and
+-- counted.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "util")
+    local plain = P.Read(P.Export())
+    B:SetOption("cd", "onlyShort", true)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(table.concat({ tostring(plain.setup.bars.cd.onlyShort), H.Sane(ns, shared) .. "|" .. shared.skipped,
+        tostring(shared.setup.bars.cd.onlyShort), tostring(shared.setup.bars.util.onlyShort) }, " "), "nil |0 true nil",
+        "left out while off; Cooldowns' tick goes in the string, Utility's, off, is left out")
+    -- Imported with its look on another account: ticked as the string has it, the same string back.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.Bars:SetOption("util", "onlyShort", true)
+    local ok = ns2.ProfileShare.Import("Short", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. tostring(ns2.BarData("cd").onlyShort) .. " " .. tostring(ns2.BarData("util").onlyShort) .. " "
+        .. tostring(ns2.ProfileShare.Export() == text), "true true false true",
+        "imported with its look: ticked on Cooldowns, off on Utility, the same string back")
+    -- Older strings keep yours; one made since that leaves it out: off.
+    local function Lists() return { cd = { "Moonfire" }, util = { "Wrath" }, buff = {}, debuff = {} } end
+    local function Made(version, bars)
+        return P.Read(H.String({ a = version, l = Lists(), g = { s = {}, b = bars or { cd = { whenReady = "dim" } }, l = {}, k = {} } }))
+    end
+    local function Took(name, from)
+        B:SetOption("cd", "onlyShort", true)
+        P.Import(name, from, true)
+        return tostring(ns.BarData("cd").onlyShort)
+    end
+    local results = {}
+    for _, version in ipairs({ "1.10.16", "1.10.13", "1.9.9" }) do results[#results + 1] = Took("Old " .. version, Made(version)) end
+    results[#results + 1] = Took("No version", P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {} } })))
+    for _, version in ipairs({ "1.10.17", "1.11.0", "dev" }) do results[#results + 1] = Took("New " .. version, Made(version)) end
+    results[#results + 1] = Took("Carried old", Made("1.10.16", { cd = { onlyShort = false } }))
+    Equal(table.concat(results, " "), "true true true true false false false false",
+        "from 1.10.16 or before yours stays; made since, left out: off; carried: as the string has it")
+    -- Anything but true or false, and the aura bars': left out and counted.
+    local bad = Made("dev", { cd = { onlyShort = "true" }, util = { onlyShort = 1 }, buff = { onlyShort = true },
+        debuff = { onlyShort = false } })
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.cd.onlyShort) .. " "
+        .. tostring(bad.setup.bars.util.onlyShort) .. " " .. tostring(bad.setup.bars.buff.onlyShort) .. " "
+        .. tostring(bad.setup.bars.debuff.onlyShort), "|4 nil nil nil nil",
+        "not true or false, and the aura bars' (which have none): left out, and counted")
+    local checks = {}
+    for _, value in ipairs({ true, false, "true", 1 }) do checks[#checks + 1] = tostring(P.BAR_CHECKS.onlyShort(value)) end
+    Equal(table.concat(checks, " "), "true true false false", "Show only when I can't afford it is true or false")
+    Equal(#printed, 0, "no errors")
 end)()
 
 -- Import makes a new profile, and leaves yours as it is ----------------------------------------------

@@ -955,7 +955,7 @@ local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
-        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
+        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ComboSetUp.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
@@ -1271,9 +1271,9 @@ do
     -- /ccm debug says so: each icon last read as one you can't cast, and
     -- under each cooldown bar how it shows them.
     local report = ns.DebugReport()
-    Equal(tostring(report:match("Moonfire | spell 8924 | [^\n]*")):match("usable false.*| can't cast true$") ~= nil
-        and tostring(report:match("Overpower | spell 7384 | [^\n]*")):match("| can't cast false$") ~= nil
-        and report:find("\n  when ready show, on cooldown show, dim when you can't cast it true, dimmed icons 40%\nutil bar:", 1, true)
+    Equal(tostring(report:match("Moonfire | spell 8924 | [^\n]*")):match("usable false.*| can't cast true | short false$") ~= nil
+        and tostring(report:match("Overpower | spell 7384 | [^\n]*")):match("| can't cast false | short false$") ~= nil
+        and report:find("\n  when ready show, on cooldown show, dim when you can't cast it true, dimmed icons 40%, show only when I can't afford it false\nutil bar:", 1, true)
             ~= nil, true,
         "/ccm debug: Moonfire read as one you can't cast, Overpower not, and the Cooldowns bar's choices under its icons")
     -- Only the bar it's ticked on.
@@ -1331,7 +1331,7 @@ do
     B:Assign("Wrath", nil)
     B:SetOption("util", "whenReady", "show")
     -- /ccm debug says how dim.
-    Equal(ns.DebugReport():find("\n  when ready show, on cooldown hide, dim when you can't cast it true, dimmed icons 10%\nutil bar:",
+    Equal(ns.DebugReport():find("\n  when ready show, on cooldown hide, dim when you can't cast it true, dimmed icons 10%, show only when I can't afford it false\nutil bar:",
         1, true) ~= nil, true, "/ccm debug: the Cooldowns bar's Dimmed icons with its choices")
     usable[8924] = nil
     B:SetOption("cd", "dimUnusable", false)
@@ -1339,6 +1339,165 @@ do
     B:SetOption("cd", "dimOpacity", 40)
     moon = cd.icons[2]
     Equal(S[moon].alpha, 1, "all back: in full")
+end
+
+-- Show only when I can't afford it (a player's idea): a cooldown bar's icons
+-- hidden, each shown in full only while the game says its spell lacks the
+-- mana, rage or energy (the same open answer the blue tint uses). An answer
+-- the game keeps secret is handed to it as it is.
+do
+    local function Spots()
+        local out = {}
+        for i = 1, cd.count do
+            local p = S[cd.icons[i]].points[1]
+            out[i] = p and (tostring(p[1]) .. " " .. tostring(p[4]) .. " " .. tostring(p[5])) or "none"
+        end
+        return table.concat(out, " | ")
+    end
+    -- Off unless ticked; anything but true is off, and never on a Buffs or Debuffs bar.
+    Equal(tostring(ns.BarData("cd").onlyShort) .. " " .. tostring(ns.BarData("util").onlyShort), "false false", "off unless ticked")
+    ns.BarData("cd").onlyShort = "yes"
+    ns.BarData("util").onlyShort = 1
+    ns.BarData("buff").onlyShort = true
+    ns.BarData("debuff").onlyShort = true
+    Equal(table.concat({ tostring(ns.BarData("cd").onlyShort), tostring(ns.BarData("util").onlyShort),
+        tostring(ns.BarData("buff").onlyShort), tostring(ns.BarData("debuff").onlyShort) }, " "), "false false false false",
+        "repaired: \"yes\" and 1 are off, and a Buffs or Debuffs bar never keeps it")
+    local before = Spots()
+    B:SetOption("cd", "onlyShort", true)
+    moon, over = cd.icons[2], cd.icons[1]
+    Equal(S[moon].alpha .. " " .. S[over].alpha, "0 0", "ticked: both castable, both hidden")
+    Equal(Spots(), before, "each icon keeps its spot: nothing closes up")
+    usable[8924], noMana[8924] = false, true
+    B:RefreshAll()
+    Equal(S[moon].alpha .. " " .. S[moon.texture].tint[1] .. " " .. S[over].alpha, "1 0.5 0",
+        "Moonfire short of mana: shown in full, tinted blue; Overpower still hidden")
+    noMana[8924] = false
+    B:RefreshAll()
+    Equal(S[moon].alpha, 0, "not usable for another reason (grey): hidden")
+    usable[8924], noMana[8924] = nil, nil
+    target, range[8924] = true, false
+    B:RefreshAll()
+    Equal(S[moon].alpha, 0, "out of range with the mana: hidden")
+    usable[8924], noMana[8924] = false, true
+    B:RefreshAll()
+    Equal(S[moon].alpha .. " " .. S[moon.texture].tint[1], "1 0.64", "short and out of range: shown, red")
+    target, range[8924] = false, nil
+    -- As the game says it changed, in a fight too: only the colour read.
+    usable[8924], noMana[8924] = nil, nil
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame()
+    Equal(S[moon].alpha, 0, "mana back: hidden again, as the game says so")
+    usable[8924], noMana[8924] = false, true
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame()
+    Equal(S[moon].alpha, 1, "short again: shown")
+    -- The answer secret: handed to the game as it is, shown while short.
+    usable[8924], noMana[8924] = false, SECRET
+    S[moon].alphaFrom = nil
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame()
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alphaIf .. " " .. tostring(moon.shortSecret), "secret 1 0 true",
+        "no mana kept secret: the game picks, 1 while short and 0 while not")
+    S[moon].alphaFrom, S[moon].alpha = nil, nil
+    active = true
+    Fire("SPELL_UPDATE_COOLDOWN")
+    NextFrame()
+    Equal(tostring(S[moon].alphaFrom) .. " " .. tostring(S[moon].alpha), "nil nil", "a cooldown read after it sets nothing over the game's")
+    Equal(tostring(ns.DebugReport():match("Moonfire | spell 8924 | [^\n]*")):match("| short false %(game's own%)$") ~= nil, true,
+        "/ccm debug: the game's own answer")
+    -- Open again: set from the open answer.
+    usable[8924], noMana[8924], active = nil, nil, false
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame()
+    Equal(S[moon].alpha .. " " .. tostring(moon.shortSecret), "0 nil", "the answer open again: hidden, as it says")
+    -- A client that can't hand it to the game: hidden.
+    usable[8924], noMana[8924] = false, SECRET
+    moon.SetAlphaFromBoolean = false
+    S[moon].alphaFrom = nil
+    B:RefreshAll()
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alpha, "nil 0", "no SetAlphaFromBoolean: hidden, nothing read")
+    moon.SetAlphaFromBoolean = nil
+    -- The cooldown secret, short of mana: shown, nothing handed to the game.
+    usable[8924], noMana[8924], active = false, true, SECRET
+    S[moon].alphaFrom = nil
+    B:RefreshAll()
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alpha .. " " .. S[over].alpha, "nil 1 0",
+        "the cooldown secret: Moonfire short, shown; Overpower hidden; nothing handed to the game")
+    -- Dim when you can't cast it, When ready and On cooldown do nothing here.
+    B:SetOption("cd", "dimUnusable", true)
+    B:SetOption("cd", "whenReady", "hide")
+    B:SetOption("cd", "onCooldown", "dim")
+    moon, over = cd.icons[2], cd.icons[1]
+    Equal(tostring(S[moon].alphaFrom) .. " " .. S[moon].alpha .. " " .. S[over].alpha, "nil 1 0",
+        "with Dim, When ready Hide and On cooldown Dim: still in full while short, hidden otherwise")
+    noMana[8924] = false
+    B:RefreshAll()
+    Equal(S[moon].alpha, 0, "and hidden when not short")
+    B:SetOption("cd", "dimUnusable", false)
+    B:SetOption("cd", "whenReady", "show")
+    B:SetOption("cd", "onCooldown", "show")
+    -- Every icon shows while the bars are being arranged.
+    B:SetUnlocked(true)
+    Equal(S[moon].alpha .. " " .. S[over].alpha, "1 1", "unlocked: every icon in full, to see while moving it")
+    B:SetUnlocked(false)
+    Equal(S[moon].alpha .. " " .. S[over].alpha, "0 0", "locked again: hidden")
+    EditModeManagerFrame:Show()
+    Equal(S[moon].alpha .. " " .. S[over].alpha, "1 1", "in Edit Mode too")
+    EditModeManagerFrame:Hide()
+    Equal(S[moon].alpha .. " " .. S[over].alpha, "0 0", "and hidden once Edit Mode closes")
+    -- /ccm debug says so.
+    noMana[8924], active = true, false
+    B:RefreshAll()
+    local report = ns.DebugReport()
+    Equal(tostring(tostring(report:match("Moonfire | spell 8924 | [^\n]*")):match("| short true$") ~= nil) .. " "
+        .. tostring(report:find(", show only when I can't afford it true\nutil bar:", 1, true) ~= nil), "true true",
+        "/ccm debug: Moonfire short, and the bar's tick")
+    -- Only the bar it's ticked on: Utility keeps its own.
+    B:Assign("Wrath", "util")
+    local wrath = B:Get("util").icons[1]
+    usable[5176], noMana[5176] = false, true
+    B:RefreshAll()
+    Equal(S[wrath].alpha .. " " .. tostring(ns.BarData("util").onlyShort), "1 false", "Utility, unticked: as ever")
+    usable[5176], noMana[5176] = nil, nil
+    B:RefreshAll()
+    Equal(S[wrath].alpha, 1, "and in full while castable")
+    B:Assign("Wrath", nil)
+    -- An extra Cooldowns bar has its own.
+    local _, extra = B:AddBar("cd")
+    B:Assign("Wrath", extra)
+    B:SetOption(extra, "onlyShort", true)
+    wrath = B:Get(extra).icons[1]
+    Equal(S[wrath].alpha, 0, "an extra Cooldowns bar ticked: hidden while castable")
+    usable[5176], noMana[5176] = false, true
+    B:RefreshAll()
+    Equal(S[wrath].alpha, 1, "and shown while short")
+    usable[5176], noMana[5176] = nil, nil
+    B:RemoveBar(extra)
+    -- A wand shooting: still shown or hidden as your mana changes (its
+    -- shots' waits never mattered here).
+    moon = cd.icons[2]
+    usable[8924], noMana[8924], active = nil, nil, false
+    B:RefreshAll()
+    RangedWorn = 5240
+    Fire("START_AUTOREPEAT_SPELL")
+    usable[8924], noMana[8924] = false, true
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame()
+    local shooting = S[moon].alpha
+    usable[8924], noMana[8924] = nil, nil
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame()
+    Equal(shooting .. " " .. S[moon].alpha, "1 0", "wand shooting: shown while short, hidden once the mana is back")
+    Fire("STOP_AUTOREPEAT_SPELL")
+    NextFrame()
+    RangedWorn = nil
+    -- Unticked: as ever again.
+    B:SetOption("cd", "onlyShort", false)
+    moon, over = cd.icons[2], cd.icons[1]
+    usable[8924], noMana[8924] = nil, nil
+    B:RefreshAll()
+    Equal(S[moon].alpha .. " " .. S[over].alpha .. " " .. Spots(), "1 1 " .. before, "unticked: in full again, in the same spots")
 end
 
 usable[8924], noMana[8924] = false, true
@@ -2190,6 +2349,15 @@ Equal(tostring(quiver.cantCast) .. " " .. tostring(ns.DebugReport():match("| amm
 ammoCount = 0
 B:RefreshAll()
 Equal(S[quiver.texture].desaturated, true, "greyed when you run out")
+-- Show only when I can't afford it: ammo costs nothing, so it stays hidden there.
+B:SetOption("util", "onlyShort", true)
+quiver = B:Get("util").icons[1]
+Equal(S[quiver].alpha .. " " .. tostring(quiver.short), "0 false", "on a bar showing only what you can't afford: hidden")
+B:SetUnlocked(true)
+Equal(S[quiver].alpha, 1, "unlocked: in full, to be placed")
+B:SetUnlocked(false)
+B:SetOption("util", "onlyShort", false)
+Equal(S[quiver].alpha, 1, "unticked: in full again")
 B:SetOption("util", "showNames", true)
 Equal(S[B:Get("util").icons[1].label].text, "Rough Arrow", "named by the ammo")
 ammo = nil
@@ -2454,6 +2622,22 @@ end
     B:Assign("item:118", "util")
     local single = B:Get("util").icons[2]
     Equal(single.kind .. " " .. single.itemID .. " " .. S[single.count].text, "item 118 5", "a potion on its own still works beside it")
+    -- Show only when I can't afford it: an item hidden, unless the game
+    -- says you lack the mana for it.
+    do
+        B:SetOption("util", "onlyShort", true)
+        single = B:Get("util").icons[2]
+        local hidden = S[single].alpha
+        local use = _G.C_Item.IsUsableItem
+        _G.C_Item.IsUsableItem = function() return false, true end
+        B:RefreshAll()
+        Equal(hidden .. " " .. S[single].alpha .. " " .. tostring(single.short), "0 1 true",
+            "an item on a bar showing only what you can't afford: hidden, shown while it lacks the mana")
+        _G.C_Item.IsUsableItem = use
+        B:SetOption("util", "onlyShort", false)
+        single = B:Get("util").icons[2]
+        Equal(S[single].alpha, 1, "unticked: in full again")
+    end
 
     -- The list: with your items, where Show items puts them, saying how it
     -- works as you go to tick one.
@@ -7198,6 +7382,93 @@ Equal(tostring(ns.LayoutData().on) .. " " .. ns.LayoutData().preset .. " " .. ta
 ns.Bars:ResetPositions()
 Equal(ns.Layout:Active(), false, "Reset positions ends the layout")
 
+-- A width of your own for the display (Layout page, a player's idea) -------------------------------
+-- Off by default. On, the display's bars are that wide, with or without a
+-- layout, in the same units as your icons at any scale; Match wins while it's
+-- in charge (a layout, the tick, a row with spells). Never in a fight: it
+-- waits. Edit Mode's Bar Width puts yours back, and the cast bar takes the
+-- display's new width in the same pass.
+
+;(function()
+Environment()
+Display()
+-- The display's bars where the game would draw them: centred where they are,
+-- as wide as they're set.
+for _, part in ipairs({ prd, prd.HealthBarsContainer, prd.PowerBar }) do
+    rawset(part, "GetRect", function(self)
+        local r = S[self].rect
+        if not r then return nil end
+        local width = S[self].width or r[3]
+        return r[1] + r[3] / 2 - width / 2, r[2], width, r[4]
+    end)
+end
+ns = Load({ useBars = true, prdSkin = false })
+B, L = ns.Bars, ns.Layout
+prd:UpdateBarWidth()
+local function Widths() return string.format("%g %g %g", S[prd].width, S[prd.HealthBarsContainer].width, S[prd.PowerBar].width) end
+Equal(tostring(ns.Get("prdOwnWidth")) .. " " .. ns.Get("prdWidth") .. " " .. Widths(), "false 200 200 200 200",
+    "off by default, 200 kept for it; without a layout the display keeps Blizzard's width")
+ns.Set("prdOwnWidth", true)
+ns.Set("prdWidth", 260)
+L:Stack()
+Equal(Widths(), "260 260 260", "ticked, 260: the display and its bars that wide, with no layout")
+rawset(prd, "GetEffectiveScale", function() return .8 end)
+L:Stack()
+local scaled = Widths()
+rawset(prd, "GetEffectiveScale", nil)
+L:Stack()
+Equal(scaled .. " | " .. Widths(), "325 325 325 | 260 260 260", "Edit Mode's Size at 80%: set wider, so it's as wide on screen")
+ns.Set("prdOwnWidth", false)
+L:Stack()
+Equal(Widths(), "200 200 200", "unticked: Blizzard's width back")
+ns.Set("prdOwnWidth", true)
+-- With a layout: Match wins while it's in charge.
+for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+L:Apply("pyramid")
+local matching = Widths()
+ns.Set("prdMatch", false)
+L:Stack()
+local unmatched = Widths()
+ns.Set("prdMatch", true)
+for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:TakeOff("cd", name) end
+L:Stack()
+local empty = tostring(L:WidestRow()) .. " " .. Widths()
+for _, name in ipairs({ "Moonfire", "Wrath", "Overpower" }) do B:Assign(name, "cd") end
+L:Stack()
+L:TurnOff()
+Equal(matching .. " | " .. unmatched .. " | " .. empty .. " | " .. Widths(), "216 216 216 | 260 260 260 | nil 260 260 260 | 260 260 260",
+    "Match wins with a row of spells; Match unticked, every spell off or the layout turned off: your own width")
+-- In a fight: nothing until it ends.
+ns.Set("castBar", true)
+ns.CastBar:Apply()
+lockdown = true
+ns.Set("prdWidth", 280)
+L:Stack()
+local during = Widths() .. " " .. tostring(ns.Resource.pendingMatch)
+lockdown = false
+Fire("PLAYER_REGEN_ENABLED")
+Equal(during .. " | " .. Widths() .. string.format(" %g", S[ns.CastBar.row].width) .. " " .. tostring(ns.Resource.pendingMatch),
+    "260 260 260 true | 280 280 280 280 nil", "in a fight it waits, then the display and your cast bar change as it ends")
+-- Edit Mode's Bar Width: yours back at once, and the cast bar as wide.
+ns.Set("prdWidth", 300)
+prd:UpdateBarWidth()
+Equal(Widths() .. string.format(" %g", S[ns.CastBar.row].width), "300 300 300 300",
+    "after Blizzard sets its own width: yours again, the cast bar taking it in the same pass")
+-- Kept over a reload; anything odd saved reads as 200.
+saved = ForeverEnhancedCooldownManagerDB
+Environment(true)
+Display()
+ns = Load(saved)
+local kept = tostring(ns.Get("prdOwnWidth")) .. " " .. ns.Get("prdWidth")
+local odd = {}
+for _, bad in ipairs({ 99, 401, "wide" }) do
+    ForeverEnhancedCooldownManagerDB.prdWidth = bad
+    odd[#odd + 1] = tostring(ns.Get("prdWidth"))
+end
+Equal(kept .. " | " .. table.concat(odd, " ") .. " " .. #printed, "true 300 | 200 200 200 0", "kept over a reload; 99, 401 and \"wide\" read as 200")
+ForeverEnhancedCooldownManagerDB.prdWidth, ForeverEnhancedCooldownManagerDB.prdOwnWidth = nil, nil
+end)()
+
 -- The Layout page ----------------------------------------------------------------------------
 
 Environment()
@@ -7304,6 +7575,44 @@ lp.match:Click()
 Equal(tostring(ns.Get("prdMatch")) .. string.format(" %g", S[prd].width), "false 200", "the match can be turned off")
 lp.match:Click()
 Equal(S[prd].width, 6 * 36, "and on")
+-- Own display width (a player's idea): its slider hidden until it's ticked,
+-- greyed while Match sets the width, each saying what it does.
+do
+    local own, slider = lp.ownWidth, lp.displayWidth
+    local function Hover(control)
+        S[control].scripts.OnEnter(control)
+        local text = S[w.note].text
+        S[control].scripts.OnLeave(control)
+        return text
+    end
+    Equal(tostring(own:GetChecked()) .. " " .. tostring(S[slider].shown) .. " | " .. S[own.text].text .. " | " .. Hover(own),
+        "false false | Own display width | Off, the display keeps Edit Mode's Bar Width. On, it's as wide as you pick. Match the resource"
+        .. " display to my rows still wins while your bars are stacked.", "off by default, its slider hidden, and what it does")
+    Equal(Hover(lp.match), "While your bars are stacked, the display is as wide as your widest row. Off, it keeps Edit Mode's Bar Width,"
+        .. " or your own width above.", "Match's hover names your own width")
+    own:Click()
+    Equal(tostring(ns.Get("prdOwnWidth")) .. " " .. tostring(S[slider].shown) .. " " .. tostring(slider.usable) .. " " .. S[slider.value].text
+        .. string.format(" %g", S[prd].width) .. " | " .. Hover(slider), "true true false 200 216 | Match the resource display to my rows"
+        .. " sets the width while your bars are stacked. Untick it to use yours.", "ticked: the slider shows, greyed while Match is in charge")
+    lp.match:Click()
+    Equal(tostring(slider.usable) .. string.format(" %g", S[prd].width) .. " | " .. Hover(slider), "true 200 | How wide the display's bars"
+        .. " are, in the same units as your icons: 6 icons of 40 is 240. Mouse wheel: one at a time.", "Match unticked: usable, your 200")
+    S[slider].scripts.OnMouseWheel(slider, 1)
+    Equal(ns.Get("prdWidth") .. string.format(" %g", S[prd].width) .. " " .. S[slider.value].text, "201 201 201", "the wheel: one at a time")
+    lockdown = true
+    slider:Choose(250)
+    Equal(ns.Get("prdWidth") .. string.format(" %g", S[prd].width) .. " | " .. S[w.note].text, "250 201 | The display's width changes once"
+        .. " the fight ends.", "in a fight: kept, and the display waits, saying so")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(S[prd].width, 250, "then changes as it ends")
+    w:Refresh()
+    Equal(tostring(own:GetChecked()) .. " " .. S[slider.value].text, "true 250", "the page shows what's kept")
+    own:Click()
+    lp.match:Click()
+    Equal(tostring(ns.Get("prdOwnWidth")) .. " " .. tostring(S[slider].shown) .. " " .. ns.Get("prdWidth") .. string.format(" %g", S[prd].width),
+        "false false 250 216", "unticked: hidden, its width kept for next time, Match back on")
+end
 -- Room between the icons in every row, flush unless you ask.
 Equal(S[lp.iconSpacing.value].text, 0, "icons flush to start with")
 lp.iconSpacing:Choose(3)
@@ -8099,6 +8408,130 @@ Equal(comboRow ~= nil and S[comboRow].shown and S[comboRow].points[1][2] == extr
 S[comboRow].rect = { 400, 280, 200, 8 }
 L:Stack()
 Equal(At(B:Get("util")), "TOP 0 -120", "and Utility under the combo points while they show")
+-- Their height and spot (a player's idea, the Look page's Set up): as before
+-- by default; a height of your own; over the display, with the rows and the
+-- cast bar moving so nothing overlaps; a change moves the rows without the
+-- row showing or hiding, and in a fight the row moves at once while the
+-- rows wait. The energy bar stays under the display, half as tall.
+;(function()
+    local R = ns.Resource
+    local before = S[comboRow].points[1][1] .. " " .. S[comboRow].height
+    ns.Set("prdComboHeight", 14)
+    R:Apply()
+    local tall = S[comboRow].height
+    ns.Set("prdComboHeight", 2)
+    R:Apply()
+    local low = S[comboRow].height
+    ForeverEnhancedCooldownManagerDB.prdComboHeight = 31
+    local repaired = ns.Get("prdComboHeight")
+    ns.Set("prdComboHeight", 0)
+    Equal(table.concat({ before, tall, low, repaired, ns.Get("prdComboAt"), tostring(ns.Valid("prdComboAt", "middle")) }, " "),
+        "TOPLEFT 8 14 8 0 below false", "as tall as the power bar by default, 14 when set; a saved 2 counts as 0; 31 reads as 0")
+    -- Over the display: on the health bar, Blizzard's padding apart; over the power bar with Hide Health Bar.
+    ns.Set("prdComboAt", "above")
+    R:Apply()
+    local p1, p2 = S[comboRow].points[1], S[comboRow].points[2]
+    local over = table.concat({ p1[1], tostring(p1[2] == prd.HealthBarsContainer), p1[3], p1[4], p1[5], p2[1],
+        tostring(p2[2] == prd.HealthBarsContainer), p2[3], p2[5], #S[comboRow].points }, " ")
+    prd.HealthBarsContainer:Hide()
+    R:Apply()
+    local noHealth = tostring(S[comboRow].points[1][2] == prd.PowerBar)
+    prd.HealthBarsContainer:Show()
+    R:Apply()
+    Equal(over .. " | " .. noHealth, "BOTTOMLEFT true TOPLEFT 0 4 BOTTOMRIGHT true TOPRIGHT 4 2 | true",
+        "Above: over the health bar, Blizzard's padding apart; with Hide Health Bar, over the power bar")
+    -- Drawn over the display: the rows above start over it, the ones below
+    -- right under the lowest bar; your cast bar over it when that's above
+    -- too, else straight under the lowest bar.
+    S[comboRow].rect = { 400, 324, 200, 14 }
+    L:Stack()
+    local rows = At(B:Get("cd")) .. " " .. At(B:Get("util"))
+    ns.Set("castBar", true)
+    ns.Set("castAbove", true)
+    ns.CastBar:Apply()
+    L:Stack()
+    local castOver = At(ns.CastBar.row) .. " " .. At(B:Get("cd"))
+    ns.Set("castAbove", false)
+    ns.CastBar:Apply()
+    L:Stack()
+    local castUnder = At(ns.CastBar.row) .. " " .. At(B:Get("util"))
+    ns.Set("castBar", false)
+    ns.CastBar:Apply()
+    L:Stack()
+    Equal(rows .. " | " .. castOver .. " | " .. castUnder, "BOTTOM 0 -62 TOP 0 -106 | BOTTOM 0 -58 BOTTOM 0 -40 | TOP 0 -110 TOP 0 -128",
+        "rows above over the combo points, Utility under the lowest bar; the cast bar over them when above, else under the lowest bar")
+    -- A height or spot change re-stacks without the row showing or hiding;
+    -- in a fight the row moves at once and the rows wait.
+    local stacks, Stack0 = 0, L.Stack
+    L.Stack = function(self, ...)
+        stacks = stacks + 1
+        return Stack0(self, ...)
+    end
+    R:Apply()
+    local same = stacks
+    ns.Set("prdComboHeight", 10)
+    R:Apply()
+    local moved = stacks - same
+    lockdown = true
+    ns.Set("prdComboAt", "below")
+    R:Apply()
+    local inFight = S[comboRow].points[1][1] .. " " .. S[comboRow].height .. " " .. tostring(L.pending)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    L.Stack = Stack0
+    Equal(same .. " " .. moved .. " | " .. inFight .. " " .. tostring(L.pending), "0 1 | TOPLEFT 10 true nil",
+        "nothing new: no re-stack; a new height: one; in a fight the row moves at once, the rows after it ends")
+    ns.Set("prdComboHeight", 0)
+    R:Apply()
+    S[comboRow].rect = { 400, 280, 200, 8 }
+    L:Stack()
+    Equal(At(B:Get("util")) .. " " .. S[comboRow].height, "TOP 0 -120 8", "back as before")
+    -- The pop-up: under Set up, the height in use, each choice saved at once, Reset, closed by a second click or Escape.
+    SlashCmdList.FECM("")
+    local win = FECMFrame
+    win:Select("look")
+    local button = win.comboSetUpButton
+    button:Click()
+    local pop = win.comboSetUp
+    local at = S[pop].points[1]
+    Equal(table.concat({ tostring(S[pop].shown), at[1], tostring(at[2] == button), at[3], at[4], at[5], S[pop.height.value].text,
+        tostring(pop.spot.selected) }, " "), "true TOPLEFT true BOTTOMLEFT 0 -4 8 below",
+        "Set up opens it under the button, showing the power bar's height and Below")
+    pop.height:Choose(14)
+    local height = ns.Get("prdComboHeight") .. " " .. S[comboRow].height
+    pop.spot.buttons[2]:Click()
+    local spot = ns.Get("prdComboAt") .. " " .. S[comboRow].points[1][1] .. " " .. tostring(pop.spot.selected)
+    pop.reset:Click()
+    Equal(height .. " | " .. spot .. " | " .. table.concat({ ns.Get("prdComboHeight"), ns.Get("prdComboAt"), S[comboRow].height,
+        S[pop.height.value].text, pop.spot.selected, S[comboRow].points[1][1] }, " "), "14 14 | above BOTTOMLEFT above | 0 below 8 8 below TOPLEFT",
+        "the height and spot saved and shown at once; Reset: the power bar's height, under the display")
+    button:Click()
+    local closed = tostring(S[pop].shown)
+    button:Click()
+    local reopened = tostring(S[pop].shown)
+    _G.FECMFrame:Hide() -- the game's Escape: the window's name stands for the pop-up while it's up
+    Equal(table.concat({ closed, reopened, tostring(S[pop].shown), tostring(S[win].shown), tostring(_G.FECMFrame == win) }, " "),
+        "false true false true true", "a second click closes it; Escape closes it alone")
+    win:Hide()
+    -- The energy bar in other forms: still under the display, half as tall, with the combo points set above.
+    ns.Set("prdComboAt", "above")
+    ns.Set("prdEnergy", true)
+    local PowerMax0 = _G.UnitPowerMax
+    _G.UnitPowerMax = function() return 100 end
+    power = 0
+    prd:UpdatePowerBar()
+    local energyRow = R:ComboRow()
+    Equal(table.concat({ tostring(energyRow ~= nil and energyRow ~= comboRow), energyRow and S[energyRow].points[1][1] or "none",
+        tostring(energyRow and S[energyRow].points[1][2] == prd.PowerBar), energyRow and S[energyRow].height or "none", #printed }, " "),
+        "true TOPLEFT true 4 0", "the energy bar: under the lowest bar, half as tall, whatever the combo points' spot")
+    ns.Set("prdEnergy", false)
+    ns.Set("prdComboAt", "below")
+    power = 3
+    prd:UpdatePowerBar()
+    _G.UnitPowerMax = PowerMax0
+    S[comboRow].rect = { 400, 280, 200, 8 }
+    L:Stack()
+end)()
 power = 0
 prd:UpdatePowerBar()
 Equal(tostring(ns.Resource:ComboRow()) .. " " .. tostring(S[comboRow].shown), "nil false", "gone in caster form")
@@ -9147,6 +9580,12 @@ do
     Equal(Shown(cd.decor.border), "true", "and so does dimming the ones you can't cast: it never hides one")
     B:SetOption("cd", "onCooldown", "show")
     B:SetOption("cd", "dimUnusable", false)
+    -- Show only when I can't afford it: its icons come and go.
+    B:SetOption("cd", "onlyShort", true)
+    Equal(Shown(cd.decor.border) .. " " .. tostring(select(1, B:BarDecorFor("cd"))), "false false",
+        "nor a bar showing only what you can't afford, nor the Layout page's drawing of it")
+    B:SetOption("cd", "onlyShort", false)
+    Equal(Shown(cd.decor.border), "true", "unticked, it's back")
     B:SetOption("buff", "showMissing", true)
     Equal(Shown(buff.decor.border), "true", "fixed Buffs spots always show, so they get it")
     target, hostile = false, true
@@ -11529,9 +11968,10 @@ end)()
     Equal(638 - 16 - S[all].width + S[all.track].points[1][2], 638 - 16 - S[page.spacing].width + S[page.spacing.track].points[1][2],
         "its track lined up with the spacing sliders'")
     Equal(tostring(#S[all.label].text * 6 <= S[all.track].points[1][2] - 8), "true", "its label clear of its track (six units a letter)")
-    Equal(Point(page.box, 2) .. " | " .. (86 - 56 - S[all].height) .. " " .. (56 - 34 - S[page.spacing].height) .. " "
-        .. (34 - 12 - S[page.iconSpacing].height), "BOTTOMRIGHT -16 86 | 10 2 2",
-        "the box ends 22 higher for it: 10 under the box, 2 over Row spacing, as between the others")
+    Equal(Point(page.box, 2) .. " | " .. Point(page.displayWidth) .. " | " .. (108 - 78 - S[page.displayWidth].height) .. " "
+        .. (78 - 56 - S[all].height) .. " " .. (56 - 34 - S[page.spacing].height) .. " " .. (34 - 12 - S[page.iconSpacing].height),
+        "BOTTOMRIGHT -16 108 | BOTTOMRIGHT -16 78 | 10 2 2 2",
+        "the box ends 22 higher for each: Display width (a player's idea) 10 under the box, 2 over All bars, as between the others")
     Equal(Point(page.shown) .. " " .. tostring(56 > S[page.shown].points[1][3] + S[page.shown].height), "BOTTOMLEFT 16 36 true",
         "above the ticks on the left, clear of them")
     -- Its note, on hover.
@@ -11566,9 +12006,10 @@ end)()
             highest = math.min(highest, -S[row].points[1][5])
         end
     end
-    -- The box is 287 tall: the page's 489 less 116 above it and 86 under it.
-    Equal(tostring(highest >= 28) .. " " .. tostring(lowest <= 287 - 28) .. " " .. Width(page.rows.cd.tiles[1]), "true true 54",
-        "every row of 96 inside the box, drawn at 54")
+    -- The box is 265 tall: the page's 489 less 116 above it and 108 under it
+    -- (22 less since Display width's row), so the drawing scales down to fit.
+    Equal(tostring(highest >= 28) .. " " .. tostring(lowest <= 265 - 28) .. " " .. Width(page.rows.cd.tiles[1]), "true true 49",
+        "every row of 96 inside the box, drawn at 49")
     for _, key in ipairs(ns.BAR_KEYS) do Bars:SetOption(key, "size", 36) end
     Bars:SetOption("cd", "size", 48)
     Layout:Apply("pyramid")

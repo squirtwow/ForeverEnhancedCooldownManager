@@ -1893,9 +1893,17 @@ local function BuildLook(window, page, width)
     local repeatMana = Choice("Tidy extra mana bar", "prdHideRepeat", -160,
         "The second mana bar some specs get, under your main bar: hidden in caster form, half size in forms.",
         function() if ns.Resource then ns.Resource:Apply() end end)
-    local combo = Choice("Combo points under your energy bar", "prdCombo", -182,
-        "Five segments as wide as the display, for rogues and druids in cat form. The game's own combo points go see-through while these show.",
-        function() if ns.Resource then ns.Resource:Apply() end end)
+    local combo = Choice("Combo points", "prdCombo", -182,
+        "Five segments as wide as the display, for rogues and druids in cat form. The game's own go see-through while these show."
+        .. " Set up: their height and spot.", function() if ns.Resource then ns.Resource:Apply() end end)
+    -- Their height and spot (a player's idea) in a pop-up (ComboSetUp.lua).
+    window.comboSetUpButton = T:Button(options, "Set up", 64, 18)
+    window.comboSetUpButton:SetPoint("LEFT", combo, "RIGHT", 8, 1) -- 1 up: inside the choices' foot, as the text's Set up
+    window.comboSetUpButton:SetScript("OnClick", function(self)
+        window.comboSetUp = window.comboSetUp or (ns.ComboSetUp and ns.ComboSetUp(window))
+        if window.comboSetUp then window.comboSetUp:Toggle(self) end
+    end)
+    window:Hint(window.comboSetUpButton, "How tall the combo points are, and whether they go under or over the display.")
     -- Druids only: their energy in other forms, beside the extra mana bar's
     -- tick (both their form bars on one row) and clear of Thick edges.
     local energyTick = Choice("Show energy bar in other forms", "prdEnergy", -160,
@@ -2218,6 +2226,7 @@ local function BuildLook(window, page, width)
         personal:SetChecked(ns.Get("prdSkin"))
         repeatMana:SetChecked(ns.Get("prdHideRepeat"))
         combo:SetChecked(ns.Get("prdCombo"))
+        if window.comboSetUp and window.comboSetUp:IsOpen() then window.comboSetUp:Refresh() end
         energyTick:SetChecked(ns.Get("prdEnergy"))
         textRow:Refresh()
         design:SetSelected(ns.Get("barStyle"))
@@ -2752,6 +2761,7 @@ local NAV_NOTES = {
     general = "Your bars on or off, the minimap button, update notices, the tour, the Discord and EraUI.",
     raid = "Blizzard's pull countdown, raid warnings and boss cast bars, in your look.",
     pulse = "A big icon in the middle of your screen when a cooldown is ready.",
+    totems = "Your totems on a bar of their own: each one's time left, and red when you're out of its range.",
 }
 
 local function NavItem(window, nav, key, label, y, previews)
@@ -3433,12 +3443,13 @@ local function BuildWindow()
     if castPage then Listed("cast", "Cast bar") end
     Listed("general", "General")
     -- More: pages beyond the Cooldown Manager and your bars, headed like
-    -- your bars: Raid Timers, then Cooldown pulse. New files, so each only
-    -- after a full restart. (A little closer under General than it was, for
-    -- Presets' room at the top.)
+    -- your bars: Raid Timers, then Cooldown pulse, then Totems (shamans
+    -- only). New files, so each only after a full restart. (A little closer
+    -- under General than it was, for Presets' room at the top.)
     local raidPage = ns.BuildRaidTimersPage ~= nil
     local pulsePage = ns.BuildPulsePage ~= nil
-    if raidPage or pulsePage then
+    local totemsPage = ns.BuildTotemsPage ~= nil and ns.Totems ~= nil and ns.Totems:ForMe()
+    if raidPage or pulsePage or totemsPage then
         local moreRule = nav:CreateTexture(nil, "BORDER")
         moreRule:SetPoint("TOPLEFT", 12, -(y + 3))
         moreRule:SetPoint("RIGHT", -12, 0)
@@ -3452,12 +3463,15 @@ local function BuildWindow()
         y = y + 26
         if raidPage then Listed("raid", "Raid Timers") end
         if pulsePage then Listed("pulse", "Cooldown pulse") end
+        if totemsPage then Listed("totems", "Totems") end
     end
     -- The bars' room (LayBars): the list's height (489) less What's new at
     -- its foot with 3 over it (12 + 22 + 3), Presets and the heading over
-    -- the bars (56) and everything under them (204 with every page): 192,
-    -- the four's.
+    -- the bars (56) and everything under them (204 with Raid Timers and
+    -- Cooldown pulse): 192, the four's; a shaman's Totems row takes 28 more,
+    -- so the rows are laid out shorter at the first refresh (LayBars).
     window.barRoom = (HEIGHT - HEADER - FOOTER - 1) - (12 + 22 + 3) - LIST_TOP - (y - 2 - bars)
+    if window.barRoom < window.barHeight then window.barsLaid = nil end
     -- What's new in this version, at the foot of the list.
     local news = T:Button(nav, "What's new", NAV - 24, 22)
     news:SetPoint("BOTTOMLEFT", 12, 12)
@@ -3488,6 +3502,10 @@ local function BuildWindow()
     if pulsePage then
         window.pages.pulse = Page()
         ns.BuildPulsePage(window, window.pages.pulse, WIDTH - NAV - 2)
+    end
+    if totemsPage then
+        window.pages.totems = Page()
+        ns.BuildTotemsPage(window, window.pages.totems, WIDTH - NAV - 2)
     end
     BuildGeneral(window, window.pages.general)
     ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)

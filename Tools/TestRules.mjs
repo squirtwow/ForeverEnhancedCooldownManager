@@ -42,6 +42,14 @@ test('the .toc loads every file once, each after what it needs', () => {
   assert.ok(at('Forms.lua') >= 0 && at('Forms.lua') < at('Bars.lua'), 'Forms.lua before Bars.lua');
   assert.ok(at('RaidTimersPage.lua') < at('PulsePage.lua') && at('PulsePage.lua') < at('Window.lua'),
     'PulsePage.lua after RaidTimersPage.lua, before Window.lua');
+  // The Totems bar lays its spots out with the bars' and adds the Buffs bar's slots; its page follows the pulse's.
+  assert.ok(at('Pulse.lua') < at('Totems.lua') && at('Buffs.lua') < at('Totems.lua'), 'Totems.lua after Pulse.lua and Buffs.lua');
+  assert.ok(at('PulsePage.lua') < at('TotemsPage.lua') && at('TotemsPage.lua') < at('Window.lua'),
+    'TotemsPage.lua after PulsePage.lua, before Window.lua');
+  // The combo points' Set up pop-up: after the pages, before the window that opens it (it uses the theme).
+  assert.ok(at('Theme.lua') < at('ComboSetUp.lua') && at('TotemsPage.lua') < at('ComboSetUp.lua')
+    && at('ComboSetUp.lua') < at('ProfileShare.lua') && at('ComboSetUp.lua') < at('Window.lua'),
+    'ComboSetUp.lua after TotemsPage.lua, before ProfileShare.lua and Window.lua');
   assert.equal(at('Core.lua'), 0, 'Core.lua first');
 });
 
@@ -159,8 +167,11 @@ test('the only sizes set on Blizzard\'s frames are Raid Timers\' own two calls',
   // No other way to size anything: text scale, font height, ignoring the parent's scale.
   assert.deepEqual(where(/SetTextScale|SetFontHeight|SetIgnoreParentScale/), []);
   // The only other scale call is on the addon's own frame, its Buffs bar's
-  // container (B:SetScale is the addon's own All bars size, in Bars.lua).
-  assert.deepEqual(where(/(?<!\bB):SetScale\(/).sort(), ['Buffs.lua', 'RaidTimers.lua']);
+  // container (B:SetScale is the addon's own All bars size, in Bars.lua),
+  // and the Totems page's preview, drawn smaller to fit its box (its own frame).
+  assert.deepEqual(where(/(?<!\bB):SetScale\(/).sort(), ['Buffs.lua', 'RaidTimers.lua', 'TotemsPage.lua']);
+  assert.equal(count(code['TotemsPage.lua'], /:SetScale\(/g), 1, 'one scale call on the Totems page');
+  assert.match(code['TotemsPage.lua'], /self\.preview:SetScale\(scale\)/, 'on its own preview');
 });
 
 // The pulse link's shared part, from "local link = _G.ForeverPulseLink" to
@@ -476,12 +487,12 @@ test("Escape closes the windows through the game's own list", () => {
 // for more than ten, and AddGroup holds a group to the icons made.
 // Tools/TestBars.lua checks it runs that way.
 test("Blizzard's aura containers never run the addon's code while they update", () => {
-  assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua', 'Pulse.lua'], 'the only containers');
+  assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua', 'Pulse.lua', 'Totems.lua'], 'the only containers');
   assert.deepEqual(where(/:AddAura(Slot|Group)\(/), [], 'no slot or group added but through F.Add');
   const looks = files.flatMap(name => (code[name].match(/initializeFrame\s*=\s*[^,}]+/g) || []).map(look => `${name}: ${look.trim()}`));
-  assert.equal(looks.length, 8,
-    'eight looks: Buffs bar spots, their edges (Warn at), packed entries, your debuffs, buff and debuff times, proc pulses,'
-    + ' glows for more procs, tick counts on cooldown icons');
+  assert.equal(looks.length, 9,
+    'nine looks: Buffs bar spots, their edges (Warn at), packed entries, your debuffs, buff and debuff times, proc pulses,'
+    + " glows for more procs, tick counts on cooldown icons, the Totems bar's range warning");
   assert.deepEqual(looks.filter(look => !/: initializeFrame = (F|ns\.BuffBar)\.Guard\(/.test(look)), [], 'every look guarded');
   const buffs = code['Buffs.lua'];
   assert.match(buffs, /function F\.Add\(container, method, \.\.\.\)\r?\n\s+adding = true\r?\n\s+local ok, result = pcall\(container\[method\], container, \.\.\.\)\r?\n\s+adding = false\r?\n/);

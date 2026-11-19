@@ -37,6 +37,10 @@ local TICK_AT_MORE = {
 }
 local TICK_FROM_NOTE = "1 as the debuff lands, 2 after its first tick, like stacks. Unticked, it counts the ticks so far, from 0."
 local TICK_EDGE_NOTE = "Centres the count on the icon's edge at its spot, half outside, so it covers less of the icon. Not for the centre."
+-- What Show only when I can't afford it (a player's idea) leaves greyed says.
+local SHORT_NOTE = "Not with Show only when I can't afford it: an icon there shows in full or not at all."
+-- And for what would show over its hidden icons (buff and debuff time, procs).
+local SHORT_OVER = "Not with Show only when I can't afford it: it would show over this bar's hidden icons."
 
 -- The "Show your debuffs on you" tick on each aura bar's page (the Debuffs
 -- one seen working in game 2026-10-08, so no experimental label).
@@ -117,6 +121,7 @@ local function TicksNote(bar, name, label)
     local every = seconds .. " for " .. (label or "it")
     -- On a Cooldowns or Utility bar: while its icon shows its debuff's time.
     if not ns.AURA_BARS[bar] then
+        if ns.BarData(bar).onlyShort then return SHORT_OVER end
         if not ns.BarData(bar).showAuras then
             return "Tick Show buff and debuff time first: the count shows while this icon shows its debuff's time on your target."
         end
@@ -571,7 +576,8 @@ local function PaintTicks(shade, bar, name)
     -- unless it's ticked, so it can be unticked: on the Debuffs bar shared
     -- with another that's in the way, on a Cooldowns or Utility bar while
     -- the debuff's time isn't shown.
-    local counts = aura and not B:TickClash(bar, name) or not aura and ns.BarData(bar).showAuras == true
+    local counts = aura and not B:TickClash(bar, name)
+        or not aura and ns.BarData(bar).showAuras == true and not ns.BarData(bar).onlyShort
     shade.ticks:SetChecked(B:CountsTicks(bar, name))
     shade.ticks:SetUsable(shade.ticks:GetChecked() or counts)
     shade.active:SetChecked(B:GlowsActive(bar, name))
@@ -1217,9 +1223,11 @@ function ns.BuildBarPage(window, page, width)
     local showTimer = Option("Show countdown numbers", "showTimer", -44, "The numbers counting down on this bar's icons.")
     -- The cooldown bars only: an icon shows the time left on the buff its
     -- spell put on you or its debuff on your target, as Blizzard's does.
-    local showAuras = Option("Show buff and debuff time", "showAuras", -107,
-        "While the buff a spell put on you, or its debuff on your target (like Shadow Word: Pain), is up,"
-            .. " its icon shows the time left with a gold edge.")
+    local showAuras = Option("Show buff and debuff time", "showAuras", -107, function()
+        if ns.BarData(state.bar).onlyShort then return SHORT_OVER end
+        return "While the buff a spell put on you, or its debuff on your target (like Shadow Word: Pain), is up,"
+            .. " its icon shows the time left with a gold edge."
+    end)
     -- The cooldown bars only, under that: Swap with my form (a player's
     -- idea), a list of icons for each form you take, in the row On
     -- cooldown's tick makes on the left. Only for a character who knows a
@@ -1328,9 +1336,10 @@ function ns.BuildBarPage(window, page, width)
         for _, key in ipairs(keys) do choices[#choices + 1] = { key = key, label = names[key] } end
         local pills
         pills = T:Segmented(options, choices, width, function(key)
-            -- A layout decides which way its bars grow.
+            -- A layout decides which way its bars grow. (held: true, or what
+            -- holds it in words: Show only when I can't afford it.)
             if pills.held then
-                window:Say("Your layout sets this. Change it on the Layout page.")
+                window:Say(type(pills.held) == "string" and pills.held or "Your layout sets this. Change it on the Layout page.")
             else
                 B:SetOption(state.bar, field, key)
             end
@@ -1340,6 +1349,7 @@ function ns.BuildBarPage(window, page, width)
         for _, button in ipairs(pills.buttons) do
             local own = type(note) == "table" and note[button.key] or note
             window:Hint(button, function()
+                if type(pills.held) == "string" then return pills.held end
                 if pills.held then return "Your layout sets this. Change it on the Layout page." end
                 if type(own) == "function" then return own() end
                 return own
@@ -1382,8 +1392,10 @@ function ns.BuildBarPage(window, page, width)
     -- And under that, an icon you can't cast now (blue, grey or red: no
     -- mana, rage or energy, out of range, or not usable yet) dimmed too,
     -- never more than dimmed: one hidden stays hidden. Off unless ticked.
-    local dimUnusable = Option("Dim when you can't cast it", "dimUnusable", -129,
-        "Dims an icon while you can't cast it: not enough mana, rage or energy, out of range, or not usable yet.", 0)
+    local dimUnusable = Option("Dim when you can't cast it", "dimUnusable", -129, function()
+        if ns.BarData(state.bar).onlyShort then return SHORT_NOTE end
+        return "Dims an icon while you can't cast it: not enough mana, rage or energy, out of range, or not usable yet."
+    end, 0)
     -- And under that, how much of a dimmed icon shows (each Dim and the
     -- tick), each bar its own, 40% as it always was. Greyed while nothing
     -- on the bar dims.
@@ -1399,9 +1411,11 @@ function ns.BuildBarPage(window, page, width)
         self.value:SetText(value .. "%")
     end
     local function Dims(data)
+        if data.onlyShort then return false end
         return data.whenReady == "dim" or data.onCooldown == "dim" or data.dimUnusable == true
     end
     window:Hint(dimOpacity, function()
+        if ns.BarData(state.bar).onlyShort then return SHORT_NOTE end
         if not Dims(ns.BarData(state.bar)) then
             return "Nothing on this bar dims yet. Pick Dim on When ready or On cooldown, or tick Dim when you can't cast it."
         end
@@ -1421,9 +1435,18 @@ function ns.BuildBarPage(window, page, width)
     -- never lit Shadow Bolt): a spell's icon glows while a proc the game
     -- doesn't light is on you (IconAuras.lua), each bar its own, off unless
     -- ticked.
-    local glowProcs = Option("Glow for more procs", "glowProcs", -173,
-        "Lights a spell while a proc that empowers it is on you, where the game lights nothing: Shadow Bolt with Nightfall's"
-            .. " Shadow Trance.")
+    local glowProcs = Option("Glow for more procs", "glowProcs", -173, function()
+        if ns.BarData(state.bar).onlyShort then return SHORT_OVER end
+        return "Lights a spell while a proc that empowers it is on you, where the game lights nothing: Shadow Bolt with"
+            .. " Nightfall's Shadow Trance."
+    end)
+    -- The cooldown bars only (a player's idea): the bar's icons hidden, each
+    -- shown only while you lack the mana, rage or energy for it, each bar its
+    -- own, off unless ticked. In the right column under New rows, or under
+    -- Editing while that shows (placed on refresh).
+    local onlyShort = Option("Show only when I can't afford it", "onlyShort", -151,
+        "This bar's icons stay hidden, and one shows only while you haven't the mana, rage or energy to cast it."
+            .. " When ready, On cooldown and Dim don't apply here.")
     -- Out of combat: show, fade or hide. The footer explains when bars come back.
     local outOfCombat = Pills("Out of combat", 320, 0, 156, ns.OUT_OF_COMBAT, ns.OUT_OF_COMBAT_NAMES, "outOfCombat", function()
         if ns.Get("oocIgnoreTarget") then
@@ -1489,7 +1512,7 @@ function ns.BuildBarPage(window, page, width)
         return false
     end
     page.options = { whenReady = whenReady, onCooldown = onCooldown, dimUnusable = dimUnusable, dimOpacity = dimOpacity,
-        showGCD = showGCD, glowProcs = glowProcs, showMissing = showMissing, keepGreyed = keepGreyed,
+        showGCD = showGCD, glowProcs = glowProcs, onlyShort = onlyShort, showMissing = showMissing, keepGreyed = keepGreyed,
         onlyMissing = onlyMissing, showNames = showNames, showTimer = showTimer, showAuras = showAuras, swapForm = swapForm,
         editing = editing,
         showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap,
@@ -1990,8 +2013,17 @@ function ns.BuildBarPage(window, page, width)
         wrap:SetSelected(data.wrap)
         -- When ready, On cooldown, its tick, Dimmed icons and Show the global
         -- cooldown: the cooldown bars only, taller for them.
-        for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity, showGCD, glowProcs }) do
+        for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity, showGCD, glowProcs,
+            onlyShort }) do
             part:SetShown(not aura)
+        end
+        -- Show only when I can't afford it: When ready, On cooldown and Dim
+        -- greyed with why while it's ticked, their choices kept.
+        local short = not aura and data.onlyShort == true
+        for _, pills in ipairs({ whenReady, onCooldown }) do
+            pills.held = short and SHORT_NOTE or nil
+            pills:SetAlpha(short and .4 or 1)
+            pills.label:SetAlpha(short and .4 or 1)
         end
         -- The tick count's two rows, while a Debuffs bar counts any (a
         -- Cooldowns or Utility bar's are in a counting spell's panel).
@@ -2006,10 +2038,13 @@ function ns.BuildBarPage(window, page, width)
         options:SetHeight(not aura and OPTIONS_COOLDOWN or counting and OPTIONS_TALL or OPTIONS)
         onCooldown:SetSelected(data.onCooldown)
         dimUnusable:SetChecked(data.dimUnusable)
+        dimUnusable:SetUsable(not data.onlyShort)
+        onlyShort:SetChecked(data.onlyShort)
         dimOpacity:Set(data.dimOpacity)
         dimOpacity:SetUsable(Dims(data))
         showGCD:SetChecked(data.showGCD)
         glowProcs:SetChecked(data.glowProcs)
+        glowProcs:SetUsable(not data.onlyShort)
         showMissing:SetShown(aura ~= nil)
         showMissing.text:SetText("Show missing " .. word .. "s greyed")
         showMissing:SetWidth(18 + (showMissing.text:GetStringWidth() or 0)) -- the label is its click area
@@ -2029,6 +2064,7 @@ function ns.BuildBarPage(window, page, width)
         showTimer:SetChecked(data.showTimer)
         showAuras:SetShown(not aura)
         showAuras:SetChecked(data.showAuras)
+        showAuras:SetUsable(not data.onlyShort)
         -- Swap with my form, for a character who knows a form (ticked in
         -- your profile); Editing with it ticked, naming whose icons show.
         -- (Cooldowns, Utility and every Debuffs bar: not an extra cooldown
@@ -2061,6 +2097,17 @@ function ns.BuildBarPage(window, page, width)
             editing.label:SetPoint("TOPLEFT", 320, swapAt - 26)
         end
         if aura then options:SetHeight((counting and OPTIONS_TALL or OPTIONS) + (forms and 22 or 0) + (picking and 22 or 0)) end
+        -- Show only when I can't afford it: under Editing while that shows,
+        -- the options a row taller then; in its spot otherwise.
+        if not aura then
+            local shortAt = picking and -195 or -151
+            if onlyShort.placedAt ~= shortAt then
+                onlyShort.placedAt = shortAt
+                onlyShort:ClearAllPoints()
+                onlyShort:SetPoint("TOPLEFT", 320, shortAt)
+            end
+            options:SetHeight(OPTIONS_COOLDOWN + (picking and 22 or 0))
+        end
         showSelf:SetShown(aura ~= nil)
         showSelf:SetChecked(data.selfDebuffs)
         if aura then

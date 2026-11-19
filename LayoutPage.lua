@@ -5,8 +5,9 @@
 -- row to add it, and an icon onto another to swap them (in its row or
 -- another); click an icon for its own size; hover a row for - and + (how
 -- many icons fit across) and the arrows (up or down the stack, past the
--- display). All bars sizes every bar together, and Show grow arrows marks
--- which way each grows while you arrange them.
+-- display). All bars sizes every bar together, Show grow arrows marks
+-- which way each grows while you arrange them, and Own display width gives
+-- the display a width of your own.
 local _, ns = ...
 local T = ns.Theme
 
@@ -14,7 +15,7 @@ local CARD_W, CARD_H, CARD_GAP = 80, 66, 6
 local TILE_GAP = 2
 local EDGE = 118 -- room beside a row for its name and buttons
 local CLEAR = 28 -- room kept at the top of the drawing's box for its hint, and at the foot for its buttons
-local UNDER = 86 -- room under the box for the three rows of controls there
+local UNDER = 108 -- room under the box for the four rows of controls there
 -- Along the box's foot from the left: the Live preview tick, then "Put
 -- back:" and a button for each bar taken out.
 local OUT_LABEL, OUT_LEFT = 136, 204
@@ -1058,9 +1059,10 @@ function ns.BuildLayoutPage(window, page, width, height)
             local data = ns.BarData(key)
             return data.perRow * Size(key) + (data.perRow - 1) * data.spacing
         end
-        -- The display: as wide as the widest row when it's to match,
+        -- The display: as wide as the widest row when it's to match, or
+        -- your own width, so it's right before the game has resized it;
         -- otherwise as it is now.
-        local displayReal = ns.Get("prdMatch") and L:WidestRow()
+        local displayReal = ns.Get("prdMatch") and L:WidestRow() or ns.Get("prdOwnWidth") and ns.Get("prdWidth") or nil
         if not displayReal then
             local shown = L:Display()
             displayReal = shown and shown.width or 200
@@ -1195,7 +1197,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         end)
     page.shown = shown
     local match = Tick("Match the resource display to my rows", 14,
-        "While your bars are stacked, the display is as wide as your widest row. Off, it keeps Blizzard's Bar Width from Edit Mode.",
+        "While your bars are stacked, the display is as wide as your widest row. Off, it keeps Edit Mode's Bar Width, or your own width above.",
         function(self)
             ns.Set("prdMatch", self:GetChecked())
             if L:Active() then L:Stack() elseif ns.Resource then ns.Resource:Match() end
@@ -1248,6 +1250,31 @@ function ns.BuildLayoutPage(window, page, width, height)
             window:Refresh()
         end)
     page.growArrows = growArrows
+    -- A width of your own for the display (a player's idea): a fourth row,
+    -- over Show grow arrows and All bars; the slider shows while it's ticked
+    -- and greys while Match sets the width. Out of a fight only.
+    local function Widen()
+        L:Stack()
+        if InCombatLockdown() then window:Say("The display's width changes once the fight ends.") end
+        window:Refresh()
+    end
+    page.ownWidth = Tick("Own display width", 80, "Off, the display keeps Edit Mode's Bar Width. On, it's as wide as you pick."
+        .. " Match the resource display to my rows still wins while your bars are stacked.", function(self)
+            ns.Set("prdOwnWidth", self:GetChecked())
+            Widen()
+        end)
+    -- A longer label than the spacing sliders': 20 more room, so its track still lines up with theirs.
+    page.displayWidth = T:Slider(page, "Display width", ns.PRD_WIDTH, 1, LABEL_ROOM + 20 + TRACK + 40, function(value)
+        ns.Set("prdWidth", value)
+        Widen()
+    end, LABEL_ROOM + 20)
+    page.displayWidth:SetPoint("BOTTOMRIGHT", -16, 78)
+    window:Hint(page.displayWidth, function()
+        if L:MatchWidth() then
+            return "Match the resource display to my rows sets the width while your bars are stacked. Untick it to use yours."
+        end
+        return "How wide the display's bars are, in the same units as your icons: 6 icons of 40 is 240. Mouse wheel: one at a time."
+    end)
 
     local function Refresh()
         local layout, active, on = ns.LayoutData(), L:Active(), B:Enabled()
@@ -1281,6 +1308,10 @@ function ns.BuildLayoutPage(window, page, width, height)
             card:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         end
         match:SetChecked(ns.Get("prdMatch"))
+        page.ownWidth:SetChecked(ns.Get("prdOwnWidth"))
+        page.displayWidth:SetShown(ns.Get("prdOwnWidth") and true or false)
+        page.displayWidth:Set(ns.Get("prdWidth"))
+        page.displayWidth:SetUsable(L:MatchWidth() == nil)
         shown:SetChecked(ns.PersonalDisplayOn())
         live:SetChecked(ns.Get("layoutPreview"))
         growArrows:SetChecked(ns.Get("growArrows"))

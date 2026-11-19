@@ -74,8 +74,12 @@ ns.DEFAULTS = {
     prdHealth = "default", -- its bars' colours: Blizzard's, or a bar colour
     prdPower = "default",
     prdMatch = true, -- while a layout holds your bars, the display is as wide as your widest row
+    prdOwnWidth = false, -- a width of your own for the display (a player's idea), while no layout matches it to your rows
+    prdWidth = 200,
     prdCombo = false, -- the addon's own combo points under the display
     prdComboColour = "default", -- their colour: the addon's red, or a bar colour
+    prdComboHeight = 0, -- their height (a player's idea): 0 as tall as your power bar, or 3 to 30
+    prdComboAt = "below", -- under the display's lowest bar, or over its health bar
     prdEnergy = false, -- druids: an energy bar under the display out of cat form
     -- The addon's own text on the display's health and power bars (Look page,
     -- Set up; Resource.lua): off unless ticked.
@@ -170,6 +174,22 @@ ns.DEFAULTS = {
     pulseProcSound = false, -- Sound on procs: each ticked proc plays its style's sound as it lands (the game plays it)
     pulseX = 0, -- where it sits: from the middle of the screen
     pulseY = 0,
+    -- Totems bar (More, shamans only; a player's idea): one spot per element, greyed until a totem is down,
+    -- then its icon and time left (Totems.lua).
+    totemBar = false, -- on or off
+    totemSize = 36, -- the icons' size, as a bar's
+    totemHeight = 100, -- Icon height: their height as a percent of their width
+    totemSpacing = 4,
+    totemPerRow = 4, -- 4 is one row, 2 a square, 1 a column
+    totemGrow = "centre", -- which way a row grows (ns.GROW)
+    totemWrap = "down", -- where a new row goes (ns.WRAP)
+    totemOutOfCombat = "show", -- show, fade or hide out of combat
+    totemTimer = true, -- the countdown numbers
+    totemNames = false, -- names under the icons
+    totemRange = false, -- Red when out of range: a totem that buffs you turns red while its buff isn't on you
+    totemOrder = "efwa", -- the elements in order: e earth, f fire, w water, a air
+    totemX = -300, -- where its middle sits: from the middle of the screen, left of your bars
+    totemY = -175,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
     barDarkness = 0, -- the empty part of your bars and the restyled ones: 0 as before, 100 solid black (Look page)
@@ -237,6 +257,9 @@ ns.KEYBIND_POSITION_NAMES = { BOTTOM = "Bottom", TOPLEFT = "Top left", TOP = "To
 ns.CAST_HEIGHT = { 10, 32, 18 }
 ns.CAST_TEXT_SIZE = { 60, 160, 100 } -- percent of the size the Height gives the text
 ns.CAST_WIDTH = { 100, 500, 200 } -- the whole bar you see, edges and icon included
+ns.PRD_WIDTH = { 100, 400, 200 } -- the display's bars, in the same units as your icons
+ns.COMBO_HEIGHT = { 0, 30, 0 } -- the combo points' height: 0 as tall as your power bar
+ns.COMBO_HEIGHT_LOW = 3 -- the Height slider's low end; a saved 1 or 2 counts as 0
 ns.CAST_SPOT = { -5000, 5000 } -- how far from the middle of the screen it can be dragged
 ns.CAST_TICK_WIDTH = { 1, 6, 2 } -- screen pixels
 ns.MINIMAP_ANGLE = { 0, 359, 202 }
@@ -260,6 +283,9 @@ ns.PULSE_LONG_TIME = { 3, 50, 25 } -- 0.3 to 5 seconds
 ns.PULSE_SEE_THROUGH = { 0, 90, 80 }
 ns.PULSE_GROW = { 100, 160, 135 }
 ns.PULSE_PLACE = { -4000, 4000, 0 }
+-- Totems bar.
+ns.TOTEM_PER_ROW = { 1, 4, 4 }
+ns.TOTEM_PLACE = { -4000, 4000, 0 }
 local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTextSize = ns.CAST_TEXT_SIZE, castWidth = ns.CAST_WIDTH, castX = ns.CAST_SPOT, castY = ns.CAST_SPOT,castTickWidth = ns.CAST_TICK_WIDTH, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
     barScale = ns.BAR_SCALE, barDarkness = ns.BAR_DARKNESS, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE,
     warningSize = ns.RAID_SIZE, emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
@@ -455,8 +481,8 @@ ns.RELOAD = {
 -- are ns.SHARE_PARTS, below), nor the window's own (its accent, lists,
 -- preview, grow arrows and the minimap button), nor the update notice.
 ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
-    "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdComboColour",
-    "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
+    "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdOwnWidth", "prdWidth",
+    "prdComboColour", "prdComboHeight", "prdComboAt", "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
     "prdPowerRight", "prdExtraAt", "prdExtraCentre", "prdExtraLeft", "prdExtraRight", "prdEnergyAt", "prdEnergyCentre",
     "prdEnergyLeft", "prdEnergyRight", "prdHealthSize", "prdPowerSize", "prdExtraSize", "prdEnergySize",
     "prdTextNumbers", "prdTextSize", "prdTextFont",
@@ -585,14 +611,36 @@ local POINTS = { CENTER = true, TOP = true, BOTTOM = true, TOPLEFT = true, TOPRI
 ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- A bar's settings a shared profile carries (its spells are in the profile,
 -- and so is Swap with my form, beside the lists it swaps between). Glow
--- for more procs (glowProcs) is a cooldown bar's only.
+-- for more procs (glowProcs) and Show only when I can't afford it
+-- (onlyShort) are a cooldown bar's only.
 ns.SHARE_BAR_FIELDS = { "size", "heightPct", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "showGCD", "selfDebuffs", "grow", "wrap", "point",
-    "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom", "glowProcs" }
+    "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom", "glowProcs", "onlyShort" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
 ns.OUT_OF_COMBAT_NAMES = { show = "Show", fade = "Fade", hide = "Hide" }
+-- The Totems bar's limits and choices (Totems.lua): a bar's, and its order,
+-- any of the 24 orders of the four element letters.
+-- The display's own width and the combo points' height and spot (players' ideas; Resource.lua).
+NUMBERS.prdWidth, NUMBERS.prdComboHeight = ns.PRD_WIDTH, ns.COMBO_HEIGHT
+CHOICES.prdComboAt = { below = true, above = true }
+NUMBERS.totemSize, NUMBERS.totemHeight, NUMBERS.totemSpacing = ns.BAR_LIMITS.size, ns.BAR_LIMITS.heightPct, ns.BAR_LIMITS.spacing
+NUMBERS.totemPerRow, NUMBERS.totemX, NUMBERS.totemY = ns.TOTEM_PER_ROW, ns.TOTEM_PLACE, ns.TOTEM_PLACE
+CHOICES.totemGrow, CHOICES.totemWrap, CHOICES.totemOutOfCombat, CHOICES.totemOrder = {}, {}, {}, {}
+for _, key in ipairs(ns.GROW) do CHOICES.totemGrow[key] = true end
+for _, key in ipairs(ns.WRAP) do CHOICES.totemWrap[key] = true end
+for _, key in ipairs(ns.OUT_OF_COMBAT) do CHOICES.totemOutOfCombat[key] = true end
+do
+    local function Orders(done, left)
+        if left == "" then
+            CHOICES.totemOrder[done] = true
+            return
+        end
+        for i = 1, #left do Orders(done .. left:sub(i, i), left:sub(1, i - 1) .. left:sub(i + 1)) end
+    end
+    Orders("", "efwa")
+end
 -- While its spell is ready an icon shows in full, dims or hides, so the ones
 -- cooling down stand out. The same three choices for while it cools down
 -- (On cooldown), so the ready ones stand out instead.
@@ -3045,6 +3093,9 @@ function ns.BarData(key)
     -- light (IconAuras.lua), off unless ticked. Shared with the look and
     -- layout, a cooldown bar's only (ProfileShare.lua).
     bar.glowProcs = bar.glowProcs == true
+    -- Show only when I can't afford it (a player's idea): icons hidden until
+    -- you can't afford them, a cooldown bar's only, off unless ticked.
+    bar.onlyShort = not ns.AURA_BARS[key] and bar.onlyShort == true
     bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
     -- The tick count of the Debuffs bar, and of the Cooldowns and Utility
     -- bars (Count ticks on a spell's icon, IconAuras.lua), each bar its own:
@@ -3537,6 +3588,7 @@ local function Load()
     db.probe = nil -- results of a development check the released addon doesn't have
     db.devTickTest, db.devTickProbe, db.devTickPace = nil, nil, nil -- and of the tick count's test (/ccm ticks)
     db.devSoundLog = nil -- and a development build's aura sound log
+    db.devTotemProbe = nil -- and the Totems bar's development check (Totems.lua); this line stays after release
     local saved = db.auraSoundIDs
     db.auraSoundIDs = nil
     if ns.BuffBar then ns.BuffBar:DropSavedSounds(saved) end -- sounds the game may still hold from before a reload, let go before any are made
@@ -3594,6 +3646,7 @@ local function Load()
     if ns.RaidTimers then ns.RaidTimers:Start() end
     if ns.Bars then ns.Bars:Start() end
     if ns.Pulse then ns.Pulse:Start() end
+    if ns.Totems then ns.Totems:Start() end
     if ns.Layout then ns.Layout:Start() end
     if ns.MinimapButton then ns.MinimapButton:Start() end
     if ns.Notes then ns.Notes:Start() end

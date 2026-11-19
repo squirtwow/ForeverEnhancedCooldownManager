@@ -959,7 +959,7 @@ local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
     for _, file in ipairs({ "Core.lua", "Style.lua", "Skin.lua", "Resource.lua", "CastBar.lua", "Ranks.lua", "Forms.lua", "Spells.lua", "Keybinds.lua", "Buffs.lua", "IconAuras.lua", "Bars.lua",
-        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
+        "Layout.lua", "Theme.lua", "BarPage.lua", "LayoutPage.lua", "CastBarPage.lua", "ComboSetUp.lua", "ProfileMenu.lua", "Window.lua", "Tour.lua",
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
@@ -2188,6 +2188,14 @@ end)()
     -- Build 70938 gave Morning Glory Dew a Drink of its own (1330734).
     Equal(tostring(Has(FamilyOf(1137), 1330734)) .. " " .. tostring(data.AURA_ONLY[1330734]), "true true",
         "Morning Glory Dew's new Drink is one icon with every other Drink")
+    -- Build 70959's newer Well Fed: Prowler Steak's and Sunrise Omelette's
+    -- (filed as Other, not Food & Drink) and the feasts' 45 minute one (their
+    -- table casts the Food, no item does). Each joins the one Well Fed icon,
+    -- and their Food the one Food icon.
+    Equal(tostring(Has(FamilyOf(19705), 1225778, 1225779, 1225780, 1225782)) .. " "
+        .. tostring(Has(FamilyOf(433), 1225769, 1225771, 1225772, 1225774)) .. " | " .. tostring(data.AURA_ONLY[1225778]) .. " "
+        .. tostring(data.AURA_ONLY[1225780]) .. " " .. tostring(data.AURA_ONLY[1225782]), "true true | true true true",
+        "Well Fed from Prowler Steak, Sunrise Omelette and a feast is one icon with every other Well Fed")
     local only = data.AURA_ONLY
     -- Aftermath's debuff is in ns.RANKS under its own name since 2026-11-13
     -- (an audit of the Debuffs search), so a warlock's search offers it.
@@ -2212,7 +2220,7 @@ end)()
     local NAMES = { [2818] = "Deadly Poison", [13218] = "Wound Poison", [13224] = "Wound Poison", [29131] = "Bloodrage",
         [1259691] = "Energized", [1270842] = "Energized", [1259688] = "Elemental Blessing", [1270893] = "Elemental Blessing",
         [8076] = "Strength of Earth", [8162] = "Strength of Earth", [25362] = "Strength of Earth", [19506] = "Trueshot Aura",
-        [20906] = "Trueshot Aura", [1248406] = "Well Fed", [1248420] = "Well Fed", [19709] = "Well Fed",
+        [20906] = "Trueshot Aura", [1248406] = "Well Fed", [1248420] = "Well Fed", [19709] = "Well Fed", [1225782] = "Well Fed",
         [401877] = "Prayer of Mending", [1240849] = "Prayer of Mending", [3355] = "Freezing Trap", [14309] = "Freezing Trap",
         [8182] = "Frost Resistance", [10477] = "Frost Resistance" }
     for name, ids in pairs(data.RANKS) do
@@ -2306,6 +2314,13 @@ end)()
     local p1 = made and S[made.p].slots.p1
     Equal(tostring(p1 and p1.enabled) .. " " .. IDs(p1 and p1.filters.includeSpellIDs), "true 2687,29131",
         "on the Cooldowns bar its buff time watches the rage buff too")
+    -- Show only when I can't afford it (a player's idea): no time over the
+    -- bar's hidden icons, the tick kept; unticked, back.
+    B:SetOption("cd", "onlyShort", true)
+    local short = tostring(p1 and p1.enabled) .. " " .. tostring(ns.BarData("cd").showAuras)
+    B:SetOption("cd", "onlyShort", false)
+    Equal(short .. " " .. tostring(p1 and p1.enabled), "false true true",
+        "Show only when I can't afford it: its buff time off, the tick kept; back once unticked")
     Equal(#printed, 0, "no errors")
 
     -- Ranks of one aura join one icon, as in 1.5.6: a totem's buff and a
@@ -2330,6 +2345,19 @@ end)()
     Equal(Said("buff", "1270842") .. " | " .. List("buff") .. " | " .. Sp:Find("Energized#1270842").name,
         "true Added Energized (ID 1270842) to Buffs. | Strength of Earth,Trueshot Aura,Well Fed,Energized,Energized#1270842"
         .. " | Energized (ID 1270842)", "the second Energized still goes on as its own icon, named by its ID")
+    Equal(#printed, 0, "no errors")
+
+    -- Well Fed by name (a player's report, 17 Nov 2026: missing from the
+    -- Buffs bar's search): no one learns it, so it's offered and found by the
+    -- game's name for any food's buff, and lights for every food's.
+    Start("WARRIOR")
+    local offered = "no"
+    for _, item in ipairs(Sp:Suggest("well f", 50)) do
+        if item.name == "Well Fed" then offered = "yes" end
+    end
+    Equal(offered .. " | " .. Said("buff", "Well Fed") .. " | " .. List("buff") .. " | " .. Lit("buff", 19709) .. " | "
+        .. Lit("buff", 1248420) .. " | " .. Lit("buff", 1225782), "yes | true Added Well Fed to Buffs. | Well Fed | g1 | g1 | g1",
+        "Well Fed offered while typing, added by name, lit by any food's buff (a feast's too)")
     Equal(#printed, 0, "no errors")
 
     -- The totem's Frost Resistance shares its name with a hunter's pet's
@@ -2550,7 +2578,7 @@ end)()
     end
     Equal(Cooldowns(1464, 8820, 11604, 11605, 1240193) .. " | " .. Cooldowns(17364) .. " | " .. Cooldowns(408521, 1239242, 1239243) .. " | "
         .. Cooldowns(437009) .. " | " .. Cooldowns(1238299, 1238300, 1326047),
-        "15,15,15,15,15 | 6 | 12,12,12 | 30 | nil,nil,nil", "Slam 15, Stormstrike 6, Riptide 12, Totemic Call 30; Lava Burst gone")
+        "15,15,15,15,15 | 8 | 12,12,12 | 30 | nil,nil,nil", "Slam 15, Stormstrike 8 (build 70959), Riptide 12, Totemic Call 30; Lava Burst gone")
     -- Build 70790: talents only a class's tree holds (no SkillLineAbility row)
     -- are read from the tree, so their procs can be found for the Buffs and
     -- Debuffs bars, each for its own class. One with nothing of its own (Boot
@@ -6239,8 +6267,20 @@ end
         .. " |" .. tostring(A:GlowReport(bar)), "false false nil | true true | false false 2 |  glow for more procs: no spell on this bar has one",
         "unticked or Shadow Bolt taken off: its slot off, nothing lit; ticked again, back; the container kept")
 
-    -- Over a reload: kept, made again with the bar.
+    -- Show only when I can't afford it on the bar (a player's idea): off,
+    -- so nothing lights over its hidden icons, the tick kept; back after.
     B:Assign("Shadow Bolt", "cd")
+    B:SetOption("cd", "onlyShort", true)
+    box.Update({ { id = 17941 } })
+    local short = tostring(slot.enabled) .. " " .. tostring(S[slot.button].shown) .. " " .. tostring(ns.BarData("cd").glowProcs)
+        .. " |" .. tostring(A:GlowReport(bar))
+    B:SetOption("cd", "onlyShort", false)
+    box.Update({ { id = 17941 } })
+    Equal(short .. " | " .. tostring(slot.enabled) .. " " .. tostring(S[slot.button].shown),
+        "false false true |  glow for more procs: off with Show only when I can't afford it | true true",
+        "Show only when I can't afford it: no glow over the bar's hidden icons, the tick kept; unticked, back")
+
+    -- Over a reload: kept, made again with the bar.
     local db = ForeverEnhancedCooldownManagerDB
     Fresh()
     ShadowBolt()
