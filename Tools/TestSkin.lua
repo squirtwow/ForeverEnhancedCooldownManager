@@ -1360,6 +1360,20 @@ do
         "Outline: what a cast will cost, heals on the way and the spent flash as see-through as the fill (the cost in a lighter purple, see-through by its alpha alone)")
     prd:UpdatePowerBar()
     Equal(string.format("%g", S[flash].tintAlpha), "0.45", "the flash still see-through after Blizzard sets the bar up")
+    -- Hide spent flash (a player's idea): tinted clear, and kept clear after
+    -- Blizzard sets the bar up; only its tint, never shown or hidden.
+    Equal(ns.Get("prdHideSpent"), false, "Hide spent flash is off by default")
+    local shownBefore, alphaBefore = S[flash].shown, S[flash].alpha
+    ns.Set("prdHideSpent", true)
+    ns.Resource:Apply()
+    Equal(string.format("%g", S[flash].tintAlpha), "0", "Hide spent flash: the flash tinted clear")
+    prd:UpdatePowerBar()
+    Equal(string.format("%g %s %s", S[flash].tintAlpha, tostring(S[flash].shown == shownBefore), tostring(S[flash].alpha == alphaBefore)),
+        "0 true true",
+        "still clear after Blizzard sets the bar up, and never shown or hidden")
+    ns.Set("prdHideSpent", false)
+    ns.Resource:Apply()
+    Equal(string.format("%g", S[flash].tintAlpha), "0.45", "unticked: the flash back as it was")
     ns.Set("barStyle", "glass")
     ns.Resource:Apply()
     Equal(Alphas(), "1 1 1 1", "Glass: solid again")
@@ -4027,6 +4041,71 @@ do
     ns.Set("swipeColour", "black")
     ns.Skin:ApplyIconDetails()
     _G.CooldownViewerConstants = nil
+    Equal(#printed, 0, "no errors")
+end
+
+-- Big stacks in the middle on Blizzard's buff icons ------------------------------------------------
+-- (A player's idea.) Ticked, each buff icon's stack count goes in the middle
+-- at the countdown's size (and colour), and its countdown smaller along the
+-- bottom, or in the Spot picked; always, stacks or none, through cosmetic
+-- setters only, the count's text never read (secret in a fight). The
+-- Essential and Utility icons stay as they were. Unticked, Blizzard's own
+-- corner anchor comes back, and a buff icon made meanwhile follows.
+
+do
+    Environment()
+    local v = Viewers(1)
+    local ns = Load(nil)
+    local item, buff = First(v.essentialActive), First(v.buffsActive)
+    local count = buff.Applications.Applications
+    -- Blizzard's own code only writes the count's text: the addon may never read it.
+    S[count].deny = { GetText = true, GetStringWidth = true, IsTruncated = true }
+    local function At(region, frame)
+        local p = S[region].points[1]
+        if not p then return "Blizzard's" end
+        local rel = p[2] == frame.Applications and "box" or p[2] == frame.Cooldown and "sweep" or tostring(p[2])
+        return p[1] .. " " .. rel .. " " .. tostring(p[3]) .. " " .. tostring(p[4]) .. " " .. tostring(p[5])
+    end
+    local function Buff(frame)
+        frame = frame or buff
+        return S[frame.Applications.Applications].font .. " " .. At(frame.Applications.Applications, frame) .. " | "
+            .. S[frame.Cooldown].countdownFont .. " " .. At(frame.Cooldown:GetCountdownFontString(), frame)
+    end
+    local function Essential()
+        return S[item.Cooldown].countdownFont .. " " .. S[item.ChargeCount.Current].font .. " "
+            .. tostring(#S[item.Cooldown:GetCountdownFontString()].points)
+    end
+    local before = Buff() .. " | " .. Essential()
+    ns.Set("bigStacks", true)
+    ns.Skin:ApplyIconDetails()
+    Equal(before .. " || " .. Buff() .. " | " .. Essential(),
+        "FECMFont14 Blizzard's | FECMFont20 Blizzard's | FECMFont25 FECMFont18 0 || FECMFont20 CENTER box CENTER 0 0 | FECMFont14"
+        .. " BOTTOM sweep BOTTOM 0 1 | FECMFont25 FECMFont18 0",
+        "ticked: the buff icon's count big in the middle, its countdown small along the bottom; the Essential icon as it was")
+    -- The Spot picked takes the small countdown; a colour takes the big count too.
+    ns.Set("countdownSpot", "TOPRIGHT")
+    ns.Set("countdownColour", "red")
+    ns.Skin:ApplyIconDetails()
+    Equal(Buff() .. " " .. table.concat(S[_G.FECMCountdown20].textColour, ","),
+        "FECMCountdown20 CENTER box CENTER 0 0 | FECMCountdown14 TOPRIGHT sweep TOPRIGHT -1 -1 1,0.25,0.2",
+        "the countdown in the Spot picked; the big count in the countdown's red")
+    ns.Set("countdownSpot", "CENTER")
+    ns.Set("countdownColour", "white")
+    -- A buff icon handed out while ticked comes in it.
+    local fresh = BuffItem()
+    Blizzard(v.buffs, "OnAcquireItemFrame", fresh)
+    Equal(Buff(fresh), "FECMFont20 CENTER box CENTER 0 0 | FECMFont14 BOTTOM sweep BOTTOM 0 1",
+        "a new buff icon while ticked: in it as it's made")
+    -- Unticked: Blizzard's own corner back, the numbers in the middle again.
+    ns.Set("bigStacks", false)
+    ns.Skin:ApplyIconDetails()
+    Equal(Buff() .. " | " .. Essential() .. " " .. S[item.Cooldown:GetCountdownFontString()].points[1][1],
+        "FECMFont14 BOTTOMRIGHT box BOTTOMRIGHT -2 2 | FECMFont20 CENTER sweep CENTER 0 0 | FECMFont25 FECMFont18 1 CENTER",
+        "unticked: the count back in Blizzard's corner at its size, the countdown big in the middle (the Essential icon's"
+        .. " back in the middle after the Spot)")
+    local points = #S[count].points
+    ns.Skin:ApplyIconDetails()
+    Equal(#S[count].points .. " " .. points, "1 1", "and not moved again after")
     Equal(#printed, 0, "no errors")
 end
 

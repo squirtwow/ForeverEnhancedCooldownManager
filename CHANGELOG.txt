@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.18
+
+### Added
+- Totems bar can sit in your layout as a row with your other bars (Totems page; order it on the Layout page).
+- Searing and Magma Totems turn red when you move out of their range (Red when out of range).
+- Combo points stay up when the resource display is switched off.
+- Big stacks: buff icons can show their stack count as the big number (Icon details).
+- Swap to my next ammo: when you run out, the best arrows or shot in your bags go in, out of a fight (General page).
+- Hide spent flash: your power bar drops straight away when you spend.
+- Shared strings now bring the Totems bar, and can switch off the resource display (the import says so first).
+
 ## 1.10.17
 
 ### Added

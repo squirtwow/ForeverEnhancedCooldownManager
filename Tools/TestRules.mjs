@@ -237,9 +237,11 @@ test("never the game's tooltip", () => {
 
 // The game's settings (CVars) are only ever changed by a click of yours: the
 // Turn on buttons for Blizzard's Cooldown Manager and Personal Resource
-// Display (Window.lua), the Layout page's display tick, and turning your bars
+// Display (Window.lua), the Layout page's display tick, turning your bars
 // on or off (ns.SetBars, Core.lua: Blizzard's Cooldown Manager goes the other
-// way), through ns.TurnOn and ns.TurnOff (Core.lua), which only ever set those two.
+// way), and an import with its look of a string shared with the display off
+// (ProfileShare.lua, after its question says so), through ns.TurnOn and
+// ns.TurnOff (Core.lua), which only ever set those two.
 // Tools/TestBars.lua checks nothing is written as the addon loads.
 test("the game's settings change only through ns.TurnOn and ns.TurnOff, from your clicks", () => {
   const writers = /\b(SetCVar\w*|ConsoleExec|RegisterCVar|SetCVarToDefault|ResetTestCVars)\b/;
@@ -257,6 +259,7 @@ test("the game's settings change only through ns.TurnOn and ns.TurnOff, from you
     .map(match => `${name} ${match[1]}(${match[2]})`)).sort();
   assert.deepEqual(calls, ['Core.lua TurnOff("cooldownViewerEnabled")', 'Core.lua TurnOn("cooldownViewerEnabled")',
     'LayoutPage.lua TurnOff("nameplateShowSelf")', 'LayoutPage.lua TurnOn("nameplateShowSelf")',
+    'ProfileShare.lua TurnOff("nameplateShowSelf")',
     'Window.lua TurnOn("cooldownViewerEnabled")', 'Window.lua TurnOn("nameplateShowSelf")']);
   // ns.SetBars itself is only ever called from a click, or a layout asked for by one,
   // or an import with its look (ProfileShare.lua), after its question says so.

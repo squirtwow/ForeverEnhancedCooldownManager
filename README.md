@@ -32,7 +32,8 @@ EraUI.
   gradient of their colour (off by default)
 - Icon details on the Look page: the cooldown swipe's colour and see-through,
   the countdown's size, colour and spot, and an edge line, on your icons and
-  Blizzard's
+  Blizzard's. Big stacks in the middle shows a buff's stack count as the big
+  number (off by default)
 - Optional borders and soft shadows, round each icon or round whole rows, with
   Thick edges for a bolder 2px edge, and a Darkness slider for the empty part
   of your bars, right down to solid black (Look page)
@@ -49,7 +50,15 @@ EraUI.
   Druids can put it on the extra mana bar and the energy bar too (off by
   default)
 - Combo points under your energy bar for rogues and druids in cat form, which
-  Forever's display leaves out (off by default)
+  Forever's display leaves out (off by default). Set up on the Look page makes
+  them taller or shorter and puts them under or above the display. With the
+  display switched off they stay up, just above your cast bar
+- Hide spent flash: your power bar drops straight away when you spend (off by
+  default)
+- Display width: an exact width for the display, on the Layout page (off by
+  default)
+- Just want the icons? Untick Show the Personal Resource Display on the Layout
+  page
 - Druids: your energy bar under it in your other forms too (off by default)
 - Your own cast bar right under it, with the spell's icon, name and time left
   (off by default)
@@ -103,6 +112,8 @@ EraUI.
   items in from your bags, and any ammo becomes one icon for whatever you have
   equipped. A warlock's Soul Shards become one icon counting how many you carry,
   greyed at 0
+- Swap to my next ammo (General page): when you run out, the best arrows or
+  shot in your bags go in, out of a fight (off by default)
 - Healthstones, Healing Potions and Mana Potions: one icon each for the best
   one you carry, switching as your bags change
 - Keybinds on the icons: the key that casts each spell, at the bottom or a top
@@ -116,7 +127,8 @@ EraUI.
 - On cooldown: show, dim or hide each icon while it cools down, on the
   Cooldowns and Utility bars. With Dim when you can't cast it, icons dim while
   you lack the mana, rage, energy or range, and Dimmed icons sets how dim (off
-  by default)
+  by default). Or show only when you can't afford it: a bar's icons stay hidden
+  until you lack the mana, rage or energy (off by default)
 - Swap with my form: each form, stance or Stealth gets its own icons on the
   Cooldowns and Utility bars, swapped as you change, in a fight too (off by
   default). The Debuffs bars have it too: in a fight it swaps at once with
@@ -169,9 +181,12 @@ EraUI.
 - An element with no totem down shows greyed. A totem down shows its icon and
   the time it has left, in a fight too
 - Red when out of range (off by default): a totem that buffs you, like Strength
-  of Earth, turns red while you're out of its range
+  of Earth, turns red while you're out of its range. Searing and Magma turn red
+  once you're further from them than they reach (20 and 8 yards)
 - Icon size, height, spacing, icons per row, the order of the elements, names,
   countdown numbers, out of combat show, fade or hide, and drag it anywhere
+- Stack it with my bars (off by default): the Totems bar becomes a row of your
+  layout, ordered on the Layout page like your bars
 
 ## Raid Timers
 - Blizzard's pull and battleground start countdown, raid warnings, boss emotes
@@ -193,7 +208,9 @@ EraUI.
   one, even across classes: each only shows its own class's spells and racials.
   Use on all characters puts one profile on every character
 - Share a profile as text from the Profile menu, or Import one someone shared:
-  it becomes a new profile, so yours stays as it is
+  it becomes a new profile, so yours stays as it is. With its look and layout
+  it also brings the Totems bar, and turns your resource display off if the
+  sharer had it off (the import says so first)
 - Presets, at the top of the settings' list: links to ready-made setups for
   every spec and to setups other players share, on squirtsaddons.com
 - Tank, Healer and Damage keep a profile for each role. Switch with my talents

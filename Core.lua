@@ -60,6 +60,9 @@ ns.DEFAULTS = {
     -- Out of combat, an enemy targeted doesn't bring bars set to Fade or Hide
     -- back (General page; a player's idea): off unless ticked.
     oocIgnoreTarget = false,
+    -- Out of ammo, the best arrows or shot in your bags go in the ammo slot,
+    -- out of a fight (General page, Spells.lua): off unless ticked.
+    ammoSwap = false,
     listItems = false, -- show trinkets and bag items in the /ccm spell list
     listRanks = false, -- show every rank you know as its own row
     listTicked = false, -- show only the spells on the bar whose page it is (a player's idea)
@@ -71,6 +74,7 @@ ns.DEFAULTS = {
     font = FONT, -- the numbers and text on icons and bars: Friz Quadrata, or another of the game's fonts
     prdSkin = true, -- Blizzard's Personal Resource Display in the same design
     prdHideRepeat = true, -- its second mana bar hidden while the main one is mana
+    prdHideSpent = false, -- the flash of power just spent on its power bar tinted clear (a player's idea)
     prdHealth = "default", -- its bars' colours: Blizzard's, or a bar colour
     prdPower = "default",
     prdMatch = true, -- while a layout holds your bars, the display is as wide as your widest row
@@ -208,6 +212,9 @@ ns.DEFAULTS = {
     countdownFormat = "game", -- its text: the game's own (2:52), or "minutes" (3m, 2m, 1m, then 59s; a player's idea)
     swipeEdge = false, -- the edge line on every icon; off, none on yours and Blizzard's own on theirs
     edgeColour = "game", -- its colour: the game's own line, or tinted in a bar colour
+    -- Big stacks in the middle (a player's idea): buff icons show their stack
+    -- count at the countdown's size in the middle, the countdown small in a corner (Style.lua)
+    bigStacks = false,
     -- Your bars' icons square as always, or drawn like Blizzard's Cooldown
     -- Manager's ("blizzard": a player's idea, its look with Swap with my form)
     iconStyle = "square",
@@ -286,6 +293,11 @@ ns.PULSE_PLACE = { -4000, 4000, 0 }
 -- Totems bar.
 ns.TOTEM_PER_ROW = { 1, 4, 4 }
 ns.TOTEM_PLACE = { -4000, 4000, 0 }
+-- The Totems bar's row in a layout (Squirt's yes, 19 Nov 2026: rows getting
+-- smaller going down, say 6, 6, 5 and 4, the first two the same), above or
+-- below the display like a bar's, once ticked on its page. Not a bar: never
+-- in ns.BAR_KEYS or ns.BAR_NAMES.
+ns.TOTEM_ROW = "totems"
 local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTextSize = ns.CAST_TEXT_SIZE, castWidth = ns.CAST_WIDTH, castX = ns.CAST_SPOT, castY = ns.CAST_SPOT,castTickWidth = ns.CAST_TICK_WIDTH, minimapAngle = ns.MINIMAP_ANGLE, keybindSize = ns.KEYBIND_SIZE,
     barScale = ns.BAR_SCALE, barDarkness = ns.BAR_DARKNESS, pullBarSize = ns.RAID_SIZE, pullNumberSize = ns.RAID_SIZE,
     warningSize = ns.RAID_SIZE, emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
@@ -397,7 +409,7 @@ ns.ICON_STYLE_KEYS = { "square", "blizzard" }
 ns.ICON_STYLE_NAMES = { square = "Square", blizzard = "Blizzard" }
 -- Every Icon details setting (the panel's Defaults puts them all back).
 ns.ICON_DETAILS = { "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge",
-    "edgeColour", "iconStyle" }
+    "edgeColour", "iconStyle", "bigStacks" }
 local CHOICES = { accent = {}, barStyle = {}, barColour = {}, prdHealth = { default = true }, prdPower = { default = true },
     prdComboColour = { default = true }, castColour = { default = true }, swingColour = { default = true },
     iconBorder = { off = true, icon = true, bar = true }, iconShadow = { off = true, icon = true, bar = true },
@@ -476,12 +488,12 @@ ns.RELOAD = {
 }
 
 -- What a shared profile carries of the look (ProfileShare.lua): how your
--- bars, the restyled bars, your cast bar, Raid Timers and the Cooldown pulse
--- look, and where they sit. Not a tick that switches a part on or off (those
+-- bars, the restyled bars, your cast bar, Raid Timers, the Cooldown pulse
+-- and the Totems bar look, and where they sit. Not a tick that switches a part on or off (those
 -- are ns.SHARE_PARTS, below), nor the window's own (its accent, lists,
 -- preview, grow arrows and the minimap button), nor the update notice.
 ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "iconBorder", "iconShadow", "barDarkness", "thickEdges", "readyGlow",
-    "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHealth", "prdPower", "prdMatch", "prdOwnWidth", "prdWidth",
+    "keybindPosition", "keybindSize", "barScale", "prdHideRepeat", "prdHideSpent", "prdHealth", "prdPower", "prdMatch", "prdOwnWidth", "prdWidth",
     "prdComboColour", "prdComboHeight", "prdComboAt", "prdHealthAt", "prdHealthCentre", "prdHealthLeft", "prdHealthRight", "prdPowerAt", "prdPowerCentre", "prdPowerLeft",
     "prdPowerRight", "prdExtraAt", "prdExtraCentre", "prdExtraLeft", "prdExtraRight", "prdEnergyAt", "prdEnergyCentre",
     "prdEnergyLeft", "prdEnergyRight", "prdHealthSize", "prdPowerSize", "prdExtraSize", "prdEnergySize",
@@ -489,12 +501,18 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castAbove", "castFree", "castNative", "castX", "castY", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
     "castLatencyColour", "castLatencyText", "castTickSound", "swingColour",
     "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge", "edgeColour",
-    "iconStyle", "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
+    "iconStyle", "bigStacks", "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
     "pulseSize", "pulseTime", "pulseSound", "pulseLongSize", "pulseLongTime", "pulseLongSound", "pulseMaster",
     "pulseSeeThrough", "pulseGrow", "pulseBorder", "pulseShadow", "pulseItems", "pulseResets", "pulseProcSound", "pulseX", "pulseY" }
 -- And each colour's custom one, kept beside it.
 for _, key in ipairs(ns.COLOUR_SETTINGS) do ns.SHARE_LOOK[#ns.SHARE_LOOK + 1] = key .. "Custom" end
+-- And the Totems bar's own settings (Squirt's yes, 19 Nov 2026: a shaman's
+-- string brings the bar with it), its tick a part (below). Not Totem time,
+-- an icon's on your Cooldowns and Utility bars.
+ns.TOTEM_LOOK = { "totemSize", "totemHeight", "totemSpacing", "totemPerRow", "totemGrow", "totemWrap", "totemOutOfCombat",
+    "totemTimer", "totemNames", "totemRange", "totemOrder", "totemX", "totemY" }
+for _, key in ipairs(ns.TOTEM_LOOK) do ns.SHARE_LOOK[#ns.SHARE_LOOK + 1] = key end
 -- The parts a shared profile carries the ones on of (ProfileShare.lua), each
 -- with its name for the message after an import: turned on for you only with
 -- its look and layout ticked, and never one turned off. Only ticks off by
@@ -521,6 +539,7 @@ ns.SHARE_PARTS = {
     { key = "bossCasts", code = "o", name = "Boss cast bars" },
     { key = "pulse", code = "p", name = "Cooldown pulse" },
     { key = "pulseProcs", code = "q", name = "Proc pulses" },
+    { key = "totemBar", code = "x", name = "Totems bar", classes = { SHAMAN = true } }, -- (since the update after 1.10.17)
 }
 -- Each entry's own ticks a shared profile carries with the profile
 -- (ProfileShare.lua; Squirt, 15 Nov 2026: so a setup from the FECM Setups
@@ -3154,6 +3173,8 @@ end
 -- Layouts: your bars stacked around Blizzard's Personal Resource Display.
 -- Which bars sit above it and below it (each top to bottom) and beside it,
 -- each bar once, and whether the layout holds them now. Repaired in place.
+-- The Totems bar's row (ns.TOTEM_ROW) is kept once, above or below, never
+-- beside it, and only there when ticked on its page: never added here.
 function ns.LayoutData()
     if not db then return nil end
     if type(db.layout) ~= "table" then db.layout = {} end
@@ -3170,8 +3191,8 @@ function ns.LayoutData()
         if not ns.BAR_NAMES[key] or out ~= true then layout.hidden[key] = nil end
     end
     local seen = {}
-    local function Take(key)
-        if ns.BAR_NAMES[key] and not seen[key] then
+    local function Take(key, row)
+        if (ns.BAR_NAMES[key] or row and key == ns.TOTEM_ROW) and not seen[key] then
             seen[key] = true
             return key
         end
@@ -3179,7 +3200,7 @@ function ns.LayoutData()
     for _, place in ipairs({ "above", "below" }) do
         local list = {}
         for _, key in ipairs(type(layout[place]) == "table" and layout[place] or {}) do
-            list[#list + 1] = Take(key)
+            list[#list + 1] = Take(key, true)
         end
         layout[place] = list
     end

@@ -5,7 +5,9 @@
 -- shape) and the display can move up or down the stack. The addon only reads
 -- where the display is (Edit Mode places it) and, if asked, widens its bars
 -- to your widest row or a width of your own (Resource.lua). A bar dragged by
--- hand leaves the layout.
+-- hand leaves the layout. A shaman's Totems bar can take a row too (Stack it
+-- with my bars, on its page: ns.TOTEM_ROW), placed like a bar's but with its
+-- own size and icons across, set on its page.
 local _, ns = ...
 
 local L = {}
@@ -97,8 +99,8 @@ local function Watch(frame)
 end
 
 -- The display's bars you can see now: health, power, the extra mana bar
--- unless it's tucked away, and the addon's combo points while they show
--- (Forever's display has none of its own). Not the frame around them, which
+-- unless it's tucked away, and the addon's combo points while they show on
+-- it (Forever's display has none of its own). Not the frame around them, which
 -- keeps a minimum height.
 local function Bars(frame)
     local list = {}
@@ -111,11 +113,25 @@ local function Bars(frame)
     return list
 end
 
+-- The width the display's bars are given now (Resource.lua R:Match): your
+-- widest row while it's matched to them, else your own width while that's
+-- ticked; nil while it keeps Blizzard's.
+local function Given(self)
+    local want = self:MatchWidth()
+    if not want and ns.Get("prdOwnWidth") then want = ns.Get("prdWidth") end
+    return want
+end
+
 -- The display's middle and size, from the middle of the screen, in the bars'
 -- own units, edges included, so rows sit flush against it; edge is how far
 -- the restyle's edges reach past its bars. While the game can't say (it's
 -- hidden until combat, say), where it was last seen. Switched off, it takes
--- no room, so the rows close up where it was. Nil when it's never been there.
+-- no room, so the rows close up where it was; but combo points staying up
+-- on their own keep their room there, the restyle's edges round them
+-- (Resource.lua R:AwayRoom). Switched off and not measured just now (not
+-- loaded, say), it's as wide as it's been given since (Given), so the combo
+-- points and your cast bar keep up with your rows. Nil when it's never been
+-- there.
 function L:Display()
     local frame = _G.PersonalResourceDisplayFrame
     local layout = ns.LayoutData()
@@ -146,6 +162,7 @@ function L:Display()
             if layout then layout.display = display end
         end
     end
+    local measured = display ~= nil
     local seen = layout and layout.display
     if not display and type(seen) == "table" and type(seen.x) == "number" and type(seen.y) == "number"
         and type(seen.width) == "number" and type(seen.height) == "number" then
@@ -154,7 +171,11 @@ function L:Display()
         if type(display.edge) ~= "number" then display.edge = ns.loaded.prdSkin and 1 or 0 end
     end
     if display and self:DisplayOff() then
-        return { x = display.x, y = display.y, width = display.width, height = 0, edge = display.edge, off = true }
+        local room = ns.Resource and ns.Resource:AwayRoom()
+        local width, given = display.width, not measured and Given(self)
+        if given then width = given + 2 * display.edge end
+        return { x = display.x, y = display.y, width = width, height = room and room + 2 * display.edge or 0,
+            edge = display.edge, off = true }
     end
     return display
 end
@@ -182,10 +203,18 @@ end
 
 -- Whether a bar is in the layout now: not taken out, and one you have (an
 -- extra bar keeps its row while another profile is on, or it's removed).
+-- The Totems bar's row: while that bar is on and yours (a shaman's); else it
+-- takes no room, but stays saved.
 local function In(layout, key)
+    if key == ns.TOTEM_ROW then return ns.Get("totemBar") == true and ns.Totems ~= nil and ns.Totems:ForMe() end
     return key ~= nil and not layout.hidden[key] and ns.HasBar(key)
 end
 L.In = In -- and for the Layout page's drawing
+
+-- A row's name: its bar's, or the Totems bar's.
+function L:Name(key)
+    return key == ns.TOTEM_ROW and "Totems" or ns.BAR_NAMES[key]
+end
 
 -- The bars in a place (above or below the display) that are in the layout.
 local function Placed(layout, place)
@@ -196,15 +225,24 @@ local function Placed(layout, place)
     return keys
 end
 
+-- How wide the Totems bar's row is: its spots across, at their size.
+local function TotemsWidth()
+    local data = ns.Totems:Data()
+    local across = math.min(data.perRow, data.count)
+    return across * ns.IconSize(data) + (across - 1) * data.spacing
+end
+
 -- Your widest row above or below the display, with every tile filled. A bar
 -- with no spells on it adds nothing (a new, empty Buffs 2 doesn't stretch the
--- display to its 20 across).
+-- display to its 20 across); the Totems bar always has its four.
 function L:WidestRow()
     local layout, widest = ns.LayoutData(), 0
     for _, place in ipairs({ "above", "below" }) do
         for _, key in ipairs(Placed(layout, place)) do
-            local data = ns.BarData(key)
-            if type(data.spells) == "table" and #data.spells > 0 then
+            local data = key ~= ns.TOTEM_ROW and ns.BarData(key)
+            if not data then
+                widest = math.max(widest, TotemsWidth())
+            elseif type(data.spells) == "table" and #data.spells > 0 then
                 widest = math.max(widest, data.perRow * ns.IconSize(data) + (data.perRow - 1) * data.spacing)
             end
         end
@@ -226,10 +264,25 @@ end
 -- after a fight. Without a layout, only the cast bar is put under the display,
 -- once the display has your own width, or Blizzard's back if it was matched
 -- to your rows (Use my bars unticked, say), so the cast bar takes it.
+-- The Totems bar, once placed here and no longer (its row taken out, the
+-- layout off, or another one in its place), goes back to its own spot.
+-- Combo points staying up with the display switched off sit in its spot,
+-- your cast bar under them (Resource.lua R:PlaceAway; without a layout,
+-- CastBar.lua C:Place puts them there).
+local function LetGo()
+    if not L.totemsPlaced then return end
+    L.totemsPlaced = nil
+    ns.Totems:Place()
+end
+
 function L:Stack()
+    -- Combo points onto the display or off it first, should it have just
+    -- been switched on or off.
+    if ns.Resource then ns.Resource:Rehome() end
     if not self:Active() then
         if ns.Resource then ns.Resource:Match() end
         if ns.CastBar then ns.CastBar:Place() end
+        LetGo()
         return false
     end
     if InCombatLockdown() then self.pending = true end
@@ -238,7 +291,10 @@ function L:Stack()
     if ns.Resource then ns.Resource:Match() end
     local display = self:Display()
     self.found = display ~= nil
-    display = display or { x = 0, y = FALLBACK_Y, width = self:MatchWidth() or 0, height = 0, edge = 0 }
+    -- (Never seen: under the middle, with room for combo points away from it.)
+    display = display or { x = 0, y = FALLBACK_Y, width = self:MatchWidth() or 0,
+        height = ns.Resource and ns.Resource:AwayRoom() or 0, edge = 0 }
+    if ns.Resource then ns.Resource:PlaceAway(display) end
     -- Each bar grows away from the display; laid out again if that changed.
     local function Grow(key, grow, wrap)
         local data = ns.BarData(key)
@@ -258,24 +314,45 @@ function L:Stack()
         if not (bar and (bar.count > 0 or B:IsUnlocked())) then return nil end
         return bar:GetHeight() + Names(data)
     end
+    -- The Totems bar's row, its point at y as a bar's, its own choices kept
+    -- (Totems.lua). In a fight once it holds the game's slots it isn't moved
+    -- till the fight ends, but its room is kept. Its room; none before it's made.
+    local held
+    local function Totems(point, y)
+        local bar, data = ns.Totems.bar, ns.Totems:Data()
+        if not bar then return nil end
+        held = true
+        local names = Names(data)
+        if not ns.Totems:PlaceAt(point, display.x, point == "BOTTOM" and y + names or y) then self.pending = true end
+        return bar:GetHeight() + names
+    end
     local y = display.y + display.height / 2 + gap
     if ns.CastBar then y = y + ns.CastBar:RoomAbove(display) end
     local above = Placed(layout, "above")
     for i = #above, 1, -1 do
-        local key = above[i]
-        local data = Grow(key, "centre", "up")
-        -- Names hang under the icons, so the bar sits above them.
-        B:PlaceAt(key, "BOTTOM", display.x, y + Names(data))
-        local room = Room(key, data)
+        local key, room = above[i], nil
+        if key == ns.TOTEM_ROW then
+            room = Totems("BOTTOM", y)
+        else
+            local data = Grow(key, "centre", "up")
+            -- Names hang under the icons, so the bar sits above them.
+            B:PlaceAt(key, "BOTTOM", display.x, y + Names(data))
+            room = Room(key, data)
+        end
         if room then y = y + room + gap end
     end
     local bottom = display.y - display.height / 2
     if ns.CastBar then bottom = ns.CastBar:Under(display) end
     y = bottom - gap
     for _, key in ipairs(Placed(layout, "below")) do
-        local data = Grow(key, "centre", "down")
-        B:PlaceAt(key, "TOP", display.x, y)
-        local room = Room(key, data)
+        local room
+        if key == ns.TOTEM_ROW then
+            room = Totems("TOP", y)
+        else
+            local data = Grow(key, "centre", "down")
+            B:PlaceAt(key, "TOP", display.x, y)
+            room = Room(key, data)
+        end
         if room then y = y - room - gap end
     end
     for _, side in ipairs({ "left", "right" }) do
@@ -287,6 +364,7 @@ function L:Stack()
             B:PlaceAt(key, side == "left" and "TOPRIGHT" or "TOPLEFT", x, display.y + ns.IconHeight(data, ns.IconSize(data)) / 2)
         end
     end
+    if held then self.totemsPlaced = true else LetGo() end
     return true
 end
 
@@ -315,6 +393,7 @@ function L:Apply(key)
     if not preset then return false, "There's no layout called that." end
     if InCombatLockdown() then return false, "Finish combat first." end
     self.undo, self.moved = Snapshot(), nil
+    local totems = self:TotemsStacked()
     local layout = ns.LayoutData()
     layout.above, layout.below, layout.left, layout.right = {}, {}, nil, nil
     for _, row in ipairs(preset.rows) do
@@ -333,6 +412,8 @@ function L:Apply(key)
         if not ns.EXTRAS_OF[bar] then ns.BarData(bar).spacing = layout.spacing end
     end
     ns.LayoutData()
+    -- The Totems bar's row stays in, at the bottom.
+    if totems then layout.below[#layout.below + 1] = ns.TOTEM_ROW end
     local note = not ns.Bars:Enabled() and ns.SetBars(true) or nil
     ns.Bars:Rebuild()
     return true, note or (preset.name .. " is set up. Tick spells for each bar, then size them to taste.")
@@ -450,10 +531,21 @@ function L:CanSwap(key, delta)
     return at ~= nil and rows[at + delta] ~= nil
 end
 
+-- Whether swapping these two rows moves the Totems bar's past the display
+-- instead: it never goes beside it, so with a row beside the display it
+-- goes past it (and past the rows beside it), which stay.
+function L:Hops(key, other)
+    local layout = ns.LayoutData()
+    return (key == ns.TOTEM_ROW or other == ns.TOTEM_ROW) and (layout.left == key or layout.right == key
+        or layout.left == other or layout.right == other)
+end
+
 -- What swapping two bars' rows does to how many fit across each: rows keep
 -- their width, so each bar takes the other's. Said before the swap (ahead)
--- or after it; nothing when they're the same.
+-- or after it; nothing when they're the same, or for the Totems bar's row
+-- (its icons across are its own, set on its page).
 function L:Widths(key, other, ahead)
+    if key == ns.TOTEM_ROW or other == ns.TOTEM_ROW then return "" end
     local mine, theirs = ns.BarData(key).perRow, ns.BarData(other).perRow
     if mine == theirs then return "" end
     if ahead then mine, theirs = theirs, mine end
@@ -463,13 +555,21 @@ end
 
 -- Swaps a bar with the row above or below it. The rows keep how many fit
 -- across, so a preset's shape stays with the bars in a new order; each bar
--- keeps its own icon size. True, and what changed.
+-- keeps its own icon size. The Totems bar's row trades places only, or goes
+-- past the display (Hops). True, and what changed.
 function L:Swap(key, delta)
     if InCombatLockdown() then return false, "Finish combat first." end
     if not self:CanSwap(key, delta) then return false end
     local layout = Edited()
     local rows = self:Rows()
     local other = rows[IndexOf(rows, key) + delta]
+    if self:Hops(key, other) then
+        local from = IndexOf(layout.above, ns.TOTEM_ROW) and "above" or "below"
+        table.remove(layout[from], IndexOf(layout[from], ns.TOTEM_ROW))
+        if from == "above" then table.insert(layout.below, 1, ns.TOTEM_ROW) else layout.above[#layout.above + 1] = ns.TOTEM_ROW end
+        self:Stack()
+        return true, "Totems moved " .. (from == "above" and "down" or "up") .. " past the display."
+    end
     local function Trade(value)
         if value == key then return other elseif value == other then return key end
         return value
@@ -478,10 +578,46 @@ function L:Swap(key, delta)
         for i, value in ipairs(layout[place]) do layout[place][i] = Trade(value) end
     end
     layout.left, layout.right = Trade(layout.left), Trade(layout.right)
-    local a, b = ns.BarData(key), ns.BarData(other)
-    a.perRow, b.perRow = b.perRow, a.perRow
+    if key ~= ns.TOTEM_ROW and other ~= ns.TOTEM_ROW then
+        local a, b = ns.BarData(key), ns.BarData(other)
+        a.perRow, b.perRow = b.perRow, a.perRow
+    end
     ns.Bars:Rebuild()
-    return true, ns.BAR_NAMES[key] .. " and " .. ns.BAR_NAMES[other] .. " swapped rows." .. self:Widths(key, other)
+    return true, self:Name(key) .. " and " .. self:Name(other) .. " swapped rows." .. self:Widths(key, other)
+end
+
+-- The Totems bar's row ---------------------------------------------------------------------
+-- Ticked on its page (TotemsPage.lua): its row is in your layout's lists,
+-- the one place that's kept. It shows while that bar is on and yours (In).
+
+-- Whether your layout has the Totems bar's row, showing or not.
+function L:TotemsStacked()
+    local layout = ns.LayoutData()
+    return layout ~= nil and (IndexOf(layout.above, ns.TOTEM_ROW) or IndexOf(layout.below, ns.TOTEM_ROW)) ~= nil
+end
+
+-- Whether the layout places the Totems bar now (Totems.lua asks).
+function L:HoldsTotems()
+    return self:Active() and self:TotemsStacked() and In(ns.LayoutData(), ns.TOTEM_ROW)
+end
+
+-- Stack it with my bars: its row goes in at the bottom of your layout, or
+-- comes out (the bar back in its own spot). Out of a fight. True, and what
+-- changed.
+function L:StackTotems(on)
+    if InCombatLockdown() then return false, "Finish combat first." end
+    local layout = ns.LayoutData()
+    for _, place in ipairs({ "above", "below" }) do
+        local at = IndexOf(layout[place], ns.TOTEM_ROW)
+        if at then table.remove(layout[place], at) end
+    end
+    if on then layout.below[#layout.below + 1] = ns.TOTEM_ROW end
+    self:Stack() -- (out, the bar goes back to its own spot: LetGo)
+    if not on then return true, "The Totems bar is out of your layout, back in its own spot." end
+    -- Saved, but no row while the bar's off (In).
+    if not In(layout, ns.TOTEM_ROW) then return true, "The Totems bar joins your layout once you tick Show the Totems bar." end
+    if not self:Active() then return true, "The Totems bar joins your layout once you line up your bars (Layout page)." end
+    return true, "The Totems bar is the bottom row of your layout. Order it on the Layout page."
 end
 
 function L:CanMoveDisplay(delta)
@@ -510,10 +646,15 @@ end
 
 -- Your bars stay where they are, and the display gets Blizzard's width or
 -- your own back, the cast bar following it (its own frame: fine in a fight).
-function L:TurnOff()
+-- The Totems bar stays where it is too, that spot its own now; or, sent
+-- home (Reset positions, Bars.lua), back to the spot it had before.
+function L:TurnOff(home)
     local layout = ns.LayoutData()
     if not (layout and layout.on) then return end
+    local held = self:HoldsTotems()
     layout.on = false
+    if held and not home then ns.Totems:Keep() end
+    if home then LetGo() end
     if ns.Resource then ns.Resource:Match() end
     if ns.CastBar then ns.CastBar:Place() end
 end

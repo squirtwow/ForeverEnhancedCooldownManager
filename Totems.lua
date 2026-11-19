@@ -3,7 +3,9 @@
 -- An element with no totem down shows its art greyed; a totem down shows its
 -- icon with the time it has left, in a fight too. With Red when out of range
 -- ticked, a totem that puts a buff on you turns red while that buff isn't on
--- you (you're out of its range); totems with no buff on you never do. Off
+-- you (you're out of its range); Searing and Magma, which hit what's near
+-- them, turn red once you're further from where you put them down than they
+-- reach (REACH); other totems with no buff on you never do. Off
 -- until it's ticked on its page under More in /ccm (TotemsPage.lua), and
 -- only for shamans: for anyone else nothing is made or heard.
 --
@@ -25,6 +27,10 @@
 -- from then on nothing they sit in is ever shown or hidden (Bars.lua B:Hold):
 -- the bar goes by alpha alone. It never takes the mouse but for the box that
 -- moves it. Nothing of Blizzard's is touched (its TotemFrame neither).
+--
+-- It sits where you put it, or (Stack it with my bars, on its page) in a row
+-- of your layout like a bar's (Layout.lua): moved there out of a fight only
+-- once it holds the game's slots.
 local _, ns = ...
 
 local M = {}
@@ -67,6 +73,16 @@ local TOTEMS = {
     ["Grounding Totem"] = { "a", { 8178 } },
     ["Sentry Totem"] = { "a" }, -- (its aura is the sight toggle on you, not a range buff)
 }
+-- Totems that hit what's near them and put no buff on you: how far each
+-- reaches, in yards, by Forever's spell text (Searing "an enemy within 20
+-- yards", Magma "creatures within 8 yards"). A player's idea: the game says
+-- where you are (out of a dungeon, and maybe not in a fight), never where a
+-- totem is, so its spot is yours as you cast it (it goes down at your feet),
+-- and it turns red once you're further from that than it reaches. Measured
+-- from you, not your target: right for a fight up close.
+local REACH = { ["Searing Totem"] = 20, ["Magma Totem"] = 8 }
+local LOOK_EVERY = .2 -- seconds between looks at where you are, while one of those stands
+local LOOK_LONGEST = 120 -- seconds after its cast one's spot is kept at most (Searing lasts 55)
 local GRACE = 2.5 -- seconds a totem just down can't turn red, while its buff arrives
 local FADE = .3 -- out of combat Fade, as your bars'
 local RED = { .64, .15, .15 } -- Blizzard's out-of-range red, as on your bars
@@ -75,7 +91,7 @@ local AGAIN = .25 -- a cooldown done this soon after the spot was read is the ga
 -- red with Red when out of range ticked); Air shows none.
 local SAMPLES = { e = { "Strength of Earth Totem", 120 }, f = { "Searing Totem", 55 }, w = { "Mana Spring Totem", 300, true } }
 
-M.ELEMENTS, M.TOTEMS, M.GRACE = ELEMENTS, TOTEMS, GRACE
+M.ELEMENTS, M.TOTEMS, M.GRACE, M.REACH, M.LOOK_EVERY = ELEMENTS, TOTEMS, GRACE, REACH, LOOK_EVERY
 
 -- Made at the start, from the game data: a totem by any rank's spell ID, by
 -- name, each element's buff IDs ({ [id] = true }) and each totem's short name.
@@ -90,6 +106,16 @@ for letter, element in pairs(ELEMENTS) do state.bySlot[element.slot] = letter en
 
 local function Open(value)
     return not (issecretvalue and issecretvalue(value))
+end
+
+-- Where you are, plain: x and y in yards and the map's instance; nil while
+-- the game won't say (in a dungeon, or kept secret).
+local function Here()
+    if type(UnitPosition) ~= "function" then return nil end
+    local ok, y, x, _, instance = pcall(UnitPosition, "player")
+    if not (ok and Open(y) and Open(x) and Open(instance)) then return nil end
+    if type(y) ~= "number" or type(x) ~= "number" or y ~= y or x ~= x then return nil end
+    return x, y, instance
 end
 
 -- A failure, said once per session each.
@@ -140,10 +166,10 @@ end
 -- Spots ------------------------------------------------------------------------------------
 -- One per element: its greyed art (empty), and over it the totem down
 -- (placed): its art, the red copy with the game's buff slot over it (warn),
--- then its time on top. Shown by alpha only. preview: the page's drawing of
+-- the red for one too far away (far), then its time on top. Shown by alpha only. preview: the page's drawing of
 -- one, never given a container.
 
-local Again, Warn -- (below)
+local Again, Warn, Watch -- (below)
 
 -- Its time ran out, or the game answered a read of it: read again, unless
 -- it's that answer. A preview's sample starts again.
@@ -222,6 +248,21 @@ local function NewSpot(parent, letter, preview)
     spot.warn, spot.red = warn, red
     spot.redKit = Style:ShapeKit(warn, red, {}, false)
 
+    -- Too far from one that reaches only so far (REACH): a red of its own,
+    -- over the game's buff slot (nothing of the game's draws it).
+    local far = CreateFrame("Frame", nil, placed)
+    far:SetAllPoints()
+    far:EnableMouse(false)
+    far:SetFrameLevel(level + 5)
+    far:SetAlpha(0)
+    local farRed = far:CreateTexture(nil, "ARTWORK")
+    farRed:SetAllPoints()
+    Style:Zoom(farRed)
+    farRed:SetVertexColor(RED[1], RED[2], RED[3])
+    farRed:SetTexture(ElementArt(letter))
+    spot.far, spot.farRed = far, farRed
+    spot.farKit = Style:ShapeKit(far, farRed, {}, false)
+
     -- Above the game's buff slot (made later, at level + 4).
     local time = CreateFrame("Frame", nil, placed)
     time:SetAllPoints()
@@ -291,18 +332,23 @@ local function Read(spot)
     local taken = false
     if okI and (not Open(icon) or icon ~= nil) then
         taken = pcall(spot.art.SetTexture, spot.art, icon)
-        if taken then pcall(spot.red.SetTexture, spot.red, icon) end
+        if taken then
+            pcall(spot.red.SetTexture, spot.red, icon)
+            pcall(spot.farRed.SetTexture, spot.farRed, icon)
+        end
     end
     if not taken and standing then
         local file = Art(standing)
         if file then
             spot.art:SetTexture(file)
             spot.red:SetTexture(file)
+            spot.farRed:SetTexture(file)
         end
     end
     spot.standing, spot.source = standing, source
     spot.label:SetText(standing and SHORT[standing] or ELEMENTS[spot.letter].name)
     Warn(spot)
+    if spot.at and spot.at.name == standing then Watch() end
 end
 
 local function Update(letter)
@@ -329,13 +375,55 @@ function Again(letter)
     end)
 end
 
+-- Too far, or not: only with Red when out of range ticked, for the totem
+-- that stands where you put it down (REACH), while the game says where you
+-- are, on the same map. Plain; true when red.
+local function Far(spot)
+    local at, out = spot.at, false
+    if at and at.name == spot.standing and ns.Get("totemRange") == true and ns.Get("totemBar") == true then
+        local x, y, instance = Here()
+        if x and instance == at.instance then
+            local dx, dy = x - at.x, y - at.y
+            out = dx * dx + dy * dy > at.reach * at.reach
+        end
+    end
+    spot.far:SetAlpha(out and 1 or 0)
+    return out
+end
+
 -- Red, or not: only with Red when out of range ticked and the game's slots
 -- started, for a totem known to buff you, once its GRACE is over. Plain.
+-- Then the red for one too far away.
 function Warn(spot)
     local standing = spot.standing
     local on = ns.Get("totemRange") == true and ns.Get("totemBar") == true and state.ranged == true and standing ~= nil
         and TOTEMS[standing] ~= nil and TOTEMS[standing][2] ~= nil and GetTime() >= spot.graceUntil
     spot.warn:SetAlpha(on and 1 or 0)
+    Far(spot)
+end
+
+-- Where you are, looked at every LOOK_EVERY seconds while a totem that
+-- reaches only so far stands where you put it, the bar on and Red when out
+-- of range ticked (the game says nothing as you move); stopped once none
+-- does, or LOOK_LONGEST after its cast. Started by Read, once however many ask.
+local function Look()
+    local now, any = GetTime(), false
+    for _, spot in pairs(state.spots) do
+        if spot.at and now - spot.at.castAt > LOOK_LONGEST then spot.at = nil end
+        Far(spot)
+        if spot.at and spot.at.name == spot.standing then any = true end
+    end
+    if any and state.on and ns.Get("totemRange") == true then
+        C_Timer.After(LOOK_EVERY, Look)
+    else
+        state.watching = false
+    end
+end
+
+function Watch()
+    if state.watching then return end
+    state.watching = true
+    Look()
 end
 
 -- A totem just down (or the bar just started): not red until its buff has
@@ -429,6 +517,19 @@ local function Data()
         perRow = ns.Get("totemPerRow"), grow = ns.Get("totemGrow"), wrap = ns.Get("totemWrap"), showNames = ns.Get("totemNames") }
 end
 
+-- Its choices as a bar's, with how many spots it has (count): for its row in
+-- your layout (Layout.lua) and the Layout page's drawing of it.
+function M:Data()
+    local data = Data()
+    data.count = #LETTERS
+    return data
+end
+
+-- An element's greyed art, for the Layout page's drawing.
+function M:Art(letter)
+    return ElementArt(letter)
+end
+
 -- A spot's time in Icon details' look: square and reversed as the Buffs
 -- bar's times, or drawn like Blizzard's with its gold swipe; its numbers
 -- sized for the icon's shorter side.
@@ -465,6 +566,7 @@ local function Lay(bar, spots, data, fight)
         Style:Shape(spot.emptyKit, size, nil, ratio)
         Style:Shape(spot.kit, size, nil, ratio)
         Style:Shape(spot.redKit, size, nil, ratio)
+        Style:Shape(spot.farKit, size, nil, ratio)
         if spot.litKit and not fight then Style:Shape(spot.litKit, size, nil, ratio) end
         Times(spot, face, timer)
         for _, label in ipairs({ spot.label, spot.emptyLabel }) do
@@ -491,13 +593,45 @@ local function Box(bar)
     bar.tailDecor = Style:Decor(bar, bar.tail)
 end
 
--- Its middle where it was put, from the middle of the screen. Never while
--- it's being dragged (the game's to move till it's let go).
+-- Whether your layout holds it now: a row there (Stack it with my bars, on
+-- its page) with the layout on (Layout.lua). The layout places it then.
+local function Held()
+    return ns.Layout ~= nil and ns.Layout:HoldsTotems()
+end
+
+-- Its middle where it was put, from the middle of the screen; held by your
+-- layout, in its row there (the layout stacks again: it never calls this
+-- back). Never while it's being dragged (the game's to move till it's let go).
 local function Place()
     local bar = state.bar
     if not bar or state.dragging then return end
+    if Held() then return ns.Layout:Stack() end
     bar:ClearAllPoints()
     bar:SetPoint("CENTER", UIParent, "CENTER", ns.Get("totemX"), ns.Get("totemY"))
+end
+
+-- For your layout (Layout.lua L:Stack): its point at x, y from the middle of
+-- the screen, as a bar's in its row. Not while it's dragged; in a fight once
+-- it holds the game's slots, not moved: false, and the layout places it as
+-- the fight ends.
+function M:PlaceAt(point, x, y)
+    local bar = state.bar
+    if not bar or state.dragging then return true end
+    if state.holds and InCombatLockdown() then return false end
+    bar:ClearAllPoints()
+    bar:SetPoint(point, UIParent, "CENTER", x, y)
+    return true
+end
+
+-- Put where it goes now (out of your layout, say): once it holds the game's
+-- slots, out of a fight only (a fight's end places it).
+function M:Place()
+    if not state.made then return end
+    if state.holds and InCombatLockdown() then
+        state.pending.restyle = true
+        return
+    end
+    Place()
 end
 
 -- Made once, the first time it's on: shown from then on, going by alpha.
@@ -586,20 +720,33 @@ end
 -- The bar itself is dragged by a box over it (as your bars'): from its page
 -- (Move, with Done and a note under it) or while your bars are unlocked.
 
--- Lets go of the bar mid-drag: its middle from the screen's is its new spot.
-local function Drop()
-    if not state.dragging then return end
-    state.dragging = false
-    local bar = state.bar
-    bar:StopMovingOrSizing()
-    if bar.SetUserPlaced then bar:SetUserPlaced(false) end
-    local x, y = bar:GetCenter()
+-- Its own spot where it is now: its middle from the screen's.
+local function Keep()
+    local x, y = state.bar:GetCenter()
     local cx, cy = UIParent:GetCenter()
     if x and y and cx and cy then
         local limits = ns.TOTEM_PLACE
         ns.Set("totemX", math.max(limits[1], math.min(limits[2], math.floor(x - cx + .5))))
         ns.Set("totemY", math.max(limits[1], math.min(limits[2], math.floor(y - cy + .5))))
     end
+end
+
+-- Your layout letting go of it (turned off, or a bar dragged out of it): it
+-- stays where it is, as your bars do, that spot its own now.
+function M:Keep()
+    if state.bar and not state.dragging then Keep() end
+end
+
+-- Lets go of the bar mid-drag: its middle from the screen's is its new spot.
+-- Dragged out of your layout, as a bar is: the layout stops.
+local function Drop()
+    if not state.dragging then return end
+    state.dragging = false
+    local bar = state.bar
+    bar:StopMovingOrSizing()
+    if bar.SetUserPlaced then bar:SetUserPlaced(false) end
+    Keep()
+    if Held() then ns.Layout:Moved() end
     Place()
 end
 
@@ -666,6 +813,7 @@ end
 function M:StartMove()
     if InCombatLockdown() then return false, "Finish the fight first, then move it." end
     if not (state.made and state.on) then return false, "Tick Show the Totems bar first." end
+    if Held() then return false, "It's in your layout: order it on the Layout page." end
     state.moving = true
     self:ShowMover()
     if ns.window then ns.window:Hide() end
@@ -690,11 +838,7 @@ end
 function M:ResetPlace()
     ns.Set("totemX", ns.DEFAULTS.totemX)
     ns.Set("totemY", ns.DEFAULTS.totemY)
-    if state.holds and InCombatLockdown() then
-        state.pending.restyle = true
-    else
-        Place()
-    end
+    self:Place()
 end
 
 -- Events ------------------------------------------------------------------------------------
@@ -714,6 +858,12 @@ local function Cast(id)
     local spot = state.spots[letter]
     state.cast[ELEMENTS[letter].slot] = name
     if not spot then return end
+    -- One that reaches only so far goes down where you stand: its spot, if
+    -- the game says where that is (REACH). Any other totem there: none.
+    local x, y, instance = Here()
+    spot.at = REACH[name] and x and { name = name, x = x, y = y, instance = instance, reach = REACH[name], castAt = GetTime() }
+        or nil
+    spot.far:SetAlpha(0)
     Grace(spot)
     Again(letter)
 end
@@ -840,6 +990,8 @@ function M:Apply()
         -- Off in a fight: its end still heard, to switch the game's slots off then.
         if state.pending.range then Driver():RegisterEvent("PLAYER_REGEN_ENABLED") end
         for _, spot in pairs(state.spots) do Warn(spot) end
+        -- Its row in your layout closes up (on, Restyle places it there).
+        if ns.Layout and ns.Layout:TotemsStacked() then ns.Layout:Stack() end
     end
     self:UpdateShown()
     self:ShowMover()
@@ -907,16 +1059,20 @@ function M:Report(add, say)
     for _, letter in ipairs(self:Order()) do
         local spot, slot = state.spots[letter], ELEMENTS[letter].slot
         local ok, have = pcall(GetTotemInfo, slot)
-        spots[#spots + 1] = ("%s %s%s, now %s, red %s"):format(ELEMENTS[letter].name, tostring(spot and spot.standing or "none"),
+        spots[#spots + 1] = ("%s %s%s, now %s, red %s, far %s%s"):format(ELEMENTS[letter].name, tostring(spot and spot.standing or "none"),
             spot and spot.source and (" (" .. spot.source .. ")") or "", ok and say(have) or "refused",
-            spot and tostring(spot.warn:GetAlpha()) or "-")
+            spot and tostring(spot.warn:GetAlpha()) or "-", spot and tostring(spot.far:GetAlpha()) or "-",
+            spot and spot.at and (" (" .. spot.at.name .. ", " .. spot.at.reach .. " yd)") or "")
     end
+    local x = Here()
+    spots[#spots + 1] = "where you are " .. (x and "known" or "not given")
     local pending = {}
     for key in pairs(state.pending) do pending[#pending + 1] = key end
     table.sort(pending)
-    add(("Totems: shaman %s, on %s, range %s (slots %s%s), order %s, in a fight %s | %s | waiting %s%s"):format(
+    local stacked = ns.Layout ~= nil and ns.Layout:TotemsStacked()
+    add(("Totems: shaman %s, on %s, range %s (slots %s%s), order %s, stacked %s (held %s), in a fight %s | %s | waiting %s%s"):format(
         tostring(self:ForMe()), tostring(ns.Get("totemBar")), tostring(ns.Get("totemRange")), tostring(state.ranged == true),
-        state.errors.range and (", refused: " .. state.errors.range) or "", tostring(ns.Get("totemOrder")),
-        tostring(InCombatLockdown()), table.concat(spots, "; "), #pending > 0 and table.concat(pending, ", ") or "none",
+        state.errors.range and (", refused: " .. state.errors.range) or "", tostring(ns.Get("totemOrder")), tostring(stacked),
+        tostring(Held()), tostring(InCombatLockdown()), table.concat(spots, "; "), #pending > 0 and table.concat(pending, ", ") or "none",
         state.errors.update and (" | update failed: " .. state.errors.update) or ""))
 end

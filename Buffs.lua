@@ -114,14 +114,15 @@ end
 -- (out of a fight, as it's made or laid out; a weapon enchant's own time
 -- has no art of its own: its spot's). high: its height (Icon height; nil
 -- while square), the art cropped to it and the numbers sized by the
--- shorter side.
+-- shorter side. A Buffs bar's icon (parts.buff): its count and countdown
+-- swapped with Big stacks in the middle (Style:BigStacks).
 local function Fit(parts, size, showTimer, look, high)
     high = high or size
     if parts.shape then Style:Shape(parts.shape, size, nil, high / size) end
     local face = math.min(size, high)
-    parts.cooldown:SetCountdownFont(Style:Countdown(face, look))
+    parts.cooldown:SetCountdownFont(Style:Countdown(face, look, parts.buff))
     parts.cooldown:SetHideCountdownNumbers(not showTimer)
-    parts.count:SetFontObject(Style:Count(face))
+    parts.count:SetFontObject(Style:Stacks(face, look, parts.buff))
     Style:AuraNumbers(parts)
 end
 
@@ -134,7 +135,8 @@ function F:Details(bar)
         high = high or size
         if parts.shape then Style:Shape(parts.shape, size, nil, high / size) end
         Style:CooldownLook(parts.cooldown)
-        parts.cooldown:SetCountdownFont(Style:Countdown(math.min(size, high), look))
+        parts.cooldown:SetCountdownFont(Style:Countdown(math.min(size, high), look, parts.buff))
+        if parts.buff then parts.count:SetFontObject(Style:Stacks(math.min(size, high), look, true)) end
         Style:AuraNumbers(parts)
     end
     local looks = bar.looks or {}
@@ -153,7 +155,8 @@ local function GroupFont(parts, look, face)
     local key = Style:LookKey(look) .. "|" .. face
     if parts.lookKey == key then return end
     parts.lookKey = key
-    parts.cooldown:SetCountdownFont(Style:Countdown(face, look))
+    parts.cooldown:SetCountdownFont(Style:Countdown(face, look, parts.buff))
+    if parts.buff then parts.count:SetFontObject(Style:Stacks(face, look, true)) end
 end
 
 -- Count ticks (a player's idea: how many times Bane of Agony has ticked),
@@ -515,8 +518,8 @@ F.ActiveGlow = ActiveGlow
 -- Debuffs bar entry's icon can count ticks too (counts), and a Buffs bar
 -- entry's can glow while it's up (active). look: its entry's own countdown
 -- font and size (settings per spell), or nil. high: its height (Icon
--- height; nil while square).
-local function Look(button, size, showTimer, decorate, counts, look, active, high)
+-- height; nil while square). buff: on a Buffs bar (Big stacks in the middle).
+local function Look(button, size, showTimer, decorate, counts, look, active, high, buff)
     button:EnableMouse(false)
     local icon = button:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -538,7 +541,8 @@ local function Look(button, size, showTimer, decorate, counts, look, active, hig
     button:SetApplicationCount(count)
     -- Square, or drawn like Blizzard's (Icon details' Icons): its pieces made
     -- now, as the container's icons only take art as they're made (Fit draws it).
-    local parts = { cooldown = cooldown, count = count, shape = Style:ShapeKit(button, icon, { cooldown }, true) }
+    local parts = { cooldown = cooldown, count = count, box = top, buff = buff == true,
+        shape = Style:ShapeKit(button, icon, { cooldown }, true) }
     if counts then parts.ticks = TickCount(button, top) end
     if active then parts.active = ActiveGlow(button, top) end
     if decorate then
@@ -583,7 +587,7 @@ local function SlotLook(holder, key)
     return function(button)
         button:SetAllPoints(holder)
         holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, ns.BAR_KIND[key] == "debuff", holder.look,
-            ns.AURA_BARS[key] ~= nil, holder.high)
+            ns.AURA_BARS[key] ~= nil, holder.high, ns.BAR_KIND[key] == "buff")
     end
 end
 
@@ -596,7 +600,8 @@ local function GroupLook(bar, index)
         local high = bar.groupHigh or BASE
         button:SetSize(BASE, high)
         local parts = Look(button, BASE, bar.data.showTimer, true, ns.BAR_KIND[bar.key] == "debuff" and index ~= nil,
-            index and bar.looks and bar.looks[index] or nil, ns.AURA_BARS[bar.key] ~= nil and index ~= nil, high)
+            index and bar.looks and bar.looks[index] or nil, ns.AURA_BARS[bar.key] ~= nil and index ~= nil, high,
+            ns.BAR_KIND[bar.key] == "buff")
         parts.index, parts.button, parts.high = index, button, high
         bar.groupParts[#bar.groupParts + 1] = parts
         if parts.ticks then
@@ -1116,7 +1121,7 @@ local function EnchantParts(holder)
     cooldown:SetDrawBling(false)
     local count = holder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     count:SetPoint("BOTTOMRIGHT", -1, 1)
-    holder.enchant = { cooldown = cooldown, count = count }
+    holder.enchant = { cooldown = cooldown, count = count, box = holder, buff = true } -- (only on Buffs bars)
     return holder.enchant
 end
 

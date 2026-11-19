@@ -4450,6 +4450,69 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- Big stacks in the middle on the Buffs bars' icons ------------------------------------------------------
+-- (A player's idea.) Ticked, a Buffs bar's icons (packed and fixed slots;
+-- a weapon enchant's spot too, not checked here) show the stack count in the middle at the
+-- countdown's size, and the countdown smaller along the bottom (or in the
+-- Spot picked): always, stacks or none, never reading a count. Out of a
+-- fight only, as the other details; ticked in one, it waits for the end.
+-- The Debuffs bars' icons and the buff times over your cooldown icons stay
+-- as they are. Unticked: back in the corner as they were made.
+
+;(function()
+    Fresh()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetAura("debuff", "Moonfire", true)
+    B:Assign("Wrath", "cd")
+    B:SetOption("cd", "showAuras", true)
+    B:SetOption("debuff", "showMissing", true)
+    B:Changed()
+    local packed = B:Get("buff").groupParts[1]
+    local fixed = B:Get("debuff").holders[1].slot
+    local over = B:Get("cd").auraAnchors[1].parts[1]
+    local function Pt(region, box)
+        local p = S[region].points[#S[region].points]
+        if not p then return "-" end
+        if p.n == 3 then return p[1] .. " " .. p[2] .. " " .. p[3] end -- (from its parent, as made)
+        return p[1] .. " " .. (p[2] == box and "box" or "?") .. " " .. p[4] .. " " .. p[5]
+    end
+    local function One(parts)
+        return tostring(Last(parts.count, "SetFontObject")) .. " " .. Pt(parts.count, parts.box) .. " / "
+            .. tostring(Last(parts.cooldown, "SetCountdownFont")) .. " " .. Pt(S[parts.cooldown].numbers or parts.cooldown)
+    end
+    local function All() return One(packed) .. " | " .. One(fixed) .. " | " .. One(over) end
+    local before = All()
+    Equal(tostring(packed.buff) .. " " .. tostring(fixed.buff) .. " " .. tostring(over.buff), "true false nil",
+        "only the Buffs bar's icons are buff icons")
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    ns.Set("bigStacks", true)
+    ns.Style:ApplyDetails()
+    local fight = All()
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(tostring(fight == before) .. " || " .. All(), "true || FECMFont18 CENTER box 0 0 / FECMFont13 BOTTOM ? 0 1 | "
+        .. before:match("| (.*)$"), "ticked in a fight: nothing till it ends; then the Buffs icon's count big in the middle,"
+        .. " its countdown small along the bottom, the Debuffs icon and the buff time over Wrath as they were")
+    -- A new Buffs icon comes in it; the Spot picked takes the small countdown.
+    ns.Set("countdownSpot", "TOPLEFT")
+    ns.Style:ApplyDetails()
+    B:SetOption("buff", "showMissing", true)
+    B:Changed()
+    local slot = B:Get("buff").holders[1].slot
+    Equal(One(slot), "FECMFont18 CENTER box 0 0 / FECMFont13 TOPLEFT ? 1 -1", "a fixed Buffs slot made while ticked: in it, the countdown"
+        .. " in the Spot picked")
+    ns.Set("countdownSpot", "CENTER")
+    -- Unticked: back in the corner at a count's size, the numbers in the middle.
+    ns.Set("bigStacks", false)
+    ns.Style:ApplyDetails()
+    Equal(One(slot) .. " | " .. One(packed), "FECMFont13 BOTTOMRIGHT box -1 1 / FECMFont18 CENTER ? 0 0 | FECMFont13 BOTTOMRIGHT box -1 1"
+        .. " / FECMFont18 CENTER ? 0 0", "unticked: each count back in its corner, the countdown big in the middle")
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- Icons drawn like Blizzard's on the aura containers' icons ----------------------------------------
 -- (A player's idea: Blizzard's look with Swap with my form.) Icon details'
 -- Icons reach the Buffs and Debuffs bars' icons (packed, fixed slots and the

@@ -1696,6 +1696,12 @@ end)()
     prdOn = false
     w:Refresh()
     Check("display off")
+    -- (Combo points staying up in its spot: Resource.lua R:AwayRoom.)
+    local away = ns.Resource.AwayRoom
+    ns.Resource.AwayRoom = function() return 8 end
+    w:Refresh()
+    Check("combo points")
+    ns.Resource.AwayRoom = away
     prdOn = true
     ns.Bars:SetUnlocked(true)
     w:Refresh()
@@ -1713,7 +1719,8 @@ end)()
     Check("bars off")
     ns.Set("useBars", true)
     Equal(table.concat(said, " | "), "Pick a layout to stack your bars around the display. | Your bars follow your resource display. | "
-        .. "Your rows close up where the display would be. | Unlocked: drag a bar on screen to move it. | "
+        .. "Your rows close up where the display would be. | Your rows close up round your combo points. | "
+        .. "Unlocked: drag a bar on screen to move it. | "
         .. "You moved a bar, so they're no longer stacked. | Your bars stay where you put them. | Your bars are off.",
         "every state's words, each clear of Undo, Reset and Turn on")
     Equal(#printed, 0, "no errors")
@@ -3405,6 +3412,32 @@ end)()
         Equal(tostring(ns.Get("keyPressGlow")) .. " " .. tostring(press:GetChecked()), "false false", "unticked: off again")
     end
 
+    -- Big stacks in the middle (a player's idea): a tick on Edge line's row,
+    -- in line with Totem time under it, off by default, its hover two lines
+    -- of the footer at most. Ticked, your Cooldowns icons stay as they are
+    -- and Defaults has it to put back.
+    do
+        local stacks = panel.stacks
+        local note = Note(stacks)
+        local edgeLeft, edgeTop = Fit.Rect(panel.edge)
+        local left, top, right = Fit.Rect(stacks)
+        local _, _, nameRight = Fit.Rect(panel.edgeColour.name)
+        Equal(tostring(stacks:IsVisible()) .. " " .. tostring(stacks:GetChecked()) .. " " .. S[stacks.text].text .. " "
+            .. tostring(ns.Get("bigStacks")) .. " | " .. note .. " | " .. tostring(Fit.Wide(note, "GameFontHighlightSmall") <= 2 * S[w.note].width)
+            .. " " .. tostring(top == edgeTop and left > nameRight and left == select(1, Fit.Rect(panel.totem)) and left > edgeLeft),
+            "true false Big stacks in the middle false | Buff icons show their stack count big in the middle and the countdown"
+            .. " small at the bottom, or in the Spot picked. Not on Cooldowns or Utility icons. | true true",
+            "Big stacks in the middle: off, its hover two lines at most, on Edge line's row right of its colour, over Totem time")
+        stacks:Click()
+        Equal(tostring(ns.Get("bigStacks")) .. " " .. tostring(stacks:GetChecked()) .. " " .. S[panel.defaults].alpha .. " "
+            .. Looks(icon.cooldown), "true true 1 0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0",
+            "ticked: on, Defaults has it to put back, your Cooldowns icons as they were")
+        Check(dialog, "Big stacks ticked")
+        stacks:Click()
+        Equal(tostring(ns.Get("bigStacks")) .. " " .. tostring(stacks:GetChecked()) .. " " .. S[panel.defaults].alpha, "false false 0.45",
+            "unticked: off again")
+    end
+
     -- Icons (a player's idea: Blizzard's look with Swap with my form): the
     -- first row, Square as always or Blizzard, neither hover marked
     -- experimental, each fitting two lines of the footer. Blizzard draws
@@ -3599,20 +3632,20 @@ end)()
     for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
     Equal(table.concat(back, " ") .. " " .. ns.Get("countdownColourCustom") .. " | " .. Looks(icon.cooldown) .. " | "
         .. Looks(panel.tray.icons[1].cooldown) .. " " .. S[panel.defaults].alpha .. " " .. #(S[icon.texture].masks or {}),
-        "black 30 100 white CENTER game false game square 00ffff |"
+        "black 30 100 white CENTER game false game square false 00ffff |"
         .. " 0,0,0,0.7 false FECMFont18 CENTER CENTER 0 0 | 0,0,0,0.7 false FECMFont20 CENTER CENTER 0 0 0.45 0",
         "Defaults: every detail back, square icons too, on your icons and the preview, the custom colour kept beside")
     -- Anything odd saved goes back to its default.
     kept = ForeverEnhancedCooldownManagerDB
     kept.swipeColour, kept.swipeSeeThrough, kept.countdownSize, kept.countdownColour = "pink", 101, 49.5, ns.CUSTOM
     kept.countdownColourCustom, kept.countdownSpot, kept.swipeEdge, kept.edgeColour = "zzzzzz", "MIDDLE", "yes", "gold"
-    kept.countdownFormat, kept.iconStyle = "hours", "round"
+    kept.countdownFormat, kept.iconStyle, kept.bigStacks = "hours", "round", "yes"
     w:Hide()
     ns = Start(kept)
     back = {}
     for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
     Equal(table.concat(back, " ") .. " " .. tostring(ForeverEnhancedCooldownManagerDB.countdownColourCustom),
-        "black 30 100 white CENTER game false game square nil", "odd values saved: each back to its default, a Custom with no colour too")
+        "black 30 100 white CENTER game false game square false nil", "odd values saved: each back to its default, a Custom with no colour too")
     _G.ColorPickerFrame = nil
     Equal(table.concat(found, " | "), "", "in every state: every piece inside the panel and none on another, under the title bar, clear of the footer")
     Equal(#printed, 0, "no errors from Icon details")

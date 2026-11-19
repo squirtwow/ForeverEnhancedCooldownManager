@@ -3,8 +3,9 @@
 -- Personal Resource Display to your rows, a bar or the /ccm debug box still
 -- being dragged as the game closes its windows (Escape, a loading screen,
 -- death), a bar held through a bag or spell change, a rebuild or a fight
--- ending, and What's new or the first-install welcome after a reload or
--- logout before they showed. The mock game is a copy of
+-- ending, What's new or the first-install welcome after a reload or
+-- logout before they showed, and combo points staying up with the display
+-- switched off (a reload too). The mock game is a copy of
 -- Tools/TestBars.lua's: Tools/TestMockSync.mjs checks the two match, and
 -- with --write copies it across. Tools/TestBars.lua is near the mock game's
 -- memory limit, so these run here.
@@ -1285,6 +1286,198 @@ do
     Equal(tostring(ForeverEnhancedCooldownManagerDB.welcomeDue) .. " " .. tostring(FECMTour == nil), "nil true",
         "a bad saved value: cleared, no welcome")
     Equal(#printed, 0, "no errors")
+end
+
+-- Combo points with the display switched off (Squirt's yes, 19 Nov 2026) --------------------------------------
+-- For setups of icons only: with Combo points ticked, a cat druid's (or a
+-- rogue's) stay up while the display is off. The addon's own row moves onto
+-- the screen in the display's spot, as wide as it and as tall as their
+-- height, your cast bar just under it and a layout's rows round it; back on,
+-- it goes back onto the display. Unticked, or a druid out of cat form, the
+-- rows close up where the display was, as before. After a reload with the
+-- display off (Blizzard hasn't loaded it) they're up from the start; with the
+-- display never seen, where your cast bar goes on its own. The display here
+-- runs 400 to 600 across, its middle 90 under the screen's; the restyle's
+-- 1px edge goes round it (202 by 22).
+
+do
+    local function At(frame)
+        local p = S[frame].points[1]
+        return p and string.format("%s %g %g", p[1], p[4], p[5]) or "none"
+    end
+    local function G(n) return string.format("%g", n) end
+    local function Size(frame) return G(S[frame].width) .. "x" .. G(S[frame].height) end
+    local power = 3 -- your power: 3 energy (cat form), 0 mana (caster form)
+    _G.UnitPowerType = function() return power end
+    Fresh()
+    local prd = Display()
+    local ns = Load({ useBars = true, prdCombo = true, castBar = true })
+    local B, L, R, C = ns.Bars, ns.Layout, ns.Resource, ns.CastBar
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "util")
+    L:Apply("pyramid")
+    local row = R.combo
+    -- Cooldowns over the display, your cast bar and Utility under it.
+    local function Stack() return At(B:Get("cd")) .. " | " .. At(C.row) .. " | " .. At(B:Get("util")) end
+    local function Home() return S[row].parent == prd and "display" or S[row].parent == UIParent and "screen" or "elsewhere" end
+    local ON = "BOTTOM 0 -79 | TOP 0 -105 | TOP 0 -123"
+    Equal(table.concat({ Home(), tostring(S[row].shown), At(row), tostring(R:ComboRow() == row), tostring(R:AwayRoom()), Stack() }, " "),
+        "display true TOPLEFT 0 -4 true nil " .. ON, "the display on: the row under its power bar, as before")
+
+    -- Switched off in Options: onto the screen in the display's spot, 200 by
+    -- its 8 (the power bar's height), at the top of its room; Cooldowns on
+    -- it, the cast bar under it as under the display (4 apart), Utility under that.
+    prdOn = false
+    Fire("CVAR_UPDATE", "nameplateShowSelf", "0")
+    local OFF = "BOTTOM 0 -85 | TOP 0 -99 | TOP 0 -117"
+    Equal(table.concat({ Home(), tostring(S[row].shown), At(row), Size(row), tostring(R:ComboRow()),
+        tostring(R:AwayRoom()), G(L:Display().height), Stack() }, " "), "screen true TOP 0 -86 200x8 nil 8 10 " .. OFF,
+        "switched off: the row on the screen in the display's spot, the cast bar under it, the rows round it")
+    Equal(G(S[C.row].width) .. " " .. tostring(S[row].points[1][2] == UIParent), "200 true", "as wide as your cast bar under it")
+    -- Only a change stacks again: nothing new, or points coming in, never;
+    -- the same switch again, its own stack only.
+    local stacks, Stack0 = 0, L.Stack
+    L.Stack = function(self, ...)
+        stacks = stacks + 1
+        return Stack0(self, ...)
+    end
+    R:Apply()
+    Fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
+    local quiet = stacks
+    Fire("CVAR_UPDATE", "nameplateShowSelf", "0")
+    Equal(quiet .. " " .. stacks .. " " .. Stack(), "0 1 " .. OFF, "nothing new: no stack; the switch again: its own stack only")
+    L.Stack = Stack0
+    -- Unticked: the rows close up where the display was, as before.
+    ns.Set("prdCombo", false)
+    R:Apply()
+    local CLOSED = "BOTTOM 0 -90 | TOP 0 -90 | TOP 0 -108"
+    Equal(tostring(S[row].shown) .. " " .. tostring(R:AwayRoom()) .. " " .. G(L:Display().height) .. " " .. Stack(), "false nil 0 " .. CLOSED,
+        "unticked: no row, the rows close up as before")
+    ns.Set("prdCombo", true)
+    R:Apply()
+    Equal(tostring(S[row].shown) .. " " .. Stack(), "true " .. OFF, "ticked again: back in the display's spot")
+    -- A druid out of cat form: as before; back in it, up again.
+    power = 0
+    Fire("UPDATE_SHAPESHIFT_FORM")
+    local caster = tostring(S[row].shown) .. " " .. Stack()
+    power = 3
+    Fire("UPDATE_SHAPESHIFT_FORM")
+    Equal(caster .. " | " .. tostring(S[row].shown) .. " " .. Stack(), "false " .. CLOSED .. " | true " .. OFF,
+        "out of cat form: the rows close up as before; in it again: the row back")
+    -- In a fight your power can be secret: the row stays as it was, and your
+    -- points go to it as they are, never read.
+    power = SECRET
+    lockdown = true
+    Fire("UNIT_DISPLAYPOWER", "player")
+    _G.UnitPower = function() return SECRET end
+    Fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
+    Equal(tostring(S[row].shown) .. " " .. tostring(IsSecret(Last(row.segments[1], "SetValue"))) .. " " .. Stack(), "true true " .. OFF,
+        "a secret power type in a fight: the row stays, your secret points handed straight on")
+    _G.UnitPower = function() return 0 end
+    power = 3
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+
+    -- Back on: onto the display again, the rows round it as at first.
+    prdOn = true
+    Fire("CVAR_UPDATE", "nameplateShowSelf", "1")
+    Equal(table.concat({ Home(), tostring(S[row].shown), At(row), tostring(R:ComboRow() == row), tostring(R:AwayRoom()), Stack() }, " "),
+        "display true TOPLEFT 0 -4 true nil " .. ON, "switched on again: back under the display's power bar")
+    -- Edit Mode's Visibility set to Hidden (read, never changed): the same as
+    -- switched off; Always: back.
+    Enum.PersonalResourceDisplayVisibleSetting = { Always = 0, InCombat = 1, Hidden = 2 }
+    rawset(prd, "visibleSetting", 2)
+    prd:Hide()
+    local hidden = Home() .. " " .. At(row) .. " " .. Stack()
+    rawset(prd, "visibleSetting", 0)
+    prd:Show()
+    Equal(hidden .. " | " .. Home() .. " " .. Stack(), "screen TOP 0 -86 " .. OFF .. " | display " .. ON,
+        "Edit Mode's Hidden: on the screen, then back on the display with Always")
+    Enum.PersonalResourceDisplayVisibleSetting = nil
+
+    -- A reload with the display off: Blizzard hasn't loaded it, and the row
+    -- is up from the start where the display was last seen.
+    prdOn = false
+    _G.PersonalResourceDisplayFrame = nil
+    ns = Reload()
+    RunTimers()
+    B, L, R, C = ns.Bars, ns.Layout, ns.Resource, ns.CastBar
+    row = R.combo
+    Equal(table.concat({ tostring(row ~= nil and S[row].parent == UIParent), tostring(S[row].shown), At(row),
+        Size(row), Stack() }, " "), "true true TOP 0 -86 216x8 " .. OFF,
+        "after a reload with the display off: up from the start, in its spot, as wide as your widest row (Match)")
+    -- Not loaded, the game can't measure it: the row and your cast bar are as
+    -- wide as the display is given, so they keep up with your rows as they
+    -- widen; your own width with Match unticked; neither, as last seen.
+    local function Wide() return G(S[row].width) .. " " .. G(S[C.row].width) .. " " .. G(L:MatchWidth() or 0) end
+    local per = ns.BarData("cd").perRow
+    B:SetOption("cd", "perRow", per + 2)
+    local wider = Wide()
+    ns.Set("prdMatch", false)
+    ns.Set("prdOwnWidth", true)
+    ns.Set("prdWidth", 250)
+    L:Stack()
+    local own = Wide()
+    ns.Set("prdOwnWidth", false)
+    L:Stack()
+    Equal(wider .. " | " .. own .. " | " .. Wide() .. " | " .. Stack(), "288 288 288 | 250 250 0 | 200 200 0 | " .. OFF,
+        "not loaded: the row and cast bar follow a widened row, then your own width, then as last seen")
+    ns.Set("prdMatch", true)
+    B:SetOption("cd", "perRow", per)
+    -- The window says so: the Look page still lists Combo points to colour
+    -- (the display's own bars wait for it to load), and the Layout page's
+    -- line and its tick's note say they stay in its spot.
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("look")
+    local listed = {}
+    for _, each in ipairs(w.eachRows) do
+        if S[each].shown then listed[#listed + 1] = S[each.name].text end
+    end
+    w:Select("layout")
+    local lp = w.pages.layout
+    Equal(tostring(listed[1]) .. " | " .. S[lp.status].text .. " | " .. lp.shown.hint(lp.shown), "Combo points | "
+        .. "Your rows close up round your combo points. | Blizzard's display, as in Options > Combat. Off, your rows close up where"
+        .. " it was. Your combo points stay in its spot.", "the window: Combo points to colour, and the Layout page says they stay up")
+    w:Hide()
+    -- Switched on: Blizzard loads the display, and the row goes onto it.
+    prdOn = true
+    prd = Display()
+    Fire("ADDON_LOADED", "Blizzard_PersonalResourceDisplay")
+    RunTimers()
+    Equal(Home() .. " " .. At(row) .. " " .. tostring(R:AwayRoom()) .. " " .. Stack(), "display TOPLEFT 0 -4 nil " .. ON,
+        "switched on after it: onto the display as Blizzard loads it")
+
+    -- Never seen (a first login with the display off): where your cast bar
+    -- goes on its own, 150 under the middle, the cast bar under it; with a
+    -- layout, the rows round it there. Nothing at the middle of the screen.
+    Fresh()
+    _G.PersonalResourceDisplayFrame = nil
+    prdOn = false
+    ns = Load({ useBars = true, prdCombo = true, castBar = true })
+    B, L, R, C = ns.Bars, ns.Layout, ns.Resource, ns.CastBar
+    row = R.combo
+    local alone = At(row) .. " " .. Size(row) .. " " .. At(C.row)
+    B:Assign("Moonfire", "cd")
+    B:Assign("Wrath", "util")
+    L:Apply("pyramid")
+    Equal(alone .. " | " .. At(row) .. " " .. G(S[row].width) .. " " .. Stack(), "TOP 0 -146 200x8 TOP 0 -158 | TOP 0 -146 216 BOTTOM 0 -146"
+        .. " | TOP 0 -158 | TOP 0 -176", "never seen: under the middle with your cast bar under it; with a layout, the rows round it")
+    -- A rogue's the same; another class: none made, nothing changes.
+    Fresh()
+    _G.UnitClass = function() return "Rogue", "ROGUE" end
+    ns = Load({ useBars = true, prdCombo = true, castBar = true })
+    local rogue = ns.Resource.combo
+    Equal(tostring(rogue ~= nil and S[rogue].shown) .. " " .. At(rogue), "true TOP 0 -146", "a rogue's the same")
+    Fresh()
+    _G.UnitClass = function() return "Mage", "MAGE" end
+    ns = Load({ useBars = true, prdCombo = true, castBar = true })
+    Equal(tostring(ns.Resource.combo) .. " " .. tostring(ns.Resource:AwayRoom()) .. " " .. At(ns.CastBar.row), "nil nil TOP 0 -150",
+        "a mage: no row, the cast bar where it always went")
+    Equal(#printed, 0, "no errors")
+    prdOn = true
+    _G.UnitPowerType = nil
+    _G.PersonalResourceDisplayFrame = nil
 end
 
 print = _G.print

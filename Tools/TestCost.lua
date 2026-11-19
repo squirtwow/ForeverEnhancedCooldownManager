@@ -1467,6 +1467,137 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Swap to my next ammo (General page): off by default and nothing heard;
+-- ticked, out of ammo out of a fight, the best you can use goes in ----------------
+
+do
+    local ns = Start({ notesSeen = "dev" })
+    local Sp = ns.Spells
+    _G.UnitClass = function() return "Hunter", "HUNTER" end
+    local level, dead = 30, false
+    _G.UnitLevel = function(unit) assert(unit == "player"); return Typed("number", level) end
+    _G.UnitIsDeadOrGhost = function(unit) assert(unit == "player"); return dead end
+    -- Arrows (2512 Rough, 2515 Sharp, 3030 Razor, 11285 Jagged) and shot
+    -- (2516 Light, 2519 Heavy): item level and the level each needs. 2508
+    -- is a gun.
+    local instant = C_Item.GetItemInfoInstant
+    C_Item.GetItemInfoInstant = function(id)
+        local kind = ({ [2515] = 2, [3030] = 2, [11285] = 2, [2519] = 3 })[id]
+        if kind then return id, nil, nil, "INVTYPE_AMMO", nil, 6, kind end
+        if id == 2508 then return id, nil, nil, "INVTYPE_RANGEDRIGHT", nil, 2, 3 end
+        return instant(id)
+    end
+    local LEVELS = { [2512] = { 5, 1 }, [2515] = { 15, 10 }, [3030] = { 30, 25 }, [11285] = { 40, 40 }, [2516] = { 5, 1 }, [2519] = { 15, 10 } }
+    C_Item.GetItemInfo = function(id)
+        local item = LEVELS[id]
+        if item then return "Ammo", nil, 1, item[1], item[2] end
+    end
+    local equipped = {}
+    C_Item.EquipItemByName = function(id)
+        equipped[#equipped + 1] = id
+        ammo, ammoCount = id, itemCount[id] or 0
+    end
+    local function Went() return table.concat(equipped, " ") end
+    RangedWorn = 2504 -- a bow
+    for _, id in ipairs({ 2512, 2515, 3030, 11285, 2519, 118 }) do bagItems[#bagItems + 1] = { itemID = id } end
+    itemCount[2512], itemCount[2515], itemCount[3030], itemCount[11285], itemCount[2519] = 0, 50, 20, 200, 100
+    ammo, ammoCount = 2512, 0 -- out of Rough Arrows
+
+    -- Off by default: nothing goes in, and nothing listens for it.
+    Equal(tostring(ns.Get("ammoSwap")), "false", "Swap to my next ammo is off by default")
+    Fire("BAG_UPDATE_DELAYED")
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Went() .. "|" .. tostring(Sp:SwapAmmo()), "|nil", "off: out of ammo, nothing goes in")
+
+    -- Ticked: the best you can use at 30 goes in at once (Razor, not
+    -- Jagged at 40, not the Rough you're out of).
+    ns.Set("ammoSwap", true)
+    Sp:ApplyAmmoSwap()
+    Equal(Went(), "3030", "ticked and out: Razor Arrows go in at once")
+    -- Not out: nothing more.
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went(), "3030", "with ammo left nothing changes")
+
+    -- Out in a fight: nothing until it ends, then the next best.
+    itemCount[3030], ammoCount, lockdown = 0, 0, true
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went(), "3030", "out in a fight: nothing in combat")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Went(), "3030 2515", "the fight over: Sharp Arrows go in")
+
+    -- A gun fires shot, not arrows.
+    itemCount[2515], ammoCount = 0, 0
+    RangedWorn = 2508
+    Fire("PLAYER_EQUIPMENT_CHANGED", 18, false)
+    Equal(Went(), "3030 2515 2519", "with a gun: Heavy Shot, not the arrows")
+
+    -- Dead: nothing until you're back.
+    itemCount[2519], ammoCount = 0, 0
+    itemCount[2516] = 30
+    bagItems[#bagItems + 1] = { itemID = 2516 }
+    dead = true
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went(), "3030 2515 2519", "while dead nothing goes in")
+    dead = false
+    Fire("PLAYER_ALIVE")
+    Equal(Went(), "3030 2515 2519 2516", "back alive: Light Shot goes in")
+
+    -- Too low a level: Jagged Arrows (40) stay in the bag; a wand fires none.
+    itemCount[2516], ammoCount = 0, 0
+    RangedWorn = 2504
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went(), "3030 2515 2519 2516", "only ammo you can't use yet: nothing goes in")
+    level = 40
+    Fire("PLAYER_LEVEL_UP", 40)
+    Equal(Went(), "3030 2515 2519 2516 11285", "at 40 Jagged Arrows go in")
+    itemCount[11285], ammoCount = 0, 0
+    itemCount[3030] = 20
+    RangedWorn = 5240 -- a wand
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went(), "3030 2515 2519 2516 11285", "with a wand nothing goes in")
+
+    -- Turned down by the game: the same ammo isn't tried again at once.
+    RangedWorn = 2504
+    C_Item.EquipItemByName = function(id) equipped[#equipped + 1] = id end -- stays out
+    Fire("BAG_UPDATE_DELAYED")
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went(), "3030 2515 2519 2516 11285 3030", "turned down: tried once, not every bag change")
+    clock = clock + 6
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went(), "3030 2515 2519 2516 11285 3030 3030", "tried again a few seconds later")
+
+    -- Unticked: nothing goes in, and nothing hears for it.
+    ns.Set("ammoSwap", false)
+    Sp:ApplyAmmoSwap()
+    clock = clock + 6
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went(), "3030 2515 2519 2516 11285 3030 3030", "unticked: nothing more goes in")
+
+    -- A class without ammo: nothing, even ticked.
+    ns.Set("ammoSwap", true)
+    _G.UnitClass = function() return "Druid", "DRUID" end
+    Sp:ApplyAmmoSwap()
+    clock = clock + 6
+    Fire("BAG_UPDATE_DELAYED")
+    Equal(Went() .. "|" .. tostring(Sp:SwapAmmo()), "3030 2515 2519 2516 11285 3030 3030|nil", "a druid: nothing, even ticked")
+
+    -- The tick on the General page: hunters, warriors and rogues only.
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("general")
+    Equal(tostring(w.ammoSwap:IsShown()), "false", "a druid has no Swap to my next ammo tick")
+    _G.UnitClass = function() return "Hunter", "HUNTER" end
+    w:Refresh()
+    Equal(tostring(w.ammoSwap:IsShown()) .. " " .. tostring(w.ammoSwap:GetChecked()), "true true", "a hunter sees it, ticked")
+    w.ammoSwap:Click()
+    Equal(tostring(ns.Get("ammoSwap")), "false", "unticking it saves the choice")
+    w:Hide()
+    _G.UnitClass = function() return "Druid", "DRUID" end
+    RangedWorn, _G.UnitLevel, _G.UnitIsDeadOrGhost = nil, nil, nil
+    Equal(#printed, 0, "no errors")
+end
+
 Equal(SecretMisuse[1], nil, "no secret misused anywhere")
 print = _G.print
 io.write("Cost checks passed: " .. checks .. " assertions.\n")

@@ -1208,13 +1208,21 @@ local function IconPanel(window)
     local edge, edgeColour = EdgeRow(window, dialog, Changed)
     At(edge, 16, 5, 2)
     At(edgeColour, DETAIL.at, 5)
+    -- Big stacks in the middle beside it (Style.lua, a player's idea): buff icons only.
+    local stacks = T:Check(dialog, "Big stacks in the middle", function(self)
+        ns.Set("bigStacks", self:GetChecked())
+        Changed()
+    end)
+    window:Hint(stacks, "Buff icons show their stack count big in the middle and the countdown small at the bottom, or in"
+        .. " the Spot picked. Not on Cooldowns or Utility icons.")
+    At(stacks, DETAIL.at + 140, 5, 2)
     local press = PressRow(window, dialog)
     At(press, 16, 6, 2)
     local totem = TotemRow(window, dialog)
     At(totem, DETAIL.at + 140, 6, 2)
     shade.swipeColour, shade.seeThrough, shade.size, shade.countdownColour = swipeColour, seeThrough, size, countdownColour
     shade.spot, shade.format, shade.edge, shade.edgeColour = spot, format, edge, edgeColour
-    shade.iconStyle, shade.press, shade.totem = iconStyle, press, totem
+    shade.iconStyle, shade.press, shade.totem, shade.stacks = iconStyle, press, totem, stacks
 
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     note:SetWidth(DETAIL.width - 32)
@@ -1259,6 +1267,7 @@ local function IconPanel(window)
         format:SetSelected(ns.Get("countdownFormat"))
         press:SetChecked(ns.Get("keyPressGlow"))
         totem:SetChecked(ns.Get("totemTime"))
+        stacks:SetChecked(ns.Get("bigStacks"))
         local edgeOn = ns.Get("swipeEdge") == true
         edge:SetChecked(edgeOn)
         edgeColour:SetEnabled(edgeOn)
@@ -1904,6 +1913,11 @@ local function BuildLook(window, page, width)
         if window.comboSetUp then window.comboSetUp:Toggle(self) end
     end)
     window:Hint(window.comboSetUpButton, "How tall the combo points are, and whether they go under or over the display.")
+    -- Beside Combo points' Set up, under the druids' energy tick (a player's idea).
+    local hideSpent = Choice("Hide spent flash", "prdHideSpent", -182,
+        "The fading flash on your power bar after you spend energy, rage or mana: hidden, so the bar drops straight away.",
+        function() if ns.Resource then ns.Resource:Apply() end end, 192) -- (past Set up)
+    window.hideSpent = hideSpent
     -- Druids only: their energy in other forms, beside the extra mana bar's
     -- tick (both their form bars on one row) and clear of Thick edges.
     local energyTick = Choice("Show energy bar in other forms", "prdEnergy", -160,
@@ -2226,6 +2240,7 @@ local function BuildLook(window, page, width)
         personal:SetChecked(ns.Get("prdSkin"))
         repeatMana:SetChecked(ns.Get("prdHideRepeat"))
         combo:SetChecked(ns.Get("prdCombo"))
+        hideSpent:SetChecked(ns.Get("prdHideSpent"))
         if window.comboSetUp and window.comboSetUp:IsOpen() then window.comboSetUp:Refresh() end
         energyTick:SetChecked(ns.Get("prdEnergy"))
         textRow:Refresh()
@@ -2285,7 +2300,10 @@ local function BuildLook(window, page, width)
                 base = SAMPLE_BARS.power.colour }
         end
         local _, class = UnitClass("player")
-        if display and ns.Get("prdCombo") and (class == "ROGUE" or class == "DRUID") then
+        -- Combo points also with the display switched off, not loaded: they
+        -- stay up in its spot then (Resource.lua).
+        local comboUp = display or ns.Layout ~= nil and ns.Layout:DisplayOff()
+        if comboUp and ns.Get("prdCombo") and (class == "ROGUE" or class == "DRUID") then
             entries[#entries + 1] = { setting = "prdComboColour", name = "Combo points",
                 icon = "Interface\\Icons\\Ability_Rogue_Eviscerate", back = "red", base = ns.Resource.COMBO_RED }
         end
@@ -2637,6 +2655,16 @@ local function BuildGeneral(window, page)
     window:Hint(ignoreTarget, "Out of combat, bars set to Fade or Hide stay faded or hidden with an enemy targeted."
         .. " They still come back in combat.")
     window.oocIgnoreTarget = ignoreTarget
+    -- Beside it, for hunters, warriors and rogues (off unless ticked): out
+    -- of ammo, the best arrows or shot in your bags go in (Spells.lua).
+    local ammoSwap = T:Check(page, "Swap to my next ammo", function(self)
+        ns.Set("ammoSwap", self:GetChecked())
+        ns.Spells:ApplyAmmoSwap()
+    end)
+    ammoSwap:SetPoint("TOPLEFT", 260, -58)
+    window:Hint(ammoSwap, "Out of ammo, the best arrows or shot in your bags go in."
+        .. " Out of a fight only: run out in one and it swaps as it ends.")
+    window.ammoSwap = ammoSwap
     Detail(page, "Cooldowns, Utility, Buffs and Debuffs bars of your own, set up on the left. Move and arrange them on the Layout page.", 34, -78)
 
     T:Heading(page, "Minimap button"):SetPoint("TOPLEFT", 16, -118)
@@ -2740,6 +2768,8 @@ local function BuildGeneral(window, page)
         bars:SetChecked(B:Enabled())
         families:SetChecked(ns.Get("groupFamilies"))
         ignoreTarget:SetChecked(ns.Get("oocIgnoreTarget"))
+        ammoSwap:SetShown(ns.Spells:UsesAmmo())
+        ammoSwap:SetChecked(ns.Get("ammoSwap"))
         minimap:SetChecked(ns.Get("minimap"))
         free:SetChecked(ns.Get("minimapFree"))
         updates:SetChecked(ns.Get("updateNotice"))

@@ -1050,6 +1050,19 @@ local function TotemGame()
             HasSecretValues = function() return TotemsSecret end }
     end
     C_Secrets.ShouldTotemSlotBeSecret = function(slot) assert(type(slot) == "number"); return TotemsSecret end
+    -- Where you are (UnitPosition: north, west, height, map): Where = { x, y, map }, SECRET (kept from
+    -- you), or nil (a dungeon). WhereAsks counts the asks.
+    Where, WhereAsks = nil, 0
+    _G.UnitPosition = function(unit)
+        assert(unit == "player")
+        WhereAsks = WhereAsks + 1
+        if rawequal(Where, SECRET) then
+            local n = SECRETS.number
+            return n, n, n, n
+        end
+        if not Where then return nil end
+        return Where.y, Where.x, 0, Where.map
+    end
     -- Each spell's art: its ID and seven million (Searing's 7003599).
     C_Spell.GetSpellTexture = function(id) return 7000000 + id end
     C_Spell.GetSpellCooldown = function() return { isEnabled = true, isOnGCD = false, startTime = 0, duration = 0, modRate = 1 } end
@@ -1984,7 +1997,7 @@ end
         Equal(S[M8.bar].shown, true, "the bar never hidden")
     end
 
-    -- 19 and 20. Share strings and profiles leave it alone ----------------------------------------
+    -- 19 and 20. Share strings carry it with the look (27, below); profiles leave it alone ---------
     do
         local ns4, M4 = T.ns4, T.M4
         local share = ns4.ProfileShare
@@ -1994,15 +2007,17 @@ end
         ns4.Set("totemRange", true)
         ns4.Set("totemX", 123)
         M4:Apply()
-        Equal(share.Export(), before, "no totem setting in a share string")
+        local look = share.Read(share.Export()).setup.look
+        Equal(tostring(share.Export() ~= before) .. " " .. tostring(look.totemSize) .. " " .. tostring(look.totemOrder) .. " "
+            .. tostring(look.totemRange) .. " " .. tostring(look.totemX), "true 50 awfe true 123", "its settings go in a share string, with the look")
         local function Totems()
             local out = {}
             for _, key in ipairs({ "totemBar", "totemSize", "totemOrder", "totemRange", "totemX", "totemY" }) do out[#out + 1] = tostring(ns4.Get(key)) end
             return table.concat(out, " ")
         end
         local kept = Totems()
-        share.Import("Shared", before, true)
-        Equal(Totems(), kept, "an import leaves every totem setting as it was")
+        share.Import("Shared", share.Read(before), false)
+        Equal(Totems(), kept, "an import without its look leaves every totem setting as it was")
         ns4.NewProfile("Second")
         Equal(Totems(), kept, "a new profile too")
         ns4.UseProfile(ns4.ProfileName())
@@ -2075,6 +2090,379 @@ end
         table.sort(missing)
         Equal(table.concat(missing, ", "), "", "every buff ID is one the game data gives its totem")
     end
+end)()
+
+-- 26. Stack it with my bars: the Totems bar as a row in your layout (Squirt's yes, 19 Nov 2026) ---------
+-- No display here, so the stack goes round the middle 150 down; Utility has
+-- an icon (36 tall), the other bars none (they take no room).
+;(function()
+    local ns, M = Fresh({ totemBar = true, useBars = true })
+    local L, B = ns.Layout, ns.Bars
+    local function Rows() return table.concat(ns.LayoutData().above, ",") .. "|" .. table.concat(ns.LayoutData().below, ",") end
+    Equal(tostring(L:TotemsStacked()) .. " " .. tostring(L:HoldsTotems()) .. " " .. At(M.bar), "false false CENTER -300 -175",
+        "off by default: no row in your layout, the bar in its own spot")
+    B:Assign("Attack", "util")
+    L:Apply("pyramid")
+    Equal(Rows(), "cd|util,buff,debuff", "a preset: no Totems row added")
+
+    -- Ticked: the bottom row, placed as a bar's: its top under the row above, its middle on the display's.
+    local ok, message = L:StackTotems(true)
+    Equal(tostring(ok) .. " " .. message .. " | " .. Rows(), "true The Totems bar is the bottom row of your layout. Order it on the"
+        .. " Layout page. | cd|util,buff,debuff,totems", "ticked: its row at the bottom of your layout")
+    Equal(At(B:Get("util")) .. " | " .. At(M.bar) .. " " .. N(S[M.bar].width) .. "x" .. N(S[M.bar].height) .. " " .. tostring(L:HoldsTotems()),
+        "TOP 0 -150 | TOP 0 -186 156x36 true", "placed centred under Utility (36 down), held by the layout")
+
+    -- The Layout page: its row in its place, its own icons, the arrows only.
+    ns.ShowWindow()
+    local w = FECMFrame
+    w:Select("layout")
+    local page = w.pages.layout
+    local row = page.totemRow
+    local arts = {}
+    for i, tile in ipairs(row.tiles) do arts[i] = tostring(S[tile].texture) end
+    Equal(tostring(S[row].shown) .. " " .. S[row.name].text .. " | " .. S[row.across].text .. " | " .. table.concat(arts, ","),
+        "true Totems | 4 across | 7008071,7003599,7005675,7008512", "drawn as Totems: Earth, Fire, Water and Air, 4 across")
+    Equal(tostring(rawget(row, "fewer")) .. " " .. tostring(rawget(row, "wider")) .. " " .. tostring(rawget(row, "out")) .. " "
+        .. tostring(page.rows.totems), "nil nil nil nil", "no - or +, no take out, and not one of your bars' rows (nothing dropped goes on it)")
+    local _, rowTop = Fit.Rect(row)
+    local _, debuffTop = Fit.Rect(page.rows.debuff)
+    Equal(tostring(rowTop > debuffTop) .. " | " .. Fit.Note(row.up) .. " | " .. Fit.Note(row.down), "true | Move Totems up the stack,"
+        .. " swapping places with Debuffs. | Totems is already at the bottom.", "under Debuffs, its arrows saying what they do")
+    ns.Set("totemPerRow", 2)
+    M:Apply()
+    w:Refresh()
+    local tile = S[row.tiles[1]]
+    Equal(S[row.across].text .. " " .. tostring(S[row.strip].height == 2 * tile.height + 2) .. " " .. At(row.tiles[3]),
+        "2 across true TOPLEFT 0 " .. N(-(tile.height + 2)), "2 across: two lines of two")
+    ns.Set("totemPerRow", 4)
+    M:Apply()
+    row.up:Click()
+    Equal(Rows() .. " | " .. S[w.note].text, "cd|util,buff,totems,debuff | Totems and Debuffs swapped rows.",
+        "its up arrow: swapped with Debuffs, order only")
+    -- An icon held over it and let go: it takes no spells, so the icon stays on its bar.
+    local held = page.rows.util.tiles[1]
+    S[held].scripts.OnDragStart(held)
+    S[row].mouseOver = true
+    S[page.ghost].scripts.OnUpdate(page.ghost)
+    local footer = S[w.note].text .. " " .. tostring(S[page.ghost.texture].desaturated) .. " " .. tostring(S[page.mark].shown == true)
+    S[held].scripts.OnDragStop(held)
+    S[row].mouseOver = nil
+    Equal(footer .. " | " .. table.concat(ns.BarData("util").spells, ","), "The Totems bar takes no spells. Let go to leave Attack"
+        .. " where it is. true false | Attack", "an icon let go over it: greyed, nothing outlined, and it stays on Utility")
+
+    -- The Totems page: its tick, and Move while it's in your layout.
+    w:Select("totems")
+    local tp = w.pages.totems
+    Equal(tostring(tp.stack:GetChecked()) .. " | " .. S[tp.where].text .. " | " .. Fit.Note(tp.stack) .. " | " .. Fit.Note(tp.move),
+        "true | In your layout. Order it on the Layout page. | It takes a row in your layout, under your other rows. Put it in order"
+        .. " on the Layout page. | It's in your layout: order it on the Layout page.", "the tick on, where it shows, its notes")
+    Equal(Fit.Note(tp.reset), "Puts its own spot back where it started, for when it leaves your layout.",
+        "Reset's note while it's in your layout")
+    tp.move:Click()
+    Equal(tostring(S[w].shown) .. " " .. S[w.note].text, "true It's in your layout: order it on the Layout page.",
+        "Move: refused while it's in your layout, and why")
+    tp.stack:Click()
+    Equal(tostring(tp.stack:GetChecked()) .. " " .. Rows() .. " " .. At(M.bar) .. " | " .. S[w.note].text, "false cd|util,buff,debuff"
+        .. " CENTER -300 -175 | The Totems bar is out of your layout, back in its own spot.", "unticked: out of your layout, back in its own spot")
+    tp.stack:Click()
+    Equal(tostring(tp.stack:GetChecked()) .. " " .. Rows(), "true cd|util,buff,debuff,totems", "ticked again: at the bottom")
+    w:Hide()
+
+    -- Names on: a row under it goes down by its height and its names' room (36 and 14).
+    ns.Set("totemNames", true)
+    M:Apply()
+    L:Swap("totems", -1)
+    L:Swap("totems", -1)
+    Equal(Rows() .. " | " .. At(M.bar) .. " | " .. At(B:Get("buff")), "cd|util,totems,buff,debuff | TOP 0 -186 | TOP 0 -236",
+        "up two, under Utility: Buffs under it by its height and names")
+    local util = ns.BarData("util").perRow
+    ok, message = L:Swap("totems", -1)
+    Equal(Rows() .. " | " .. message .. " | " .. util .. " " .. ns.BarData("util").perRow .. " " .. ns.Get("totemPerRow"),
+        "cd|totems,util,buff,debuff | Totems and Utility swapped rows. | 5 5 4", "swapped with Utility: order only, each keeps its icons across")
+    Equal(At(M.bar) .. " | " .. At(B:Get("util")), "TOP 0 -150 | TOP 0 -200", "Totems right under the display, Utility under its names")
+    L:Swap("totems", -1)
+    Equal(Rows() .. " | " .. At(M.bar) .. " | " .. At(B:Get("cd")), "totems|cd,util,buff,debuff | BOTTOM 0 -136 | TOP 0 -150",
+        "past Cooldowns, above the display: it sits on its names, growing up")
+
+    -- Its width counts for your widest row (Match the resource display to my rows).
+    local before = L:WidestRow()
+    ns.Set("totemSize", 64)
+    M:Apply()
+    Equal(N(before) .. " " .. N(L:WidestRow()), "180 268", "Utility's 5 of 36 the widest, then the Totems bar's 4 of 64 with 4 between")
+    ns.Set("totemSize", 36)
+    ns.Set("totemNames", false)
+    M:Apply()
+    L:Swap("totems", 1)
+    Equal(Rows() .. " | " .. At(M.bar) .. " | " .. At(B:Get("util")), "cd|totems,util,buff,debuff | TOP 0 -150 | TOP 0 -186",
+        "back under the display, names off")
+
+    -- In a fight once it holds the game's slots: never moved, its room kept
+    -- for the rows under it; placed as the fight ends.
+    ns.Set("totemRange", true)
+    M:Apply()
+    local slots = 0
+    for _ in pairs(Holders(M)) do slots = slots + 1 end
+    Equal(slots, 4, "Red when out of range: the game's slots made")
+    lockdown = true
+    Fire("PLAYER_REGEN_DISABLED")
+    ns.LayoutData().gap = 4
+    L:Stack()
+    Equal(At(M.bar) .. " | " .. At(B:Get("util")) .. " | " .. tostring(L.pending), "TOP 0 -150 | TOP 0 -194 | true",
+        "in a fight: the Totems bar stays put, Utility still leaves its room")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(At(M.bar) .. " " .. tostring(L.pending), "TOP 0 -154 nil", "placed as the fight ends")
+    L:SetGap(0)
+
+    -- The bar off: its row stays saved but takes no room, and can't be swapped.
+    L:Swap("totems", 1)
+    ns.Set("totemBar", false)
+    M:Apply()
+    Equal(Rows() .. " | " .. table.concat(L:Rows(), ",") .. " | " .. tostring(L:CanSwap("totems", -1)) .. " " .. tostring(L:CanSwap("util", 1))
+        .. " " .. tostring(L:HoldsTotems()) .. " " .. At(B:Get("buff")), "cd|util,totems,buff,debuff | cd,util,buff,debuff | false true false"
+        .. " TOP 0 -186", "off: kept in your layout, but no row: Buffs right under Utility")
+    ns.Set("totemBar", true)
+    M:Apply()
+    Equal(At(M.bar) .. " | " .. At(B:Get("buff")), "TOP 0 -186 | TOP 0 -222", "on again: back in its row")
+    -- Ticked while the bar's off: saved at the bottom, and it says what's missing.
+    ns.Set("totemBar", false)
+    M:Apply()
+    ok, message = L:StackTotems(true)
+    Equal(message .. " | " .. Rows(), "The Totems bar joins your layout once you tick Show the Totems bar. | cd|util,buff,debuff,totems",
+        "ticked with the bar off: its row saved, and the footer says to show the bar")
+    ns.Set("totemBar", true)
+    M:Apply()
+
+    -- A preset, Reset and Undo: it stays, at the bottom.
+    L:Apply("wide")
+    Equal(Rows(), "cd|util,buff,debuff,totems", "another preset: still stacked, at the bottom")
+    L:Reset()
+    Equal(Rows(), "cd|util,buff,debuff,totems", "Reset: the same")
+    L:Apply("sides")
+    Equal(Rows() .. " " .. ns.LayoutData().left .. " " .. ns.LayoutData().right, "cd|util,totems buff debuff", "Sides: under Utility")
+    L:Swap("totems", -1)
+    ok, message = L:Swap("totems", -1)
+    Equal(Rows() .. " " .. ns.LayoutData().left .. " " .. ns.LayoutData().right .. " | " .. message, "cd,totems|util buff debuff | Totems"
+        .. " moved up past the display.", "next to a row beside the display: past the display instead, those staying")
+    ok, message = L:Swap("buff", -1)
+    Equal(Rows() .. " | " .. message .. " | " .. table.concat(L:Rows(), ","), "cd|totems,util | Totems moved down past the display."
+        .. " | cd,buff,debuff,totems,util", "and back down past it, from the row beside it")
+    L:Undo()
+    Equal(Rows(), "cd|util,buff,debuff,totems", "Undo: as it was before Sides")
+
+    -- Dragged while your bars are unlocked: the layout stops, as for a bar,
+    -- and where it was let go is its own spot.
+    B:SetUnlocked(true)
+    local mover = M.mover
+    Equal(S[mover].shown, true, "unlocked: the box over it")
+    S[mover].scripts.OnDragStart(mover)
+    S[M.bar].cx, S[M.bar].cy = 400, 300
+    S[mover].scripts.OnDragStop(mover)
+    Equal(tostring(L:Active()) .. " " .. tostring(L.moved) .. " " .. ns.Get("totemX") .. " " .. ns.Get("totemY") .. " " .. At(M.bar),
+        "false true -100 -100 CENTER -100 -100", "dragged out of your layout: it stops, the bar where it was let go")
+    B:SetUnlocked(false)
+    L:LineUp()
+    Equal(tostring(L:HoldsTotems()) .. " " .. At(M.bar), "true TOP 0 -186", "lined up again: back in its row")
+    -- Turned off: it stays where it is, as your bars do.
+    S[M.bar].cx, S[M.bar].cy = 500, 214
+    L:TurnOff()
+    L:Stack()
+    Equal(ns.Get("totemX") .. " " .. ns.Get("totemY") .. " " .. At(M.bar), "0 -186 CENTER 0 -186", "the layout off: it stays put, that spot its own")
+    L:LineUp()
+    -- Reset positions (Layout page): the layout stops and it goes back to its own spot, kept as it was.
+    ns.Set("totemX", -250)
+    ns.Set("totemY", -100)
+    Equal(At(M.bar), "TOP 0 -186", "its own spot changed while in your layout: it stays in its row")
+    B:ResetPositions()
+    Equal(tostring(L:Active()) .. " " .. ns.Get("totemX") .. " " .. ns.Get("totemY") .. " " .. At(M.bar), "false -250 -100 CENTER -250 -100",
+        "Reset positions: the layout off, the Totems bar back in its own spot")
+    L:LineUp()
+
+    -- Kept once, above or below only; never added.
+    local layout = ns.LayoutData()
+    layout.above, layout.below, layout.left, layout.right = { "totems", "cd", "totems" }, { "totems", "util", "nope" }, "totems", nil
+    layout = ns.LayoutData()
+    Equal(Rows() .. " " .. tostring(layout.left) .. " " .. tostring(layout.hidden.totems), "totems,cd|util,buff,debuff nil nil",
+        "repaired: once, never beside the display, never taken out; bars missing go under, it never does")
+
+    -- In a share string: its row (its settings go with the look: 27, below).
+    L:Apply("pyramid")
+    local P = ns.ProfileShare
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(table.concat(shared.setup.layout.below, ",") .. " " .. shared.skipped .. " " .. tostring(shared.setup.look.totemSize),
+        "util,buff,debuff,totems 0 nil", "a share string carries its row")
+    local ns2 = Fresh({ totemBar = true, useBars = true })
+    local done = ns2.ProfileShare.Import("Shared", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(done) .. " " .. tostring(ns2.Layout:HoldsTotems()) .. " " .. table.concat(ns2.LayoutData().below, ",") .. " "
+        .. At(ns2.Totems.bar), "true true util,buff,debuff,totems TOP 0 -186",
+        "imported with its look by a shaman: stacked there too, under Utility (its Attack came with the profile)")
+
+    -- Not a shaman: its row kept, but skipped everywhere.
+    local ns3 = Fresh({ totemBar = true, useBars = true, layout = { on = true, base = "pyramid", above = { "cd" },
+        below = { "util", "totems", "buff", "debuff" } } }, "DRUID")
+    local L3 = ns3.Layout
+    L3:Stack()
+    Equal(table.concat(ns3.LayoutData().below, ",") .. " | " .. table.concat(L3:Rows(), ",") .. " | " .. tostring(L3:CanSwap("totems", 1))
+        .. " " .. tostring(L3:CanSwap("util", 1)) .. " " .. tostring(L3:HoldsTotems()) .. " " .. tostring(ns3.Totems.bar) .. " "
+        .. tostring(L3:WidestRow()), "util,totems,buff,debuff | cd,util,buff,debuff | false true false nil nil",
+        "a druid: the row kept, but no room, no swap, no bar")
+    ns3.ShowWindow()
+    FECMFrame:Select("layout")
+    Equal(tostring(FECMFrame.pages.layout.totemRow), "nil", "and no Totems row drawn")
+    local done3 = ns3.ProfileShare.Import("Shared", ns3.ProfileShare.Read(text), true)
+    Equal(tostring(done3) .. " " .. table.concat(ns3.LayoutData().below, ",") .. " | " .. table.concat(L3:Rows(), ","),
+        "true util,buff,debuff,totems | cd,util,buff,debuff", "a shaman's string imported by a druid: harmless")
+end)()
+
+-- 27. A share string brings the Totems bar (Squirt's yes, 19 Nov 2026) ----------------------------------------
+-- Made on a shaman with the bar on and set up: imported with its look by a
+-- shaman with it off, the bar comes on and is drawn at once as shared, in
+-- its own spot, and the question names it. Without its look nothing of it
+-- changes. A druid gets the settings saved and the tick on (unnamed), and
+-- nothing made, heard or shown. (Tools/TestShare.lua checks the string
+-- itself: what goes in, odd values, older strings.)
+;(function()
+    local ns = Fresh({ useBars = true, totemBar = true, totemSize = 44, totemPerRow = 2, totemOrder = "awfe", totemX = -320,
+        totemY = -120, totemOutOfCombat = "fade", totemNames = true })
+    local text = ns.ProfileShare.Export()
+    local shared = ns.ProfileShare.Read(text)
+    Equal(tostring(shared.setup.parts.totemBar) .. " " .. shared.skipped .. " " .. tostring(shared.setup.look.totemSize) .. " "
+        .. tostring(shared.setup.look.totemSpacing), "true 0 44 nil", "the string: the bar on and its settings, those at their default left out")
+    -- A shaman with the bar off: nothing made yet.
+    local ns2, M2 = Fresh({ useBars = true })
+    local function Bar(n)
+        return table.concat({ tostring(n.Get("totemBar")), n.Get("totemSize"), n.Get("totemPerRow"), n.Get("totemOrder"), n.Get("totemX"),
+            n.Get("totemY"), n.Get("totemOutOfCombat"), tostring(n.Get("totemNames")) }, " ")
+    end
+    -- Without its look: nothing of it changes, nothing made.
+    local ok = ns2.ProfileShare.Import("Lists", ns2.ProfileShare.Read(text), false)
+    Equal(tostring(ok) .. " " .. Bar(ns2) .. " " .. tostring(M2.bar), "true false 36 4 efwa -300 -175 show false nil",
+        "imported without its look: the Totems bar as it was, nothing made")
+    Equal(ns2.ProfileShare.LookQuestion(ns2.ProfileShare.Read(text)), "Your bar sizes, spots, layout and look change to the shared ones,"
+        .. " on every character. It also turns on Totems bar. To keep a copy of yours, Share it first.", "the question names it")
+    local message
+    ok, message = ns2.ProfileShare.Import("Shared", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. message, "true Imported Shared with its look and layout, and switched to it. Also turned on 1 of its settings.",
+        "imported with its look: switched on, and counted")
+    Equal(Bar(ns2) .. " | " .. N(S[M2.bar].width) .. "x" .. N(S[M2.bar].height) .. " " .. Across(M2) .. " " .. At(M2.bar) .. " "
+        .. tostring(S[M2.bar].alpha), "true 44 2 awfe -320 -120 fade true | 92x106 awfe CENTER -320 -120 0.3",
+        "every setting as shared, the bar made and drawn at once: 2 across of 44, names under, in its own spot, faded out of a fight")
+    Equal(tostring(ns2.ProfileShare.Export() == text), "true", "and shares the same string back")
+    -- Never turned off: a string with it off leaves yours on.
+    local off = Fresh({ useBars = true })
+    local plain = off.ProfileShare.Export()
+    ns2.ProfileShare.Import("Plain", ns2.ProfileShare.Read(plain), true)
+    Equal(Bar(ns2) .. " " .. tostring(S[M2.bar].alpha > 0), "true 36 4 efwa -300 -175 show false true",
+        "a string with it off: yours stays on, its settings back to the string's (the defaults)")
+    -- A druid: saved, unnamed, nothing made or heard.
+    local ns3, M3 = Fresh({ useBars = true }, "DRUID")
+    local question = ns3.ProfileShare.LookQuestion(ns3.ProfileShare.Read(text))
+    ok, message = ns3.ProfileShare.Import("Shared", ns3.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. message .. " | " .. tostring(question:find("Totems", 1, true)), "true Imported Shared with its look and"
+        .. " layout, and switched to it. | nil", "a druid: not named, not counted")
+    Equal(Bar(ns3) .. " | " .. tostring(M3.bar) .. " " .. tostring(M3.driver), "true 44 2 awfe -320 -120 fade true | nil nil",
+        "its settings and tick saved (they're every character's), nothing made or heard")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- 28. Searing and Magma: red once you're further than they reach (a player's idea, Squirt's yes, 20 Nov 2026) --
+-- Their spot is yours as you cast them (UnitPosition); where you are is looked
+-- at every LOOK_EVERY seconds while one stands, then no more. Never red while
+-- the game won't say where you are (a dungeon, a secret), on another map,
+-- with Red when out of range unticked, or for one seen but not cast by you
+-- since the addon started (after a reload).
+;(function()
+    local ns, M = Fresh({ useBars = true, totemBar = true, totemRange = true })
+    local spots = Spots(M)
+    local function Far(letter) return tostring(S[spots[letter or "f"].far].alpha) end
+    Where = { x = 100, y = 200, map = 1 }
+    Cast(3599)
+    Drop(1, "Searing Totem", 3599)
+    Equal(Far() .. " " .. M.REACH["Searing Totem"] .. " " .. M.REACH["Magma Totem"], "0 20 8", "Searing down at your feet: not red")
+    Where.x = 119
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "0", "19 yards away: still in reach")
+    Where.x, Where.y = 115, 215
+    Pass(M.LOOK_EVERY)
+    Equal(Far() .. " " .. tostring(S[spots.f.warn].alpha), "1 0", "21 yards away, on a slant: red (its own red, not the buff one)")
+    Where.x, Where.y = 105, 205
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "0", "back in reach: the red goes")
+    Equal(tostring(ns.DebugReport():find("Fire Searing Totem (seen), now true, red 0, far 0 (Searing Totem, 20 yd)", 1, true) ~= nil),
+        "true", "/ccm debug says so")
+    -- A fight: every totem answer secret, your cast still says it's Searing, put down where you are now.
+    lockdown, TotemsSecret = true, true
+    Fire("PLAYER_REGEN_DISABLED")
+    Cast(3599)
+    Drop(1, "Searing Totem", 3599)
+    Where.x = 130
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "1", "in a fight, 25 yards from the new one: red")
+    Where = SECRET
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "0", "where you are kept secret: no red, rather than a wrong one")
+    Where = { x = 130, y = 205, map = 1 }
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "1", "said again: red again")
+    Where.map = 2
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "0", "another map: no red")
+    Where.map = 1
+    lockdown, TotemsSecret = false, false
+    Fire("PLAYER_REGEN_ENABLED")
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "1", "the fight over: read again, still red")
+    -- Unticked: no red, and no more looking.
+    ns.Set("totemRange", false)
+    M:Apply()
+    local asks = WhereAsks
+    Pass(1)
+    Equal(Far() .. " " .. (WhereAsks - asks), "0 0", "Red when out of range unticked: no red, where you are no longer looked at")
+    ns.Set("totemRange", true)
+    M:Apply()
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "1", "ticked again: red again at once")
+    -- Another fire totem in its place: never red that way, and the looking stops.
+    Cast(8227)
+    Drop(1, "Flametongue Totem", 8227)
+    Pass(M.LOOK_EVERY)
+    asks = WhereAsks
+    Pass(1)
+    Equal(Far() .. " " .. (WhereAsks - asks), "0 0", "Flametongue in Searing's place: no far red, nothing looked at")
+    -- Magma reaches 8 yards.
+    Cast(8190)
+    Drop(1, "Magma Totem", 8190)
+    Where.x = 137
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "0", "7 yards from Magma: in reach")
+    Where.x = 139
+    Pass(M.LOOK_EVERY)
+    Equal(Far(), "1", "9 yards from Magma: red")
+    -- Gone (its time up, out of a fight): no red, no looking.
+    Drop(1, nil)
+    asks = WhereAsks
+    Pass(1)
+    Equal(Far() .. " " .. (WhereAsks - asks), "0 0", "Magma gone: no red, nothing looked at")
+    -- Cast where the game won't say where you are (a dungeon): never red.
+    Where = nil
+    Cast(3599)
+    Drop(1, "Searing Totem", 3599)
+    Where = { x = 500, y = 500, map = 1 }
+    Pass(1)
+    Equal(Far(), "0", "put down in a dungeon: never red, even once where you are is known")
+    -- A reload with Searing already down: its spot never seen, never red.
+    local ns2, M2 = Fresh({ useBars = true, totemBar = true, totemRange = true }, nil, function()
+        TOTEM[1] = { name = "Searing Totem", id = 3599, icon = 7003599 }
+    end)
+    Where = { x = 0, y = 0, map = 1 }
+    Pass(1)
+    Where.x = 300
+    Pass(1)
+    Equal(tostring(S[Spots(M2).f.far].alpha) .. " " .. S[Spots(M2).f.label].text, "0 Searing", "after a reload: Searing shown, never red")
+    -- Buffing totems still go by their buff, never by distance.
+    Equal(tostring(M2.REACH["Strength of Earth Totem"]), "nil", "Strength of Earth has no reach of its own")
+    Equal(#printed, 0, "no errors")
 end)()
 
 Equal(#printed, 0, "no errors")

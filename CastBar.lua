@@ -921,7 +921,8 @@ end
 -- Puts the bar under the display (and its combo points), or over it if that's
 -- chosen, as wide as it, and gives back where the next row starts: under the
 -- bar, or under the display while the bar is off or over it. With the display
--- switched off it sits where that was.
+-- switched off it sits where that was, under the combo points if they stay up
+-- there (the display's height is their room then: Layout.lua L:Display).
 function C:Under(display)
     local bottom = display.y - display.height / 2
     local height = self:Room()
@@ -958,8 +959,17 @@ function C:Under(display)
 end
 
 -- Without a layout: under the display on its own, or where it would be.
+-- Combo points staying up with the display switched off go in its spot
+-- first, the bar under them (Resource.lua R:PlaceAway); never seen, they
+-- take their room where the bar goes alone.
 function C:Place()
-    self:Under(ns.Layout and ns.Layout:Display() or ALONE)
+    local display = ns.Layout and ns.Layout:Display()
+    if not display then
+        local room = ns.Resource and ns.Resource:AwayRoom()
+        display = room and { x = ALONE.x, y = ALONE.y, width = ALONE.width, height = room, edge = ALONE.edge } or ALONE
+    end
+    if ns.Resource then ns.Resource:PlaceAway(display) end
+    self:Under(display)
 end
 
 -- Dragging it anywhere (Cast bar page, off by default) ---------------------------------

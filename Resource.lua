@@ -5,8 +5,8 @@
 -- repeats it, and half as tall in bear, cat and other forms. While a layout
 -- stacks your bars around it, it can be as wide as your widest row, or a
 -- width of your own (Layout page, a player's idea). Combo points, which
--- Forever's display leaves out, can go under or over it, and your health
--- and power as text on its bars.
+-- Forever's display leaves out, can go under or over it (and stay up in its
+-- spot with it switched off), and your health and power as text on its bars.
 -- Visual only. Blizzard still decides what shows and where: only colours,
 -- textures, sizes and the addon's own pieces change, and no key is ever
 -- written on Blizzard's frames.
@@ -88,8 +88,13 @@ local function Spent(bar)
     if flash and flash:GetObjectType() == "Texture" then return flash end
 end
 
+-- With Hide spent flash ticked (a player's idea) it's tinted clear instead,
+-- so the bar drops straight to your new power. Only its colour is set:
+-- Blizzard still plays it, unseen.
 local function Flash(state, colour, outline)
-    if state.flash then state.flash:SetVertexColor(colour[1], colour[2], colour[3], outline and .45 or 1) end
+    if not state.flash then return end
+    local alpha = ns.Get("prdHideSpent") and 0 or outline and .45 or 1
+    state.flash:SetVertexColor(colour[1], colour[2], colour[3], alpha)
 end
 
 -- What a cast will cost, at the end of the power bar.
@@ -308,6 +313,11 @@ end
 -- display. Their height and spot are yours to pick (a player's idea, the
 -- Look page's Set up): as tall as the power bar or 3 to 30, under the
 -- display or over its health bar.
+-- With the display switched off (Options, or Edit Mode's Visibility Hidden)
+-- they stay up on their own (Squirt's yes, 19 Nov 2026, for setups of icons
+-- only): the row moves off the display onto the screen, in the display's
+-- spot, as wide as it, your cast bar under it and a layout's rows round it
+-- (Layout.lua L:Display, R:PlaceAway). Only the addon's own row moves.
 -- Rogues, and druids in cat form. The count can be secret in combat, so each
 -- segment is a bar from i - 1 to i handed the count as it is: the game fills
 -- it, and the addon never reads the number.
@@ -317,8 +327,10 @@ local COMBO_MAX = 5
 local COMBO_GAP = 3 -- between segments, clear of each one's 1px edge
 local COMBO_RED = { .87, .2, .13 } -- the colour they start in
 R.COMBO_RED = COMBO_RED -- and on the Look page's swatch for them
-local combo -- the row, made once the display is there
+local combo -- the row, made with the display, or once it's wanted with the display switched off
 local comboShown = false
+local comboAway = false -- shown away from the display, while that's switched off
+local comboOff -- whether the display was switched off as the row was last put in place
 
 local function ComboColour()
     local key = ns.ColourKey("prdComboColour")
@@ -383,8 +395,11 @@ local function ComboLayout()
     end
 end
 
-local function MakeCombo(frame)
-    combo = CreateFrame("Frame", nil, frame)
+-- parent: the display, or the screen while the display is switched off.
+local function MakeCombo(parent)
+    combo = CreateFrame("Frame", nil, parent)
+    R.combo = combo -- (for the tests)
+    combo.home = parent
     combo:SetSize(1, 1)
     combo:Hide()
     combo.segments = {}
@@ -513,18 +528,48 @@ local function ComboListen()
     end
 end
 
+-- Whether the display is switched off, as the layout reads it (Layout.lua
+-- L:DisplayOff: Options, or Edit Mode's Visibility Hidden).
+local function DisplayOff()
+    return ns.Layout ~= nil and ns.Layout:DisplayOff() == true
+end
+
+-- The row's own frame onto the display, or onto the screen while it's away:
+-- only the addon's row moves, nothing is set on Blizzard's.
+local function Home(parent)
+    if combo.home == parent then return end
+    combo.home = parent
+    combo:SetParent(parent)
+end
+
 -- Shows or hides the row and puts it in place, under the display or over
--- it, at its height; a layout makes room for it, and moves again when its
--- spot or height changes while it shows.
-local function ComboUpdate()
+-- it, at its height. With the display switched off it goes onto the screen
+-- at its height, placed in the display's spot as your bars stack
+-- (R:PlaceAway); while the display is on but not loaded yet, there's
+-- nothing to sit on. True when a layout must make room again: the row came
+-- or went, or its spot or height changed while it shows.
+local function ComboSet()
+    if not comboEvents then return false end
     local frame = _G.PersonalResourceDisplayFrame
-    if not (frame and combo) then return end
-    local want = ComboWanted()
-    local moved = false
+    local off = DisplayOff()
+    comboOff = off
+    local want = (off or frame ~= nil) and ComboWanted()
+    if want and not combo then MakeCombo(off and UIParent or frame) end
+    if not combo then
+        ComboListen()
+        return false
+    end
+    local away, moved = want and off, false
     if want then
-        local height, above = R:ComboHeight(), ns.Get("prdComboAt") == "above"
-        local on = "below"
-        if above then on = "above " .. Over(combo, frame, height) else Underneath(combo, frame, false, height) end
+        local height, on = R:ComboHeight(), "below"
+        if away then
+            Home(UIParent)
+            combo:SetHeight(height)
+            on = "away"
+        else
+            Home(frame)
+            if ns.Get("prdComboAt") == "above" then on = "above " .. Over(combo, frame, height) else Underneath(combo, frame, false, height) end
+        end
         local spot = on .. " " .. height
         moved = spot ~= combo.spot
         combo.spot = spot
@@ -533,9 +578,62 @@ local function ComboUpdate()
     combo:SetShown(want)
     ComboPoints()
     local changed = want ~= comboShown or moved
-    comboShown = want
+    comboShown, comboAway = want, away
     ComboListen()
-    if changed then Restack() end
+    return changed
+end
+
+-- The same, and a layout makes room for it, or moves again when its spot or
+-- height changes while it shows.
+local function ComboUpdate()
+    if ComboSet() then Restack() end
+end
+
+-- The row's listener, for the classes with combo points, made as the addon
+-- starts, the display there or not. It hears nothing until they're ticked
+-- (ComboListen, from ComboSet). Any power's change counts, not only combo
+-- points', as for the game's own.
+local function ComboStart()
+    if comboEvents then return end
+    local _, class = UnitClass("player")
+    if class ~= "ROGUE" and class ~= "DRUID" then return end
+    comboEvents = CreateFrame("Frame")
+    comboEvents:SetScript("OnEvent", function(_, event)
+        if event == "UNIT_POWER_FREQUENT" or event == "PLAYER_TARGET_CHANGED" then ComboPoints() else ComboUpdate() end
+    end)
+end
+
+-- Before your bars stack again (Layout.lua L:Stack): the row onto the
+-- display or away from it, should the display have just been switched on or
+-- off, so the stack makes room for it where it is now. Nothing while combo
+-- points are off or the display's the same; it never stacks again itself.
+function R:Rehome()
+    if comboEvents and ns.Get("prdCombo") and DisplayOff() ~= comboOff then ComboSet() end
+end
+
+-- How much room the row takes away from the display (switched off): its
+-- height, which a layout and your cast bar leave in the display's spot. Nil
+-- while it isn't away.
+function R:AwayRoom()
+    if comboShown and comboAway then return R:ComboHeight() end
+    return nil
+end
+
+-- Puts the row, while it's away, in the display's spot (display, from
+-- Layout.lua L:Display or where the stack goes without it, as tall as
+-- R:AwayRoom and the restyle's edges): at its top, your cast bar under it
+-- (CastBar.lua C:Under). As wide as your cast bar there, so the row's own
+-- edges sit where the display's were too; narrower than 40, the display's
+-- usual 200.
+function R:PlaceAway(display)
+    if not (combo and comboShown and comboAway and display) then return end
+    local edge = display.edge or 0
+    local width = display.width
+    if edge > 0 then width = width - 2 end
+    if not (width >= 40) then width = ns.PRD_WIDTH[3] end
+    combo:ClearAllPoints()
+    combo:SetPoint("TOP", UIParent, "CENTER", display.x, display.y + display.height / 2 - edge)
+    combo:SetSize(width, R:ComboHeight())
 end
 
 -- Energy out of cat form ---------------------------------------------------------
@@ -616,9 +714,10 @@ local function EnergyUpdate()
 end
 
 -- The row under the display while it shows (combo points or energy, never
--- both), so a layout counts it as part of the display.
+-- both), so a layout counts it as part of the display. Not the combo points
+-- while they're away from it (R:AwayRoom has their room then).
 function R:ComboRow()
-    return comboShown and combo or energyShown and energy or nil
+    return comboShown and not comboAway and combo or energyShown and energy or nil
 end
 
 -- Text on the display's bars -------------------------------------------------------
@@ -1038,17 +1137,12 @@ local function Hook()
         Restyle(frame.PowerBar, "prdPower", COST_PIECES, true)
         Restyle(frame.AlternatePowerBar, "prdPower")
     end
-    -- Combo points, for the classes that have them. The listener hears
-    -- nothing until they're ticked (ComboListen, from ComboUpdate). Any
-    -- power's change counts, not only combo points', as for the game's own.
+    -- Combo points, for the classes that have them (the row may be up
+    -- already, away from the display while it was switched off), and
+    -- their listener (ComboStart).
     local _, class = UnitClass("player")
-    if class == "ROGUE" or class == "DRUID" then
-        MakeCombo(frame)
-        comboEvents = CreateFrame("Frame")
-        comboEvents:SetScript("OnEvent", function(_, event)
-            if event == "UNIT_POWER_FREQUENT" or event == "PLAYER_TARGET_CHANGED" then ComboPoints() else ComboUpdate() end
-        end)
-    end
+    if (class == "ROGUE" or class == "DRUID") and not combo then MakeCombo(frame) end
+    ComboStart()
     -- Energy in other forms, for druids: silent too until ticked.
     if class == "DRUID" then
         MakeEnergy(frame)
@@ -1111,6 +1205,14 @@ function R:Start()
         Fault(found)
         return
     end
+    -- Combo points can stay up with the display switched off before
+    -- Blizzard has loaded it (Hook takes the row over once it has); your
+    -- bars stack round them as they start.
+    local fine, err = pcall(function()
+        ComboStart()
+        ComboSet()
+    end)
+    if not fine then Fault(err) end
     -- Blizzard loads the display when it's switched on; wait for it.
     local watcher = CreateFrame("Frame")
     watcher:RegisterEvent("ADDON_LOADED")

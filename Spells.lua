@@ -1650,3 +1650,106 @@ function S:Pin(id, bar)
     end
     return key
 end
+
+-- Swap to my next ammo (General page, off unless ticked): out of ammo, the
+-- best arrows or shot in your bags for your bow, gun or crossbow go in the
+-- ammo slot. Out of a fight only (one that runs out in a fight swaps as it
+-- ends), never while dead. Best is the highest item level you can use, then
+-- the most you carry. While unticked nothing is heard.
+do
+    local RANGED = INVSLOT_RANGED or 18
+    local WEAPON = Enum and Enum.ItemClass and Enum.ItemClass.Weapon or 2
+    -- What each ranged weapon fires (weapon subclass to projectile
+    -- subclass): bows and crossbows arrows, guns shot. Thrown and wands none.
+    local FIRES = { [2] = 2, [18] = 2, [3] = 3 }
+    local EVENTS = { "BAG_UPDATE_DELAYED", "PLAYER_REGEN_ENABLED", "PLAYER_EQUIPMENT_CHANGED", "PLAYER_LEVEL_UP",
+        "PLAYER_UNGHOST", "PLAYER_ALIVE", "GET_ITEM_INFO_RECEIVED" }
+    local AGAIN = 5 -- seconds before the same ammo is tried again, if the game turned it down
+    local swapper, listening
+    local lastID, lastAt = nil, 0
+
+    local function Number(value)
+        return Open(value) and type(value) == "number" and value or nil
+    end
+
+    -- The projectile subclass your ranged weapon fires, or nil.
+    local function Fires()
+        local id = Number(GetInventoryItemID("player", RANGED))
+        if not (id and C_Item and C_Item.GetItemInfoInstant) then return nil end
+        local _, _, _, _, _, class, subclass = C_Item.GetItemInfoInstant(id)
+        if Number(class) ~= WEAPON then return nil end
+        return FIRES[Number(subclass) or -1]
+    end
+
+    -- Out: no ammo in the slot, or none of it left.
+    local function Out()
+        if not GetInventoryItemID("player", AMMO) then return true end
+        return Number(GetInventoryItemCount("player", AMMO)) == 0
+    end
+
+    -- The best ammo of that kind in your bags you can use, or nil.
+    local function Best(kind)
+        local level = Number(UnitLevel("player"))
+        local Info = C_Item and C_Item.GetItemInfo or GetItemInfo
+        if not (level and Info and C_Container and C_Container.GetContainerNumSlots) then return nil end
+        local best, bestLevel, bestCount
+        for bag = 0, BAGS do
+            for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                local id = info and Number(info.itemID)
+                if id and S:IsAmmo(id) then
+                    local _, _, _, _, _, _, subclass = C_Item.GetItemInfoInstant(id)
+                    local _, _, _, itemLevel, needs = Info(id)
+                    itemLevel, needs = Number(itemLevel), Number(needs)
+                    if Number(subclass) == kind and itemLevel and (needs or 0) <= level then
+                        local count = Number(C_Item.GetItemCount(id, false, false)) or 0
+                        if count > 0 and (not best or itemLevel > bestLevel or (itemLevel == bestLevel and count > bestCount)) then
+                            best, bestLevel, bestCount = id, itemLevel, count
+                        end
+                    end
+                end
+            end
+        end
+        return best
+    end
+
+    -- Swaps if you're out and can, and says what went in (or nil).
+    function S:SwapAmmo()
+        if not (ns.Get("ammoSwap") and S:UsesAmmo()) then return nil end
+        if InCombatLockdown() or UnitIsDeadOrGhost("player") or not Out() then return nil end
+        local kind = Fires()
+        local id = kind and Best(kind)
+        local Equip = C_Item and C_Item.EquipItemByName or EquipItemByName
+        if not (id and Equip) then return nil end
+        local now = GetTime()
+        if id == lastID and now - lastAt < AGAIN then return nil end
+        lastID, lastAt = id, now
+        Equip(id)
+        return id
+    end
+
+    -- Listens while ticked (and for a class that uses ammo), and swaps at
+    -- once if you're out.
+    function S:ApplyAmmoSwap()
+        local want = ns.Get("ammoSwap") and S:UsesAmmo() or false
+        if want and not swapper then
+            swapper = CreateFrame("Frame")
+            swapper:SetScript("OnEvent", function() S:SwapAmmo() end)
+        end
+        if want ~= (listening or false) and swapper then
+            for _, event in ipairs(EVENTS) do
+                if want then pcall(swapper.RegisterEvent, swapper, event) else swapper:UnregisterEvent(event) end
+            end
+            listening = want
+        end
+        if want then S:SwapAmmo() end
+    end
+
+    -- Listening from login when it's ticked; heard once, then let go.
+    local login = CreateFrame("Frame")
+    login:RegisterEvent("PLAYER_LOGIN")
+    login:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_LOGIN")
+        S:ApplyAmmoSwap()
+    end)
+end

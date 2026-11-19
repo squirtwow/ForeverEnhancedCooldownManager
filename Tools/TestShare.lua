@@ -1454,7 +1454,7 @@ function H.Sane(ns, shared)
         if (field == "left" or field == "right") and not ns.BAR_NAMES[v] then return "a side" end
         if (field == "above" or field == "below") then
             for _, key in pairs(v) do
-                if not ns.BAR_NAMES[key] then return "a row" end
+                if not (ns.BAR_NAMES[key] or key == ns.TOTEM_ROW) then return "a row" end -- (a bar's, or the Totems bar's)
             end
         end
     end
@@ -1549,13 +1549,12 @@ end
 -- Settings a shared profile never carries: parts on by default (a string
 -- never switches one back on), and the window's own. (The parts it
 -- switches on are ns.SHARE_PARTS.)
-H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "oocIgnoreTarget", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
+H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "oocIgnoreTarget", "ammoSwap", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
     "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew",
-    "keybindsPlain", "totemTime", "totemBar", "totemSize", "totemHeight", "totemSpacing", "totemPerRow", "totemGrow", "totemWrap",
-    "totemOutOfCombat", "totemTimer", "totemNames", "totemRange", "totemOrder", "totemX", "totemY" }
+    "keybindsPlain", "totemTime" }
 -- Every part a string can switch on, in order, with its letter.
 H.PARTS = "useBars=u prdCombo=c prdEnergy=e prdText=t keybinds=k keyPressGlow=g castBar=b swingTimer=s castBatch=h castTicks=m"
-    .. " castLatency=l pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q"
+    .. " castLatency=l pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q totemBar=x"
 
 -- Every setting is either shared or kept out, on purpose -------------------------------------------
 -- A setting added later must be put on one side or the other.
@@ -3243,6 +3242,224 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- Big stacks in the middle in a string ---------------------------------------------------------------------
+-- (A player's idea.) It goes in the look only while ticked, so a string from
+-- anyone who never ticked it is exactly as before. A string from 1.10.17 or
+-- before (or with no version) says nothing of it, so with its look yours
+-- stays; one made since that leaves it out has it off. Anything but true or
+-- false: left out and counted. Defaults in Icon details unticks it.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:Assign("Moonfire", "cd")
+    local plain = P.Export()
+    local none = tostring(P.Read(plain).setup.look.bigStacks)
+    ns.Set("bigStacks", true)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(none .. " | " .. H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. tostring(shared.setup.look.bigStacks) .. " "
+        .. tostring(text ~= plain), "nil | |0 true true", "left out while off; carried once ticked")
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local ok = ns2.ProfileShare.Import("Stacks", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. tostring(ns2.Get("bigStacks")) .. " " .. tostring(ns2.ProfileShare.Export() == text), "true true true",
+        "imported with its look: ticked, and the same string back")
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } end
+    local function Made(version, settings)
+        return P.Read(H.String({ a = version, l = Lists(), g = { s = settings or {}, b = {}, l = {}, k = {} } }))
+    end
+    local function Took(name, from)
+        ns.Set("bigStacks", true)
+        P.Import(name, from, true)
+        return tostring(ns.Get("bigStacks"))
+    end
+    local results = {}
+    for _, version in ipairs({ "1.10.17", "1.10.16", "1.9.9" }) do results[#results + 1] = Took("Old " .. version, Made(version)) end
+    results[#results + 1] = Took("No version", P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {} } })))
+    for _, version in ipairs({ "1.10.18", "1.11.0", "dev" }) do results[#results + 1] = Took("New " .. version, Made(version)) end
+    results[#results + 1] = Took("Carried old", Made("1.10.17", { bigStacks = false }))
+    Equal(table.concat(results, " "), "true true true true false false false false",
+        "from 1.10.17 or before yours stays; made since, left out: off; carried: as the string has it")
+    local bad = Made("dev", { bigStacks = "yes" })
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.look.bigStacks), "|1 nil", "not a tick: left out and counted")
+    ns.Set("bigStacks", true)
+    for _, key in ipairs(ns.ICON_DETAILS) do ns.Set(key, ns.DEFAULTS[key]) end
+    Equal(tostring(ns.Get("bigStacks")), "false", "Icon details' Defaults unticks it")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The Totems bar's row in a string ---------------------------------------------------------------------------
+-- (Squirt's yes, 19 Nov 2026.) A shaman's layout can hold the Totems bar's
+-- row (Stack it with my bars): a string carries it as a row, never that bar's
+-- own settings, and reads it back. Where there's no Totems bar (no shaman,
+-- or here, no Totems.lua) it's kept but takes no room. Never beside the display.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P = ns.ProfileShare
+    ns.Bars:Assign("Moonfire", "cd")
+    ns.Layout:Apply("pyramid")
+    table.insert(ns.LayoutData().below, 2, ns.TOTEM_ROW)
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. table.concat(shared.setup.layout.below, ","), "|0 util,totems,buff,debuff",
+        "the Totems bar's row goes in the string and reads back")
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local ok = ns2.ProfileShare.Import("Totems", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. table.concat(ns2.LayoutData().below, ",") .. " | " .. table.concat(ns2.Layout:Rows(), ",") .. " "
+        .. tostring(ns2.ProfileShare.Export() == text), "true util,totems,buff,debuff | cd,util,buff,debuff true",
+        "imported with no Totems bar: kept, no row, and the same string back")
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } end
+    local odd = P.Read(H.String({ a = "dev", l = Lists(), g = { s = {}, b = {}, k = {},
+        l = { above = { "totems", "cd" }, below = { "util" }, left = "totems" } } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. table.concat(odd.setup.layout.above, ",") .. " " .. tostring(odd.setup.layout.left),
+        "|1 totems,cd nil", "beside the display: left out and counted")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The Totems bar in a string ---------------------------------------------------------------------------------
+-- (Squirt's yes, 19 Nov 2026: a shaman's string brings the Totems bar.) Its
+-- tick is a part (x): on in the string, it comes on with the look, never
+-- going off. Its settings go with the look, each only where it differs from
+-- the default. A string from 1.10.17 or before (or with no version) says
+-- nothing of them, so with its look yours stay; one made since that leaves
+-- them out has them at their defaults. Odd values: left out and counted.
+-- Without its look nothing of it changes. (No Totems.lua here:
+-- Tools/TestTotems.lua checks the bar drawn after an import.)
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P = ns.ProfileShare
+    ns.Bars:Assign("Moonfire", "cd")
+    -- Each of its settings in a string's look, in order (nil: left out).
+    local function Look(look)
+        local out = {}
+        for _, key in ipairs(ns.TOTEM_LOOK) do out[#out + 1] = tostring(look[key]) end
+        return table.concat(out, " ")
+    end
+    -- And yours now: the tick, then the same.
+    local function Now(n)
+        local out = { tostring(n.Get("totemBar")) }
+        for _, key in ipairs(n.TOTEM_LOOK) do out[#out + 1] = tostring(n.Get(key)) end
+        return table.concat(out, " ")
+    end
+    local NONE = ("nil "):rep(12) .. "nil"
+    local DEFAULTS = "false 36 100 4 4 centre down show true false false efwa -300 -175"
+    local SET = { totemSize = 44, totemHeight = 80, totemSpacing = 6, totemPerRow = 2, totemGrow = "left", totemWrap = "up",
+        totemOutOfCombat = "fade", totemTimer = false, totemNames = true, totemRange = true, totemOrder = "awfe", totemX = -320,
+        totemY = -120 }
+    local ALL = "44 80 6 2 left up fade false true true awfe -320 -120"
+    local plain = P.Read(P.Export())
+    Equal(table.concat(ns.TOTEM_LOOK, ",") .. " | " .. Now(ns) .. " | " .. Look(plain.setup.look) .. " " .. tostring(plain.setup.parts.totemBar),
+        "totemSize,totemHeight,totemSpacing,totemPerRow,totemGrow,totemWrap,totemOutOfCombat,totemTimer,totemNames,totemRange,totemOrder,"
+        .. "totemX,totemY | " .. DEFAULTS .. " | " .. NONE .. " nil", "off and at its defaults: none of it in the string")
+    ns.Set("totemBar", true)
+    for key, value in pairs(SET) do ns.Set(key, value) end
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. Look(shared.setup.look) .. " | " .. tostring(shared.setup.parts.totemBar),
+        "|0 " .. ALL .. " | true", "on and set up: its tick a part, every setting with the look, read back sane")
+    ns.Set("totemSize", 36)
+    local one = P.Read(P.Export()).setup.look
+    ns.Set("totemSize", 44)
+    Equal(tostring(one.totemSize) .. " " .. tostring(one.totemHeight), "nil 80", "one back at its default: left out")
+
+    -- Another account: without its look nothing of it; with it, all of it,
+    -- switched on, and the same string back.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local ok = ns2.ProfileShare.Import("Lists", ns2.ProfileShare.Read(text), false)
+    Equal(tostring(ok) .. " " .. Now(ns2), "true " .. DEFAULTS, "imported without its look: the Totems bar left as it was")
+    ok = ns2.ProfileShare.Import("Totems", ns2.ProfileShare.Read(text), true)
+    Equal(tostring(ok) .. " " .. Now(ns2) .. " " .. tostring(ns2.ProfileShare.Export() == text), "true true " .. ALL .. " true",
+        "imported with its look: on and set up as shared, and the same string back")
+
+    -- Older strings keep yours; one made since that leaves them out: the
+    -- defaults; carried: as the string has it. The tick is never turned off.
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } end
+    local function Made(version, settings)
+        return P.Read(H.String({ a = version, l = Lists(), g = { s = settings or {}, b = {}, l = {}, k = {} } }))
+    end
+    local function Took(name, from)
+        ns.Set("totemBar", true)
+        for key, value in pairs(SET) do ns.Set(key, value) end
+        P.Import(name, from, true)
+        return tostring(ns.Get("totemBar")) .. " " .. ns.Get("totemSize") .. " " .. ns.Get("totemOrder")
+    end
+    local results = {}
+    for _, version in ipairs({ "1.10.17", "1.10.16", "1.9.9" }) do results[#results + 1] = Took("Old " .. version, Made(version)) end
+    results[#results + 1] = Took("No version", P.Read(H.String({ l = Lists(), g = { s = {}, b = {}, l = {}, k = {} } })))
+    for _, version in ipairs({ "1.10.18", "1.11.0", "dev" }) do results[#results + 1] = Took("New " .. version, Made(version)) end
+    results[#results + 1] = Took("Carried old", Made("1.10.17", { totemSize = 50 }))
+    Equal(table.concat(results, ", "), "true 44 awfe, true 44 awfe, true 44 awfe, true 44 awfe, true 36 efwa, true 36 efwa, true 36 efwa,"
+        .. " true 50 awfe", "from 1.10.17 or before yours stay; made since, left out: the defaults; carried: as the string has it; on stays on")
+
+    -- Odd values: each left out and counted.
+    local bad = Made("dev", { totemSize = 65, totemHeight = "tall", totemSpacing = -1, totemPerRow = 5, totemGrow = "up",
+        totemWrap = "left", totemOutOfCombat = "never", totemTimer = "yes", totemNames = 1, totemRange = "true", totemOrder = "eefa",
+        totemX = 4001, totemY = "0" })
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. Look(bad.setup.look), "|13 " .. NONE,
+        "too big, not a number, below 0, past 4, not a way to grow or wrap, not a choice, not ticks, not an order, past 4000: left out and counted")
+    -- A string from this version read by an older one: its settings and
+    -- letter are names that one doesn't know, left out and counted as any
+    -- other (here, names and a letter this version doesn't know).
+    local newer = P.Read(H.String({ a = "dev", l = Lists(), g = { s = { totemSize = 44, totemGlow = true }, b = {}, l = {}, k = {}, o = "xz" } }))
+    Equal(H.Sane(ns, newer) .. "|" .. newer.skipped .. " " .. tostring(newer.setup.look.totemSize) .. " " .. H.Text(newer.setup.parts),
+        '|2 44 {["totemBar"]=true}', "names and letters it doesn't know: left out and counted, the rest read")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- The display switched off in a string ------------------------------------------------------------------
+-- (Squirt, 19 Nov 2026: icons-only setups for the website.) Shared with
+-- Blizzard's Personal Resource Display off, a string says so (d). Imported
+-- with its look: the question names it, it goes off, a reload is asked
+-- for, and the same string comes back. Without its look, or already off:
+-- nothing about it. Odd values: left out and counted.
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    prdOn = true
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P = ns.ProfileShare
+    ns.Bars:Assign("Moonfire", "cd")
+    local shownText = P.Export()
+    prdOn = false
+    local text = P.Export()
+    local shown, hidden = P.Read(shownText), P.Read(text)
+    Equal(tostring(shown.setup.displayOff) .. " " .. tostring(hidden.setup.displayOff) .. " " .. H.Sane(ns, hidden) .. "|" .. hidden.skipped,
+        "nil true |0", "display on: nothing in the string; off: it says so, read back sane")
+    local odd = P.Read(H.String({ a = "dev", l = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} },
+        g = { s = {}, b = {}, l = {}, k = {}, d = "yes" } }))
+    Equal(tostring(odd.setup.displayOff) .. " " .. odd.skipped, "nil 1", "not true: left out and counted")
+
+    -- Another account, its display on.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    prdOn = true
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P2 = ns2.ProfileShare
+    local NAMED = "It turns off your Personal Resource Display too (reload after)."
+    Equal(tostring(P2.LookQuestion(P2.Read(text)):find(NAMED, 1, true) ~= nil) .. " "
+        .. tostring(P2.LookQuestion(P2.Read(shownText)):find(NAMED, 1, true) ~= nil), "true false",
+        "the question names it only for a string shared with it off")
+    local ok = P2.Import("Lists", P2.Read(text), false)
+    Equal(tostring(ok) .. " " .. tostring(prdOn), "true true", "without its look: your display stays on")
+    local message
+    ok, message = P2.Import("Icons", P2.Read(text), true)
+    Equal(tostring(ok) .. " " .. tostring(prdOn) .. " " .. tostring(message:find("Your Personal Resource Display is off.", 1, true) ~= nil)
+        .. " " .. tostring(message:find("Reload to finish.", 1, true) ~= nil) .. " " .. tostring(P2.Export() == text),
+        "true false true true true", "with its look: off, said so, a reload asked for, and the same string back")
+    Equal(tostring(P2.LookQuestion(P2.Read(text)):find(NAMED, 1, true) ~= nil), "false", "already off: not named again")
+    ok = P2.Import("Shown", P2.Read(shownText), true)
+    Equal(tostring(ok) .. " " .. tostring(prdOn), "true false", "a string shared with it on never turns yours back on")
+    Equal(#printed, 0, "no errors")
+    prdOn = true -- (back on for the checks after)
+end)()
+
 -- Import makes a new profile, and leaves yours as it is ----------------------------------------------
 
 do
@@ -3985,7 +4202,7 @@ do
     character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, swipeColour = "custom", swipeColourCustom = "112233",
         swipeSeeThrough = 55, countdownSize = 130, countdownColour = "gold", countdownSpot = "TOPRIGHT", countdownFormat = "minutes",
-        swipeEdge = true, edgeColour = "purple", iconStyle = "blizzard", bars = { cd = { spells = { "Moonfire" } } } })
+        swipeEdge = true, edgeColour = "purple", iconStyle = "blizzard", bigStacks = true, bars = { cd = { spells = { "Moonfire" } } } })
     local P = ns.ProfileShare
     local setup = H.SetupNow(ns)
     local text = P.Export()
@@ -3993,7 +4210,7 @@ do
     local look, kept = shared.setup.look, {}
     for _, key in ipairs(ns.ICON_DETAILS) do kept[#kept + 1] = tostring(look[key]) end
     Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " | " .. table.concat(kept, " ") .. " " .. tostring(look.swipeColourCustom) .. " "
-        .. tostring(look.countdownColourCustom), "|0 | custom 55 130 gold TOPRIGHT minutes true purple blizzard 112233 nil",
+        .. tostring(look.countdownColourCustom), "|0 | custom 55 130 gold TOPRIGHT minutes true purple blizzard true 112233 nil",
         "shared: every detail unlike the default, Custom with its own colour, nothing left out")
     -- Blizzard's icons go short (I = "b"), so a full profile drawn like
     -- Blizzard's still fits one Discord message (the full profile's check);

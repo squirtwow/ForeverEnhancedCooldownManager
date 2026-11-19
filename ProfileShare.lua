@@ -470,22 +470,30 @@ end
 -- since the update after 1.10.15. And the display's own width and the
 -- combo points' height and spot in the look, and a cooldown bar's Show only
 -- when I can't afford it (players' ideas), carried only since the update
--- after 1.10.16.
+-- after 1.10.16. And Big stacks in the middle in the look (a player's
+-- idea), carried only since the update after 1.10.17, as are the Totems
+-- bar's own settings (ns.TOTEM_LOOK; its tick is a part, ns.SHARE_PARTS)
+-- and Hide spent flash (prdHideSpent, a player's idea).
 local CARRIED_AFTER = "1.10.13"
 local HEIGHT_AFTER = "1.10.14"
 local SOUND_AFTER = "1.10.15"
 local IDEAS_AFTER = "1.10.16"
+local STACKS_AFTER = "1.10.17"
 local NEW_LOOK = { "pulseResets" }
 local NEWER_LOOK = { "pulseProcSound" }
 local NEWEST_LOOK = { "prdOwnWidth", "prdWidth", "prdComboHeight", "prdComboAt" }
 local NEW_COOLDOWN = { "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
 local function Kept(version)
-    if ns.CompareVersions(version, IDEAS_AFTER) == 1 then return nil end
+    if ns.CompareVersions(version, STACKS_AFTER) == 1 then return nil end
     local older = ns.CompareVersions(version, CARRIED_AFTER) ~= 1
     local tall = ns.CompareVersions(version, HEIGHT_AFTER) ~= 1
     local quiet = ns.CompareVersions(version, SOUND_AFTER) ~= 1
-    local keep = { look = {}, bars = {} }
-    for _, key in ipairs(NEWEST_LOOK) do keep.look[key] = true end
+    local ideas = ns.CompareVersions(version, IDEAS_AFTER) ~= 1
+    local keep = { look = { bigStacks = true, prdHideSpent = true }, bars = {} }
+    for _, key in ipairs(ns.TOTEM_LOOK) do keep.look[key] = true end
+    if ideas then
+        for _, key in ipairs(NEWEST_LOOK) do keep.look[key] = true end
+    end
     if quiet then
         for _, key in ipairs(NEWER_LOOK) do keep.look[key] = true end
     end
@@ -494,7 +502,7 @@ local function Kept(version)
     end
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
         local own = {}
-        if not ns.AURA_BARS[key] then own.onlyShort = true end
+        if ideas and not ns.AURA_BARS[key] then own.onlyShort = true end
         if tall then own.heightPct = true end
         if older then
             own.glowProcs = true
@@ -528,6 +536,9 @@ local function Setup(g, Skip, swap, version)
     elseif g.o ~= nil then
         Skip()
     end
+    -- Shared with Blizzard's Personal Resource Display switched off (d): an
+    -- icons-only setup (Squirt, 19 Nov 2026). Older strings say nothing.
+    if g.d == true then setup.displayOff = true elseif g.d ~= nil then Skip() end
     -- Custom only with its own colour beside it.
     for _, key in ipairs(ns.COLOUR_SETTINGS) do
         if setup.look[key] == ns.CUSTOM and not ns.Hex(setup.look[key .. "Custom"]) then
@@ -568,10 +579,11 @@ local function Setup(g, Skip, swap, version)
             Skip()
         end
     end
+    -- Rows: bars, and the Totems bar's (Layout.lua shows it only for a shaman with it on).
     for _, place in ipairs({ "above", "below" }) do
         local rows = {}
         for _, key in ipairs(Table(saved[place])) do
-            if BarKey(key) then rows[#rows + 1] = key else Skip() end
+            if BarKey(key) or key == ns.TOTEM_ROW then rows[#rows + 1] = key else Skip() end
         end
         layout[place] = rows
     end
@@ -1005,7 +1017,7 @@ local function SetupNow()
     for _, field in ipairs(LAYOUT_FIELDS) do
         if saved[field] ~= LAYOUT_DEFAULTS[field] then layout[field] = saved[field] end
     end
-    layout.above, layout.below = Entries(saved.above), Entries(saved.below)
+    layout.above, layout.below = Entries(saved.above), Entries(saved.below) -- (the Totems bar's row too; its settings are in the look)
     for key in pairs(saved.hidden) do layout.hidden[key] = true end
     local picked, custom, hexes = ns.BarColours()
     for id, colour in pairs(picked) do
@@ -1020,7 +1032,8 @@ local function SetupNow()
     for _, part in ipairs(ns.SHARE_PARTS) do
         if ns.GetSaved(part.key) == true then parts[#parts + 1] = part.code end
     end
-    return { s = look, b = bars, l = layout, k = colours, h = hexes, o = #parts > 0 and table.concat(parts) or nil }
+    return { s = look, b = bars, l = layout, k = colours, h = hexes, o = #parts > 0 and table.concat(parts) or nil,
+        d = not ns.PersonalDisplayOn() or nil }
 end
 
 -- The trap icons ticked Show the trap I last laid on your Cooldowns and
@@ -1189,13 +1202,16 @@ function P.Export()
 end
 
 -- After a look and layout came in: everything that shows them, as the Look,
--- Layout, Cast bar, Raid Timers and Cooldown pulse pages do on a change.
--- Undo on the Layout page is for a layout you picked, and the presets' Undo
--- for a look you picked (it would switch off what came on), so both go.
+-- Layout, Cast bar, Raid Timers, Cooldown pulse and Totems pages do on a
+-- change (the Totems bar only for a shaman; it stacks again if your layout
+-- holds it). Undo on the Layout page is for a layout you picked, and the
+-- presets' Undo for a look you picked (it would switch off what came on),
+-- so both go.
 local function Redraw()
     if ns.Layout then ns.Layout.undo, ns.Layout.moved = nil, nil end
     P.undo = nil
     P.RedrawLook()
+    if ns.Totems then ns.Totems:Apply() end
 end
 
 -- Everything that shows the look, after it changed: the font, your bars, the
@@ -1451,6 +1467,14 @@ local function SwitchOn(shared)
     return shown, note, turned
 end
 
+-- Whether a string read by P.Read turns your Personal Resource Display off
+-- with its look and layout: shared with it off, and yours is on. The one
+-- thing a string switches off, as its question says.
+function P.WouldTurnOffDisplay(shared)
+    local setup = type(shared) == "table" and type(shared.setup) == "table" and shared.setup or {}
+    return setup.displayOff == true and ns.PersonalDisplayOn()
+end
+
 -- A string read by P.Read as a new profile (Core.lua's ns.ImportProfile),
 -- switched to; with its look and layout too, if asked, and the parts it has
 -- on switched on. True and what happened, or false and why not. (The
@@ -1459,13 +1483,20 @@ function P.Import(text, shared, withLook)
     local ok, message, name = ns.ImportProfile(text, shared, withLook)
     if not ok then return false, message end
     if withLook then
+        local displayOff, why = false, nil
+        if P.WouldTurnOffDisplay(shared) then displayOff, why = ns.TurnOff("nameplateShowSelf") end
         local shown, note, turned = SwitchOn(shared)
         -- Keys on icons, or Key press glow: your action bars read again first, as their ticks have it.
         if (turned.keybinds or turned.keyPressGlow) and ns.Keybinds then ns.Keybinds:Update() end
         Redraw()
         if shown > 0 then message = message .. (" Also turned on %d of its settings."):format(shown) end
+        if displayOff then
+            message = message .. " Your Personal Resource Display is off."
+        elseif why then
+            message = message .. " Your Personal Resource Display stays on: " .. why
+        end
         -- Your bars on: Blizzard's Cooldown Manager went off, as the question said.
-        if note and ns.NeedsReload and ns.NeedsReload() then
+        if (note or displayOff) and ns.NeedsReload and ns.NeedsReload() then
             message = message .. " Reload to finish."
         elseif note then
             message = message .. " " .. note
@@ -1511,6 +1542,7 @@ function P.LookQuestion(shared)
     local last = table.remove(names)
     if last then text = text .. " It also turns on " .. (#names > 0 and (table.concat(names, ", ") .. " and ") or "") .. last .. "." end
     if bars then text = text .. " Your own bars come on in place of Blizzard's Cooldown Manager, which turns off (reload after)." end
+    if P.WouldTurnOffDisplay(shared) then text = text .. " It turns off your Personal Resource Display too (reload after)." end
     return text .. KEEP_YOURS
 end
 

@@ -7,7 +7,8 @@
 -- many icons fit across) and the arrows (up or down the stack, past the
 -- display). All bars sizes every bar together, Show grow arrows marks
 -- which way each grows while you arrange them, and Own display width gives
--- the display a width of your own.
+-- the display a width of your own. A shaman's Totems bar shows as a row too,
+-- once stacked from its page, with just the arrows.
 local _, ns = ...
 local T = ns.Theme
 
@@ -529,6 +530,7 @@ function ns.BuildLayoutPage(window, page, width, height)
 
     local rows = {}
     page.rows = rows
+    local totemRow -- the Totems bar's, once stacked (TotemRow, below): not in rows
     local display -- the resource display, drawn between the rows
     local function Hovered(row)
         return row:IsMouseOver() or row.buttons:IsMouseOver() or selected == row.key
@@ -593,13 +595,17 @@ function ns.BuildLayoutPage(window, page, width, height)
         for i, row in ipairs(order) do
             if row == key then other = order[i + delta] end
         end
-        local name, way = ns.BAR_NAMES[key], delta < 0 and "up" or "down"
+        local name, way = L:Name(key), delta < 0 and "up" or "down"
         if not other then return name .. " is already at the " .. (delta < 0 and "top." or "bottom.") end
+        -- The Totems bar's row goes past the display, never beside it (L:Hops).
+        if L:Hops(key, other) then
+            return "Move Totems " .. ((key == ns.TOTEM_ROW) == (delta < 0) and "up" or "down") .. " the stack, past the display."
+        end
         local from, to = RowPlace(key), RowPlace(other)
         local how = from == to and " the stack"
             or InStack(from) and InStack(to) and " the stack, past the display"
             or (", " .. PLACES[to])
-        return "Move " .. name .. " " .. way .. how .. ", swapping places with " .. ns.BAR_NAMES[other] .. "."
+        return "Move " .. name .. " " .. way .. how .. ", swapping places with " .. L:Name(other) .. "."
             .. L:Widths(key, other, true)
     end
     -- - and +: one fewer or more across, and how many now.
@@ -618,7 +624,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         for i = first, last, step do
             if L.In(layout, list[i]) then
                 return "Move your resource display " .. (delta < 0 and "up" or "down") .. " the stack, past "
-                    .. ns.BAR_NAMES[list[i]] .. "."
+                    .. L:Name(list[i]) .. "."
             end
         end
         return "Your resource display is already at the " .. (delta < 0 and "top." or "bottom.")
@@ -630,6 +636,7 @@ function ns.BuildLayoutPage(window, page, width, height)
 
     -- An icon being dragged follows the cursor: onto another icon the two
     -- swap places (in its row or another), onto another row it moves there,
+    -- onto the Totems bar's it stays where it was (that takes no spells),
     -- anywhere else it comes off its bar.
     local ghost = CreateFrame("Frame", nil, page)
     ghost:SetSize(24, 24)
@@ -667,6 +674,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         for key, row in pairs(rows) do
             if row:IsShown() and row:IsMouseOver() then return key end
         end
+        if totemRow and totemRow:IsShown() and totemRow:IsMouseOver() then return ns.TOTEM_ROW end
     end
     -- While an icon is held: what it would swap with or move to outlined,
     -- the footer saying what letting go does, and the icon greyed where
@@ -692,6 +700,8 @@ function ns.BuildLayoutPage(window, page, width, height)
             end
         elseif target == held.bar then
             text = "Let go to leave " .. name .. " where it is."
+        elseif target == ns.TOTEM_ROW then
+            refused, text = true, "The Totems bar takes no spells. Let go to leave " .. name .. " where it is."
         elseif target then
             text, around = "Let go to move " .. name .. " to " .. ns.BAR_NAMES[target] .. ".", rows[target].strip
         else
@@ -726,7 +736,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         if onto and onto.name ~= from.name then
             -- Onto another icon: the two swap places, on one bar or two.
             Done(B:Trade(from.bar, from.name, target, onto.name))
-        elseif target == from.bar then
+        elseif target == from.bar or target == ns.TOTEM_ROW then
             window:Refresh()
         elseif target then
             Done(B:Transfer(from.bar, target, from.name))
@@ -872,6 +882,49 @@ function ns.BuildLayoutPage(window, page, width, height)
         return row
     end
 
+    -- The Totems bar's row (Stack it with my bars, on its page): its four
+    -- spots as its own icons, with the arrows. No - or +: its icons across
+    -- are set on its page, as is taking it out. Not one of your bars, so it's
+    -- kept apart from rows: nothing dropped on it goes on it.
+    local function TotemRow()
+        if totemRow then return totemRow end
+        local key = ns.TOTEM_ROW
+        local row = CreateFrame("Button", nil, box)
+        row:SetSize(boxWidth, 20) -- sized again on every refresh
+        row.key = key
+        row.hover = row:CreateTexture(nil, "BACKGROUND")
+        row.hover:SetAllPoints()
+        row.hover:SetColorTexture(1, 1, 1, .05)
+        row.strip = CreateFrame("Frame", nil, row)
+        row.strip:SetSize(10, 10)
+        row.strip:EnableMouse(false)
+        row.tiles = {}
+        row.name = T:Text(row, "GameFontHighlightSmall")
+        row.name:SetText(L:Name(key))
+        row.across = T:Text(row, "GameFontHighlightSmall", T.MUTED)
+        row.more = T:Text(row, "GameFontHighlightSmall", T.MUTED)
+        local Button = Buttons(row, 40)
+        row.up = Button(Arrow(row.buttons, true), 0, function() Done(L:Swap(key, -1)) end,
+            function() return MoveNote(key, -1) end)
+        row.down = Button(Arrow(row.buttons, false), 22, function() Done(L:Swap(key, 1)) end,
+            function() return MoveNote(key, 1) end)
+        row:SetScript("OnEnter", function(self) ShowButtons(self) end)
+        row:SetScript("OnLeave", function(self) ShowButtons(self) end)
+        -- A found debuff waiting for its spot: not here (Place says where).
+        row:SetScript("OnClick", function(self)
+            if placing then return Place(self.key) end
+            selected = self.key
+            window:Refresh()
+        end)
+        window:Hint(row, function()
+            if placing then return PlaceNote(key, nil, true) end
+            return "Your Totems bar. The arrows move its row; its size and icons across are on the Totems page,"
+                .. " where it can come out of your layout."
+        end)
+        totemRow, page.totemRow = row, row
+        return row
+    end
+
     -- The display, with arrows to move it up or down the stack.
     display = CreateFrame("Button", nil, box)
     display:SetSize(100, 14)
@@ -993,13 +1046,41 @@ function ns.BuildLayoutPage(window, page, width, height)
         row.down:SetUsable(L:CanSwap(row.key, 1))
     end
 
+    -- The Totems row's tiles: each element's art in the order picked, as many
+    -- across as its page says, then the next line. (size, high: a tile's
+    -- width and height.)
+    local function FillTotems(row, size, high)
+        local M = ns.Totems
+        local data, order = M:Data(), M:Order()
+        local across = math.min(data.perRow, #order)
+        for i, letter in ipairs(order) do
+            local tile = row.tiles[i]
+            if not tile then
+                tile = row.strip:CreateTexture(nil, "ARTWORK")
+                ns.Style:Zoom(tile)
+                row.tiles[i] = tile
+            end
+            tile:SetTexture(M:Art(letter))
+            tile:SetSize(size, high)
+            tile:ClearAllPoints()
+            tile:SetPoint("TOPLEFT", row.strip, "TOPLEFT", (i - 1) % across * (size + TILE_GAP),
+                -math.floor((i - 1) / across) * (high + TILE_GAP))
+        end
+        local lines = math.ceil(#order / across)
+        row.strip:SetSize(across * size + (across - 1) * TILE_GAP, lines * high + (lines - 1) * TILE_GAP)
+        row.across:SetText(across .. " across")
+        row.up:SetUsable(L:CanSwap(row.key, -1))
+        row.down:SetUsable(L:CanSwap(row.key, 1))
+    end
+
     -- A row across the middle, its name on the left and buttons on the right.
-    -- (high: its tiles' height, Icon height.)
-    local function Stacked(row, y, tile, high)
+    -- (high: its tiles' height, Icon height; tall: the row's, its lines of
+    -- them, for the Totems bar's.)
+    local function Stacked(row, y, tile, high, tall)
         row.place = "stack"
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", box, "TOPLEFT", 8, -y)
-        row:SetSize(boxWidth, high)
+        row:SetSize(boxWidth, tall or high)
         row.strip:ClearAllPoints()
         row.strip:SetPoint("CENTER")
         row.name:ClearAllPoints()
@@ -1010,7 +1091,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         row.buttons:SetPoint("RIGHT", -8, 0)
         row.more:ClearAllPoints()
         row.more:SetPoint("LEFT", row.strip, "RIGHT", 6, 0)
-        Fill(row, tile, false, high)
+        if row.key == ns.TOTEM_ROW then FillTotems(row, tile, high) else Fill(row, tile, false, high) end
     end
 
     -- A row beside the display: tiles against it, name and buttons outside.
@@ -1051,14 +1132,19 @@ function ns.BuildLayoutPage(window, page, width, height)
         for _, key in ipairs(layout.above) do if In(key) then above[#above + 1] = key end end
         for _, key in ipairs(layout.below) do if In(key) then below[#below + 1] = key end end
         for _, side in ipairs({ "left", "right" }) do if In(layout[side]) then sides[side] = layout[side] end end
+        -- The Totems bar's row goes by its own choices: its four spots, as
+        -- many across as its page says, in lines.
+        local totems = ns.Totems and ns.Totems:Data()
+        local function Data(key) return key == ns.TOTEM_ROW and totems or ns.BarData(key) end
+        local function Across(key) return key == ns.TOTEM_ROW and math.min(totems.perRow, totems.count) or Data(key).perRow end
+        local function Lines(key) return key == ns.TOTEM_ROW and math.ceil(totems.count / Across(key)) or 1 end
         -- Each bar's icons at their size on screen (All bars included).
-        local function Size(key) return ns.IconSize(ns.BarData(key)) end
+        local function Size(key) return ns.IconSize(Data(key)) end
         -- And how tall (Icon height): the rows as tall as the bars' icons.
-        local function High(key) return ns.IconHeight(ns.BarData(key), Size(key)) end
-        local function Real(key)
-            local data = ns.BarData(key)
-            return data.perRow * Size(key) + (data.perRow - 1) * data.spacing
-        end
+        local function High(key) return ns.IconHeight(Data(key), Size(key)) end
+        local function Real(key) return Across(key) * Size(key) + (Across(key) - 1) * Data(key).spacing end
+        -- A row's lines of icons, all of them: one, but for the Totems bar's.
+        local function Tall(key) return Lines(key) * High(key) + (Lines(key) - 1) * Data(key).spacing end
         -- The display: as wide as the widest row when it's to match, or
         -- your own width, so it's right before the game has resized it;
         -- otherwise as it is now.
@@ -1083,12 +1169,14 @@ function ns.BuildLayoutPage(window, page, width, height)
         for _, key in pairs(sides) do line = math.max(line, High(key)) end
         local tall = math.max(line, (line + displayTall) / 2 + (castRoom and 4 + castRoom or 0))
         for _, list in ipairs({ above, below }) do
-            for _, key in ipairs(list) do tall = tall + High(key) + layout.gap end
+            for _, key in ipairs(list) do tall = tall + Tall(key) + layout.gap end
         end
         local scale = math.min(SCALE, (boxWidth - 2 * EDGE) / math.max(1, widest, middle),
             (boxHeight - 2 * CLEAR) / math.max(1, tall))
         local function Tile(key) return math.max(6, math.floor(Size(key) * scale)) end
         local function TileHigh(key) return math.max(6, math.floor(High(key) * scale)) end
+        -- (and a row's, every line of its tiles)
+        local function RowHigh(key) return Lines(key) * TileHigh(key) + (Lines(key) - 1) * TILE_GAP end
         local gap = math.floor(layout.gap * scale + .5)
         local displayWidth = math.floor(displayReal * scale)
         local displayHeight = math.max(6, math.floor(displayTall * scale + .5))
@@ -1100,19 +1188,26 @@ function ns.BuildLayoutPage(window, page, width, height)
         local lineBottom = math.max(lineHeight, (lineHeight + displayHeight) / 2 + castGap + castHeight)
         local total = lineBottom
         for _, list in ipairs({ above, below }) do
-            for _, key in ipairs(list) do total = total + TileHigh(key) + gap end
+            for _, key in ipairs(list) do total = total + RowHigh(key) + gap end
         end
         for _, row in pairs(rows) do row:Hide() end
+        if totemRow then totemRow:Hide() end
         local function Draws(row)
             row:Show()
             -- The Debuffs row, outlined while a found debuff waits for its spot.
             row.target:SetShown(placing ~= nil and row.key == "debuff")
             return row
         end
+        -- A row above or below the display: a bar's, or the Totems bar's.
+        local function Drawn(key)
+            if key ~= ns.TOTEM_ROW then return Draws(Row(key)) end
+            TotemRow():Show()
+            return totemRow
+        end
         local y = math.max(CLEAR, math.floor((boxHeight - total) / 2))
         for _, key in ipairs(above) do
-            Stacked(Draws(Row(key)), y, Tile(key), TileHigh(key))
-            y = y + TileHigh(key) + gap
+            Stacked(Drawn(key), y, Tile(key), TileHigh(key), RowHigh(key))
+            y = y + RowHigh(key) + gap
         end
         -- The cast bar over the display (if chosen) takes the same room at the
         -- top of its line as it otherwise does at the bottom.
@@ -1142,8 +1237,8 @@ function ns.BuildLayoutPage(window, page, width, height)
         end
         y = y + lineBottom + gap
         for _, key in ipairs(below) do
-            Stacked(Draws(Row(key)), y, Tile(key), TileHigh(key))
-            y = y + TileHigh(key) + gap
+            Stacked(Drawn(key), y, Tile(key), TileHigh(key), RowHigh(key))
+            y = y + RowHigh(key) + gap
         end
         local health, power = ns.ColourKey("prdHealth"), ns.ColourKey("prdPower")
         T:Fill(display.health, health ~= "default" and ns.Style:BarColour(health) or HEALTH)
@@ -1151,6 +1246,7 @@ function ns.BuildLayoutPage(window, page, width, height)
         display.up:SetUsable(L:CanMoveDisplay(-1))
         display.down:SetUsable(L:CanMoveDisplay(1))
         for _, row in pairs(rows) do ShowButtons(row) end
+        if totemRow then ShowButtons(totemRow) end
         ShowButtons(display)
         -- Put back: a button for each bar taken out.
         local x, line, any = OUT_LEFT, 9, false
@@ -1182,8 +1278,15 @@ function ns.BuildLayoutPage(window, page, width, height)
         window:Hint(check, note)
         return check
     end
+    -- Its note: a rogue's or a druid's combo points, while ticked, stay in its spot (Resource.lua).
+    local function ShownNote()
+        local _, class = UnitClass("player")
+        local combo = ns.Get("prdCombo") and (class == "ROGUE" or class == "DRUID")
+        return "Blizzard's display, as in Options > Combat. Off, your rows close up where it was."
+            .. (combo and " Your combo points stay in its spot." or "")
+    end
     local shown = Tick("Show the Personal Resource Display", 36,
-        "Blizzard's display, as in Options > Combat. Off, your rows close up where it was.", function(self)
+        ShownNote, function(self)
             local on, why
             if self:GetChecked() then on, why = ns.TurnOn("nameplateShowSelf") else on, why = ns.TurnOff("nameplateShowSelf") end
             if not on then
@@ -1286,7 +1389,9 @@ function ns.BuildLayoutPage(window, page, width, height)
         elseif B:IsUnlocked() then
             text = "Unlocked: drag a bar on screen to move it."
         elseif active and L:DisplayOff() then
-            text = "Your rows close up where the display would be."
+            -- (Combo points staying up in its spot: Resource.lua R:AwayRoom.)
+            local combo = ns.Resource and ns.Resource:AwayRoom()
+            text = combo and "Your rows close up round your combo points." or "Your rows close up where the display would be."
         elseif active then
             text = "Your bars follow your resource display."
         elseif L.moved then

@@ -1,8 +1,9 @@
 -- The Totems page in the /ccm window, under More, for shamans only (a
 -- player's idea): one tick to turn the bar on, a preview of it with your
--- choices, where it sits with Move and Reset, Red when out of range, its
--- size, spacing, rows, names, countdown numbers and out of combat choice,
--- and the order of the four elements. Totems.lua does the work.
+-- choices, where it sits with Move and Reset (or Stack it with my bars, a
+-- row in your layout: Layout.lua), Red when out of range, its size,
+-- spacing, rows, names, countdown numbers and out of combat choice, and the
+-- order of the four elements. Totems.lua does the work.
 local _, ns = ...
 local T = ns.Theme
 
@@ -69,15 +70,23 @@ local function BuildTray(window, page, inner)
             window:Refresh()
         end
     end)
-    window:Hint(move, "Hides this window and shows a box over the bar. Drag it where you want it, then click Done.")
+    window:Hint(move, function()
+        if ns.Layout:HoldsTotems() then return "It's in your layout: order it on the Layout page." end
+        return "Hides this window and shows a box over the bar. Drag it where you want it, then click Done."
+    end)
     local reset = T:Button(tray, "Reset", 80, 22)
     reset:SetPoint("TOPLEFT", 496, -26)
     reset:SetScript("OnClick", function()
         M:ResetPlace()
-        window:Say("The Totems bar is back where it started.")
+        -- In your layout, it stays there: its own spot is for when it leaves.
+        window:Say(ns.Layout:HoldsTotems() and "Its own spot is back where it started. It stays in your layout."
+            or "The Totems bar is back where it started.")
         window:Refresh()
     end)
-    window:Hint(reset, "Puts the Totems bar back where it started, left of your bars.")
+    window:Hint(reset, function()
+        if ns.Layout:HoldsTotems() then return "Puts its own spot back where it started, for when it leaves your layout." end
+        return "Puts the Totems bar back where it started, left of your bars."
+    end)
     local where = T:Text(tray, "GameFontHighlightSmall", T.MUTED)
     where:SetPoint("TOPLEFT", 408, -56)
     where:SetWidth(inner - 420)
@@ -85,7 +94,8 @@ local function BuildTray(window, page, inner)
 end
 
 -- The choices: on or off and Red when out of range, the sliders on the left,
--- names and countdown numbers under them, out of combat and rows on the right.
+-- names and countdown numbers under them, out of combat and rows on the
+-- right, and Stack it with my bars under those.
 local function BuildOptions(window, page, inner)
     local M = ns.Totems
     local options = CreateFrame("Frame", nil, page)
@@ -105,8 +115,8 @@ local function BuildOptions(window, page, inner)
     -- Greyed while the game can't show it (Totems.lua CanRange).
     page.range = Tick("Red when out of range", "totemRange", COLUMN, 0, function()
         if not M:CanRange() then return "Your game can't show the range warning." end
-        return "A totem that buffs you, like Strength of Earth or Mana Spring, turns red while you're out of its range."
-            .. " Totems that don't buff you never do."
+        return "Totems that buff you, like Strength of Earth, turn red out of their range. Searing and Magma turn red once"
+            .. " you're further away than they reach."
     end)
 
     page.sliders = {}
@@ -144,6 +154,16 @@ local function BuildOptions(window, page, inner)
     page.timer = Tick("Show countdown numbers", "totemTimer", 0, -113, "The time left on each totem, counting down.")
     page.names = Tick("Show totem names", "totemNames", 0, -135,
         "Each totem's name under its icon, or its element's while none is down.")
+    -- A row in your layout (Layout.lua StackTotems): kept in the layout's
+    -- own rows, not a setting, so it goes with the layout.
+    local stack = T:Check(options, "Stack it with my bars", function(self)
+        local _, message = ns.Layout:StackTotems(self:GetChecked())
+        if message then window:Say(message) end
+        window:Refresh()
+    end)
+    stack:SetPoint("TOPLEFT", COLUMN, -113)
+    window:Hint(stack, "It takes a row in your layout, under your other rows. Put it in order on the Layout page.")
+    page.stack = stack
 
     -- A label, then its buttons PILL_LABEL along.
     local function Pills(label, key, keys, names, width, y, note)
@@ -239,6 +259,7 @@ function ns.BuildTotemsPage(window, page, width)
         self.range:SetUsable(M:CanRange())
         self.timer:SetChecked(ns.Get("totemTimer") == true)
         self.names:SetChecked(ns.Get("totemNames") == true)
+        self.stack:SetChecked(ns.Layout:TotemsStacked())
         for _, slider in ipairs(self.sliders) do slider:Set(ns.Get(slider.key)) end
         for _, pills in ipairs({ self.outOfCombat, self.grow, self.wrap }) do pills:SetSelected(ns.Get(pills.key)) end
         for index, letter in ipairs(M:Order()) do
@@ -261,7 +282,8 @@ function ns.BuildTotemsPage(window, page, width)
         end
         self.status:SetText(said)
         local moved = ns.Get("totemX") ~= ns.DEFAULTS.totemX or ns.Get("totemY") ~= ns.DEFAULTS.totemY
-        self.where:SetText(moved and "Where you dragged it." or "Left of your bars, where it starts.")
+        self.where:SetText(ns.Layout:HoldsTotems() and "In your layout. Order it on the Layout page."
+            or moved and "Where you dragged it." or "Left of your bars, where it starts.")
 
         -- The preview, drawn smaller to fit its box.
         local w, h = M:DrawPreview(self.preview)

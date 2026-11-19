@@ -45,6 +45,10 @@ local edged = setmetatable({}, { __mode = "k" })
 -- spell changes are hooked (only once any spell has a look).
 local looks = setmetatable({}, { __mode = "k" })
 local lookHooks = setmetatable({}, { __mode = "k" })
+-- Big stacks in the middle: every buff icon -> true, and those whose count
+-- the addon has put in the middle (moved back as it's unticked).
+local stacked = setmetatable({}, { __mode = "k" })
+local bigs = setmetatable({}, { __mode = "k" })
 M.decors, M.rows, M.keys = decors, rows, keys
 local hooked = {}
 local SPLIT_BOX = 46 -- the Split design's time box
@@ -150,7 +154,7 @@ local function Room(item)
     local parts = keys[item]
     local keyed = parts and parts.keyed
     -- Lifted clear of a key only while one shows on it (not just with keybinds on).
-    local top, lift, spot = Style:CountUp(keyed), keyed == true and parts.lift or 0, ns.Get("countdownSpot")
+    local top, lift, spot = Style:CountUp(keyed), keyed == true and parts.lift or 0, Style:Spot(stacked[item])
     local was = room[item]
     if was then
         if was.top == top and was.lift == lift and was.spot == spot then return end
@@ -166,7 +170,22 @@ local function Room(item)
     end
     -- (A charge count only on an icon with a key: the Essential and Utility ones.)
     local box = parts and item.ChargeCount
-    Style:KeyRoom(box and box.Current, box, 2, numbers, cooldown, lift, keyed)
+    Style:KeyRoom(box and box.Current, box, 2, numbers, cooldown, lift, keyed, stacked[item])
+end
+
+-- A buff icon's stack count: a count's font in Blizzard's corner, or with
+-- Big stacks in the middle the countdown's font in the middle (Style.lua).
+-- Blizzard only ever writes its text, never read here (secret in a fight);
+-- its own anchor (BOTTOMRIGHT -2,2 of its Applications frame) goes back
+-- once, as it's unticked.
+local function Stacks(item, spec)
+    local holder = item.Applications
+    local count = holder and holder.Applications
+    if not count then return end
+    count:SetFontObject(Style:Stacks(spec.size, looks[item] or nil, true))
+    local big = Style:BigStacks(true)
+    if big ~= (bigs[item] == true) then Style:StacksAt(count, holder, 2, true) end
+    bigs[item] = big or nil
 end
 
 -- A key showing up or going (a new spell, a binding changed) moves the count
@@ -310,9 +329,10 @@ end
 -- text), its spot (clear of a key in the middle), and the swipe.
 local function Detail(item, spec)
     if item.Cooldown then
-        item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, looks[item] or nil))
+        item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, looks[item] or nil, stacked[item]))
         Style:TimerText(item.Cooldown)
     end
+    if stacked[item] then Stacks(item, spec) end
     if keys[item] then KeyLook(item) else Room(item) end
     Sweep(item)
 end
@@ -331,8 +351,9 @@ local function SpellFont(item)
     local look, was = LookOf(item) or false, looks[item]
     looks[item] = look
     if Style:LookKey(look or nil) == Style:LookKey(was or nil) then return end
-    item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, look or nil))
+    item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, look or nil, stacked[item]))
     if keys[item] then KeyLook(item) end
+    if stacked[item] then Stacks(item, spec) end -- (big stacks in its spell's font)
 end
 
 -- A failure is reported once per session, never thrown into Blizzard's code.
@@ -361,7 +382,7 @@ local function FirstLook(item, spec)
     looks[item] = LookOf(item) or false
     if ns.HasSpellLooks() then HookLook(item) end
     if item.Cooldown then
-        item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, looks[item] or nil))
+        item.Cooldown:SetCountdownFont(Style:Countdown(spec.size, looks[item] or nil, stacked[item]))
         Style:TimerText(item.Cooldown)
     end
 end
@@ -384,13 +405,14 @@ local function Cooldown(item, spec)
     Sweep(item)
 end
 
--- Tracked buffs shown as icons.
+-- Tracked buffs shown as icons (their count and countdown swapped with Big stacks in the middle).
 local function Buff(item, spec)
+    stacked[item] = true
     SquareIcon(item, item.Icon)
     SquareSweep(item.Cooldown, item.Icon)
     Decorate(item, item.Icon)
     FirstLook(item, spec)
-    Font(item.Applications and item.Applications.Applications, Style:Count(spec.size))
+    Stacks(item, spec)
     Room(item)
     sweeps[item] = spec
     Sweep(item)

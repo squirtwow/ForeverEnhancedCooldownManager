@@ -3424,8 +3424,9 @@ function B:Clear(key)
 end
 
 function B:ResetPositions()
-    -- Back above the action bar, so no longer stacked in a layout.
-    if ns.Layout then ns.Layout:TurnOff() end
+    -- Back above the action bar, so no longer stacked in a layout (the
+    -- Totems bar back in its own spot).
+    if ns.Layout then ns.Layout:TurnOff(true) end
     for _, key in ipairs(ns.BAR_KEYS) do
         local data = ns.BarData(key)
         data.x, data.y, data.point = nil, nil, nil

@@ -197,8 +197,10 @@ end
 -- white, as they always were; in another colour (Icon details), that
 -- size's own font in that colour. look: a spell's own font and size
 -- (settings per spell, ns.SpellLook), each in place of the Look page's, or
--- nil, which is exactly as before.
-function S:Countdown(iconSize, look)
+-- nil, which is exactly as before. stacked: a buff icon, its countdown
+-- smaller while Big stacks in the middle is ticked (S:BigStacks).
+function S:Countdown(iconSize, look, stacked)
+    if self:BigStacks(stacked) then look = { font = look and look.font, size = S.SMALL_COUNTDOWN } end
     local size, key = self:CountdownSize(iconSize, look and look.size), ns.ColourKey("countdownColour")
     local own = look and S.FONTS[look.font] and look.font or nil
     if own then
@@ -854,7 +856,8 @@ end
 -- bottom-right otherwise, as on an icon with no key; the countdown's numbers move by lift, only
 -- on an icon that shows a key (keyed): one with none keeps them in its middle.
 -- box/inset: where the count sits; around: what the numbers sit on (S:NumbersAt).
-function S:KeyRoom(count, box, inset, numbers, around, lift, keyed)
+-- stacked: a buff icon (S:BigStacks), its numbers in its own spot.
+function S:KeyRoom(count, box, inset, numbers, around, lift, keyed, stacked)
     if count and box then
         count:ClearAllPoints()
         if self:CountUp(keyed) then
@@ -863,7 +866,7 @@ function S:KeyRoom(count, box, inset, numbers, around, lift, keyed)
             count:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -inset, inset)
         end
     end
-    if numbers and around then self:NumbersAt(numbers, around, keyed == true and lift or 0) end
+    if numbers and around then self:NumbersAt(numbers, around, keyed == true and lift or 0, stacked) end
 end
 
 -- Icon details ---------------------------------------------------------------------
@@ -1118,9 +1121,10 @@ end
 
 -- The countdown's numbers in the spot picked: in the middle (moved up or
 -- down by lift, clear of a key), or in a corner or along an edge, just in
--- from it. around: the art they sit on (its cooldown).
-function S:NumbersAt(numbers, around, lift)
-    local spot = ns.Get("countdownSpot")
+-- from it. around: the art they sit on (its cooldown). stacked: a buff
+-- icon, its numbers in S:Spot's spot.
+function S:NumbersAt(numbers, around, lift, stacked)
+    local spot = self:Spot(stacked)
     local at = SPOTS[spot]
     numbers:ClearAllPoints()
     if at then
@@ -1135,15 +1139,56 @@ end
 -- icons) in the spot picked: placed as the icon is made, in the middle of
 -- its art as on your bars' icons (not left wherever the game would put it),
 -- then set again only when the spot changes. parts: the icon's
--- { cooldown }, which keeps the spot set last.
+-- { cooldown }, which keeps the spot set last. A Buffs bar icon's
+-- (parts.buff) count too, in the middle with big stacks (in parts.box, the
+-- frame it sits in), and back in its corner after.
 function S:AuraNumbers(parts)
-    local spot = ns.Get("countdownSpot")
+    local big = self:BigStacks(parts.buff)
+    if parts.count and parts.box and parts.big ~= big and (big or parts.big) then
+        self:StacksAt(parts.count, parts.box, 1, parts.buff)
+    end
+    parts.big = big
+    local spot = self:Spot(parts.buff)
     if parts.spot == spot then return end
     local get = parts.cooldown.GetCountdownFontString
     local found = type(get) == "function" and get(parts.cooldown) or nil
     if not found then return end
     parts.spot = spot
-    self:NumbersAt(found, parts.cooldown, 0)
+    self:NumbersAt(found, parts.cooldown, 0, parts.buff)
+end
+
+-- Big stacks in the middle (Icon details, a player's idea): on buff icons
+-- (your Buffs bars' and Blizzard's), the stack count at the countdown's
+-- size in the middle, and the countdown smaller, in the Spot picked, or
+-- along the bottom while that's the middle. Swapped on every buff icon
+-- while ticked, stacks or none: a count can be secret in a fight, so it's
+-- never read. stacked: the icon is a buff icon.
+S.SMALL_COUNTDOWN = 72 -- the countdown beside big stacks: this percent of its automatic size, about a count's
+function S:BigStacks(stacked)
+    return stacked == true and ns.Get("bigStacks") == true
+end
+
+-- Where an icon's countdown goes (stacked: a buff icon).
+function S:Spot(stacked)
+    local spot = ns.Get("countdownSpot")
+    if self:BigStacks(stacked) and not SPOTS[spot] then return "BOTTOM" end
+    return spot
+end
+
+-- A buff icon's stack count font: a count's, or the countdown's with big stacks.
+function S:Stacks(iconSize, look, stacked)
+    if self:BigStacks(stacked) then return self:Countdown(iconSize, look) end
+    return self:Count(iconSize)
+end
+
+-- Its count in the middle of box with big stacks, else in the corner, inset in from it.
+function S:StacksAt(count, box, inset, stacked)
+    count:ClearAllPoints()
+    if self:BigStacks(stacked) then
+        count:SetPoint("CENTER", box, "CENTER", 0, 0)
+    else
+        count:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -inset, inset)
+    end
 end
 
 -- Every icon again after a change in Icon details: your bars' and Blizzard's.
