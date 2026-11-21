@@ -1219,6 +1219,39 @@ function ns.BuildBarPage(window, page, width)
     local onlyMissing = Option("Only show missing", "onlyMissing", -107,
         "Shows a buff only while it's not on you. The game hides your buffs from addons in a fight, so changes then show"
             .. " once it ends.", 0)
+    -- The Buffs bar only (a player's idea), beside those two: the bar gone
+    -- while your pet is out, or outside instances. Off unless ticked. Short
+    -- labels, to fit the left half's right side, as Keep colour does: the
+    -- longer one beside Only show missing, which leaves it more room.
+    local hidePet = Option("Hide w/ pet", "hidePet", -85,
+        "This bar hides while your pet or demon is out, in a fight too. It comes back while unlocked and in Edit Mode.", 210)
+    local hideOutside = Option("Only in instances", "hideOutside", -107,
+        "This bar shows only in dungeons, raids and battlegrounds, and hides everywhere else. It comes back while unlocked"
+            .. " and in Edit Mode.", 160)
+    -- The Debuffs bar only (a player's idea), beside Show missing debuffs
+    -- greyed (its label longer than the Buffs one, so further right than
+    -- Hide w/ pet): its missing debuffs' spots in colour, still faded. Off
+    -- unless ticked. A short label, to end before New rows.
+    local missingColour = Option("In colour", "missingColour", -85, function()
+        if not ns.BarData(state.bar).showMissing then
+            return "Tick Show missing debuffs greyed first: this shows those spots in colour."
+        end
+        return "Missing debuffs show in colour in their spots instead of grey, still faded."
+    end, 232)
+    missingColour:SetWidth(18 + (missingColour.text:GetStringWidth() or 0)) -- the label is its click area
+    -- The Debuffs bar only (a player's idea), beside Show spell names (in
+    -- its spot while packed debuffs have no names): the key that casts each
+    -- debuff on its icon, usable with the Look page's Keybinds on icons. Off
+    -- unless ticked.
+    local debuffKeys = Option("Show keybinds", "debuffKeys", -22, function()
+        if ns.Get("keybinds") ~= true then
+            return "Tick Keybinds on icons on the Look page first: this puts them on your debuffs too."
+        end
+        return "The key that casts each debuff, from your action bars, on its icon. Its size and spot are the Look page's."
+            .. " In a fight a key change shows once the fight ends."
+    end, 470)
+    debuffKeys:SetWidth(18 + (debuffKeys.text:GetStringWidth() or 0)) -- the label is its click area
+    options.ticks = { hidePet = hidePet, hideOutside = hideOutside, missingColour = missingColour, debuffKeys = debuffKeys }
     local showNames = Option("Show spell names", "showNames", -22, "Each spell's name under its icon.")
     local showTimer = Option("Show countdown numbers", "showTimer", -44, "The numbers counting down on this bar's icons.")
     -- The cooldown bars only: an icon shows the time left on the buff its
@@ -1440,6 +1473,11 @@ function ns.BuildBarPage(window, page, width)
         return "Lights a spell while a proc that empowers it is on you, where the game lights nothing: Shadow Bolt with"
             .. " Nightfall's Shadow Trance."
     end)
+    -- And beside Show the global cooldown, the cooldown bars only (a
+    -- player's ask): icons stay in colour while they cool down, each bar its
+    -- own, off unless ticked. Its short label fits the row's right half.
+    local keepColour = Option("Keep colour", "keepColour", -173,
+        "This bar's icons stay in colour while they cool down, instead of turning grey.", 210)
     -- The cooldown bars only (a player's idea): the bar's icons hidden, each
     -- shown only while you lack the mana, rage or energy for it, each bar its
     -- own, off unless ticked. In the right column under New rows, or under
@@ -1512,8 +1550,8 @@ function ns.BuildBarPage(window, page, width)
         return false
     end
     page.options = { whenReady = whenReady, onCooldown = onCooldown, dimUnusable = dimUnusable, dimOpacity = dimOpacity,
-        showGCD = showGCD, glowProcs = glowProcs, onlyShort = onlyShort, showMissing = showMissing, keepGreyed = keepGreyed,
-        onlyMissing = onlyMissing, showNames = showNames, showTimer = showTimer, showAuras = showAuras, swapForm = swapForm,
+        showGCD = showGCD, glowProcs = glowProcs, onlyShort = onlyShort, keepColour = keepColour, showMissing = showMissing, keepGreyed = keepGreyed,
+        onlyMissing = onlyMissing, hidePet = hidePet, hideOutside = hideOutside, showNames = showNames, showTimer = showTimer, showAuras = showAuras, swapForm = swapForm,
         editing = editing,
         showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap,
         tickAt = tickAt, tickFrom = tickFrom, tickEdge = tickEdge, tickSize = tickSize, tickColour = tickColour,
@@ -2014,7 +2052,7 @@ function ns.BuildBarPage(window, page, width)
         -- When ready, On cooldown, its tick, Dimmed icons and Show the global
         -- cooldown: the cooldown bars only, taller for them.
         for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity, showGCD, glowProcs,
-            onlyShort }) do
+            onlyShort, keepColour }) do
             part:SetShown(not aura)
         end
         -- Show only when I can't afford it: When ready, On cooldown and Dim
@@ -2043,6 +2081,7 @@ function ns.BuildBarPage(window, page, width)
         dimOpacity:Set(data.dimOpacity)
         dimOpacity:SetUsable(Dims(data))
         showGCD:SetChecked(data.showGCD)
+        keepColour:SetChecked(data.keepColour)
         glowProcs:SetChecked(data.glowProcs)
         glowProcs:SetUsable(not data.onlyShort)
         showMissing:SetShown(aura ~= nil)
@@ -2050,6 +2089,11 @@ function ns.BuildBarPage(window, page, width)
         showMissing:SetWidth(18 + (showMissing.text:GetStringWidth() or 0)) -- the label is its click area
         onlyMissing:SetShown(kind == "buff")
         onlyMissing:SetChecked(data.onlyMissing)
+        -- (Read from the page's options: this function is at the game's limit of 60 upvalues.)
+        for _, field in ipairs({ "hidePet", "hideOutside" }) do
+            options.ticks[field]:SetShown(kind == "buff")
+            options.ticks[field]:SetChecked(data[field])
+        end
         -- Packed buffs have no fixed spot to put a name under.
         showNames:SetShown(not aura or not ns.BuffBar:Packed(data))
         whenReady:SetSelected(data.whenReady)
@@ -2059,6 +2103,21 @@ function ns.BuildBarPage(window, page, width)
         keepGreyed:SetShown(kind == "debuff")
         keepGreyed:SetChecked(data.greyedNoTarget)
         keepGreyed:SetUsable(data.showMissing)
+        options.ticks.missingColour:SetShown(kind == "debuff")
+        options.ticks.missingColour:SetChecked(data.missingColour)
+        options.ticks.missingColour:SetUsable(data.showMissing)
+        -- Show keybinds: beside Show spell names, or in its spot while packed
+        -- debuffs have no names; usable with the Look page's keybinds on.
+        local keys = options.ticks.debuffKeys
+        keys:SetShown(kind == "debuff")
+        keys:SetChecked(data.debuffKeys)
+        keys:SetUsable(ns.Get("keybinds") == true)
+        local keysAt = showNames:IsShown() and 470 or 320
+        if keys.placedAt ~= keysAt then
+            keys.placedAt = keysAt
+            keys:ClearAllPoints()
+            keys:SetPoint("TOPLEFT", keysAt, -22)
+        end
         showNames:SetChecked(data.showNames)
         outOfCombat:SetSelected(data.outOfCombat)
         showTimer:SetChecked(data.showTimer)

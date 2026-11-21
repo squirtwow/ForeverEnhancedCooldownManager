@@ -995,6 +995,7 @@ local function Display()
     rawset(prd.PowerBar, "ManaCostPredictionBar", New("Texture", prd.PowerBar))
     rawset(prd.PowerBar, "FeedbackFrame", New("Frame", prd.PowerBar))
     rawset(prd.PowerBar.FeedbackFrame, "BarTexture", New("Texture", prd.PowerBar.FeedbackFrame))
+    rawset(prd.PowerBar.FeedbackFrame, "LossGlowTexture", New("Texture", prd.PowerBar.FeedbackFrame)) -- its glow, as in game
     rawset(prd, "AlternatePowerBar", false)
     rawset(prd, "ClassFrameContainer", false)
     rawset(prd, "defaultBarWidth", 200)

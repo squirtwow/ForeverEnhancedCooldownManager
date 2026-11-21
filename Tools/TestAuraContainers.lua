@@ -1191,6 +1191,16 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Build 71037's new fishing lure, Camper's Lure, is a weapon enchant the
+-- hand entries name, beside the older ones.
+;(function()
+    Fresh()
+    local ns = Load({ notesSeen = "dev" })
+    local lure, old = ns.HAND_ENCHANTS[8773], ns.HAND_ENCHANTS[266]
+    Equal(tostring(lure and lure[1]) .. " " .. tostring(lure and lure[2]) .. " | " .. tostring(old and old[1]),
+        "Camper's Lure 134895 | Aquadynamic Fish Attractor", "Camper's Lure (build 71037) named on the hand entries")
+end)()
+
 do
     -- Set up while off (entries, buff and debuff times): still none, until
     -- the bars are turned on.
@@ -2592,6 +2602,10 @@ end)()
         .. " " .. tostring(data.PASSIVES["Reckless Swings"]),
         "400588 400589,1326083 MAGE | 408505 SHAMAN | 1293696 WARLOCK | 1329286 nil ROGUE | 1329555 15 WARRIOR nil",
         "build 70790's tree-only talents and Reckless Swings")
+    -- Unsealed Wrath's stacks (a player's report, 21 Nov 2026): the talent's
+    -- Echo of each Seal, which the game's scripts give, light its icon.
+    Equal(Joined(data.PASSIVE_BUFFS[1310735]) .. " " .. Joined(data.PASSIVES["Unsealed Wrath"]),
+        "1311701,1311703,1311704,1311705,1328198,1328206 1310735", "Unsealed Wrath tracks its six Echo buffs")
     Equal(tostring(data.RANKS["Living Bomb"]) .. " " .. tostring(data.SPELL_CLASSES["Living Bomb"]) .. " "
         .. tostring(Has(data.DEBUFFS.MAGE, "Living Bomb")) .. " " .. tostring(data.RANKS.Starfall) .. " "
         .. tostring(data.NAME_AURAS["Living Bomb"]) .. " | " .. tostring(Has(data.RANKS["Fire Blast"], 2136, 400618)) .. " "
@@ -2612,6 +2626,10 @@ end)()
     Equal(Said("buff", "16191") .. " | " .. Lit("buff", 1325257) .. " | " .. tostring(Sp:AddNote("20177", "buff")) .. " | "
         .. tostring(Sp:AddNote("20177", "cd")), "true Added Mana Tide to Buffs. | g1 | nil | Reckoning is passive. Only its buff"
         .. " can be tracked, on the Buffs bar.", "Mana Tide lights for the fourth totem's; Reckoning goes on the Buffs bar now")
+    NAMES[1310735] = "Unsealed Wrath"
+    Equal(tostring(Sp:AddNote("1310735", "buff")) .. " | " .. tostring(Sp:AddNote("1310735", "cd")),
+        "nil | Unsealed Wrath is passive. Only its buff can be tracked, on the Buffs bar.",
+        "Unsealed Wrath goes on the Buffs bar for its Echo stacks, not on Cooldowns")
 
     -- Saved by the old names: every profile's keys move over as it loads
     -- (each bar's list and each form's, joins, the pulse's ticks and Long, a

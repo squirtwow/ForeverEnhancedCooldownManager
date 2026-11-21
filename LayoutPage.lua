@@ -533,7 +533,10 @@ function ns.BuildLayoutPage(window, page, width, height)
     local totemRow -- the Totems bar's, once stacked (TotemRow, below): not in rows
     local display -- the resource display, drawn between the rows
     local function Hovered(row)
-        return row:IsMouseOver() or row.buttons:IsMouseOver() or selected == row.key
+        -- (the display's mouse area reaches past the bar: its reach, set in Refresh)
+        local reach = row.reach
+        local over = reach and row:IsMouseOver(reach[1], reach[2], reach[3], reach[4]) or row:IsMouseOver()
+        return over or row.buttons:IsMouseOver() or selected == row.key
     end
     -- The buttons show while the row is hovered or chosen; beside the display
     -- they take the place of the row's name.
@@ -1212,10 +1215,22 @@ function ns.BuildLayoutPage(window, page, width, height)
         -- The cast bar over the display (if chosen) takes the same room at the
         -- top of its line as it otherwise does at the bottom.
         local castOver = castRoom and ns.Get("castAbove")
+        local lineStart = y
         local lineTop = y + (castOver and lineBottom - lineHeight or 0)
+        local displayTop = lineTop + (lineHeight - displayHeight) / 2
         display:ClearAllPoints()
-        display:SetPoint("TOP", box, "TOP", 0, -(lineTop + (lineHeight - displayHeight) / 2))
+        display:SetPoint("TOP", box, "TOP", 0, -displayTop)
         display:SetSize(math.max(20, displayWidth), displayHeight)
+        -- Its mouse area reaches into the free room round it, so its arrows
+        -- show without finding the thin bar itself (a player's report): up
+        -- to 6 above and below, short of any row there, and across the box
+        -- while nothing sits beside it.
+        local up = #above > 0 and displayTop - (lineStart - gap) or displayTop
+        local down = #below > 0 and lineStart + lineBottom + gap - (displayTop + displayHeight) or 6
+        up, down = math.max(0, math.min(6, math.floor(up))), math.max(0, math.min(6, math.floor(down)))
+        local across = next(sides) == nil and math.max(0, math.floor((boxWidth - math.max(20, displayWidth)) / 2)) or 0
+        display:SetHitRectInsets(-across, -across, -up, -down)
+        display.reach = { up, -down, -across, across }
         display.health:SetHeight(math.max(2, math.ceil(displayHeight * .6)))
         display.power:SetHeight(math.max(2, displayHeight - math.ceil(displayHeight * .6) - 1))
         -- Switched off, it's drawn faintly where it would be.

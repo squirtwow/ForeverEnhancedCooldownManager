@@ -313,6 +313,11 @@ local BAR_CHECKS = {
     tickCustom = function(v) return v == "" or ns.Hex(v) == v end,
     glowProcs = Bool,
     onlyShort = Bool,
+    keepColour = Bool,
+    hidePet = Bool,
+    hideOutside = Bool,
+    missingColour = Bool,
+    debuffKeys = Bool,
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.heightPct[3], spacing = ns.BAR_LIMITS.spacing[3],
@@ -321,13 +326,19 @@ local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.h
     outOfCombat = "show", showMissing = false, onlyMissing = false, greyedNoTarget = false, showNames = false, showTimer = true,
     showAuras = false, showGCD = false, selfDebuffs = false, grow = "centre", wrap = "down",
     tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false, tickCustom = "",
-    glowProcs = false, onlyShort = false }
+    glowProcs = false, onlyShort = false, keepColour = false, hidePet = false, hideOutside = false,
+    missingColour = false, debuffKeys = false }
 -- A bar setting only some bars have, and which: Glow for more procs and Show
 -- only when I can't afford it are a cooldown bar's (Cooldowns, Utility, and
 -- their extra bars). On any other bar a string's is left out and counted,
 -- and Share never writes one.
 local BAR_FITS = { glowProcs = function(key) return not ns.AURA_BARS[key] end,
-    onlyShort = function(key) return not ns.AURA_BARS[key] end }
+    onlyShort = function(key) return not ns.AURA_BARS[key] end,
+    keepColour = function(key) return not ns.AURA_BARS[key] end,
+    hidePet = function(key) return ns.BAR_KIND[key] == "buff" end,
+    hideOutside = function(key) return ns.BAR_KIND[key] == "buff" end,
+    missingColour = function(key) return ns.BAR_KIND[key] == "debuff" end,
+    debuffKeys = function(key) return ns.BAR_KIND[key] == "debuff" end }
 local function Fits(field, key)
     local fits = BAR_FITS[field]
     return not fits or fits(key)
@@ -473,24 +484,31 @@ end
 -- after 1.10.16. And Big stacks in the middle in the look (a player's
 -- idea), carried only since the update after 1.10.17, as are the Totems
 -- bar's own settings (ns.TOTEM_LOOK; its tick is a part, ns.SHARE_PARTS)
--- and Hide spent flash (prdHideSpent, a player's idea).
+-- and Hide spent flash (prdHideSpent, a player's idea). And a cooldown
+-- bar's Keep colour (a player's ask), carried only since the update after
+-- 1.10.18.
 local CARRIED_AFTER = "1.10.13"
 local HEIGHT_AFTER = "1.10.14"
 local SOUND_AFTER = "1.10.15"
 local IDEAS_AFTER = "1.10.16"
 local STACKS_AFTER = "1.10.17"
+local COLOUR_AFTER = "1.10.18"
 local NEW_LOOK = { "pulseResets" }
 local NEWER_LOOK = { "pulseProcSound" }
 local NEWEST_LOOK = { "prdOwnWidth", "prdWidth", "prdComboHeight", "prdComboAt" }
 local NEW_COOLDOWN = { "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
 local function Kept(version)
-    if ns.CompareVersions(version, STACKS_AFTER) == 1 then return nil end
+    if ns.CompareVersions(version, COLOUR_AFTER) == 1 then return nil end
     local older = ns.CompareVersions(version, CARRIED_AFTER) ~= 1
     local tall = ns.CompareVersions(version, HEIGHT_AFTER) ~= 1
     local quiet = ns.CompareVersions(version, SOUND_AFTER) ~= 1
     local ideas = ns.CompareVersions(version, IDEAS_AFTER) ~= 1
-    local keep = { look = { bigStacks = true, prdHideSpent = true }, bars = {} }
-    for _, key in ipairs(ns.TOTEM_LOOK) do keep.look[key] = true end
+    local stacks = ns.CompareVersions(version, STACKS_AFTER) ~= 1
+    local keep = { look = {}, bars = {} }
+    if stacks then
+        keep.look.bigStacks, keep.look.prdHideSpent = true, true
+        for _, key in ipairs(ns.TOTEM_LOOK) do keep.look[key] = true end
+    end
     if ideas then
         for _, key in ipairs(NEWEST_LOOK) do keep.look[key] = true end
     end
@@ -502,6 +520,9 @@ local function Kept(version)
     end
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
         local own = {}
+        if not ns.AURA_BARS[key] then own.keepColour = true end
+        if ns.BAR_KIND[key] == "buff" then own.hidePet, own.hideOutside = true, true end
+        if ns.BAR_KIND[key] == "debuff" then own.missingColour, own.debuffKeys = true, true end -- (Missing in colour, Show keybinds: since 1.10.18 too)
         if ideas and not ns.AURA_BARS[key] then own.onlyShort = true end
         if tall then own.heightPct = true end
         if older then

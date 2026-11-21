@@ -10,6 +10,25 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.19",
+        sections = {
+            { "Added", {
+                "Keep colour: a bar's icons stay in colour while on cooldown.",
+                "Buffs bars can hide while your pet is out, or outside instances.",
+                "In colour: missing debuffs can show in colour instead of grey (Debuffs page).",
+                "Show keybinds: debuff icons show the key that casts them, greyed ones too (Debuffs page).",
+                "The window's - button makes it a small strip, so you can see your bars while you move them.",
+            } },
+            { "Fixed", {
+                "Unsealed Wrath can go on the Buffs bar to show its Echo stacks.",
+                "Switch with my talents now follows dual spec.",
+                "Layout page: your resource display's arrows are easier to find.",
+                "Camper's Lure now shows its own name and icon on your weapon.",
+                "Hide spent flash now really hides the flash and its glow.",
+            } },
+        },
+    },
+    {
         version = "1.10.18",
         sections = {
             { "Added", {

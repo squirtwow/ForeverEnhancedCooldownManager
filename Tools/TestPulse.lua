@@ -2827,20 +2827,24 @@ end)()
     SlashCmdList.FECM("")
     local w = FECMFrame
     local help = w.help
-    -- Beside the X, in the window's own square style; the profile menu
-    -- moves along for it.
-    local hp, pp = S[help].points[1], S[w.profileButton].points[1]
+    -- Beside the X, in the window's own square style; the make-smaller
+    -- square left of it (a player's ask, 22 Nov 2026), and the profile menu
+    -- moves along for them.
+    local small = w.smallButton
+    local hp, sp, pp = S[help].points[1], S[small].points[1], S[w.profileButton].points[1]
     Equal(S[help.label].text .. " " .. S[help].width .. "x" .. S[help].height .. " " .. hp[1] .. " " .. tostring(hp[2] == w.close) .. " "
-        .. hp[3] .. " " .. hp[4] .. " | " .. pp[1] .. " " .. tostring(pp[2] == help) .. " " .. pp[3] .. " " .. pp[4] .. " | "
+        .. hp[3] .. " " .. hp[4] .. " | " .. S[small].width .. "x" .. S[small].height .. " " .. sp[1] .. " " .. tostring(sp[2] == help) .. " "
+        .. sp[3] .. " " .. sp[4] .. " | " .. pp[1] .. " " .. tostring(pp[2] == small) .. " " .. pp[3] .. " " .. pp[4] .. " | "
         .. tostring(S[help].parent == w.header) .. " " .. tostring(help.hint),
-        "? 22x22 RIGHT true LEFT -6 | RIGHT true LEFT -8 | true nil",
-        "a ? square beside the X, the profile menu left of it; on hover a tooltip under it says what it does,"
-            .. " not the footer (Tools/TestHelp.lua)")
+        "? 22x22 RIGHT true LEFT -6 | 22x22 RIGHT true LEFT -6 | RIGHT true LEFT -8 | true nil",
+        "a ? square beside the X, the make-smaller square left of it and the profile menu left of that; on hover a tooltip"
+            .. " under the ? says what it does, not the footer (Tools/TestHelp.lua)")
     -- The title (large text, ten units a letter to be sure) clear of the
-    -- profile menu, which starts 28 further left than before the ?.
+    -- profile menu, which starts 28 further left than before the ?, and 28
+    -- more for the make-smaller square.
     local profileLeft = Placed(w.profileButton)
     Equal(tostring(1 + 12 + 26 + 8 + #"Forever Enhanced Cooldown Manager" * 10 + 20 <= profileLeft) .. " " .. profileLeft,
-        "true 471", "the title clear of the profile menu, which starts at 471")
+        "true 443", "the title clear of the profile menu, which starts at 443")
     local Tour = hns.Tour
     local box
     -- The bar showing is what a bar step talks about.

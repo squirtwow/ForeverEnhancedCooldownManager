@@ -1178,6 +1178,7 @@ local function PRDPieces(frame, container, health)
     local feedback = New("Frame", power)
     feedback.BarTexture = New("Texture", feedback)
     S[feedback.BarTexture].file = UI_STATUSBAR
+    feedback.LossGlowTexture = New("Texture", feedback)
     power.FeedbackFrame = feedback
     -- Heals on the way, and the shield's stripes and glow, which keep Blizzard's own art.
     for _, key in ipairs({ "myHealPrediction", "otherHealPrediction", "totalAbsorb", "totalAbsorbOverlay", "overAbsorbGlow" }) do
@@ -1208,7 +1209,8 @@ local function PRDAllow(frame, health)
     local power = frame.PowerBar
     if not rawget(power, "ManaCostPredictionBar") then return end
     S[power.ManaCostPredictionBar].allow = { SetTexture = true, SetVertexColor = true }
-    S[power.FeedbackFrame.BarTexture].allow = { SetTexture = true, SetVertexColor = true }
+    S[power.FeedbackFrame.BarTexture].allow = { SetTexture = true, SetVertexColor = true, SetColorTexture = true }
+    S[power.FeedbackFrame.LossGlowTexture].allow = { SetVertexColor = true }
     S[health.myHealPrediction].allow, S[health.otherHealPrediction].allow = { SetTexture = true }, { SetTexture = true }
     for _, key in ipairs({ "totalAbsorb", "totalAbsorbOverlay", "overAbsorbGlow" }) do
         S[health[key]].deny = { SetTexture = true, SetAlpha = true, SetVertexColor = true, SetAtlas = true, SetColorTexture = true,
@@ -1363,17 +1365,31 @@ do
     -- Hide spent flash (a player's idea): tinted clear, and kept clear after
     -- Blizzard sets the bar up; only its tint, never shown or hidden.
     Equal(ns.Get("prdHideSpent"), false, "Hide spent flash is off by default")
+    local glow = prd.PowerBar.FeedbackFrame.LossGlowTexture
+    Equal(tostring(S[glow].tint), "nil", "off: Blizzard's spent glow never tinted")
     local shownBefore, alphaBefore = S[flash].shown, S[flash].alpha
+    local glowShown, glowAlpha = S[glow].shown, S[glow].alpha
     ns.Set("prdHideSpent", true)
     ns.Resource:Apply()
-    Equal(string.format("%g", S[flash].tintAlpha), "0", "Hide spent flash: the flash tinted clear")
+    -- (A tint's alpha is the alpha Blizzard sets to 1 as each flash starts, so
+    -- on Forever it never hid it: Squirt's test, 22 Nov 2026. The flash is a
+    -- clear colour texture instead, and the glow, drawn by adding light, black.)
+    Equal(table.concat(S[flash].color or {}, ","), "0,0,0,0", "Hide spent flash: the flash a clear colour texture")
+    Equal(string.format("%s %s %s", table.concat(S[glow].tint, ","), tostring(S[glow].shown == glowShown), tostring(S[glow].alpha == glowAlpha)),
+        "0,0,0 true true", "Hide spent flash: its glow tinted black (adds no light), never shown, hidden or faded")
+    local texturesSet = S[flash].file
+    ns.Set("barTexture", ns.Get("barTexture") == "flat" and "classic" or "flat")
+    ns.Resource:Apply()
+    Equal(S[flash].file, texturesSet, "kept clear when the bars' texture changes")
     prd:UpdatePowerBar()
-    Equal(string.format("%g %s %s", S[flash].tintAlpha, tostring(S[flash].shown == shownBefore), tostring(S[flash].alpha == alphaBefore)),
-        "0 true true",
+    Equal(string.format("%s %s %s", table.concat(S[flash].color or {}, ","), tostring(S[flash].shown == shownBefore), tostring(S[flash].alpha == alphaBefore)),
+        "0,0,0,0 true true",
         "still clear after Blizzard sets the bar up, and never shown or hidden")
     ns.Set("prdHideSpent", false)
     ns.Resource:Apply()
-    Equal(string.format("%g", S[flash].tintAlpha), "0.45", "unticked: the flash back as it was")
+    Equal(tostring(S[flash].file ~= texturesSet) .. " " .. string.format("%g", S[flash].tintAlpha), "true 0.45",
+        "unticked: the flash gets the bars' texture back, as it was")
+    Equal(string.format("%s %g", table.concat(S[glow].tint, ","), S[glow].tintAlpha), "1,1,1 1", "unticked: the glow back to Blizzard's white")
     ns.Set("barStyle", "glass")
     ns.Resource:Apply()
     Equal(Alphas(), "1 1 1 1", "Glass: solid again")

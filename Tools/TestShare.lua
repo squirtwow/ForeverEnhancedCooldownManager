@@ -1591,7 +1591,7 @@ do
     end
     Equal(table.concat(fields, ","), "size,heightPct,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
         .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,showGCD,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,"
-        .. "tickFrom,tickEdge,tickCustom,glowProcs,onlyShort",
+        .. "tickFrom,tickEdge,tickCustom,glowProcs,onlyShort,keepColour,hidePet,hideOutside,missingColour,debuffKeys",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
     -- Every bar setting a bar keeps is shared (ns.BarData), Glow for more
     -- procs too since 15 Nov 2026: none left behind.

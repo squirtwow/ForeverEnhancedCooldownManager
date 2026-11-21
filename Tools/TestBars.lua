@@ -1095,6 +1095,17 @@ Equal(p[1] == "BOTTOM" and p[4] == 0 and p[5], 190, "starts above the action bar
 active = SECRET
 B:RefreshAll()
 Equal(S[moon.texture].desaturated, SECRET, "the secret cooldown state goes straight to the game")
+-- Keep colour on cooldown (a player's ask): off by default, a cooldown bar's
+-- only; ticked, never grey and the secret state is never tested.
+Equal(tostring(ns.BarData("cd").keepColour) .. " " .. tostring(ns.BarData("buff").keepColour), "false false",
+    "Keep colour on cooldown is off by default")
+B:SetOption("cd", "keepColour", true)
+B:RefreshAll()
+Equal(S[cd.icons[2].texture].desaturated, false, "kept in colour while its secret cooldown runs")
+B:SetOption("cd", "keepColour", false)
+B:RefreshAll()
+moon = cd.icons[2]
+Equal(S[moon.texture].desaturated, SECRET, "unticked: greyed by the game again")
 Equal(Last(moon.cooldown, "SetCooldownFromDurationObject") ~= nil, true, "sweep fed from the duration object")
 Equal(S[moon].alpha .. " " .. ns.BarData("cd").whenReady, "1 show", "shown in full while ready unless you choose otherwise")
 B:SetOption("cd", "whenReady", "hide")
@@ -1941,6 +1952,49 @@ B:SetOption("buff", "showMissing", false)
 Equal(groups.g1.enabled and slots.b1.enabled == false, true, "back to packed")
 Equal(groups.g2.enabled, false, "Clearcasting's group off after being unticked")
 Equal(#printed, 0, "no errors")
+
+-- Hide while my pet is out and Hide outside instances (a player's idea): a
+-- Buffs bar's own, off unless ticked; gone right out (never hidden), in a
+-- fight too, and back while unlocked.
+do
+    local oldExists, oldInside = _G.UnitExists, _G.IsInInstance
+    local pet, inside = false, false
+    _G.UnitExists = function(unit) if unit == "pet" then return pet end return oldExists(unit) end
+    _G.IsInInstance = function() return inside, inside and "party" or "none" end
+    B:SetOption("buff", "outOfCombat", "show")
+    Equal(tostring(ns.BarData("buff").hidePet) .. " " .. tostring(ns.BarData("buff").hideOutside)
+        .. " " .. tostring(ns.BarData("debuff").hidePet), "false false false", "both off unless ticked, a Buffs bar's only")
+    pet = true
+    Fire("UNIT_PET", "player")
+    Equal(S[buffs].alpha, 1, "unticked: a pet out changes nothing")
+    B:SetOption("buff", "hidePet", true)
+    Equal(tostring(S[buffs].alpha) .. " " .. tostring(S[buffs].shown), "0 true", "pet out: gone right out, never hidden")
+    pet = false
+    Fire("UNIT_PET", "player")
+    Equal(S[buffs].alpha, 1, "pet dismissed: back")
+    pet = true
+    Fire("UNIT_PET", "player")
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    Equal(S[buffs].alpha, 0, "still gone in a fight")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    B:SetOption("buff", "hidePet", false)
+    Equal(S[buffs].alpha, 1, "unticked: back")
+    B:SetOption("buff", "hideOutside", true)
+    Equal(S[buffs].alpha, 0, "outside an instance: gone")
+    B:SetUnlocked(true)
+    Equal(S[buffs].alpha, 1, "back while unlocked")
+    B:SetUnlocked(false)
+    inside = true
+    Fire("PLAYER_ENTERING_WORLD")
+    Equal(S[buffs].alpha, 1, "in a dungeon: shown")
+    B:SetOption("buff", "hideOutside", false)
+    ns.BarData("debuff").hidePet = true
+    Equal(tostring(ns.BarData("debuff").hidePet), "false", "never on another kind of bar")
+    _G.UnitExists, _G.IsInInstance = oldExists, oldInside
+    Equal(#printed, 0, "no errors")
+end
 local kept = ForeverEnhancedCooldownManagerDB
 Equal(tostring(kept.bars.buff.showMissing) .. " " .. tostring(kept.bars.buff.showTimer), "false true", "Buffs bar options saved")
 Equal(table.concat(kept.profiles[ns.ProfileName()].buff, ","), "Thorns", "and its list, in your profile")
@@ -2051,7 +2105,93 @@ Fire("PLAYER_REGEN_ENABLED")
     Equal(tostring(ns.BarData("buff").greyedNoTarget) .. " " .. tostring(ns.BarData("debuff").greyedNoTarget), "false false",
         "only the Debuffs bar's, and only true or false")
 end)()
+-- Missing in colour (a player's idea, the Debuffs bar's own): the missing
+-- debuffs' spots in colour instead of grey, still faded; off unless ticked,
+-- and never on the Buffs bar.
+;(function()
+    local spot = debuffs.holders[1]
+    local function Grey() return tostring(S[spot.icon].desaturated) .. " " .. tostring(S[spot.icon].alpha) end
+    target, hostile = true, true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(tostring(ns.BarData("debuff").missingColour) .. " " .. Grey(), "false true 0.45", "missing in colour: off unless ticked, spots grey")
+    B:SetOption("debuff", "missingColour", true)
+    Equal(Grey(), "false 0.45", "ticked: the missing debuff's spot in colour, still faded")
+    B:SetOption("debuff", "missingColour", false)
+    Equal(Grey(), "true 0.45", "unticked: grey again")
+    -- In a fight it changes at once too (a player's test, 22 Nov 2026: it
+    -- waited for the fight to end), and stays right after it.
+    lockdown = true
+    B:SetOption("debuff", "missingColour", true)
+    local fight = Grey()
+    B:SetOption("debuff", "missingColour", false)
+    fight = fight .. " | " .. Grey()
+    B:SetOption("debuff", "missingColour", true)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight .. " | " .. Grey(), "false 0.45 | true 0.45 | false 0.45", "in a fight: in colour and grey at once, and still right after it")
+    B:SetOption("debuff", "missingColour", false)
+    ns.BarData("buff").missingColour = true
+    ns.BarData("debuff").missingColour = "yes"
+    Equal(tostring(ns.BarData("buff").missingColour) .. " " .. tostring(ns.BarData("debuff").missingColour), "false false",
+        "missing in colour: only the Debuffs bar's, and only true or false")
+end)()
 B:SetOption("debuff", "showMissing", false)
+-- Show keybinds (a player's idea, the Debuffs bar's own): the key that casts
+-- each debuff on its icon, packed or in a fixed spot, with the Look page's
+-- keybinds on; off unless ticked, set out of a fight only, never on the Buffs bar.
+;(function()
+    local parts
+    for _, p in ipairs(debuffs.groupParts) do if p.index == 1 then parts = p end end
+    local text = parts.keyText
+    local function Shows(t) return tostring(S[t or text].shown) .. " " .. tostring(S[t or text].text) end
+    Equal(S[text].parent == parts.box, true, "made with Moonfire's packed icon, above its sweep")
+    -- (The keys are read at once out of a fight: no timers run here, as
+    -- queued ones would show What's new for this load.)
+    actionSlots[1], keyOf.ACTIONBUTTON1 = { "spell", 8924 }, "1"
+    ns.Set("keybinds", true)
+    ns.Keybinds:Update()
+    Equal(tostring(ns.BarData("debuff").debuffKeys) .. " " .. tostring(S[text].shown), "false false",
+        "show keybinds: off unless ticked, even with the Look page's keybinds on")
+    B:SetOption("debuff", "debuffKeys", true)
+    Equal(Shows(), "true 1", "ticked: Moonfire's icon shows the key that casts it")
+    B:SetOption("debuff", "showMissing", true)
+    local slot = debuffs.holders[1].slot
+    Equal(Shows(slot.keyText), "true 1", "and in its fixed spot with missing debuffs greyed")
+    -- The greyed spot itself shows it too (Squirt's ask, 22 Nov 2026), on the
+    -- addon's own spot, hidden with the spot while no enemy is targeted.
+    local spot = debuffs.holders[1]
+    Equal(tostring(spot.spotKey ~= nil) .. " " .. Shows(spot.spotKey) .. " " .. tostring(S[spot.spotKey].parent == spot),
+        "true true 1 true", "the greyed spot shows its key too, on its own spot")
+    target, hostile = false, false
+    Fire("PLAYER_TARGET_CHANGED")
+    local away = tostring(S[spot.spotKey].alpha)
+    target, hostile = true, true
+    Fire("PLAYER_TARGET_CHANGED")
+    Equal(away .. " " .. tostring(S[spot.spotKey].alpha), "0 1", "hidden with the spot with no enemy targeted, back with one")
+    B:SetOption("debuff", "showMissing", false)
+    ns.Set("keybinds", false)
+    B:ApplyKeybinds()
+    Equal(tostring(S[text].shown), "false", "the Look page's keybinds off: none")
+    ns.Set("keybinds", true)
+    B:ApplyKeybinds()
+    Equal(Shows(), "true 1", "and back with them")
+    -- Unticked in a fight: the game's icons wait for it to end.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetOption("debuff", "debuffKeys", false)
+    B:ShowKeys()
+    Equal(tostring(S[text].shown), "true", "in a fight: nothing set on the icon")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(tostring(S[text].shown), "false", "unticked once the fight ends")
+    ns.BarData("buff").debuffKeys = true
+    ns.BarData("debuff").debuffKeys = "yes"
+    Equal(tostring(ns.BarData("buff").debuffKeys) .. " " .. tostring(ns.BarData("debuff").debuffKeys), "false false",
+        "show keybinds: only the Debuffs bar's, and only true or false")
+    ns.Set("keybinds", false)
+    actionSlots[1], keyOf.ACTIONBUTTON1 = nil, nil
+    ns.Keybinds:Update()
+end)()
 Equal(#printed, 0, "no errors")
 
 -- Joined entries ------------------------------------------------------------------------------
@@ -2799,6 +2939,14 @@ trinketCooldown = { 100, 120, 1 }
 B:RefreshAll()
 Equal(Last(charmIcon.cooldown, "SetCooldown", 2), 120, "trinket cooldown shown")
 Equal(S[charmIcon.texture].desaturated, true, "greyed while cooling down")
+B:SetOption("cd", "keepColour", true)
+B:RefreshAll()
+charmIcon = cdBar.icons[1]
+Equal(S[charmIcon.texture].desaturated, false, "Keep colour on cooldown: the trinket stays in colour")
+B:SetOption("cd", "keepColour", false)
+B:RefreshAll()
+charmIcon = cdBar.icons[1]
+Equal(S[charmIcon.texture].desaturated, true, "unticked: greyed again")
 trinketCooldown = { 0, 0, 1 }
 S[charmIcon.cooldown].scripts.OnCooldownDone()
 Equal(S[charmIcon.texture].desaturated, true, "a cooldown ending asks for a refresh on the next frame")
@@ -3763,6 +3911,32 @@ unlock:Click()
 w:Hide()
 Equal(B:IsUnlocked(), false, "closing the window locks them")
 ns.ShowWindow()
+-- Made smaller (a player's ask, 22 Nov 2026): the - in the title bar swaps the
+-- window for a small strip; the bars stay unlocked to move, the strip locks and
+-- unlocks them, Open (or /ccm) brings the window back and the strip's X locks them.
+;(function()
+    local strip = w.small
+    w:Select("layout")
+    unlock:Click()
+    w.smallButton:Click()
+    Equal(tostring(S[w].shown) .. " " .. tostring(S[strip].shown) .. " " .. tostring(B:IsUnlocked()) .. " " .. S[strip.lock.label].text,
+        "false true true Lock bars", "smaller: the window goes, the strip shows, the bars stay unlocked")
+    strip.lock:Click()
+    local locked = tostring(B:IsUnlocked()) .. " " .. S[strip.lock.label].text
+    strip.lock:Click()
+    Equal(locked .. " | " .. tostring(B:IsUnlocked()), "false Unlock bars | true", "the strip locks and unlocks them")
+    strip.open:Click()
+    Equal(tostring(S[w].shown) .. " " .. tostring(S[strip].shown) .. " " .. tostring(B:IsUnlocked()), "true false true",
+        "Open: the window back, the strip gone, still unlocked")
+    w.smallButton:Click()
+    ns.ShowWindow()
+    Equal(tostring(S[w].shown) .. " " .. tostring(S[strip].shown), "true false", "opened another way: the strip goes too")
+    w.smallButton:Click()
+    strip.close:Click()
+    Equal(tostring(S[strip].shown) .. " " .. tostring(B:IsUnlocked()), "false false", "the strip's X locks them, as closing the window does")
+    ns.ShowWindow()
+    w:Select("general")
+end)()
 
 -- Escape: the game hides every window on its list, in a fight too, and the
 -- addon never touches a key binding, before, during or after the fight.
@@ -7182,6 +7356,7 @@ local function Display()
     rawset(prd.PowerBar, "ManaCostPredictionBar", New("Texture", prd.PowerBar))
     rawset(prd.PowerBar, "FeedbackFrame", New("Frame", prd.PowerBar))
     rawset(prd.PowerBar.FeedbackFrame, "BarTexture", New("Texture", prd.PowerBar.FeedbackFrame))
+    rawset(prd.PowerBar.FeedbackFrame, "LossGlowTexture", New("Texture", prd.PowerBar.FeedbackFrame)) -- its glow, as in game
     rawset(prd, "AlternatePowerBar", false)
     rawset(prd, "ClassFrameContainer", false)
     rawset(prd, "defaultBarWidth", 200)
@@ -12581,7 +12756,16 @@ end)()
         "LEFT 0 0 48 | LEFT 8 0 | LEFT 30 0", "the arrows where they were, the strip reaching back to the display")
     Equal(tostring(Last(display.buttons, "EnableMouse")) .. " " .. tostring(Last(cd.buttons, "EnableMouse")), "true nil",
         "that strip takes the mouse; a row's, inside the row, doesn't need to")
-    local DISPLAY = "Your Personal Resource Display. The arrows move it up or down the stack; move it on screen in Edit Mode."
+    -- Its mouse area reaches past the thin bar (up to 6 above and below, short
+    -- of any row, and across the box with nothing beside it), and the hover
+    -- check uses that same reach.
+    local reach = display.reach
+    Equal(table.concat({ Last(display, "SetHitRectInsets", 1), Last(display, "SetHitRectInsets", 2),
+        Last(display, "SetHitRectInsets", 3), Last(display, "SetHitRectInsets", 4) }, " ") .. " | "
+        .. tostring(reach[1] >= 0 and reach[1] <= 6 and reach[2] <= 0 and reach[2] >= -6 and reach[4] > 0),
+        table.concat({ reach[3], -reach[4], -reach[1], reach[2] }, " ") .. " | true",
+        "the display's mouse area and its hover reach agree, within 6 above and below")
+    local DISPLAY ="Your Personal Resource Display. The arrows move it up or down the stack; move it on screen in Edit Mode."
     Over(true, display)
     Enter(display)
     Over(nil, display)

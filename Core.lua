@@ -634,7 +634,8 @@ ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 -- (onlyShort) are a cooldown bar's only.
 ns.SHARE_BAR_FIELDS = { "size", "heightPct", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "showGCD", "selfDebuffs", "grow", "wrap", "point",
-    "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom", "glowProcs", "onlyShort" }
+    "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom", "glowProcs", "onlyShort",
+    "keepColour", "hidePet", "hideOutside", "missingColour", "debuffKeys" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -2864,16 +2865,20 @@ local function Number(ok, value)
     if ok and Plain(value) and Finite(value) then return value end
 end
 
--- Your active talents' config: the one your spec group fights with.
+-- Your active talents' config: the one your spec group fights with, read
+-- as Forever's own talent window reads it (its Camelot ClassTalentsFrame:
+-- the active spec group's combat config). C_ClassTalents' answer is only
+-- the fallback: with dual spec it can stay on your first spec's (a
+-- player's report, 21 Nov: Fury to Protection never switched).
 local function TalentConfig()
     local talents, spec = C_ClassTalents, C_SpecializationInfo
-    if type(talents) == "table" and type(talents.GetActiveConfigID) == "function" then
-        local config = Number(pcall(talents.GetActiveConfigID))
-        if config then return config end
-    end
     if type(spec) == "table" and type(spec.GetActiveSpecGroup) == "function" and type(spec.GetCombatConfigIDForSpecGroup) == "function" then
         local group = Number(pcall(spec.GetActiveSpecGroup))
-        return group and Number(pcall(spec.GetCombatConfigIDForSpecGroup, group))
+        local config = group and Number(pcall(spec.GetCombatConfigIDForSpecGroup, group))
+        if config then return config end
+    end
+    if type(talents) == "table" and type(talents.GetActiveConfigID) == "function" then
+        return Number(pcall(talents.GetActiveConfigID))
     end
 end
 
@@ -3104,6 +3109,17 @@ function ns.BarData(key)
     -- A Debuffs bar only (a player's idea): its missing debuffs greyed
     -- stay with no enemy targeted, off unless ticked.
     bar.greyedNoTarget = kind == "debuff" and bar.greyedNoTarget == true
+    -- A Debuffs bar only (a player's idea): its missing debuffs' spots in
+    -- colour rather than grey, still faded. Off unless ticked.
+    bar.missingColour = kind == "debuff" and bar.missingColour == true
+    -- A Debuffs bar only (a player's idea): the key that casts each debuff
+    -- on its icon, with the Look page's keybinds on. Off unless ticked.
+    bar.debuffKeys = kind == "debuff" and bar.debuffKeys == true
+    -- A Buffs bar only (a player's idea): the bar gone while your pet is
+    -- out, or while you're outside a dungeon, raid or battleground, each
+    -- off unless ticked (Bars.lua UpdateShown).
+    bar.hidePet = kind == "buff" and bar.hidePet == true
+    bar.hideOutside = kind == "buff" and bar.hideOutside == true
     bar.showNames = bar.showNames == true
     bar.showTimer = bar.showTimer ~= false -- countdown numbers, on unless turned off
     bar.showAuras = bar.showAuras == true -- buff and debuff times on cooldown icons, off unless ticked
@@ -3115,6 +3131,10 @@ function ns.BarData(key)
     -- Show only when I can't afford it (a player's idea): icons hidden until
     -- you can't afford them, a cooldown bar's only, off unless ticked.
     bar.onlyShort = not ns.AURA_BARS[key] and bar.onlyShort == true
+    -- Keep colour on cooldown (a player's ask): a cooldown bar's icons stay
+    -- in colour while they cool down, not greyed. Off unless ticked; shared
+    -- with the look and layout (ProfileShare.lua).
+    bar.keepColour = not ns.AURA_BARS[key] and bar.keepColour == true
     bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
     -- The tick count of the Debuffs bar, and of the Cooldowns and Utility
     -- bars (Count ticks on a spell's icon, IconAuras.lua), each bar its own:

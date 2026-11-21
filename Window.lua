@@ -3363,6 +3363,91 @@ local function BuildHelp(window, header)
     end)
 end
 
+-- Smaller (a player's ask, 22 Nov 2026: to see the screen while moving bars):
+-- the - in the title bar swaps the window for a small strip where its title
+-- bar was, with Lock bars (or Unlock bars) and Open. Your bars stay as they
+-- were; the strip's X locks them, as closing the window does. Opening the
+-- window any way (Open, /ccm, the minimap button) puts the strip away.
+local function BuildSmall(window, header)
+    local button = T:Square(header, "")
+    button:SetSize(22, 22)
+    button:SetPoint("RIGHT", window.help, "LEFT", -6, 0)
+    window.smallButton = button
+    -- A bar in the accent, not a "-" (Squirt: "cant really tell its there").
+    local line = button:CreateTexture(nil, "OVERLAY")
+    line:SetSize(10, 2)
+    line:SetPoint("CENTER", 0, -3)
+    T:Paint(function(accent) line:SetColorTexture(accent[1], accent[2], accent[3], 1) end)
+    button.line = line
+    window:Hint(button, "Make the window small, so you can see your bars while you move them. They stay unlocked.")
+    local strip = CreateFrame("Frame", "FECMSmallFrame", UIParent, "BackdropTemplate")
+    strip:SetSize(360, 38)
+    strip:SetFrameStrata(WINDOW_STRATA)
+    strip:SetToplevel(true)
+    strip:SetClampedToScreen(true)
+    strip:EnableMouse(true)
+    strip:SetMovable(true)
+    strip:RegisterForDrag("LeftButton")
+    strip:SetScript("OnDragStart", strip.StartMoving)
+    strip:SetScript("OnDragStop", strip.StopMovingOrSizing)
+    T:Flat(strip, T.HEADER, T.CONTROL_BORDER)
+    strip:Hide()
+    window.small = strip
+    -- Easy to spot over the world (Squirt: "cant really tell its there"): the
+    -- addon's icon, its name with the accent, an accent edge and a line on top.
+    local icon = strip:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(22, 22)
+    icon:SetPoint("LEFT", 9, 0)
+    icon:SetTexture(ns.MEDIA .. "FECMIcon.tga")
+    local name = T:Text(strip, "GameFontHighlight")
+    name:SetPoint("LEFT", icon, "RIGHT", 7, 0)
+    local top = strip:CreateTexture(nil, "OVERLAY")
+    top:SetPoint("TOPLEFT", 1, -1)
+    top:SetPoint("TOPRIGHT", -1, -1)
+    top:SetHeight(2)
+    T:Paint(function(accent)
+        name:SetText("|cff" .. T:Hex(accent) .. "Cooldown|r Manager")
+        strip:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+        top:SetColorTexture(accent[1], accent[2], accent[3], 1)
+    end)
+    local close = T:Square(strip, "X")
+    close:SetSize(22, 22)
+    close:SetPoint("RIGHT", -7, 0)
+    local open = T:Button(strip, "Open", 54, 22)
+    open:SetPoint("RIGHT", close, "LEFT", -6, 0)
+    local lock = T:Button(strip, "Lock bars", 80, 22)
+    lock:SetPoint("RIGHT", open, "LEFT", -6, 0)
+    strip.close, strip.open, strip.lock = close, open, lock
+    local function Label()
+        lock:SetLabel(ns.Bars and ns.Bars:IsUnlocked() and "Lock bars" or "Unlock bars")
+    end
+    strip:SetScript("OnShow", Label)
+    lock:SetScript("OnClick", function()
+        if ns.Bars and ns.Bars:Enabled() then ns.Bars:SetUnlocked(not ns.Bars:IsUnlocked()) end
+        Label()
+    end)
+    open:SetScript("OnClick", function() window:Show() end)
+    close:SetScript("OnClick", function()
+        strip:Hide()
+        if ns.Bars then ns.Bars:SetUnlocked(false) end
+    end)
+    button:SetScript("OnClick", function()
+        -- Where the window's title bar was, the strip's top left on its top left.
+        local left, top = window:GetLeft(), window:GetTop()
+        strip:ClearAllPoints()
+        if left and top then
+            local scale = window:GetEffectiveScale() / UIParent:GetEffectiveScale()
+            strip:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left * scale, top * scale)
+        else
+            strip:SetPoint("TOP", UIParent, "TOP", 0, -120)
+        end
+        window.shrinking = true
+        window:Hide()
+        window.shrinking = nil
+        strip:Show()
+    end)
+end
+
 local function BuildWindow()
     local window = CreateFrame("Frame", "FECMFrame", UIParent, "BackdropTemplate")
     window:SetSize(WIDTH, HEIGHT)
@@ -3380,12 +3465,14 @@ local function BuildWindow()
     -- Set before anything hooks these: setting a script later would drop the
     -- hooks the pages and the profile menu add.
     window:SetScript("OnShow", function(self)
+        if self.small then self.small:Hide() end -- (open again: the small strip goes, BuildSmall)
         self:Refresh()
     end)
     window:SetScript("OnHide", function(self)
         -- Closed mid-drag, it never hears the mouse let go: stop moving now.
         self:StopMovingOrSizing()
-        if ns.Bars then ns.Bars:SetUnlocked(false) end
+        -- Made smaller (BuildSmall), your bars stay unlocked to move.
+        if ns.Bars and not self.shrinking then ns.Bars:SetUnlocked(false) end
         -- A colour row's pop-up goes with it.
         ClosePopup()
     end)
@@ -3402,8 +3489,9 @@ local function BuildWindow()
     BuildFooter(window)
     window:Hint(header.close, "Close the window. Escape closes it too. The minimap button, Options > AddOns or /ccm opens it again.")
     BuildHelp(window, header)
+    BuildSmall(window, header)
     BuildConfirm(window)
-    ns.BuildProfileMenu(window, header, window.help)
+    ns.BuildProfileMenu(window, header, window.smallButton)
 
     -- The bar list down the left.
     local nav = CreateFrame("Frame", nil, window, "BackdropTemplate")

@@ -397,7 +397,7 @@ local function RefreshItem(icon, data, follows)
     if Open(start) and Open(duration) and type(start) == "number" and type(duration) == "number" then
         local active = start > 0 and duration > 1.5
         if active then icon.cooldown:SetCooldown(start, duration) else icon.cooldown:Clear() end
-        icon.texture:SetDesaturated(active)
+        icon.texture:SetDesaturated(active and not data.keepColour)
         local cooling, ready = Alphas(data, icon.cantCast, icon.short)
         Alpha(icon, active and cooling or ready)
     end
@@ -539,7 +539,12 @@ local function SpellCooldown(icon, data)
         icon.cooldown:SetCooldownFromDurationObject(duration)
         -- Secret in combat: passed to the game as it is, never tested here.
         active = duration:IsActive()
-        icon.texture:SetDesaturated(active)
+        -- Keep colour on cooldown: never grey (the secret answer untested).
+        if data.keepColour then
+            icon.texture:SetDesaturated(false)
+        else
+            icon.texture:SetDesaturated(active)
+        end
         -- The same either way is set as it is; otherwise the game picks.
         -- (Show only when I can't afford it: the cooldown never matters.)
         local cooling, ready = Alphas(data, icon.cantCast, icon.short)
@@ -1601,8 +1606,9 @@ function B:ApplyGlow()
     end
 end
 
--- Keybinds go on the Cooldowns and Utility icons only: the Buffs and Debuffs
--- bars show auras, not casts. Each icon in use goes through fn; a failure is
+-- Keybinds go on the Cooldowns and Utility icons here: the Buffs and Debuffs
+-- bars show auras, not casts (a Debuffs bar ticked Show keybinds has its own,
+-- B:AuraKeys). Each icon in use goes through fn; a failure is
 -- reported once, as for RefreshAll.
 local function EachKey(fn)
     for _, bar in pairs(bars) do
@@ -1637,6 +1643,7 @@ function B:ApplyKeybinds()
         ShowKey(icon)
     end)
     Presses()
+    self:AuraKeys()
 end
 
 -- The keys again after a binding or page change; text only, so in combat
@@ -1644,6 +1651,19 @@ end
 function B:ShowKeys()
     EachKey(ShowKey)
     Presses()
+    self:AuraKeys()
+end
+
+-- And on a Debuffs bar ticked Show keybinds (Buffs.lua F:Keys): its icons
+-- are the game's, so they follow out of a fight only (in one, once it ends).
+function B:AuraKeys()
+    for _, bar in pairs(bars) do
+        local ok, err = pcall(ns.BuffBar.Keys, ns.BuffBar, bar)
+        if not ok and not B.lastError then
+            B.lastError = tostring(err)
+            print("|cffffd100" .. ns.TITLE .. ":|r a debuff icon's keybind couldn't update. Please report this: " .. B.lastError)
+        end
+    end
 end
 
 -- Key press glow ticked or unticked (Icon details): each icon's buttons
@@ -1737,6 +1757,19 @@ function B:Hold(bar)
     bar:Show()
 end
 
+-- A Buffs bar ticked to go while your pet is out, or while you're outside a
+-- dungeon, raid or battleground (a player's idea): gone as Hide out of
+-- combat makes it, in a fight too, but never while unlocked or in Edit Mode.
+function B:Away(data)
+    if unlocked or editMode then return false end
+    if data.hidePet and UnitExists("pet") then return true end
+    if data.hideOutside then
+        local inside = IsInInstance()
+        if not inside then return true end
+    end
+    return false
+end
+
 function B:UpdateShown()
     local on = self:Enabled()
     if not on then unlocked = false end
@@ -1747,6 +1780,7 @@ function B:UpdateShown()
         local bar = bars[key]
         if bar then
             local mode = awake and "show" or bar.data.outOfCombat
+            if bar.kind == "aura" and self:Away(bar.data) then mode = "hide" end
             -- A bar taken out of your layout doesn't show at all.
             local out = ns.Layout ~= nil and ns.Layout:IsHidden(key) or not ns.HasBar(key)
             if bar.kind == "aura" then
@@ -3298,6 +3332,8 @@ function B:SetOption(key, field, value)
     local apart = field == "swapForm" and not ns.AURA_BARS[key] and ns.KeepApart(value and (key == "cd" and "util" or "cd") or key)
     if not self.started then return end
     if apart then return self:Rebuild() end
+    -- In colour: the Debuffs bar's greyed spots change at once, in a fight too.
+    if field == "missingColour" and bars[key] then ns.BuffBar:PaintMissing(bars[key]) end
     -- Swap with my form ticked: the form you're in now, read before the bar
     -- shows its list.
     ns.FollowForm()
@@ -3526,6 +3562,9 @@ end
 
 local function Listing(_, event)
     local open = ns.window ~= nil and ns.window:IsShown()
+    -- A Buffs bar set to go while your pet is out or outside an instance
+    -- follows at once (B:UpdateShown).
+    if event == "UNIT_PET" or event == "PLAYER_ENTERING_WORLD" then B:UpdateShown() end
     if event == "BAG_UPDATE_DELAYED" then
         if open then BagsChanged() end
     else

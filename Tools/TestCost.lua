@@ -1388,6 +1388,7 @@ do
         rawset(display.PowerBar, "ManaCostPredictionBar", New("Texture", display.PowerBar))
         rawset(display.PowerBar, "FeedbackFrame", New("Frame", display.PowerBar))
         rawset(display.PowerBar.FeedbackFrame, "BarTexture", New("Texture", display.PowerBar.FeedbackFrame))
+        rawset(display.PowerBar.FeedbackFrame, "LossGlowTexture", New("Texture", display.PowerBar.FeedbackFrame)) -- its glow, as in game
         -- The full-power pulse, with its spike and glow frames.
         local pulse = New("Frame", display.PowerBar)
         rawset(display.PowerBar, "FullPowerFrame", pulse)

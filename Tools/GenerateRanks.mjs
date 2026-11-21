@@ -670,6 +670,21 @@ for (const [name, ids] of passives) {
         if (auras.length > 0 && !auraLinks.debuff.has(id)) for (const aura of auras) link('debuff', id, aura);
     }
 }
+// Talents whose buffs the game's scripts give, so neither the description nor
+// the icon names them (2026-11-21, a player's report: a paladin couldn't find
+// Unsealed Wrath's stacks). Unsealed Wrath (1310735) stores your Seal as an
+// Echo of it, up to 3 stacks: Fury, Command, Righteousness, Justice, Light and
+// Wisdom, checked against build 71037's data.
+const TALENT_BUFFS = new Map([
+    [1310735, [1311701, 1311703, 1311704, 1311705, 1328198, 1328206]],
+]);
+for (const [id, auras] of TALENT_BUFFS) {
+    assert(names.has(id), `talent ${id} is gone`);
+    for (const aura of auras) {
+        assert(names.has(aura), `${names.get(id)}'s buff ${aura} is gone`);
+        if (!(auraLinks.buff.get(id) || []).includes(aura)) link('buff', id, aura);
+    }
+}
 // The game marks some auras that come and go passive too: a totem's or a
 // battle standard's buff on everyone near it (Strength of Earth, Mana
 // Spring). Shown, with an area aura on your side, each is its own buff.

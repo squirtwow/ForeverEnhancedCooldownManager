@@ -107,6 +107,26 @@ function F:KeepGreyed(data)
     return data ~= nil and data.greyedNoTarget == true and self:Fixed(data)
 end
 
+-- Missing in colour (the Debuffs bar's own, a player's idea): its missing
+-- debuffs' spots keep their colour, still faded (ns.BarData keeps it off on
+-- the Buffs bar).
+function F:InColour(data)
+    return data ~= nil and data.missingColour == true
+end
+
+-- In colour ticked or unticked: the greyed spots take it at once, in a fight
+-- too (a player's test, 22 Nov 2026: it waited for the fight to end). Their
+-- icons are the addon's own textures, so that's safe; the rest of the bar
+-- still catches up after the fight. A hand entry's spot is F:PaintEnchants's.
+function F:PaintMissing(bar)
+    if not bar or not bar.holders then return end
+    local grey = not self:InColour(bar.data)
+    for i = 1, ns.BUFF_SLOTS do
+        local holder = bar.holders[i]
+        if holder and holder.icon and not (bar.imbues and bar.imbues[i]) then holder.icon:SetDesaturated(grey) end
+    end
+end
+
 -- Sizes an icon's numbers for its size, and shows or hides the countdown,
 -- in the spot picked in Icon details; look: its entry's own countdown font
 -- and size (settings per spell), or nil for the Look page's. An aura
@@ -145,6 +165,87 @@ function F:Details(bar)
         Style:Shape(holder.shape) -- the spot itself, at its size as laid out
         if holder.slot then Detail(holder.slot, holder.size or BASE, holder.look, holder.high) end
         if holder.enchant then Detail(holder.enchant, holder.size or BASE, holder.look, holder.high) end
+    end
+    self:Keys(bar) -- the numbers just placed again: clear of a key once more
+end
+
+-- Show keybinds (the Debuffs bar's own, a player's idea; Squirt's yes, 21 Nov
+-- 2026): the key that casts each entry's debuff (Bars.lua B:KeyFor; a joined
+-- entry's first spell with one) on its icon, packed or in a fixed spot,
+-- placed and sized as the Look page's keybinds, the countdown moved clear and
+-- the count up top as on your cooldown icons. Only with the Look page's
+-- Keybinds on icons (Style:SetKey). The text is the addon's own, made with
+-- the icon (Look), but the icons are the game's: set out of a fight only, so
+-- in one it waits for the fight's end. Each icon is set again only when what
+-- it shows changes, and never touched while it has never shown a key.
+function F:Keys(bar)
+    if not (bar and bar.container) or ns.BAR_KIND[bar.key] ~= "debuff" then return end
+    if InCombatLockdown() then
+        local later = F.keysLater
+        if not later then
+            later = CreateFrame("Frame")
+            later:SetScript("OnEvent", function(frame)
+                frame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                ns.Bars:ShowKeys()
+            end)
+            F.keysLater = later
+        end
+        later:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    local function KeyOf(name)
+        if not name then return nil end
+        for part in name:gmatch("[^+]+") do
+            local key = ns.Bars:KeyFor(part)
+            if key then return key end
+        end
+    end
+    local function Set(parts, name, size, high, look)
+        local text = parts.keyText
+        if not text then return end
+        local key = KeyOf(name)
+        if key == nil and parts.keySig == nil then return end
+        local face = math.min(size, high or size)
+        local countdown = Style:CountdownSize(face, look and look.size)
+        local sig = table.concat({ key or "", face, countdown, tostring(ns.Get("keybinds")), tostring(ns.Get("keybindPosition")),
+            tostring(ns.Get("keybindSize")), tostring(Style:Spot(parts.buff)) }, "|")
+        if parts.keySig == sig then return end
+        parts.keySig = sig
+        local lift = Style:KeyLook(text, parts.box, face, countdown)
+        local keyed = Style:SetKey(text, key)
+        local get = parts.cooldown.GetCountdownFontString
+        local numbers = type(get) == "function" and get(parts.cooldown) or nil
+        Style:KeyRoom(parts.count, parts.box, 1, numbers, parts.cooldown, lift, keyed, parts.buff)
+    end
+    -- A greyed spot's own key (Squirt's ask, 22 Nov 2026: the key to press to
+    -- put the debuff back). The addon's own text on its own spot, made the
+    -- first time it has a key; the lit icon draws over it with its own key.
+    -- It hides with the spot (F:UpdateTarget).
+    local function SpotKey(holder, name)
+        local key, text = KeyOf(name), holder.spotKey
+        if not text then
+            if key == nil then return end
+            text = Style:KeyText(holder)
+            holder.spotKey = text
+            text:SetAlpha(bar.enemy == false and 0 or 1)
+        end
+        local face = math.min(holder.size or BASE, holder.high or holder.size or BASE)
+        local countdown = Style:CountdownSize(face, holder.look and holder.look.size)
+        local sig = table.concat({ key or "", face, countdown, tostring(ns.Get("keybinds")), tostring(ns.Get("keybindPosition")),
+            tostring(ns.Get("keybindSize")) }, "|")
+        if holder.spotKeySig == sig then return end
+        holder.spotKeySig = sig
+        Style:KeyLook(text, holder, face, countdown)
+        Style:SetKey(text, key)
+    end
+    local on = bar.data ~= nil and bar.data.debuffKeys == true
+    local names, looks = bar.names or {}, bar.looks or {}
+    for _, parts in ipairs(bar.groupParts or {}) do
+        if parts.index then Set(parts, on and names[parts.index] or nil, BASE, parts.high, looks[parts.index]) end
+    end
+    for i, holder in ipairs(bar.holders or {}) do
+        if holder.slot then Set(holder.slot, on and names[i] or nil, holder.size or BASE, holder.high, holder.look) end
+        SpotKey(holder, on and holder.slot and names[i] or nil)
     end
 end
 
@@ -543,7 +644,11 @@ local function Look(button, size, showTimer, decorate, counts, look, active, hig
     -- now, as the container's icons only take art as they're made (Fit draws it).
     local parts = { cooldown = cooldown, count = count, box = top, buff = buff == true,
         shape = Style:ShapeKit(button, icon, { cooldown }, true) }
-    if counts then parts.ticks = TickCount(button, top) end
+    if counts then
+        parts.ticks = TickCount(button, top)
+        -- Show keybinds (F:Keys): made now, hidden until it has a key.
+        parts.keyText = Style:KeyText(top)
+    end
     if active then parts.active = ActiveGlow(button, top) end
     if decorate then
         -- Made now: the container's icons only take art as they're made.
@@ -887,6 +992,7 @@ ns.HAND_ENCHANTS = {
     [8716] = { "Imbue Greater Flame", 4549170 },
     [8717] = { "Imbue Greater Frost", 4549168 },
     [8718] = { "Imbue Precision", 4549172 },
+    [8773] = { "Camper's Lure", 134895 }, -- build 71037
 }
 
 -- Inventory slot: Enum.WeaponSlot.
@@ -1158,7 +1264,7 @@ function F:PaintEnchants(bar)
             end
         elseif holder.enchantLit ~= nil then
             holder.enchantLit = nil
-            holder.icon:SetDesaturated(true)
+            holder.icon:SetDesaturated(not self:InColour(bar.data))
             holder.icon:SetAlpha(.45)
             if holder.glowHost then holder.glowHost:SetAlpha(1) end
             if holder.enchant then
@@ -1277,6 +1383,7 @@ function F:UpdateTarget(bar)
     bar.enemy = hostile and true or false
     for _, holder in ipairs(bar.holders) do
         holder.icon:SetAlpha(bar.enemy and .45 or 0)
+        if holder.spotKey then holder.spotKey:SetAlpha(bar.enemy and 1 or 0) end -- (its key, F:Keys)
         Style:Away(holder.shape, not bar.enemy) -- (Blizzard's frame round it goes too)
     end
     self:TargetGlow(bar)
@@ -1623,6 +1730,7 @@ function F:Layout(bar, data)
             -- (What a hand entry shows while nothing is on it: F:PaintEnchants.)
             local text = #group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name
             holder.icon:SetTexture(entry.icon)
+            holder.icon:SetDesaturated(not self:InColour(data)) -- (a weapon enchant's: F:PaintEnchants)
             holder.label:SetWidth(own + spacing)
             holder.label:SetText(text)
             holder.restIcon, holder.restName, holder.whichIcon, holder.whichName = entry.icon, text, entry.icon, text
@@ -1930,6 +2038,7 @@ function F:Apply(bar)
     self:Ticks(bar)
     self:Warns(bar)
     self:Actives(bar)
+    self:Keys(bar)
 end
 
 -- Count ticks: each Debuffs bar icon's count set going at its entry's pace,

@@ -1652,6 +1652,21 @@ do
     R.Points({ [103] = 41 }, true)
     Fire("ACTIVE_TALENT_GROUP_CHANGED", 2, 1)
     Equal(ns.ProfileName(), "Druid Healer", "the other spec group, Restoration on top: Healer")
+    -- C_ClassTalents can stay on your first spec's config while you fight
+    -- with the second (a player's report: Fury to Protection never
+    -- switched): the spec group's own config wins, as Forever's talent
+    -- window reads it.
+    R.talents.group = 1
+    Fire("ACTIVE_TALENT_GROUP_CHANGED", 1, 2)
+    local first = ns.ProfileName()
+    local stuck = C_ClassTalents.GetActiveConfigID
+    C_ClassTalents.GetActiveConfigID = function() return 77 end
+    R.talents.group = 2
+    Fire("ACTIVE_TALENT_GROUP_CHANGED", 2, 1)
+    local second = ns.ProfileName()
+    C_ClassTalents.GetActiveConfigID = stuck
+    Equal(first .. " | " .. second, "Druid Damage | Druid Healer",
+        "back to the first spec: Damage; the second again while the other call still names the first's config: Healer")
 
     -- Another character of your class: its first look only notes its main tree.
     character = { guid = "Player-1-0004", name = "Tarn", realm = "Zephras" }

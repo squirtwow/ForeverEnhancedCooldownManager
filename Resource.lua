@@ -88,13 +88,38 @@ local function Spent(bar)
     if flash and flash:GetObjectType() == "Texture" then return flash end
 end
 
--- With Hide spent flash ticked (a player's idea) it's tinted clear instead,
--- so the bar drops straight to your new power. Only its colour is set:
--- Blizzard still plays it, unseen.
+-- The bright glow Blizzard fades in and out over that same spent piece.
+local function SpentGlow(bar)
+    local glow = Part(Part(bar, "FeedbackFrame"), "LossGlowTexture")
+    if glow and glow:GetObjectType() == "Texture" then return glow end
+end
+
+-- With Hide spent flash ticked (a player's idea) both are made unseen, so the
+-- bar drops straight to your new power; Blizzard still plays them. A tint's
+-- alpha can't do it: on a texture it's the same alpha Blizzard sets to 1 as
+-- each flash starts (Squirt's test, 22 Nov 2026: the flash still showed). So
+-- the flash becomes a clear colour texture (no alpha brings it back) and gets
+-- the bar's texture again when unticked; the glow, drawn by adding light,
+-- is tinted black, which adds none, and gets Blizzard's white back.
 local function Flash(state, colour, outline)
     if not state.flash then return end
-    local alpha = ns.Get("prdHideSpent") and 0 or outline and .45 or 1
-    state.flash:SetVertexColor(colour[1], colour[2], colour[3], alpha)
+    local hide = ns.Get("prdHideSpent")
+    if hide then
+        if not state.flashClear then
+            state.flash:SetColorTexture(0, 0, 0, 0)
+            state.flashClear = true
+        end
+    else
+        if state.flashClear then
+            state.flash:SetTexture(state.texture or Style:BarTexture())
+            state.flashClear = nil
+        end
+        state.flash:SetVertexColor(colour[1], colour[2], colour[3], outline and .45 or 1)
+    end
+    if state.glow and (hide or state.glowHidden) then
+        if hide then state.glow:SetVertexColor(0, 0, 0) else state.glow:SetVertexColor(1, 1, 1, 1) end
+        state.glowHidden = hide or nil
+    end
 end
 
 -- What a cast will cost, at the end of the power bar.
@@ -183,7 +208,7 @@ local function Fill(bar, state)
     state.texture = texture
     bar:SetStatusBarTexture(texture)
     for _, piece in ipairs(state.pieces) do piece:SetTexture(texture) end
-    if state.flash then state.flash:SetTexture(texture) end
+    if state.flash and not state.flashClear then state.flash:SetTexture(texture) end -- (kept clear: Flash)
 end
 
 -- The track's darkness chosen on the Look page (and Block's warmer track),
@@ -238,7 +263,7 @@ local function Restyle(bar, setting, pieces, main)
     if not bar or bars[bar] then return end
     -- Blizzard's pieces start at full alpha, so nothing is set on them until Outline.
     local state = { setting = setting, tracks = {}, pieces = Pieces(bar, pieces), alpha = 1,
-        flash = main and Spent(bar) or nil, cost = main and CostPiece(bar) or nil }
+        flash = main and Spent(bar) or nil, glow = main and SpentGlow(bar) or nil, cost = main and CostPiece(bar) or nil }
     Fill(bar, state)
     -- Blizzard's art behind the bar becomes its track (Track colours it).
     for _, region in ipairs({ bar:GetRegions() }) do
