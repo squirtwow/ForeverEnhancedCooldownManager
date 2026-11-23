@@ -2721,8 +2721,9 @@ end)()
 -- The profile menu: every piece inside it, none on another -----------------------------------------
 -- Its Roles at the foot: the heading with Switch with my talents at its
 -- right, Tank, Healer and Damage under them, and while the tick is on each
--- talent tree (its name and points, then its four choices: Tank, Healer,
--- Damage and None, each word inside its own) and a note under them.
+-- talent tree (its name and points, then its box naming its pick, whose
+-- list holds Tank, Healer, Damage and None, then your profiles) and a note
+-- under them.
 -- The menu stays inside the window, hanging under its button, and ends
 -- clear of the footer's line (where every control's hover note shows), the
 -- list showing fewer profiles while the trees and note take room.
@@ -2746,22 +2747,57 @@ end)()
     local found = {}
     -- The footer's line: one line of small text up from its foot.
     local footerTop = select(4, Fit.Rect(w.note)) - 12
-    -- A tree's choices, end to end inside it: each word 2 clear of its edges.
-    local function Choices(choice)
+    -- A tree's box: its word inside its room (8 in from the left, 18 from
+    -- the right for its arrow). Opened where the game puts it (the game's
+    -- own spots run up from the window's foot), its list is inside the
+    -- window, clear of the footer's line and of its box: the four roles one
+    -- under another inside it, each word 8 clear of its row's edges, then
+    -- Your profiles and the profiles under it. Clicked again, it closes.
+    local function Choices(box)
         local problems = {}
-        local left, _, right = Fit.Rect(choice)
-        local at = left + 1
-        for _, button in ipairs(choice.buttons) do
-            local bl, _, br = Fit.Rect(button)
-            local ll, _, lr = Fit.Rect(button.label)
-            local word = S[button.label].text
-            if math.abs(bl - at) > .01 then problems[#problems + 1] = word .. " not against the one before" end
-            if ll < bl + 2 or lr > br - 2 then problems[#problems + 1] = ('"%s" (%.1f wide) runs out of its %.1f'):format(word,
-                Fit.Wide(word, "GameFontHighlightSmall"), br - bl) end
-            at = br
+        local small = "GameFontHighlightSmall"
+        local left, _, right = Fit.Rect(box)
+        local word = S[box.label].text
+        if box.profile then
+            -- A profile's name, which can be long: held to that room on one line (the game cuts it short).
+            if #S[box.label].points ~= 2 or Last(box.label, "SetWordWrap") ~= false then
+                problems[#problems + 1] = ('"%s" not held to its box'):format(word)
+            end
+        elseif Fit.Wide(word, small) > (right - 18) - (left + 8) then
+            problems[#problems + 1] = ('"%s" (%.1f wide) runs out of its box'):format(word, Fit.Wide(word, small))
         end
-        if math.abs(at - (right - 1)) > .01 then problems[#problems + 1] = ("the choices end at %.1f, not %.1f"):format(at, right - 1) end
-        if #choice.buttons ~= 4 then problems[#problems + 1] = #choice.buttons .. " choices, not 4" end
+        if #box.buttons ~= 4 then problems[#problems + 1] = #box.buttons .. " roles, not 4" end
+        rawset(box, "GetBottom", function() return 560 - select(4, Fit.Rect(box)) end)
+        rawset(w, "GetBottom", function() return 0 end)
+        box:Click()
+        rawset(box, "GetBottom", nil)
+        rawset(w, "GetBottom", nil)
+        local popup = box.popup
+        -- While it's up the window's name stands for it, so Escape closes it
+        -- alone (Window.lua's Raise); measured against the window itself.
+        if _G.FECMFrame ~= popup then problems[#problems + 1] = "Escape wouldn't close its list first" end
+        _G.FECMFrame = w
+        local pl, pt, pr, pb = Fit.Rect(popup)
+        if not S[popup].shown then problems[#problems + 1] = "its list doesn't open" end
+        if pl < 0 or pr > 820 or pt < 0 or pb > footerTop - 4 then
+            problems[#problems + 1] = ("its list reaches %.1f, %.1f to %.1f, %.1f"):format(pl, pt, pr, pb)
+        end
+        if not Fit.Clear(popup, box) then problems[#problems + 1] = "its list covers its box" end
+        local above = pt
+        for _, pick in ipairs(box.buttons) do
+            local l, t, r, b = Fit.Rect(pick)
+            local name = S[pick.label].text
+            if l < pl or r > pr or t < pt or b > pb then problems[#problems + 1] = name .. " out of the list" end
+            if t < above - .01 then problems[#problems + 1] = name .. " not under the one before" end
+            if Fit.Wide(name, small) > r - l - 16 then problems[#problems + 1] = ('"%s" runs out of its row'):format(name) end
+            above = b
+        end
+        local _, ht, _, hb = Fit.Rect(box.heading)
+        local ll, lt, lr, lb = Fit.Rect(box.list)
+        if ht < above or hb > lt then problems[#problems + 1] = "Your profiles not between the roles and the profiles" end
+        if ll < pl or lr > pr or lt < pt or lb > pb then problems[#problems + 1] = "the profiles out of the list" end
+        box:Click()
+        if S[popup].shown then problems[#problems + 1] = "its list doesn't close" end
         return table.concat(problems, ", ")
     end
     local function Check(label)
@@ -2801,21 +2837,34 @@ end)()
     Check("the longest tree name")
     Equal(S[w.treeRows[2].name].text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") .. " | " .. #w.treeRows[2].choice.buttons, "Beast Mastery 51 | 4",
         "(the longest tree name showing, with four choices)")
+    -- A tree linked to a profile with a name as long as they come.
+    local long = ("Profile name as long as they come, made by hand"):sub(1, 48)
+    ns.NewProfile(long)
+    ns.SetTreeProfile(102, long)
+    Check("a tree linked to the longest profile name")
+    Equal(S[w.treeRows[2].choice.label].text, long, "(its box names it)")
     Equal(table.concat(found, " | "), "", "the profile menu with its roles and talents: each piece clear of the next, all inside it,"
-        .. " each tree's four choices' words inside them, and it inside the window under its button, clear of the footer's line")
+        .. " each tree's box and its list's words inside them, and it inside the window under its button, clear of the footer's line")
     Equal(tostring(footerTop) .. " " .. tostring(S[w.profileList].shown), "539 true", "(the footer's line measured where it shows)")
-    -- Each choice's hover note for the longest tree name, on one line of the
+    -- Each choice's hover note for the longest tree name (its box, its
+    -- roles, and its profiles, the longest name too), on one line of the
     -- footer: counted at 5.6 a letter (the small font's widest, as What's
     -- new's foot below), inside the note's width.
-    local long = {}
-    for _, choice in ipairs(w.treeRows[2].choice.buttons) do
+    local runs = {}
+    local box = w.treeRows[2].choice
+    box:Click()
+    local hovered = { box }
+    for _, choice in ipairs(box.buttons) do hovered[#hovered + 1] = choice end
+    for _, pick in ipairs(box.profileRows) do hovered[#hovered + 1] = pick end
+    for _, choice in ipairs(hovered) do
         S[choice].scripts.OnEnter(choice)
         local text = S[w.note].text
-        if not text:find("Beast Mastery", 1, true) then long[#long + 1] = choice.key .. ": not shown"
-        elseif #text * 5.6 > w.note:GetWidth() then long[#long + 1] = ('"%s" runs %.1f'):format(text, #text * 5.6) end
+        if not text:find("Beast Mastery", 1, true) then runs[#runs + 1] = tostring(choice.key or choice.profile) .. ": not shown"
+        elseif #text * 5.6 > w.note:GetWidth() then runs[#runs + 1] = ('"%s" runs %.1f'):format(text, #text * 5.6) end
         S[choice].scripts.OnLeave(choice)
     end
-    Equal(w.note:GetWidth() .. " | " .. table.concat(long, " | "), "560 | ",
+    box:Click()
+    Equal(tostring(#hovered > 5) .. " " .. w.note:GetWidth() .. " | " .. table.concat(runs, " | "), "true 560 | ",
         "hovered, each tree choice's note for Beast Mastery fits on the footer's one line")
     _G.C_ClassTalents, _G.C_Traits = nil, nil
     Equal(#printed, 0, "no errors")
@@ -3640,12 +3689,22 @@ end)()
     kept.swipeColour, kept.swipeSeeThrough, kept.countdownSize, kept.countdownColour = "pink", 101, 49.5, ns.CUSTOM
     kept.countdownColourCustom, kept.countdownSpot, kept.swipeEdge, kept.edgeColour = "zzzzzz", "MIDDLE", "yes", "gold"
     kept.countdownFormat, kept.iconStyle, kept.bigStacks = "hours", "round", "yes"
+    -- (And Colour by time left's settings from a development build, when it
+    -- was one for every countdown here: it's each spell's own now.)
+    kept.timeColours, kept.timeStepHigh, kept.timeStepLow, kept.timeColourHigh = true, 12, 3, "white"
+    kept.timeColourMid, kept.timeColourMidCustom, kept.timeColourLow = ns.CUSTOM, "ff8800", "purple"
     w:Hide()
     ns = Start(kept)
     back = {}
     for _, key in ipairs(ns.ICON_DETAILS) do back[#back + 1] = tostring(ns.Get(key)) end
-    Equal(table.concat(back, " ") .. " " .. tostring(ForeverEnhancedCooldownManagerDB.countdownColourCustom),
-        "black 30 100 white CENTER game false game square false nil", "odd values saved: each back to its default, a Custom with no colour too")
+    local old = {}
+    for _, key in ipairs({ "timeColours", "timeStepHigh", "timeStepLow", "timeColourHigh", "timeColourMid", "timeColourMidCustom",
+        "timeColourLow" }) do
+        old[#old + 1] = tostring(ForeverEnhancedCooldownManagerDB[key])
+    end
+    Equal(table.concat(back, " ") .. " " .. tostring(ForeverEnhancedCooldownManagerDB.countdownColourCustom) .. " | " .. table.concat(old, " "),
+        "black 30 100 white CENTER game false game square false nil | nil nil nil nil nil nil nil",
+        "odd values saved: each back to its default, a Custom with no colour too; the old Colour by time left settings let go quietly")
     _G.ColorPickerFrame = nil
     Equal(table.concat(found, " | "), "", "in every state: every piece inside the panel and none on another, under the title bar, clear of the footer")
     Equal(#printed, 0, "no errors from Icon details")
@@ -3820,6 +3879,8 @@ end)()
         .. " Manager. The Buffs and Debuffs bars change once you're out of combat.",
         "its own ticks as on its row: Glow when missing greyed until missing debuffs show greyed, Count ticks with its pace")
     Check(panel, "Debuffs, two ticks")
+    Equal(tostring(panel.pet:IsVisible()) .. " " .. tostring(panel.inside:IsVisible()), "false false",
+        "no Hide with my pet or Only in instances on the Debuffs page: they're a Buffs bar's")
     Equal(tostring(panel.active:IsVisible()) .. " " .. tostring(panel.glowSize:IsVisible()) .. " | " .. Note(panel.active), "true true"
         .. " | Its icon glows while the debuff is on your target, like a proc, so you can't miss it.",
         "Glow while active on the Debuffs page too (a player's idea), with its Glow size")
@@ -3847,15 +3908,20 @@ end)()
     for i, button in ipairs(panel.warn.buttons) do warnLabels[i] = S[button.label].text end
     Equal(table.concat(warnLabels, " ") .. " | " .. tostring(panel.warn:IsVisible()) .. " " .. tostring(panel.warn.selected) .. " "
         .. S[panel.warnLabel].text .. " " .. tostring(S[panel.warn].alpha) .. " | " .. Note(panel.warn.buttons[1]) .. " | "
-        .. Note(panel.warn.buttons[2]), "Off 3s 5s 10s 30s 1m 5m 10m | true 0 Warn at 1 | No warning: its countdown stays as it is. | Its"
+        .. Note(panel.warn.buttons[3]), "Off 1s 3s 5s 10s 30s 1m 5m 10m | true 0 Warn at 1 | No warning: its countdown stays as it is. | Its"
         .. " countdown turns red with 3 seconds left. Tick Show missing debuffs greyed for a red edge round its icon too.",
-        "Warn at: Off picked, eight choices, each saying what it does; packed: the numbers only, and how to get the edge")
+        "Warn at: Off picked, nine choices, each saying what it does; packed: the numbers only, and how to get the edge")
+    -- 1s (a player's idea: a dot's last second): one second, said singly.
+    Equal(Note(panel.warn.buttons[2]), "Its countdown turns red with 1 second left. Tick Show missing debuffs greyed for a red edge round"
+        .. " its icon too.", "Warn at 1s: offered, saying what it does")
     panel.warn.buttons[2]:Click()
+    Equal(tostring(B:WarnAt("debuff", "Moonfire")), "1", "1s: kept for Moonfire")
+    panel.warn.buttons[3]:Click()
     Equal(tostring(B:WarnAt("debuff", "Moonfire")) .. " " .. tostring(panel.warn.selected) .. " " .. tostring(S[panel].shown),
         "3 3 true", "3s: kept for Moonfire on the Debuffs bar, picked, the panel still open")
     B:SetOption("debuff", "showMissing", true)
     w:Refresh()
-    Equal(Note(panel.warn.buttons[7]), "Its countdown turns red with 5 minutes left, with a red edge round its icon.",
+    Equal(Note(panel.warn.buttons[8]), "Its countdown turns red with 5 minutes left, with a red edge round its icon.",
         "with missing debuffs greyed: the edge too (no glow on the Debuffs bar)")
     Check(panel, "Debuffs, Warn at")
     Equal(ns.DebugReport():match("Warn at: [^|]*"), "Warn at: debuff: Moonfire 3s ", "/ccm debug lists it")
@@ -3878,7 +3944,7 @@ end)()
     Check(panel, "Debuffs, Dim until Warn at")
     panel.warn.buttons[1]:Click()
     local noTime = tostring(panel.dim.usable) .. " " .. tostring(panel.dim:GetChecked()) .. " | " .. Note(panel.dim)
-    panel.warn.buttons[2]:Click()
+    panel.warn.buttons[3]:Click()
     B:SetOption("debuff", "showMissing", false)
     w:Refresh()
     Equal(noTime .. " | " .. tostring(panel.dim.usable) .. " " .. tostring(panel.dim:GetChecked()) .. " | " .. Note(panel.dim),
@@ -3890,6 +3956,181 @@ end)()
     panel.warn.buttons[1]:Click()
     Equal(tostring(B:WarnAt("debuff", "Moonfire")) .. " " .. tostring(panel.warn.selected) .. " " .. tostring(ns.ProfileLists().warnAt),
         "nil 0 nil", "Off: none kept")
+
+    -- Colour by time left, spell by spell (a player's idea: a dot's
+    -- countdown green, then yellow, then red; Squirt, 23 Nov 2026: in each
+    -- spell's own box, not Icon details): its tick on Glow when missing's
+    -- row, right of it, off, so the box doesn't grow; its hover says what it
+    -- does in two lines of the footer, not marked experimental. Ticked: 10
+    -- and 5 seconds, green, yellow and red kept for Moonfire, one row right
+    -- under it with the first colour, the first time, the middle colour, the
+    -- second time and the last colour, left to right, each saying what it
+    -- does; the preview in those colours (the game's number rules). The
+    -- fullest Debuffs box (Count ticks, Glow while active, Glow size, Play a
+    -- sound) still fits. Each time stops a second short of the other and
+    -- never moves it; a colour from its pop-up, Custom too; Cancel puts it
+    -- back. Unticked: none kept, the row gone, the preview plain.
+    do
+        local util, enum = _G.C_StringUtil, _G.Enum
+        _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+            return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end }
+        end }
+        _G.Enum = setmetatable({ NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 } }, { __index = enum })
+        local time = panel.time
+        local tick, parts = time.tick, time.parts
+        local NAMES = { ["59e659"] = "green", ffeb40 = "yellow", ff4033 = "red", ff9426 = "orange", ff4040 = "warn", ["00ffff"] = "custom" }
+        -- A cooldown's numbers: "-" with no formatter, else each rule from its first second, a colour's name round its text.
+        local function Rules(cooldown)
+            local call = S[cooldown].last.SetCountdownFormatter
+            if not (call and call[1]) then return "-" end
+            local out = {}
+            for _, rule in ipairs(call[1].rules) do
+                out[#out + 1] = rule.threshold .. "=" .. rule.format:gsub("|cff(%x%x%x%x%x%x)(.-)|r", function(hex, text)
+                    return (NAMES[hex] or hex) .. "(" .. text .. ")"
+                end)
+            end
+            return table.concat(out, " ")
+        end
+        local function Kept()
+            local out = {}
+            for i, v in ipairs(B:TimeColours("debuff", "Moonfire") or {}) do out[i] = tostring(v) end
+            return table.concat(out, " ")
+        end
+        local function At(region) return S[region].points[1][2] .. "," .. S[region].points[1][3] end
+        local function NoteRow() return ("%.2f"):format((-S[panel.note].points[1][3] - (42 + 64 + 14) - 4) / 26) end
+        local long = {}
+        local function Said(control)
+            local note = Note(control)
+            if note == "" or note == "nil" or note:find("experimental", 1, true) or note:find("\226\128[\147\148]") or not Fits(note) then
+                long[#long + 1] = note
+            end
+            return note
+        end
+        local glowY = S[panel.glow].points[1][3]
+        local shownParts = 0
+        for _, part in ipairs(parts) do if part:IsVisible() then shownParts = shownParts + 1 end end
+        Equal(table.concat({ tostring(tick:IsVisible()), S[tick.text].text, tostring(tick:GetChecked()), tostring(tick.usable), At(tick),
+            tostring(shownParts), NoteRow(), tostring(B:TimeColours("debuff", "Moonfire")), Rules(preview.cooldown) }, " ") .. " | " .. Said(tick),
+            "true Colour by time left false true 168," .. glowY .. " 0 10.00 nil - | Its countdown changes colour as it runs out, at the two"
+            .. " times you pick under this. With a Warn at time, Warn at's red wins.",
+            "the tick on Glow when missing's row, right of it, off: nothing under it and the box no taller (the note's still on row ten)")
+        Check(panel, "Debuffs, Colour by time left off")
+
+        -- Ticked: the defaults kept, the row under it, the preview coloured.
+        tick:Click()
+        local rows, order, last = {}, true, 0
+        for i, part in ipairs(parts) do
+            rows[i] = At(part)
+            local l, _, r = Fit.Rect(part)
+            if l <= last then order = false end
+            last = r
+        end
+        local dialogLeft, _, dialogRight = Fit.Rect(panel.dialog)
+        local rowY = glowY + 2 - 26
+        Equal(table.concat({ tostring(tick:GetChecked()), table.concat(rows, " "), tostring(order), tostring(last <= dialogRight - 16),
+            S[parts[2].value].text, S[parts[4].value].text, NoteRow() }, " ") .. " | " .. table.concat({ Kept(), tostring(S[panel].shown),
+            Rules(preview.cooldown) }, " | "),
+            "true 96," .. rowY .. " 134," .. rowY .. " 244," .. rowY .. " 282," .. rowY .. " 392," .. rowY .. " true true 10s 5s 11.00 | 10 5 green"
+            .. " yellow red | true | 0=red(%d) 5=yellow(%d) 10=green(%d) 60=green(%dm) 3600=green(%dh)",
+            "ticked: 10 and 5 seconds, green, yellow and red kept for Moonfire; the colours and times in the row right under it, left to"
+            .. " right inside the box; the preview red under 5, yellow under 10, green above")
+        Check(panel, "Debuffs, Colour by time left ticked (the fullest box)")
+        -- (One row more than the window has room for by 2 pixels: the box
+        -- gives them up under its note, so it fits exactly.)
+        local function Room()
+            local _, top, _, bottom = Fit.Rect(panel.dialog)
+            local _, _, _, noteBottom = Fit.Rect(panel.note)
+            local _, doneTop = Fit.Rect(panel.done)
+            return ("%g to %g, %g under the note"):format(top, bottom, doneTop - noteBottom)
+        end
+        Equal(Room(), "42 to 532, 8 under the note", "the fullest box, ticked: inside the window, 2 pixels less under its note")
+        local _, _, popupRight = Fit.Rect(parts[5].popup)
+        Equal(Said(parts[1]) .. " | " .. Said(parts[2]) .. " | " .. Said(parts[3]) .. " | " .. Said(parts[4]) .. " | " .. Said(parts[5])
+            .. " | " .. Said(parts[3].swatches[3]) .. " | " .. tostring(popupRight <= 820),
+            "This spell's countdown colour above the first time. Click for the colours. | The first time: under 10s left this spell's"
+            .. " countdown turns from the first colour to the middle one. | This spell's countdown colour from the first time down to the"
+            .. " second. Click for the colours. | The second time: under 5s left this spell's countdown takes the last colour, to the end."
+            .. " | This spell's countdown colour under the second time, to the end. Click for the colours. | Orange from the first time"
+            .. " down to the second. | true", "each says what it does, with its seconds; the last colour's pop-up inside the window")
+        -- Each time stops a second short of the other and never moves it.
+        parts[2]:Choose(4)
+        local down = Kept() .. " " .. S[parts[2].value].text .. " " .. S[parts[4].value].text
+        parts[4]:Choose(20)
+        local up = Kept() .. " " .. S[parts[2].value].text .. " " .. S[parts[4].value].text
+        Equal(down .. " | " .. up, "6 5 green yellow red 6s 5s | 6 5 green yellow red 6s 5s",
+            "the first time stops just over the second, the second just under the first; neither moves the other")
+        parts[2]:Choose(12)
+        parts[4]:Choose(3)
+        -- The middle colour from its pop-up: orange; the last a colour of its own (Custom), then Cancel puts it back.
+        parts[3]:Click()
+        parts[3].swatches[3]:Click()
+        local picker = { shown = false }
+        function picker:SetupColorPickerAndShow(info)
+            self.info, self.shown = info, true
+            self.r, self.g, self.b = info.r, info.g, info.b
+            info.swatchFunc()
+        end
+        function picker:GetColorRGB() return self.r, self.g, self.b end
+        function picker:IsShown() return self.shown end
+        local before = _G.ColorPickerFrame
+        _G.ColorPickerFrame = picker
+        parts[5]:Click()
+        parts[5].custom:Click()
+        picker.r, picker.g, picker.b = 0, 1, 1
+        picker.info.swatchFunc()
+        local custom = Kept() .. " | " .. Rules(preview.cooldown) .. " | " .. tostring(parts[5].spec.chosen())
+        picker.info.cancelFunc()
+        picker.shown = false
+        local cancelled = Kept()
+        parts[5]:Click()
+        parts[5].custom:Click()
+        picker.r, picker.g, picker.b = 0, 1, 1
+        picker.info.swatchFunc()
+        picker.shown = false
+        S[w.colourWatch].scripts.OnUpdate(w.colourWatch, 0)
+        _G.ColorPickerFrame = before
+        Equal(custom .. " || " .. cancelled .. " || " .. Kept(), "12 3 green orange #00ffff | 0=custom(%d) 3=orange(%d) 12=green(%d)"
+            .. " 60=green(%dm) 3600=green(%dh) | custom || 12 3 green orange red || 12 3 green orange #00ffff",
+            "12 and 3 seconds, orange in the middle; Custom's own colour last, shown at once; Cancel puts red back; picked again and kept")
+        Check(panel, "Debuffs, Colour by time left picked")
+        Equal(ns.DebugReport():match("Colour by time left: [^\n]*"), "Colour by time left: 1 spell (debuff: Moonfire 12/3s green orange"
+            .. " #00ffff) | rules made 6, refused 0", "/ccm debug: the spell with it, and the game took every rule set")
+        -- Warn at on it: Warn at's red wins on the preview, as on its icon.
+        -- (5s: the rules for 3s were asked for above, with no number rules
+        -- in the game then, and the game's answer is kept.)
+        panel.warn.buttons[4]:Click()
+        local warned = Rules(preview.cooldown)
+        panel.warn.buttons[1]:Click()
+        Equal(warned .. " | " .. Rules(preview.cooldown), "0=warn(%d) 5=%d 60=%dm 3600=%dh | 0=custom(%d) 3=orange(%d) 12=green(%d)"
+            .. " 60=green(%dm) 3600=green(%dh)", "Warn at 5s on it: its own red wins; Warn at Off: the colours again")
+
+        -- The bar's countdown numbers off: nothing to colour, so the row
+        -- stays shut (the box no taller: its longer note still fits), the
+        -- tick usable to untick it, saying why; kept for when they're back.
+        B:SetOption("debuff", "showTimer", false)
+        w:Refresh()
+        shownParts = 0
+        for _, part in ipairs(parts) do if part:IsVisible() then shownParts = shownParts + 1 end end
+        local off = table.concat({ tostring(tick:GetChecked()), tostring(tick.usable), tostring(shownParts), NoteRow(), Kept() }, " ")
+            .. " | " .. Said(tick)
+        Check(panel, "Debuffs, Colour by time left ticked, countdown numbers off")
+        B:SetOption("debuff", "showTimer", true)
+        w:Refresh()
+        Equal(off .. " || " .. tostring(parts[1]:IsVisible()) .. " " .. NoteRow(), "true true 0 10.00 12 3 green orange #00ffff | Show"
+            .. " countdown numbers is off on this bar, so no countdown to colour. || true 11.00", "the bar's countdown numbers off: the"
+            .. " row shut, the box no taller, the tick still there to untick, saying why; numbers back on: the row again")
+        -- Unticked: none kept, the row gone, the box back as it was, the preview plain.
+        tick:Click()
+        shownParts = 0
+        for _, part in ipairs(parts) do if part:IsVisible() then shownParts = shownParts + 1 end end
+        Equal(table.concat({ tostring(tick:GetChecked()), tostring(B:TimeColours("debuff", "Moonfire")), tostring(ns.ProfileLists().timeColours),
+            tostring(shownParts), NoteRow(), Rules(preview.cooldown) }, " "), "false nil nil 0 10.00 -",
+            "unticked: none kept, the row gone, the box back to ten rows, the preview's countdown plain")
+        Check(panel, "Debuffs, Colour by time left unticked")
+        Equal(Room(), "54 to 520, 10 under the note", "unticked: the box as it always was")
+        Equal(table.concat(long, " | "), "", "every hover: two lines of the footer at most, plain, none marked experimental")
+        _G.C_StringUtil, _G.Enum = util, enum
+    end
     -- With a spell held, a click drops it on the bar, as before: no panel.
     panel.done:Click()
     local GetCursor = _G.GetCursorInfo
@@ -3910,12 +4151,61 @@ end)()
         .. tostring(panel.glow.usable) .. " | " .. S[panel.note].text:match("The Buffs.*$"), "true false false | true true true | The Buffs and Debuffs bars"
         .. " change once you're out of combat.", "Thorns: Only when missing, then Glow when missing, usable once it's ticked")
     Check(panel, "Buffs, two ticks")
+    -- Hide with my pet and Only in instances (a player's idea: for single
+    -- buffs, not the whole bar): side by side beside Only when missing in
+    -- its row (no row of their own, so the panel still fits), off, each
+    -- saying what it does and that a fight holds the change back; ticked
+    -- from here, kept for Thorns, and the panel still fits.
+    local function Spot(region) return S[region].points[1][2] .. "," .. S[region].points[1][3] end
+    local onlyY = S[panel.only].points[1][3]
+    Equal(table.concat({ tostring(panel.pet:IsVisible()), S[panel.pet.text].text, tostring(panel.pet:GetChecked()), Spot(panel.pet),
+        tostring(panel.inside:IsVisible()), S[panel.inside.text].text, tostring(panel.inside:GetChecked()), Spot(panel.inside),
+        S[panel.only].points[1][2] }, " ") .. " | " .. Note(panel.pet) .. " | " .. Note(panel.inside),
+        "true Hide with my pet false 168," .. onlyY .. " true Only in instances false 316," .. onlyY .. " 16"
+        .. " | Hides this buff while your pet or demon is out. If you're in a fight, it changes once the fight ends."
+        .. " | Shows this buff only in dungeons, raids and battlegrounds, and hides it everywhere else. If you're in a fight,"
+        .. " it changes once the fight ends.",
+        "Hide with my pet and Only in instances beside Only when missing, off, each saying what it does")
+    panel.pet:Click()
+    panel.inside:Click()
+    Equal(table.concat({ tostring(B:HidesWithPet("buff", "Thorns")), tostring(B:OnlyInInstances("buff", "Thorns")),
+        tostring(panel.pet:GetChecked()), tostring(panel.inside:GetChecked()), tostring(S[panel].shown) }, " "), "true true true true true",
+        "both ticked from the panel: kept for Thorns, the panel still open")
+    Check(panel, "Buffs, Hide with my pet and Only in instances")
+    panel.pet:Click()
+    panel.inside:Click()
+    Equal(tostring(B:HidesWithPet("buff", "Thorns")) .. " " .. tostring(B:OnlyInInstances("buff", "Thorns")), "false false",
+        "and unticked again")
     -- Warn at greyed for a buff shown only while it's missing: no icon while it's up.
     Equal(tostring(S[panel.warn].alpha) .. " " .. tostring(Last(panel.warn.buttons[2], "SetEnabled")) .. " | " .. Note(panel.warn.buttons[2]),
         "0.35 false | Not for a buff shown Only when missing: it has no icon while it's on you, so nothing to warn on.",
         "Only when missing: Warn at greyed, and says why")
     Equal(tostring(panel.dim:IsVisible()) .. " " .. tostring(panel.dim.usable) .. " | " .. Note(panel.dim), "true false | Not for a buff"
         .. " shown Only when missing: it has no icon while it's on you, so nothing to dim.", "and Dim until Warn at greyed, saying why")
+    -- And Colour by time left, on Glow when missing's row here too: greyed,
+    -- saying why. Ticked before (kept), it stays usable so it can be
+    -- unticked, its row greyed, saying why.
+    do
+        local time = panel.time
+        local greyed = table.concat({ tostring(time.tick:IsVisible()), tostring(time.tick.usable),
+            S[time.tick].points[1][2] .. "," .. tostring(S[time.tick].points[1][3] == S[panel.glow].points[1][3]) }, " ")
+            .. " | " .. Note(time.tick)
+        B:SetTimeColours("buff", "Thorns", { 20, 8, "white", "orange", "purple" })
+        w:Refresh()
+        local parts = {}
+        for i, part in ipairs(time.parts) do
+            parts[i] = tostring(part:IsVisible()) .. "/" .. tostring(S[part].alpha)
+        end
+        local kept = tostring(time.tick.usable) .. " " .. tostring(time.tick:GetChecked()) .. " " .. table.concat(parts, " ") .. " "
+            .. S[time.parts[2].value].text .. " " .. S[time.parts[4].value].text .. " | " .. Note(time.parts[1]) .. " | " .. Note(time.parts[2])
+        Check(panel, "Buffs, Colour by time left greyed")
+        time.tick:Click()
+        Equal(greyed .. " || " .. kept .. " || " .. tostring(B:TimeColours("buff", "Thorns")), "true false 168,true | Not for a buff shown Only"
+            .. " when missing: it has no icon while it's on you, so no countdown to colour. || true true true/0.35 true/0.35 true/0.35"
+            .. " true/0.35 true/0.35 20s 8s | Not for a buff shown Only when missing: it has no icon while it's on you, so no countdown to"
+            .. " colour. | Not for a buff shown Only when missing: it has no icon while it's on you, so no countdown to colour. || nil",
+            "Only when missing: Colour by time left greyed, saying why; kept from before, still usable to untick, its row greyed; unticked")
+    end
     -- Glow while active under them (no row of its own in the list; seen
     -- working in game, so no longer marked experimental): greyed while
     -- Thorns shows only while it's missing, saying why; then usable, saying
@@ -4028,14 +4318,14 @@ end)()
     panel.only:Click()
     B:SetOption("buff", "showMissing", true)
     w:Refresh()
-    Equal(tostring(S[panel.warn].alpha) .. " | " .. Note(panel.warn.buttons[8]), "1 | Its countdown turns red with 10 minutes left, with"
+    Equal(tostring(S[panel.warn].alpha) .. " | " .. Note(panel.warn.buttons[9]), "1 | Its countdown turns red with 10 minutes left, with"
         .. " a red edge round its icon. Out of combat its icon glows too.", "unticked, with missing buffs greyed: the"
         .. " edge, and out of combat a glow (your own buffs)")
     -- A hand's weapon enchant: its spot is the addon's own, so no red edge.
     B:SetAura("buff", "hand:main", true)
     w:Refresh()
     bp.icons[2]:Click()
-    Equal(S[panel.title].text .. " " .. S[panel.quiet].text .. " | " .. Note(panel.warn.buttons[8]), "MAIN HAND ENCHANT on Buffs | Its"
+    Equal(S[panel.title].text .. " " .. S[panel.quiet].text .. " | " .. Note(panel.warn.buttons[9]), "MAIN HAND ENCHANT on Buffs | Its"
         .. " countdown turns red with 10 minutes left. Out of combat its icon glows too.",
         "Main hand enchant: the countdown and the glow, no edge")
     Equal(tostring(panel.active.usable) .. " | " .. Note(panel.active), "false | Not for a weapon enchant: only a buff's icon can glow"

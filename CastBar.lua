@@ -33,7 +33,7 @@ local cast -- the cast on it now: { channel, id, start, finish }
 local fading -- when the last cast ended, while it fades
 local swing -- the swing timer's latest swing: { ranged, total, finish }
 local swingEnd -- when the last swing ran out with no new one, while it fades
-local drawn -- what the bar is drawn for: "cast", "channel", "broken", "swing" or nil
+local drawn -- what the bar is drawn for: "cast", "channel", "broken", "swing", "idle" (Always show's empty swing timer) or nil
 
 -- Secret values can be handed to the game, but never read.
 local function Open(value)
@@ -377,6 +377,29 @@ local function DrawSwing()
     row:SetAlpha(1)
 end
 
+-- Always show (Cast bar page, off by default): between swings the swing
+-- timer stays up, empty, in and out of combat, with the last hand that
+-- swung (Auto Shot for hunters before any). Nothing ticks while it waits.
+local lastRanged
+local function Always()
+    return ns.Get("swingTimer") == true and ns.Get("swingAlways") == true
+end
+
+local function Idle()
+    drawn = "idle"
+    local ranged = lastRanged
+    if ranged == nil then ranged = C:Hunter() end
+    C:Lag(row, nil)
+    C:SwingLook(row)
+    row.bar:SetMinMaxValues(0, 1)
+    row.bar:SetValue(0)
+    row.icon:SetTexture(C:WeaponIcon(ranged))
+    row.bar.name:SetText(C:SwingName(ranged))
+    row.bar.time:SetText("")
+    row:SetAlpha(1)
+    row:SetScript("OnUpdate", nil)
+end
+
 -- The cast has left the spot: a swing still running takes it back, but one
 -- that ran out meanwhile doesn't come back just to fade.
 local function Handover(now)
@@ -599,15 +622,18 @@ local function Tick()
         C:Time(row.bar.time, 0, swing.total)
         swing, swingEnd = nil, swing.finish
     end
+    -- Shown always, a swing run out is held, then empties without fading.
+    local always = Always()
     if swingEnd and drawn == "swing" then
         local gone = now - swingEnd
-        if gone < HOLD + FADE then
-            row:SetAlpha(gone > HOLD and 1 - (gone - HOLD) / FADE or 1)
+        if gone < HOLD + (always and 0 or FADE) then
+            row:SetAlpha((not always and gone > HOLD) and 1 - (gone - HOLD) / FADE or 1)
             return
         end
     end
-    -- Nothing left to show: no more work each frame.
     swingEnd, drawn = nil, nil
+    if always then return Idle() end
+    -- Nothing left to show: no more work each frame.
     row:SetAlpha(0)
     row:SetScript("OnUpdate", nil)
 end
@@ -629,7 +655,7 @@ end
 
 local function DropSwing()
     swing, swingEnd = nil, nil
-    if drawn == "swing" then
+    if drawn == "swing" or drawn == "idle" then
         drawn = nil
         Wake()
     end
@@ -637,7 +663,7 @@ end
 
 -- Whatever's on the bar now, restyled after a choice changes.
 local function Restyle()
-    if drawn == "swing" then
+    if drawn == "swing" or drawn == "idle" then
         C:SwingLook(row)
     else
         C:Look(row, drawn == "channel", drawn == "broken")
@@ -784,6 +810,7 @@ function C:Swing(duration, kind)
     if not (Open(duration) and Open(kind)) then return end
     if (kind ~= 0 and kind ~= 2) or type(duration) ~= "number" or not (duration > 0 and duration < LONGEST) then return end
     swing, swingEnd = { ranged = kind == 2, total = duration, finish = GetTime() + duration }, nil
+    lastRanged = kind == 2
     -- A cast keeps the spot until it's gone.
     if not (cast or fading) then DrawSwing() end
     Wake()
@@ -1061,6 +1088,11 @@ function C:Apply()
     if not casts then DropCast() end
     if not swings then DropSwing() end
     Native(not casts)
+    -- Always show switched on or off: the empty swing timer up, or gone.
+    if not (cast or fading or swing or swingEnd) and (drawn == "idle" or Always()) then
+        drawn = nil
+        Wake()
+    end
     Restyle()
     if ns.Layout then ns.Layout:Stack() else self:Place() end
     -- A channel's marks, and the latency zone, as just chosen.

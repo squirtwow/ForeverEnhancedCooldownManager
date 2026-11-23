@@ -1552,7 +1552,7 @@ do
     Equal(R.Listening("TRAIT_CONFIG_UPDATED") .. " " .. R.Listening("PLAYER_TALENT_UPDATE") .. " " .. R.Listening("ACTIVE_TALENT_GROUP_CHANGED")
         .. " " .. R.Listening("TRAIT_CONFIG_LIST_UPDATED"), "1 1 1 1", "ticked: listening for talent changes")
     Equal(tostring(rawget(w.talentTick, "hint")), "When another talent tree takes the lead in points, switch to its role's profile,"
-        .. " after any fight.", "the tick's note, not marked experimental")
+        .. " or the one you picked for it, after any fight.", "the tick's note, not marked experimental")
     local choice = w.treeRows[3].choice.buttons[1]
     Equal(choice.hint(choice), "When Restoration takes the lead in points, switch to your Tank profile.", "each choice's note")
 
@@ -1972,6 +1972,206 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Talents: a tree linked to one of your profiles ----------------------------------------------------------
+-- A player's idea: a warlock's damage trees, each with a profile of its own,
+-- not by role. A tree's list holds the four roles, then your profiles; a
+-- tree linked to a profile switches to it by the same rules as a role.
+
+do
+    character = { guid = "Player-1-0011", name = "Morwen", realm = "Zephras" }
+    R.class = { "Warlock", "WARLOCK" }
+    R.Trees({ { 201, "Affliction" }, { 202, "Demonology" }, { 203, "Destruction" } })
+    R.Points({ [201] = 31 }, true)
+    local ns = R.Start({ useBars = true, notesSeen = "dev", helpSeen = true, talentSwitch = true })
+    local db = ForeverEnhancedCooldownManagerDB
+    local guid, own = character.guid, "Morwen (Warlock) - Zephras"
+    ns.NewProfile("Affli")
+    ns.NewProfile("Destro")
+    ns.UseProfile(own)
+    local P = ns.ProfileShare
+    local plain = P.Export()
+    -- Nothing linked (the default): every tree goes by its role, as before.
+    -- Destruction leads with no Damage profile: nothing switched, the menu says to make one.
+    R.Points({ [203] = 31 })
+    local clickDamage = "Your main talent tree is now Destruction, but Damage has no profile yet: click Damage to make one."
+    Equal(tostring(db.treeProfiles) .. " | " .. tostring(ns.TreeProfile({ id = 203 })) .. " | " .. ns.ProfileName() .. " | "
+        .. db.mainTrees[guid] .. " | " .. tostring(ns.talentNote), "nil | nil | " .. own .. " | 203 | " .. clickDamage,
+        "nothing linked: no links saved, and Destruction (Damage, no profile yet) leading only says so, as before")
+
+    -- The menu: each tree's box names its pick; its list, the roles then your profiles.
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w.profileButton:Click()
+    local box = w.treeRows[3].choice
+    local function List(b)
+        local out = {}
+        for _, pick in ipairs(b.buttons) do out[#out + 1] = S[pick.label].text .. (S[pick.fill].shown and "*" or "") end
+        out[#out + 1] = "(" .. S[b.heading].text .. ")"
+        for _, pick in ipairs(b.profileRows) do
+            if S[pick].shown then out[#out + 1] = S[pick.label].text .. (S[pick.fill].shown and "*" or "") end
+        end
+        return table.concat(out, ", ")
+    end
+    local function Boxes()
+        local out = {}
+        for _, row in ipairs(w.treeRows) do
+            if S[row.name].shown then out[#out + 1] = S[row.choice.label].text .. " " .. tostring(row.choice.selected) end
+        end
+        return table.concat(out, ", ")
+    end
+    Equal(Boxes() .. " | " .. tostring(S[box.popup].shown), "Damage damage, Damage damage, Damage damage | false",
+        "each tree's box names its role; its list closed")
+    do
+        -- Each tree's list has a spot by its box from the start, and its
+        -- profiles are pinned again a moment after it opens: on this client
+        -- a scroll area pinned while hidden, or under a frame with no spot,
+        -- draws nothing.
+        local spots = {}
+        for _, row in ipairs(w.treeRows) do
+            local spot = S[row.choice.popup].points[1]
+            spots[#spots + 1] = tostring(spot ~= nil and spot[2] == row.choice)
+        end
+        local queued = #timers
+        box:Click()
+        box.list:ClearAllPoints()
+        for i = queued + 1, #timers do timers[i]() end
+        local again = S[box.list].points
+        Equal(table.concat(spots, " ") .. " | " .. #again .. " " .. tostring(again[1] and again[1][1]) .. " "
+            .. tostring(again[2] and again[2][1]), "true true true | 2 TOPLEFT BOTTOMRIGHT",
+            "each list is placed by its box from the start, and its profiles pinned by two corners again once it shows")
+        box:Click()
+    end
+    box:Click()
+    Equal(tostring(S[box.popup].shown) .. " | " .. List(box) .. " | " .. S[box.popup].height .. " " .. S[box.popup].points[1][1],
+        "true | Tank, Healer, Damage*, None, (Your profiles), Affli, Destro, " .. own .. " | 152 TOPRIGHT",
+        "clicked: its list opens under it, the roles (Damage lit) and then every profile you have")
+    Equal(box.profileRows[2].hint(box.profileRows[2]) .. " | " .. box.hint(box), "When Destruction takes the lead, switch to"
+        .. " Destro. | What Destruction switches to when it takes the lead in points: a role, or one of your profiles.",
+        "a profile's note in the list, and the box's own")
+    box:Click()
+    Equal(tostring(S[box.popup].shown), "false", "clicked again: the list closes")
+    box:Click()
+    Fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    Equal(tostring(S[box.popup].shown), "false", "a click anywhere else closes it too")
+
+    -- Destruction linked to Destro from its list: saved for warlocks, the
+    -- note about Destruction gone (it leads), nothing switched yet.
+    box:Click()
+    box.profileRows[2]:Click()
+    Equal(tostring(S[box.popup].shown) .. " | " .. Boxes() .. " | " .. tostring(db.treeProfiles.WARLOCK[203]) .. " | "
+        .. tostring(db.treeRoles) .. " | " .. ns.ProfileName() .. " | " .. tostring(ns.talentNote) .. " " .. tostring(S[w.talentStatus].shown),
+        "false | Damage damage, Damage damage, Destro profile | Destro | nil | " .. own .. " | nil false",
+        "Destruction linked to Destro: the list closes, its box names Destro, the note goes, nothing switched")
+    w.treeRows[1].choice:Click()
+    Equal(List(w.treeRows[1].choice), "Tank, Healer, Damage*, None, (Your profiles), Affli, Destro, " .. own,
+        "Affliction's own list: Damage still lit, no profile")
+    w.treeRows[1].choice.profileRows[1]:Click()
+    box:Click()
+    Equal(List(box), "Tank, Healer, Damage, None, (Your profiles), Affli, Destro*, " .. own, "Destruction's list: Destro lit, no role")
+    box:Click()
+    Equal(tostring(P.Export() == plain), "true", "links are your own: the share string is the very same")
+
+    -- Two damage trees, each with its own profile: each picks its own.
+    R.Points({ [201] = 31 })
+    Equal(ns.ProfileName() .. " | " .. tostring(ns.talentNote), "Affli | Your main talent tree is now Affliction: switched to Affli.",
+        "Affliction takes the lead: switched to Affli, and said naming it")
+    Equal(S[w.note].text, ns.talentNote, "with the window open, the footer says so")
+    R.Open(w)
+    Equal(tostring(S[w.talentStatus].shown) .. " " .. S[w.talentStatus].text, "true " .. ns.talentNote, "and the menu, under the trees")
+    R.Points({ [203] = 31 })
+    Equal(ns.ProfileName() .. " | " .. tostring(ns.talentNote), "Destro | Your main talent tree is now Destruction: switched to Destro.",
+        "Destruction takes the lead: switched to Destro")
+    -- A profile picked by hand stays while the main tree does.
+    ns.UseProfile(own)
+    R.Points({ [203] = 35 })
+    Equal(ns.ProfileName(), own, "more points in Destruction, still on top: your pick stays")
+    -- In a fight: held until it ends.
+    lockdown = true
+    R.Points({ [201] = 41 })
+    Equal(ns.ProfileName() .. " " .. db.mainTrees[guid] .. " " .. tostring(R.Waiting()), own .. " 203 true",
+        "in a fight: nothing switched, waiting for the fight to end")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(ns.ProfileName() .. " " .. db.mainTrees[guid], "Affli 201", "the fight over: switched to Affli")
+    -- Already on the profile linked: nothing switched or said.
+    ns.UseProfile("Destro")
+    R.Points({ [203] = 50 })
+    Equal(ns.ProfileName() .. " " .. db.mainTrees[guid] .. " " .. tostring(ns.talentNote), "Destro 203 nil",
+        "Destruction leads while you're on Destro: nothing switched, nothing said")
+
+    -- Role links still work beside them: Demonology, on Damage.
+    ns.UseRole("damage")
+    ns.UseProfile("Affli")
+    R.Points({ [202] = 31 })
+    Equal(ns.ProfileName() .. " | " .. tostring(ns.talentNote), "Warlock Damage | Your main talent tree is now Demonology: switched to"
+        .. " Warlock Damage, your Damage profile.", "Demonology (Damage, no link) leads: switched to the Damage profile, as before")
+    -- A role picked from a linked tree's list lets go of its profile.
+    R.Open(w)
+    w.treeRows[1].choice:Click()
+    w.treeRows[1].choice.buttons[4]:Click()
+    Equal(tostring(db.treeProfiles.WARLOCK[201]) .. " " .. tostring(db.treeRoles.WARLOCK[201]) .. " | " .. Boxes(),
+        "nil none | None none, Damage damage, Destro profile", "Affliction set to None from its list: the link goes")
+    R.Points({ [201] = 51 })
+    Equal(ns.ProfileName() .. " " .. tostring(ns.talentNote), "Warlock Damage nil", "then Affliction (None) leads: nothing switched")
+    -- Linked again; a profile that isn't there, or a tree that isn't, never saved.
+    ns.SetTreeProfile(201, "Affli")
+    ns.SetTreeProfile(202, "Nope")
+    ns.SetTreeProfile(202, 5)
+    ns.SetTreeProfile(-1, "Affli")
+    ns.SetTreeProfile("x", "Affli")
+    Equal(tostring(db.treeProfiles.WARLOCK[201]) .. " " .. tostring(db.treeProfiles.WARLOCK[202]) .. " "
+        .. tostring(db.treeProfiles.WARLOCK[-1]) .. " " .. tostring(db.treeProfiles.WARLOCK.x) .. " " .. tostring(db.treeProfiles.DRUID),
+        "Affli nil nil nil nil", "linked again; a profile or tree that isn't there never saved, and only for warlocks")
+
+    -- Renamed: the link follows it.
+    ns.UseProfile("Destro")
+    ns.RenameProfile("Destruction build")
+    R.Open(w)
+    Equal(tostring(db.treeProfiles.WARLOCK[203]) .. " | " .. Boxes(), "Destruction build | Affli profile, Damage damage,"
+        .. " Destruction build profile", "Destro renamed: Destruction's link follows it")
+    -- Kept over a reload.
+    w:Hide()
+    local saved = ForeverEnhancedCooldownManagerDB
+    ns = R.Start(saved)
+    Equal(tostring(saved.treeProfiles.WARLOCK[201]) .. " " .. tostring(saved.treeProfiles.WARLOCK[203]) .. " | " .. ns.ProfileName(),
+        "Affli Destruction build | Destruction build", "after a reload: both links kept")
+    -- Deleted: the link goes, and the tree goes back to its role (Affliction's None, set before it was linked).
+    ns.UseProfile(own)
+    Equal(select(2, ns.DeleteProfile("Affli")) .. " | " .. tostring(saved.treeProfiles.WARLOCK[201]) .. " "
+        .. tostring(ns.TreeProfile({ id = 201 })) .. " " .. ns.TreeRole({ id = 201, name = "Affliction" }),
+        "Deleted Affli. | nil nil none", "Affli deleted: Affliction's link goes, back to None")
+    SlashCmdList.FECM("")
+    w = FECMFrame
+    w.profileButton:Click()
+    Equal(Boxes(), "None none, Damage damage, Destruction build profile", "its box says None")
+    R.Points({ [203] = 60 })
+    R.Points({ [201] = 70 })
+    Equal(ns.ProfileName(), "Destruction build", "Destruction leads: switched; then Affliction (None again): nothing")
+    -- The one you're on deleted: you move to a fresh profile, Destruction back to Damage.
+    Equal(select(2, ns.DeleteProfile("Destruction build")) .. " | " .. tostring(saved.treeProfiles.WARLOCK[203]),
+        "Deleted Destruction build. You're now on " .. own .. " 2. | nil", "the linked profile you're on deleted: link gone")
+    R.Open(w)
+    Equal(Boxes(), "None none, Damage damage, Damage damage", "Destruction's box says Damage again")
+    R.Points({ [203] = 80 })
+    Equal(ns.ProfileName(), "Warlock Damage", "Destruction leads: its role's profile, Damage")
+    w:Hide()
+
+    -- Saved links repaired at load: to profiles that are gone, trees that aren't, junk.
+    saved.treeProfiles = { WARLOCK = { [203] = "Warlock Damage", [202] = "Gone", [-1] = "Warlock Damage", x = "Warlock Damage",
+        [201] = 7, [204] = own }, DRUID = "junk", [4] = { [101] = own } }
+    ns = R.Start(saved)
+    local links = saved.treeProfiles.WARLOCK
+    Equal(tostring(links[203]) .. " " .. tostring(links[202]) .. " " .. tostring(links[-1]) .. " " .. tostring(links.x) .. " "
+        .. tostring(links[201]) .. " " .. tostring(links[204]) .. " " .. tostring(saved.treeProfiles.DRUID) .. " "
+        .. tostring(saved.treeProfiles[4]), "Warlock Damage nil nil nil nil " .. own .. " nil nil",
+        "only a tree's ID and a profile that's there kept; links to profiles gone, odd trees and junk let go")
+    saved.treeProfiles = 5
+    ns = R.Start(saved)
+    Equal(tostring(saved.treeProfiles) .. " " .. tostring(ns.TreeProfile({ id = 203 })), "nil nil", "not a table at all: let go")
+    R.class = { "Druid", "DRUID" }
+    Equal(#printed, 0, "no errors, nothing in chat")
+end
+
 -- The menu: help, the tour, and room ----------------------------------------------------------------------
 
 do
@@ -2017,32 +2217,50 @@ do
         if type(hint) ~= "function" or not Plain(hint(w.roleButtons[role])) then missing[#missing + 1] = role end
     end
     if not Plain(rawget(w.talentTick, "hint")) then missing[#missing + 1] = "tick" end
+    w.treeRows[1].choice:Click() -- its list filled in, with your profiles
     for i, row in ipairs(w.treeRows) do
-        for _, choice in ipairs(row.choice.buttons) do
+        local box = row.choice
+        if type(box.hint) ~= "function" or not Plain(box.hint(box)) then missing[#missing + 1] = "tree " .. i .. " box" end
+        if not Plain(rawget(box.popup, "hint")) then missing[#missing + 1] = "tree " .. i .. " list" end
+        for _, choice in ipairs(box.buttons) do
             if type(choice.hint) ~= "function" or not Plain(choice.hint(choice)) then
                 missing[#missing + 1] = "tree " .. i .. " " .. choice.key
             end
         end
+        for _, pick in ipairs(box.profileRows) do
+            if type(pick.hint) ~= "function" or not Plain(pick.hint(pick)) then missing[#missing + 1] = "tree " .. i .. " " .. pick.profile end
+        end
     end
-    Equal(table.concat(missing, ", "), "", "each role, the tick and each tree's choices have a note, none marked experimental")
+    Equal(tostring(#w.treeRows[1].choice.profileRows > 0) .. " " .. table.concat(missing, ", "), "true ",
+        "each role, the tick, each tree's box, list, roles and profiles have a note, none marked experimental")
+    -- 30 profiles and your own: the list shows 8 under the roles and scrolls to the rest.
+    local pick = w.treeRows[1].choice
+    local topLeft, bottomRight = S[pick.list].points[1], S[pick.list].points[2]
+    Equal(S[pick.popup].height .. " " .. S[pick.list.content].height .. " | " .. topLeft[1] .. " " .. topLeft[4] .. " " .. topLeft[5]
+        .. " | " .. bottomRight[1] .. " " .. bottomRight[3] .. " " .. bottomRight[4] .. " " .. bottomRight[5],
+        "242 558 | TOPLEFT 4 -94 | BOTTOMRIGHT TOPLEFT 208 -238",
+        "with 31 profiles the list shows 8 under the roles, pinned by two corners, and scrolls to the rest")
+    w.treeRows[1].choice:Click()
     -- Words fit: about 7.5 units a letter, 6.5 in the small font (as Tools/TestHelp.lua counts).
     local function Wide(text, small) return #text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") * (small and 6.5 or 7.5) end
     local fits = {}
     -- The tick at the right of the Roles heading, clear of it.
     fits[#fits + 1] = tostring(10 + #S[w.roleHeading].text * 7.5 + 8 <= 290 - (18 + Wide(S[w.talentTick.text].text)))
-    -- Each tree's name and points clear of its four choices (the longest
-    -- names, at 51 points, too), each choice's word in its own room, and
-    -- the four end to end inside the choice's edge.
+    -- Each tree's name and points clear of its box (the longest names, at
+    -- 51 points, too), the role it shows inside the box's room for words
+    -- (8 in from the left, 18 from the right for its arrow), and its list's
+    -- four roles one under another, each word in its row.
     local wide = S[w.treeRows[1].choice].width
     for _, row in ipairs(w.treeRows) do
         fits[#fits + 1] = tostring(18 + Wide(S[row.name].text, true) <= 300 - 10 - wide - 6)
-        local x, words = 1, true
-        for _, choice in ipairs(row.choice.buttons) do
+        local box, words = row.choice, true
+        if Wide(S[box.label].text, true) > wide - 8 - 18 then words = false end
+        for i, choice in ipairs(box.buttons) do
             local at = S[choice].points[1]
-            if at[1] ~= "LEFT" or math.abs(at[2] - x) > .01 or Wide(S[choice.label].text, true) + 4 > S[choice].width then words = false end
-            x = x + S[choice].width
+            if at[1] ~= "TOPLEFT" or at[2] ~= 4 or math.abs(at[3] + 4 + (i - 1) * 18) > .01
+                or Wide(S[choice.label].text, true) + 16 > S[choice].width then words = false end
         end
-        fits[#fits + 1] = tostring(words and #row.choice.buttons == 4 and math.abs(x - (wide - 1)) < .01)
+        fits[#fits + 1] = tostring(words and #box.buttons == 4)
     end
     fits[#fits + 1] = tostring(Wide("Beast Mastery 51", true) <= 300 - 10 - wide - 6 - 18
         and Wide("Assassination 51", true) <= 300 - 10 - wide - 6 - 18)

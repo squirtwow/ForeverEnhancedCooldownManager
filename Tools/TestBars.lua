@@ -1853,6 +1853,86 @@ do
     Equal(#printed, 0, "no errors from reactive abilities")
 end
 
+-- Lit in any stance (a player's idea, 23 Nov 2026): Overpower lit by the
+-- dodge's combo point while the game says it's unusable (Berserker Stance).
+-- Off by default; your combo points heard only while ticked with Overpower
+-- on a bar; rage never refreshes anything; a secret point counts as none.
+do
+    Environment()
+    book = { { name = "Arms", items = { { name = "Overpower", subName = "Rank 1", spellID = 7384, iconID = 1 },
+        { name = "Hamstring", subName = "Rank 1", spellID = 1715, iconID = 1 } } } }
+    -- As seen in game (23 Nov 2026): the point is in your combo points power,
+    -- while GetComboPoints stays 0 (read only as a backup: oldPoints).
+    local points, oldPoints = 0, 0
+    Enum.PowerType = { ComboPoints = 4 }
+    _G.UnitPower = function(unit, kind)
+        if kind ~= 4 then return 0 end
+        assert(unit == "player")
+        return points
+    end
+    _G.GetComboPoints = function(unit, other)
+        assert(unit == "player" and other == "target")
+        return oldPoints
+    end
+    local sns = Load({ useBars = true })
+    local SB = sns.Bars
+    SB:Assign("Overpower", "cd")
+    SB:Assign("Hamstring", "cd")
+    local bar = SB:Get("cd")
+    local driver = SB.driver
+    local function Lit(i) return tostring(S[bar.icons[i].glow].shown and true or false) end
+    local function Heard() return tostring(S[driver].events.UNIT_POWER_FREQUENT and true or false) end
+    usable[7384], usable[1715] = false, false
+    target, points = true, 1
+    SB:RefreshAll()
+    Equal(tostring(sns.Get("anyStance")) .. " " .. Lit(1) .. " " .. Heard() .. " " .. tostring(SB:LitInAnyStance()),
+        "false false false false", "off by default: Overpower unusable in Berserker Stance stays unlit, nothing heard")
+    Equal(tostring(SB:SetAnyStance(true)) .. " " .. tostring(SB:SetAnyStance(true)) .. " " .. Heard(), "true false true",
+        "ticked: saved once, your combo points heard")
+    NextFrame(SB)
+    Equal(Lit(1) .. " " .. Lit(2), "true false", "the dodge's point lights Overpower in any stance; Hamstring never")
+    points = 0
+    Fire("UNIT_POWER_FREQUENT", "player", "RAGE")
+    NextFrame(SB)
+    Equal(Lit(1), "true", "rage ticking refreshes nothing")
+    Fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
+    NextFrame(SB)
+    Equal(Lit(1), "false", "the point used or gone: out at once")
+    points = SECRET
+    Fire("UNIT_POWER_FREQUENT", "player", SECRET)
+    NextFrame(SB)
+    Equal(Lit(1), "false", "a secret point counts as none")
+    points, oldPoints = 0, 1
+    Fire("UNIT_POWER_FREQUENT", "player", "COMBO_POINTS")
+    NextFrame(SB)
+    Equal(Lit(1), "true", "GetComboPoints' point lights it too, as a backup")
+    oldPoints = 0
+    points, target = 1, false
+    Fire("PLAYER_TARGET_CHANGED")
+    NextFrame(SB)
+    Equal(Lit(1), "false", "no target: unlit")
+    target = true
+    usable[7384] = true
+    points = 0
+    Fire("SPELL_UPDATE_USABLE")
+    NextFrame(SB)
+    Equal(Lit(1), "true", "in Battle Stance the game's own answer still lights it")
+    usable[7384] = false
+    Equal(tostring(SB:SetAnyStance(false)) .. " " .. Heard() .. " " .. tostring(sns.Get("anyStance")), "true false false",
+        "unticked: points no longer heard")
+    points = 1
+    NextFrame(SB)
+    Equal(Lit(1), "false", "and the point no longer lights it")
+    SB:SetAnyStance(true)
+    SB:Remove("cd", 1)
+    Equal(bar.icons[1].name .. " " .. Heard(), "Hamstring false", "ticked but no Overpower on a bar: nothing heard")
+    _G.GetComboPoints = nil
+    _G.UnitPower = function() return 0 end
+    Enum.PowerType = nil
+    target = false
+    Equal(#printed, 0, "no errors from Lit in any stance")
+end
+
 -- Buffs bar -------------------------------------------------------------------------------
 
 Environment()
@@ -1992,6 +2072,126 @@ do
     B:SetOption("buff", "hideOutside", false)
     ns.BarData("debuff").hidePet = true
     Equal(tostring(ns.BarData("debuff").hidePet), "false", "never on another kind of bar")
+    _G.UnitExists, _G.IsInInstance = oldExists, oldInside
+    Equal(#printed, 0, "no errors")
+end
+
+-- Hide with my pet and Only in instances, ticked buff by buff (a player's
+-- idea: for single buffs, not the whole bar): a Buffs bar's own, off unless
+-- ticked, kept by name in your profile. A ticked buff is left off the bar
+-- while your pet is out, or while you're outside an instance, the rest
+-- staying; the bar follows your pet (UNIT_PET) and the zone (a loading
+-- screen, ZONE_CHANGED_NEW_AREA) at once out of a fight and right after one
+-- in it, never touching the game's aura container in the fight. Taken off
+-- the bar, a buff's ticks go with it.
+do
+    local oldExists, oldInside = _G.UnitExists, _G.IsInInstance
+    local pet, inside = false, true
+    _G.UnitExists = function(unit) if unit == "pet" then return pet end return oldExists(unit) end
+    _G.IsInInstance = function() return inside, inside and "party" or "none" end
+    B:SetAura("buff", "Clearcasting", true)
+    B:SetAura("buff", "Nature's Grace", true)
+    -- The buffs on the bar as laid out, in order, and its groups switched on.
+    local function Shown()
+        local names, on = {}, {}
+        for i = 1, buffs.count do names[i] = buffs.names[i] end
+        for i = 1, 3 do on[i] = groups["g" .. i] and groups["g" .. i].enabled and "on" or "off" end
+        return table.concat(names, ",") .. " " .. table.concat(on, " ")
+    end
+    local store = ns.ProfileLists()
+    -- What's kept in your profile under a field, by bar: the names ticked.
+    local function Kept(field)
+        local out = {}
+        for key, set in pairs(type(store[field]) == "table" and store[field] or {}) do
+            for name in pairs(set) do out[#out + 1] = key .. ":" .. name end
+        end
+        table.sort(out)
+        return table.concat(out, ",")
+    end
+    Equal(Shown() .. " | " .. tostring(B:HidesWithPet("buff", "Thorns")) .. " " .. tostring(B:OnlyInInstances("buff", "Thorns"))
+        .. " [" .. Kept("hideWithPet") .. "] [" .. Kept("onlyInInstances") .. "]",
+        "Thorns,Clearcasting,Nature's Grace on on on | false false [] []",
+        "all three on the bar, both off unless ticked, nothing kept for them")
+    pet = true
+    Fire("UNIT_PET", "player")
+    Equal(Shown(), "Thorns,Clearcasting,Nature's Grace on on on", "unticked: a pet out changes nothing")
+    Equal(tostring(B:SetHideWithPet("buff", "Thorns", true)) .. " " .. tostring(B:HidesWithPet("buff", "Thorns")) .. " "
+        .. Kept("hideWithPet") .. " | " .. Shown(), "true true buff:Thorns | Clearcasting,Nature's Grace on on off",
+        "Hide with my pet ticked with your pet out: Thorns alone left off, the rest close up")
+    Equal(groups.g1.filters.includeSpellIDs[16870] ~= nil and groups.g2.filters.includeSpellIDs[16886] ~= nil, true,
+        "the game's groups told Clearcasting and Nature's Grace")
+    pet = false
+    Fire("UNIT_PET", "player")
+    Equal(Shown(), "Thorns,Clearcasting,Nature's Grace on on on", "pet dismissed: Thorns back, at once")
+    -- In a fight: nothing set up until it ends, then it follows.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    local calls = containerCallsInCombat
+    pet = true
+    Fire("UNIT_PET", "player")
+    Equal(Shown() .. " " .. tostring(containerCallsInCombat - calls), "Thorns,Clearcasting,Nature's Grace on on on 0",
+        "pet summoned in a fight: the bar waits, the game's container untouched")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Shown(), "Clearcasting,Nature's Grace on on off", "and Thorns goes once the fight ends")
+    pet = false
+    Fire("UNIT_PET", "player")
+    -- Only in instances on Nature's Grace: in the open world it goes; a
+    -- dungeon (a loading screen) brings it back; a new zone counts too.
+    inside = false
+    Equal(tostring(B:SetOnlyInInstances("buff", "Nature's Grace", true)) .. " " .. tostring(B:OnlyInInstances("buff", "Nature's Grace"))
+        .. " | " .. Shown(), "true true | Thorns,Clearcasting on on off", "Only in instances ticked outside one: Nature's Grace goes")
+    inside = true
+    Fire("PLAYER_ENTERING_WORLD")
+    Equal(Shown(), "Thorns,Clearcasting,Nature's Grace on on on", "in a dungeon: back")
+    inside = false
+    Fire("ZONE_CHANGED_NEW_AREA")
+    Equal(Shown(), "Thorns,Clearcasting on on off", "out in a new zone: gone again")
+    -- A zone change in a fight waits for it too.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    calls = containerCallsInCombat
+    inside = true
+    Fire("ZONE_CHANGED_NEW_AREA")
+    Equal(Shown() .. " " .. tostring(containerCallsInCombat - calls), "Thorns,Clearcasting on on off 0", "in a fight: it waits")
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(Shown(), "Thorns,Clearcasting,Nature's Grace on on on", "back once it ends")
+    -- Both at once: each left off for its own reason. With missing buffs
+    -- greyed, a buff left off has no greyed spot either.
+    pet, inside = true, false
+    Fire("UNIT_PET", "player")
+    Equal(Shown(), "Clearcasting on off off", "pet out and outside an instance: both left off")
+    B:SetOption("buff", "showMissing", true)
+    Equal(buffs.count .. " " .. tostring(S[buffs.holders[1]].shown) .. " " .. tostring(S[buffs.holders[2]].shown) .. " "
+        .. tostring(slots.b1.filters.includeSpellIDs[16870] ~= nil) .. " " .. tostring(slots.b2.enabled),
+        "1 true false true false", "missing ones greyed: one spot, Clearcasting's, none for the two left off")
+    B:SetOption("buff", "showMissing", false)
+    -- Unticked, at once.
+    B:SetHideWithPet("buff", "Thorns", false)
+    Equal(Shown(), "Thorns,Clearcasting on on off", "Hide with my pet unticked: Thorns back with your pet out")
+    -- When the game won't say, nothing is left off.
+    _G.IsInInstance = nil
+    B:Rebuild()
+    Equal(Shown(), "Thorns,Clearcasting,Nature's Grace on on on", "no IsInInstance: nothing left off")
+    _G.IsInInstance = function() return inside, inside and "party" or "none" end
+    -- Never on another kind of bar, nor for an entry not on the bar.
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(tostring(B:SetHideWithPet("debuff", "Moonfire", true)) .. " " .. tostring(B:SetOnlyInInstances("debuff", "Moonfire", true)) .. " "
+        .. tostring(B:SetHideWithPet("buff", "Wrath", true)) .. " " .. tostring(B:HidesWithPet("debuff", "Moonfire")) .. " "
+        .. tostring(store.hideWithPet.debuff) .. " [" .. Kept("hideWithPet") .. "]", "false false false false nil []",
+        "only for a buff on a Buffs bar")
+    B:SetAura("debuff", "Moonfire", false)
+    -- Taken off the bar, its tick goes with it; put back, it starts afresh.
+    Equal(Kept("onlyInInstances"), "buff:Nature's Grace", "Only in instances kept for Nature's Grace")
+    B:SetAura("buff", "Nature's Grace", false)
+    Equal("[" .. Kept("onlyInInstances") .. "]", "[]", "taken off: its Only in instances goes too")
+    B:SetAura("buff", "Nature's Grace", true)
+    Equal(tostring(B:OnlyInInstances("buff", "Nature's Grace")) .. " " .. Shown(), "false Thorns,Clearcasting,Nature's Grace on on on",
+        "put back: unticked, shown")
+    B:SetAura("buff", "Clearcasting", false)
+    B:SetAura("buff", "Nature's Grace", false)
+    pet, inside = false, true
     _G.UnitExists, _G.IsInInstance = oldExists, oldInside
     Equal(#printed, 0, "no errors")
 end
@@ -6533,6 +6733,17 @@ end)()
     Equal(Low() .. " " .. tostring(main.enchantLit), "false false", "gone: no low-time glow")
     B:SetWarnAt("buff", "hand:main", 0)
     Equal(tostring(ns.Style:Warned(main.enchant.cooldown)), "nil", "no warning: its countdown as it was")
+    -- Colour by time left (a player's idea), where Warn at is: on the hand
+    -- entry's countdown too, in its colours; unticked, as it was.
+    onHand[16], ends[16] = 2628, clock + 1800
+    Change()
+    B:SetTimeColours("buff", "hand:main", { 10, 5, "green", "yellow", "red" })
+    local coloured = tostring(ns.Style:Coloured(main.enchant.cooldown))
+    B:SetTimeColours("buff", "hand:main", nil)
+    Equal(coloured .. " " .. tostring(ns.Style:Coloured(main.enchant.cooldown)), "10/5/|cffff4033|cffffeb40|cff59e659 nil",
+        "Colour by time left on Main hand enchant: its countdown in its colours (red, yellow, green up); unticked, as it was")
+    onHand[16], ends[16] = nil, nil
+    Change()
     clock = was
     -- Not (yet) on a named enchant's own entry, Instant Poison: its countdown
     -- and spot as before, the time left under its warning or not.
@@ -6540,13 +6751,16 @@ end)()
     Change()
     from = #timers
     B:SetWarnAt("buff", "Instant Poison", 600)
+    B:SetTimeColours("buff", "Instant Poison", { 10, 5, "green", "yellow", "red" })
     local function PoisonLow() return tostring(poison.lowHost ~= nil and poison.lowHost.glow ~= nil and poison.lowHost.glow:IsShown()) end
-    local before = tostring(ns.Style:Warned(poison.enchant.cooldown)) .. " " .. PoisonLow()
+    local before = tostring(ns.Style:Warned(poison.enchant.cooldown)) .. " " .. tostring(ns.Style:Coloured(poison.enchant.cooldown)) .. " "
+        .. PoisonLow()
     clock = clock + 1250
     Later(from)
-    Equal(before .. " | " .. PoisonLow() .. " " .. tostring(poison.enchantLit), "nil false | false true",
-        "Warn at on Instant Poison's own entry: no red countdown, no glow, with 30 minutes or 9 left")
+    Equal(before .. " | " .. PoisonLow() .. " " .. tostring(poison.enchantLit), "nil nil false | false true",
+        "Warn at and Colour by time left on Instant Poison's own entry: no red countdown or colours, no glow, with 30 minutes or 9 left")
     B:SetWarnAt("buff", "Instant Poison", 0)
+    B:SetTimeColours("buff", "Instant Poison", nil)
     onHand[16], ends[16] = nil, nil
     Change()
     clock = was
@@ -9389,6 +9603,68 @@ end)()
     for _, name in ipairs({ "SwingTimerMainHandFrame", "SwingTimerOffHandFrame", "SwingTimerRangedFrame", "PlayerCastingBarFrame" }) do
         _G[name] = nil
     end
+end)()
+
+-- Always show: the swing timer stays up, empty, between swings ----------------------------------
+
+;(function()
+    Environment()
+    Display()
+    _G.PlayerCastingBarFrame = Blizzard(New("Frame"), "PlayerCastingBarFrame")
+    local weapons = { [16] = 135274, [18] = 135490 }
+    _G.GetInventoryItemTexture = function(_, slot) return weapons[slot] end
+    _G.UnitClass = function() return "Warrior", "WARRIOR" end
+    ns = Load({ useBars = true, prdSkin = false, swingTimer = true })
+    local C = ns.CastBar
+    local sw = C.row
+    Equal(tostring(ns.Get("swingAlways")) .. " " .. S[sw].alpha .. " " .. tostring(S[sw].scripts.OnUpdate), "false 0 nil",
+        "off by default: nothing shows before a swing")
+    ns.Set("swingAlways", true)
+    C:Apply()
+    Equal(string.format("%g %s %g %s %s", S[sw].alpha, S[sw.bar.name].text, Last(sw.bar, "SetValue", 1), S[sw.bar.time].text,
+        tostring(S[sw].scripts.OnUpdate)), "1 Main hand 0  nil", "on: up straight away, empty, in silver, nothing ticking")
+    Equal(S[sw.icon].texture .. " " .. string.format("%g", Last(sw.bar, "SetStatusBarColor", 1)), "135274 0.66", "with the main hand weapon")
+    clock = 300
+    Fire("PLAYER_SWING", 2, 0)
+    clock = 301
+    S[sw].scripts.OnUpdate(sw, 1)
+    Equal(string.format("%g %g", Last(sw.bar, "SetValue", 1), S[sw].alpha), "1 1", "a swing fills it as before")
+    clock = 302.2 -- ran out at 302
+    S[sw].scripts.OnUpdate(sw, 1.2)
+    Equal(string.format("%g %g", Last(sw.bar, "SetValue", 1), S[sw].alpha), "2 1", "run out: held full")
+    local lowest = 1
+    rawset(sw, "SetAlpha", function(self, alpha)
+        lowest = math.min(lowest, alpha)
+        S[self].alpha = alpha
+    end)
+    clock = 302.5
+    S[sw].scripts.OnUpdate(sw, .3)
+    rawset(sw, "SetAlpha", nil)
+    Equal(string.format("%g %g %g %s", lowest, S[sw].alpha, Last(sw.bar, "SetValue", 1), tostring(S[sw].scripts.OnUpdate)), "1 1 0 nil",
+        "no next swing: it empties without fading, and stops ticking")
+    -- Auto-attack switched off, and a loading screen: still up, empty.
+    Fire("PLAYER_SWING", 2, 0)
+    Fire("PLAYER_LEAVE_COMBAT")
+    clock = 303
+    S[sw].scripts.OnUpdate(sw, .5)
+    Equal(string.format("%g %g", S[sw].alpha, Last(sw.bar, "SetValue", 1)), "1 0", "auto-attack off: it empties and stays")
+    Fire("PLAYER_ENTERING_WORLD")
+    Equal(string.format("%g %s", S[sw].alpha, S[sw.bar.name].text), "1 Main hand", "a loading screen: still up")
+    -- The last hand that swung.
+    Fire("PLAYER_SWING", 2, 2)
+    clock = 306
+    S[sw].scripts.OnUpdate(sw, 3)
+    Equal(S[sw.bar.name].text .. " " .. S[sw.icon].texture .. " " .. S[sw].alpha, "Ranged 135490 1", "a ranged swing last: its weapon")
+    -- Switched off again: gone, as before.
+    ns.Set("swingAlways", false)
+    C:Apply()
+    Equal(S[sw].alpha .. " " .. tostring(S[sw].scripts.OnUpdate), "0 nil", "switched off: gone between swings again")
+    -- On, but with the swing timer off: nothing.
+    ns.Set("swingAlways", true)
+    ns.Set("swingTimer", false)
+    C:Apply()
+    Equal(tostring(S[sw].shown) .. " " .. S[sw].alpha, "false 0", "with the swing timer off it does nothing")
+    _G.PlayerCastingBarFrame = nil
 end)()
 
 -- The cast bar exactly as wide as the display ------------------------------------------------------

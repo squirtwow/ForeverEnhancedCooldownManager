@@ -133,6 +133,27 @@ local function Warns(Add)
         #dims > 0 and (" | dim until Warn at: " .. table.concat(dims, "; ")) or ""))
 end
 
+-- Colour by time left, set spell by spell: how many entries use it, each
+-- with its times and colours by aura bar, and whether the game made its
+-- rules (Style.lua).
+local function TimeColours(Add)
+    local list, count = {}, 0
+    for _, key in ipairs(ns.BAR_KEYS) do
+        if ns.AURA_BARS[key] then
+            local names = {}
+            for name, colours in pairs(ns.TimeColours(key)) do
+                names[#names + 1] = ("%s %s/%ss %s %s %s"):format(tostring(name), tostring(colours[1]), tostring(colours[2]),
+                    tostring(colours[3]), tostring(colours[4]), tostring(colours[5]))
+            end
+            table.sort(names)
+            count = count + #names
+            if #names > 0 then list[#list + 1] = key .. ": " .. table.concat(names, ", ") end
+        end
+    end
+    Add(("Colour by time left: %d %s%s | %s"):format(count, count == 1 and "spell" or "spells",
+        #list > 0 and (" (" .. table.concat(list, "; ") .. ")") or "", ns.Style:TimeReport()))
+end
+
 function ns.DebugReport()
     local lines = {}
     local function Add(text) lines[#lines + 1] = text end
@@ -148,6 +169,8 @@ function ns.DebugReport()
     -- Icon details' countdown, and how its Timer text went.
     Add(("Countdown: size %s%%, spot %s, text %s%s"):format(tostring(ns.Get("countdownSize")), tostring(ns.Get("countdownSpot")),
         tostring(ns.Get("countdownFormat")), ns.Style and ns.Style:TimerReport() or ""))
+    -- Colour by time left: the spells with it, and whether the game made its rules.
+    if ns.Style then TimeColours(Add) end
     if ns.Style then Warns(Add) end
     -- The Cooldown pulse's procs: what the game took, and what it keeps secret.
     if ns.Pulse and ns.Pulse.ProcReport then ns.Pulse:ProcReport(Add) end

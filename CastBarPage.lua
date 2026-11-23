@@ -119,6 +119,12 @@ function ns.BuildCastBarPage(window, page, width)
     local swings = Tick("Swing timer in this spot", "swingTimer", -26,
         "Main hand and ranged swings: Auto Shot for hunters, Ranged for other classes. A cast takes the spot while it lasts. "
         .. "Forever's own swing timers and EraUI's are separate: turn those off if you don't want two.")
+    -- Always show, beside the swing timer's tick while that's on.
+    local always = Tick("Always show", "swingAlways", -26,
+        "The swing timer stays up between swings, empty, in and out of combat, instead of fading away.")
+    always:ClearAllPoints()
+    always:SetPoint("LEFT", swings, "RIGHT", 14, 0)
+    page.always = always
     -- Both ticks as one part, for the tour to outline and put its box under.
     local ticks = CreateFrame("Frame", nil, options)
     ticks:SetPoint("TOPLEFT", shown, "TOPLEFT")
@@ -425,6 +431,8 @@ function ns.BuildCastBarPage(window, page, width)
             or "It sits right under your resource display, and in a layout the rows go under it. ") .. KEEPS_ROOM)
         shown:SetChecked(casts)
         swings:SetChecked(swinging)
+        always:SetChecked(ns.Get("swingAlways"))
+        always:SetShown(swinging and true or false)
         above:SetChecked(over)
         free:SetChecked(dragged)
         atNative:SetChecked(atSpot)

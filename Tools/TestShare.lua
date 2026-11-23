@@ -1183,7 +1183,7 @@ function H.Sane(ns, shared)
     local function ID(v) return type(v) == "number" and v == math.floor(v) and v >= 1 and v <= 2147483647 end
     local known = { lists = true, forms = true, swap = true, joins = true, only = true, pick = true, style = true, added = true,
         looks = true, warns = true, setup = true, count = true, picks = true, skipped = true, name = true, version = true,
-        extras = true, sizes = true, traps = true, options = true, glowSize = true, sounds = true }
+        extras = true, sizes = true, traps = true, options = true, glowSize = true, sounds = true, times = true }
     for k in pairs(shared) do
         if not known[k] then return "an unknown key " .. tostring(k) end
     end
@@ -1342,6 +1342,31 @@ function H.Sane(ns, shared)
             end
         end
     end
+    -- Colour by time left: the Buffs and Debuffs bars' only, names on that
+    -- bar's lists (a form's too), five each: two whole seconds from 1 to 60,
+    -- the first over the second, then three of its six colours or "#rrggbb".
+    if type(shared.times) ~= "table" then return "times" end
+    local timeKeys = { green = true, yellow = true, orange = true, red = true, white = true, purple = true }
+    for key, set in pairs(shared.times) do
+        if not ns.AURA_BARS[key] or not shared.lists[key] or type(set) ~= "table" then return "times on " .. tostring(key) end
+        local listed = {}
+        for _, v in ipairs(shared.lists[key]) do listed[v] = true end
+        for _, lists in pairs(shared.forms) do
+            for _, v in ipairs(lists[key] or {}) do listed[v] = true end
+        end
+        for name, v in pairs(set) do
+            local count = 0
+            for _ in pairs(type(v) == "table" and v or {}) do count = count + 1 end
+            local function Second(n) return type(n) == "number" and n == math.floor(n) and n >= 1 and n <= 60 end
+            if not listed[name] or count ~= 5 or not (Second(v[1]) and Second(v[2]) and v[2] < v[1]) then return "a time colour " .. tostring(name) end
+            for i = 3, 5 do
+                local c = v[i]
+                if not (timeKeys[c] or (type(c) == "string" and c:find("^#%x%x%x%x%x%x$") and c == c:lower())) then
+                    return "a time colour " .. tostring(name) .. " " .. tostring(c)
+                end
+            end
+        end
+    end
     -- Play a sound: the Buffs and Debuffs bars' only, names on that bar's
     -- lists (a form's too), never a weapon enchant, one of the pulse's
     -- sounds but None each.
@@ -1392,13 +1417,13 @@ function H.Sane(ns, shared)
             if v ~= true or not listed[name] or not trapNames[name:match("^[^@#]+")] then return "a trap " .. tostring(name) end
         end
     end
-    -- Each entry's own ticks: only the six carried, each on a bar of a kind
+    -- Each entry's own ticks: only the eight carried, each on a bar of a kind
     -- that has it, names on that bar's lists (a form's too), true each;
     -- Count ticks only for one that ticks, Others only for a hand's enchant.
     if type(shared.options) ~= "table" then return "options" end
     local kinds = { countTicks = { debuff = true, cd = true, util = true }, glowMissing = { buff = true, debuff = true },
         glowActive = { buff = true, debuff = true }, handOthers = { buff = true }, dimUntilWarn = { buff = true, debuff = true },
-        missingPicks = { buff = true, debuff = true } }
+        missingPicks = { buff = true, debuff = true }, hideWithPet = { buff = true }, onlyInInstances = { buff = true } }
     for field, sets in pairs(shared.options) do
         if not kinds[field] or type(sets) ~= "table" then return "an option " .. tostring(field) end
         for key, set in pairs(sets) do
@@ -1551,7 +1576,7 @@ end
 -- switches on are ns.SHARE_PARTS.)
 H.NOT_SHARED = { "skin", "prdSkin", "groupFamilies", "oocIgnoreTarget", "ammoSwap", "listItems", "listRanks", "listTicked", "accent", "layoutPreview",
     "growArrows", "minimap", "minimapAngle", "minimapFree", "minimapX", "minimapY", "talentSwitch", "updateNotice", "noWhatsNew",
-    "keybindsPlain", "totemTime" }
+    "keybindsPlain", "totemTime", "anyStance" }
 -- Every part a string can switch on, in order, with its letter.
 H.PARTS = "useBars=u prdCombo=c prdEnergy=e prdText=t keybinds=k keyPressGlow=g castBar=b swingTimer=s castBatch=h castTicks=m"
     .. " castLatency=l pullTimer=r raidWarnings=w bossCasts=o pulse=p pulseProcs=q totemBar=x"
@@ -2368,11 +2393,83 @@ end
         "imported without its look: every option and Glow size (the profile's), the bars' settings the importer's own")
 end)()
 
+-- Hide with my pet and Only in instances (a player's idea: for single
+-- buffs, not the whole bar), ticked buff by buff on a Buffs bar: carried
+-- under letters of their own (u and b), read back the same, counted with
+-- the icon options, imported with the profile and kept by a copy of it. A
+-- string from before them (1.10.19) reads and imports as it did, with
+-- none; odd ones (another kind of bar, a bar the string hasn't, a name not
+-- on the list, not true) are left out and counted.
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Moonfire" }, util = {}, buff = { "Thorns", "Mark of the Wild", "Clearcasting" }, debuff = { "Moonfire" } } } })
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    -- A profile's (or a read string's) two, each bar with something in it.
+    local function Away(profile)
+        local out = {}
+        for _, field in ipairs({ "hideWithPet", "onlyInInstances" }) do
+            local sets = {}
+            for key, set in pairs(type(profile[field]) == "table" and profile[field] or {}) do
+                if type(set) == "table" and next(set) then sets[key] = set end
+            end
+            if next(sets) then out[field] = sets end
+        end
+        return H.Text(out)
+    end
+    local set = { B:SetHideWithPet("buff", "Thorns", true), B:SetOnlyInInstances("buff", "Clearcasting", true),
+        B:SetOnlyInInstances("buff", "Thorns", true), B:SetHideWithPet("debuff", "Moonfire", true), B:SetOnlyInInstances("buff", "Wrath", true) }
+    for i, v in ipairs(set) do set[i] = tostring(v) end
+    local want = '{["hideWithPet"]={["buff"]={["Thorns"]=true}},["onlyInInstances"]={["buff"]={["Clearcasting"]=true,["Thorns"]=true}}}'
+    Equal(table.concat(set, " ") .. " | " .. Away(ns.ProfileLists()), "true true true false false | " .. want,
+        "ticked on the Buffs bar, kept in the profile; never on the Debuffs bar, nor for a spell not on the bar")
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(table.concat({ H.Sane(ns, shared) .. "|" .. shared.skipped, Away(shared.options), tostring(P.Export() == text) }, " | "),
+        "|0 | " .. want .. " | true", "out and back: both, nothing left out, the same string every time")
+    Equal(P.Describe(shared), "Holds 5 bar entries, with 3 icon options and its look and layout.", "counted with the icon options")
+    -- Their own letters, read from a string made by hand.
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = { "Thorns", "Mark of the Wild", "Clearcasting" }, debuff = { "Moonfire" } } end
+    local made = P.Read(H.String({ l = Lists(), u = { buff = { ["Mark of the Wild"] = true } }, b = { buff = { Thorns = true } } }))
+    Equal(H.Sane(ns, made) .. "|" .. made.skipped .. " " .. Away(made.options),
+        '|0 {["hideWithPet"]={["buff"]={["Mark of the Wild"]=true}},["onlyInInstances"]={["buff"]={["Thorns"]=true}}}',
+        "u is Hide with my pet, b Only in instances")
+    -- Imported (without its look): the new profile has them, and the bar goes by them.
+    P.Import("Shared", shared, false)
+    Equal(table.concat({ ns.ProfileName(), Away(db.profiles.Shared), tostring(B:HidesWithPet("buff", "Thorns")),
+        tostring(B:OnlyInInstances("buff", "Clearcasting")), tostring(B:HidesWithPet("buff", "Clearcasting")) }, " | "),
+        "Shared | " .. want .. " | true | true | false", "imported: in the new profile, and the bar goes by them")
+    -- Copied: the copy has its own, sharing no table.
+    ns.CopyProfile("Copy")
+    local copy = db.profiles.Copy
+    Equal(Away(copy) .. " " .. tostring(copy.hideWithPet.buff ~= db.profiles.Shared.hideWithPet.buff), want .. " true",
+        "a copy of the profile keeps them, in tables of its own")
+    -- A string from before them: none, nothing left out, imported as it was.
+    local old = P.Read(H.String({ a = "1.10.19", l = Lists(), m = { buff = { Thorns = true } } }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. Away(old.options) .. " " .. H.Text(old.only),
+        '|0 {} {["buff"]={["Thorns"]=true}}', "a string from 1.10.19 reads as it did: no Hide with my pet or Only in instances")
+    P.Import("Old", old, false)
+    Equal(Away(db.profiles.Old) .. " " .. tostring(B:HidesWithPet("buff", "Thorns")) .. " " .. tostring(B:OnlyWhenMissing("buff", "Thorns")),
+        "{} false true", "imported: none ticked, its Only when missing as before")
+    -- Odd ones: each left out and counted, the rest kept.
+    local odd = P.Read(H.String({ l = Lists(),
+        -- The Debuffs bar (a Buffs bar's alone), a name not on the list: 2.
+        u = { buff = { Thorns = true, Gone = true }, debuff = { Moonfire = true } },
+        -- Not true, Buffs 2 (the string hasn't one), not a table: 3.
+        b = { buff = { Clearcasting = 1 }, buff2 = { Thorns = true }, buff3 = "x" } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. Away(odd.options), '|5 {["hideWithPet"]={["buff"]={["Thorns"]=true}}}',
+        "odd ones left out and counted; only what can be kept")
+    local junk = P.Read(H.String({ l = Lists(), u = "evil" }))
+    Equal(junk.skipped .. " " .. Away(junk.options), "1 {}", "not a table: left out and counted")
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- A big setup in one string ---------------------------------------------------------------------------
 -- (For the FECM Setups website's presets.) 12 cooldowns, 7 utility, 6 buffs
 -- and 5 debuffs, lists for three forms, and every option on: joins, Only
--- when missing, pulse ticks and Long, Warn at, own countdowns and sizes,
--- Show the trap I last laid, every icon option, Glow size, and in its look
+-- when missing, pulse ticks and Long, Warn at, Colour by time left, own
+-- countdowns and sizes, Show the trap I last laid, every icon option, Glow size, and in its look
 -- Glow for more procs and the tick count's look. Read back with all of it
 -- and nothing left out, within the longest string read, and the same
 -- string back from a new profile made from it.
@@ -2405,7 +2502,10 @@ end)()
         glowActive = { buff = { Clearcasting = true, ["Nature's Grace"] = true } }, handOthers = { buff = { ["hand:main"] = true } },
         dimUntilWarn = { debuff = { Moonfire = true, ["Insect Swarm"] = true } },
         missingPicks = { buff = { ["Mark of the Wild"] = true }, debuff = { ["Insect Swarm"] = true } }, glowActiveSize = 120,
-        auraSound = { buff = { Thorns = "bell", Clearcasting = "fanfare" }, debuff = { Moonfire = "chime", Rip = "warhorn" } } }
+        auraSound = { buff = { Thorns = "bell", Clearcasting = "fanfare" }, debuff = { Moonfire = "chime", Rip = "warhorn" } },
+        timeColours = { buff = { ["Nature's Grace"] = { 10, 5, "green", "yellow", "red" } },
+            debuff = { Moonfire = { 10, 5, "green", "yellow", "red" }, ["Insect Swarm"] = { 12, 3, "white", "#ff8800", "purple" },
+                Rip = { 10, 5, "green", "yellow", "red" }, Rake = { 10, 5, "green", "yellow", "red" } } } }
     local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true, keybinds = true, castBar = true, pulse = true, prdText = true,
         barStyle = "split", font = "barlow", chars = { ["Player-1-0001"] = "Big" }, profiles = { Big = profile },
         bars = { cd = { glowProcs = true, tickAt = "BOTTOM", tickColour = "gold", size = 44 }, util = { glowProcs = true, tickFrom = 0 },
@@ -2425,7 +2525,7 @@ end)()
     -- Each thing the profile has beside the string's: whether they match.
     local same = {}
     for _, pair in ipairs({ { "onlyWhenMissing", "only" }, { "warnAt", "warns" }, { "iconSize", "sizes" }, { "lastTrap", "traps" },
-        { "joins", "joins" }, { "auraSound", "sounds" } }) do
+        { "joins", "joins" }, { "auraSound", "sounds" }, { "timeColours", "times" } }) do
         same[#same + 1] = pair[1] .. "=" .. tostring(Sets(mine[pair[1]]) == Sets(shared[pair[2]]))
     end
     for _, field in ipairs({ "countTicks", "glowMissing", "glowActive", "handOthers", "dimUntilWarn", "missingPicks" }) do
@@ -2436,11 +2536,12 @@ end)()
     same[#same + 1] = "glowActiveSize=" .. tostring(mine.glowActiveSize == shared.glowSize)
     Equal(table.concat({ H.Sane(ns, shared) .. "|" .. shared.skipped, tostring(#text <= P.MAX_TEXT), table.concat(same, " "),
         tostring(shared.setup.bars.cd.glowProcs) .. " " .. tostring(shared.setup.bars.util.glowProcs) }, " | "),
-        "|0 | true | onlyWhenMissing=true warnAt=true iconSize=true lastTrap=true joins=true auraSound=true countTicks=true"
+        "|0 | true | onlyWhenMissing=true warnAt=true iconSize=true lastTrap=true joins=true auraSound=true timeColours=true countTicks=true"
         .. " glowMissing=true glowActive=true handOthers=true dimUntilWarn=true missingPicks=true spellLook=true forms=true glowActiveSize=true"
         .. " | true true", "read back with every option the profile has and nothing left out, within the longest string read")
     Equal(P.Describe(shared), "Holds 30 bar entries and 12 pulse ticks, with icons for 3 forms, own countdowns for 3 spells, low-time"
-        .. " warnings for 5 auras, own sizes for 4 icons, the trap you last laid shown on 1 icon, 23 icon options and its look and layout.",
+        .. " warnings for 5 auras, colours by time left for 5 auras, own sizes for 4 icons, the trap you last laid shown on 1 icon, 23 icon"
+        .. " options and its look and layout.",
         "said in one line (each sound one of the icon options)")
     io.write("Share: a big setup with every option on is " .. #text .. " letters as a string.\n")
     character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
@@ -3287,6 +3388,109 @@ end)()
     ns.Set("bigStacks", true)
     for _, key in ipairs(ns.ICON_DETAILS) do ns.Set(key, ns.DEFAULTS[key]) end
     Equal(tostring(ns.Get("bigStacks")), "false", "Icon details' Defaults unticks it")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Colour by time left, spell by spell, in profiles and strings ------------------------------------------
+-- (A player's idea; Squirt, 23 Nov 2026: set in each spell's own box.) Kept
+-- by bar and entry like Warn at: at load only an aura bar's entries on its
+-- lists, each with two whole seconds (the first over the second) and three
+-- of its colours (or Custom's "#rrggbb"), each in a table of its own; a
+-- copy of the profile shares no table; taken off its bar, forgotten in that
+-- profile only. Carried under a letter of its own (T, beside Warn at's t):
+-- out and back the same, said in what a string holds, imported into the new
+-- profile with or without its look. A string from before it (1.10.19)
+-- reads and imports as it did, with none; odd ones are left out and counted.
+-- None of it is the look's (nothing in Icon details any more).
+
+;(function()
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local saved = { notesSeen = "dev", helpSeen = true, useBars = true, chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Moonfire" }, util = {}, buff = { "Thorns", "Clearcasting" }, debuff = { "Moonfire", "Insect Swarm" },
+            timeColours = { buff = { Thorns = { 20, 8, "white", "#ff8800", "purple" }, Gone = { 10, 5, "green", "yellow", "red" } },
+                debuff = { Moonfire = { 10, 5, "green", "yellow", "red" }, ["Insect Swarm"] = { 5, 5, "green", "yellow", "red" } },
+                cd = { Moonfire = { 10, 5, "green", "yellow", "red" } } } },
+        Odd = { cd = {}, util = {}, buff = { "Thorns" }, debuff = {}, timeColours = { buff = { Thorns = { 10, 5, "gold", "yellow", "red" } },
+            debuff = "x" } },
+        Old = { cd = { "Moonfire" }, util = {}, buff = {}, debuff = {} } } }
+    local ns = Start(saved)
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    -- As text, each one's five in a row ({10,5,"green","yellow","red"}).
+    local function Text(value) return (H.Text(value):gsub("%[%d+%]=", "")) end
+    local MINE = '{["buff"]={["Thorns"]={20,8,"white","#ff8800","purple"}},["debuff"]={["Moonfire"]={10,5,"green","yellow","red"}}}'
+    Equal(ns.ProfileName() .. " " .. Text(db.profiles.Mine.timeColours) .. " " .. tostring(db.profiles.Old.timeColours) .. " "
+        .. tostring(db.profiles.Odd.timeColours), "Mine " .. MINE .. " nil nil", "loaded: only an aura bar's entries on its list, each"
+        .. " with times and colours it can use; a profile from before it, or with none left, keeps no table")
+    Equal(Text(B:TimeColours("buff", "Thorns")) .. " " .. tostring(B:TimeColours("cd", "Moonfire")) .. " "
+        .. tostring(B:TimeColours("buff", "Clearcasting")), '{20,8,"white","#ff8800","purple"} nil nil', "read by bar and entry;"
+        .. " none on the Cooldowns bar")
+
+    -- Copy: the new profile has them, sharing no table with yours.
+    ns.CopyProfile("Copy")
+    local copy, mine = db.profiles.Copy.timeColours, db.profiles.Mine.timeColours
+    Equal(ns.ProfileName() .. " " .. Text(copy) .. " " .. tostring(copy ~= mine and copy.buff ~= mine.buff and copy.buff.Thorns ~= mine.buff.Thorns),
+        "Copy " .. MINE .. " true", "Copy carries each one, sharing no table")
+    B:SetTimeColours("buff", "Thorns", { 30, 8, "white", "#ff8800", "purple" })
+    Equal(copy.buff.Thorns[1] .. " " .. mine.buff.Thorns[1], "30 20", "a change on the copy leaves the profile it came from as it was")
+    -- Taken off its bar: forgotten there (and put back, none), in that profile only.
+    B:SetAura("debuff", "Moonfire", false)
+    B:SetAura("debuff", "Moonfire", true)
+    Equal(tostring(copy.debuff) .. " " .. Text(mine.debuff.Moonfire) .. " " .. tostring(B:TimeColours("debuff", "Moonfire")),
+        'nil {10,5,"green","yellow","red"} nil', "off its bar: forgotten there, in that profile only")
+    ns.UseProfile("Mine")
+
+    -- Share: carried under T, read back the same, said in one line.
+    local text = P.Export()
+    local shared = P.Read(text)
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. Text(shared.times) .. " | " .. P.Describe(shared),
+        "|0 " .. MINE .. " | Holds 5 bar entries, with colours by time left for 2 auras and its look and layout.",
+        "Share: each one goes with the profile, and the line says so")
+    Equal(tostring(P.Export() == text) .. " " .. tostring(shared.setup.look.timeColours), "true nil",
+        "the same string every time; nothing of it in the look")
+    -- Its own letter, read from a string made by hand.
+    local function Lists() return { cd = { "Moonfire" }, util = {}, buff = { "Thorns", "Clearcasting" }, debuff = { "Moonfire" } } end
+    local made = P.Read(H.String({ l = Lists(), T = { debuff = { Moonfire = { 12, 3, "white", "orange", "#00ffff" } } } }))
+    Equal(H.Sane(ns, made) .. "|" .. made.skipped .. " " .. Text(made.times), '|0 {["debuff"]={["Moonfire"]={12,3,"white","orange","#00ffff"}}}',
+        "T is Colour by time left")
+    -- Imported without its look, then with it: the new profile has them, yours as it was, the bar goes by them.
+    local ok = P.Import("Theirs", shared, false)
+    Equal(tostring(ok) .. " " .. ns.ProfileName() .. " " .. Text(db.profiles.Theirs.timeColours) .. " "
+        .. Text(B:TimeColours("debuff", "Moonfire")) .. " " .. Text(db.profiles.Mine.timeColours), "true Theirs " .. MINE
+        .. ' {10,5,"green","yellow","red"} ' .. MINE, "imported without its look: the new profile has them, yours as it was")
+    Equal(tostring(db.profiles.Theirs.timeColours.debuff.Moonfire ~= shared.times.debuff.Moonfire) .. " " .. tostring(P.Export() == text),
+        "true true", "in tables of its own, and the very same string back")
+    P.Import("Theirs too", shared, true)
+    Equal(Text(db.profiles["Theirs too"].timeColours), MINE, "with its look too")
+    -- On another account.
+    character = { guid = "Player-1-0077", name = "Kess", realm = "Zephras" }
+    local ns2 = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    ns2.ProfileShare.Import("Kess", ns2.ProfileShare.Read(text), true)
+    Equal(Text(ns2.Bars:TimeColours("buff", "Thorns")) .. " " .. tostring(ns2.ProfileShare.Export() == text),
+        '{20,8,"white","#ff8800","purple"} true', "on another account: kept, and the same string back")
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    -- A string from before it: none, nothing left out, imported as it was.
+    local old = P.Read(H.String({ a = "1.10.19", l = Lists(), t = { debuff = { Moonfire = 3 } } }))
+    Equal(H.Sane(ns, old) .. "|" .. old.skipped .. " " .. H.Text(old.times) .. " " .. H.Text(old.warns), '|0 {} {["debuff"]={["Moonfire"]=3}}',
+        "a string from 1.10.19 reads as it did: no Colour by time left, its Warn at as before")
+    P.Import("Old string", old, false)
+    Equal(tostring(db.profiles["Old string"].timeColours) .. " " .. tostring(B:TimeColours("debuff", "Moonfire")) .. " "
+        .. tostring(B:WarnAt("debuff", "Moonfire")), "nil nil 3", "imported: none, its Warn at as before")
+    -- Odd ones: each left out and counted, the rest kept.
+    local lists = Lists()
+    lists.debuff = { "Moonfire", "Insect Swarm", "Rip" }
+    local odd = P.Read(H.String({ l = lists, T = {
+        -- A name not on the list, the second time over the first: 2.
+        buff = { Thorns = { 10, 5, "green", "yellow", "red" }, Gone = { 10, 5, "green", "yellow", "red" }, Clearcasting = { 5, 10, "green", "yellow", "red" } },
+        -- Past 60, four of them, not one of its colours: 3.
+        debuff = { Moonfire = { 61, 5, "green", "yellow", "red" }, ["Insect Swarm"] = { 10, 5, "green", "yellow" },
+            Rip = { 10, 5, "gold", "yellow", "red" } },
+        -- The Cooldowns bar (no countdown of an aura's), not a table: 2.
+        cd = { Moonfire = { 10, 5, "green", "yellow", "red" } }, debuff2 = "x" } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. Text(odd.times), '|7 {["buff"]={["Thorns"]={10,5,"green","yellow","red"}}}',
+        "odd ones left out and counted; only what can be kept")
+    local junk = P.Read(H.String({ l = Lists(), T = "evil" }))
+    Equal(junk.skipped .. " " .. H.Text(junk.times), "1 {}", "not a table: left out and counted")
     Equal(#printed, 0, "no errors")
 end)()
 

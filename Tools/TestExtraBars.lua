@@ -2369,6 +2369,53 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- Hide with my pet and Only in instances on Buffs 2 (a player's idea: for
+-- single buffs, not the whole bar): ticked for that bar alone, the bar laid
+-- out without a ticked buff while your pet is out or outside an instance,
+-- kept over a reload, and gone with the bar.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    local oldExists, oldInside = _G.UnitExists, _G.IsInInstance
+    local pet, inside = false, true
+    _G.UnitExists = function(unit) if unit == "pet" then return pet end return oldExists(unit) end
+    _G.IsInInstance = function() return inside, inside and "party" or "none" end
+    B:AddBar("buff")
+    B:SetAura("buff2", "Thorns", true)
+    B:SetAura("buff2", "Clearcasting", true)
+    B:SetAura("buff", "Thorns", true)
+    local ticked = tostring(B:SetHideWithPet("buff2", "Thorns", true)) .. " " .. tostring(B:SetOnlyInInstances("buff2", "Clearcasting", true))
+    local function Shown(key)
+        local bar, names = B:Get(key), {}
+        for i = 1, bar.count do names[i] = bar.names[i] end
+        return #names > 0 and table.concat(names, ",") or "none"
+    end
+    pet = true
+    Fire("UNIT_PET", "player")
+    local petOut = Shown("buff2") .. " / " .. Shown("buff")
+    inside = false
+    Fire("ZONE_CHANGED_NEW_AREA")
+    Equal(table.concat({ ticked, tostring(B:HidesWithPet("buff", "Thorns")), petOut, Shown("buff2") .. " / " .. Shown("buff") }, " | "),
+        "true true | false | Clearcasting / Thorns | none / Thorns",
+        "ticked on Buffs 2 alone: pet out, its Thorns goes (the Buffs bar's stays); outside an instance, its Clearcasting too")
+    pet, inside = false, true
+    -- Over a reload.
+    ns = Start(ForeverEnhancedCooldownManagerDB)
+    B = ns.Bars
+    Equal(tostring(B:HidesWithPet("buff2", "Thorns")) .. " " .. tostring(B:OnlyInInstances("buff2", "Clearcasting")) .. " " .. Shown("buff2"),
+        "true true Thorns,Clearcasting", "kept over a reload, both shown with no pet out in a dungeon")
+    -- Removed: they go with it (and Colour by time left, a spell's own too).
+    local coloured = tostring(B:SetTimeColours("buff2", "Thorns", { 10, 5, "green", "yellow", "red" }))
+        .. " " .. tostring(B:TimeColours("buff", "Thorns"))
+    B:RemoveBar("buff2")
+    local store = ns.ProfileLists()
+    Equal(tostring(store.hideWithPet.buff2) .. " " .. tostring(store.onlyInInstances.buff2) .. " | " .. coloured .. " "
+        .. tostring(store.timeColours), "nil nil | true nil nil", "Buffs 2 removed: both gone with it, and Thorns' colours by time left"
+        .. " there (the Buffs bar's Thorns never had them)")
+    _G.UnitExists, _G.IsInInstance = oldExists, oldInside
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- Count ticks on Cooldowns 2 (Squirt, 14 Nov 2026): a spell there whose
 -- debuff ticks counts them on its icon while it shows the debuff's time,
 -- in a count slot of that bar's own, with that bar's own tick count

@@ -376,11 +376,16 @@ local LAYOUT_DEFAULTS = { on = false, gap = ns.ROW_GAP[3], spacing = ns.ICON_GAP
 -- bar -> name -> true), each entry's own ticks (ns.SHARE_TICKS, each under
 -- its letter: k Count ticks, o Glow when missing, v Glow while active, h
 -- Others only, d Dim until Warn at, e the entry a joined icon shows while
--- none is up; bar -> name -> true), how big the buffs' glows while up
--- are (s: Glow size, a percent) and each entry's sound (y: bar -> name ->
--- sound key, Play a sound).
+-- none is up, u Hide with my pet, b Only in instances; bar -> name ->
+-- true), how big the buffs' glows while up
+-- are (s: Glow size, a percent), each entry's sound (y: bar -> name ->
+-- sound key, Play a sound) and the aura bars' entries coloured by time
+-- left (T, beside Warn at's t: "buff"/"debuff" -> name -> { first time,
+-- second time, first, middle and last colours }, as Core.lua keeps them;
+-- since the update after 1.10.19, so an older FECM leaves it out and says
+-- so).
 local KNOWN = { n = true, a = true, l = true, f = true, w = true, j = true, m = true, p = true, q = true, c = true, g = true,
-    i = true, t = true, x = true, z = true, r = true, s = true, y = true }
+    i = true, t = true, x = true, z = true, r = true, s = true, y = true, T = true }
 for _, tick in ipairs(ns.SHARE_TICKS) do KNOWN[tick.code] = true end
 local MAX_LOOKS = 200 -- entries with a look of their own
 
@@ -639,7 +644,7 @@ local function Clean(data)
         if not KNOWN[key] then Skip() end
     end
     local shared = { lists = {}, forms = {}, swap = {}, joins = {}, only = {}, pick = {}, style = {}, added = {}, looks = {}, warns = {},
-        sounds = {}, extras = {}, sizes = {}, traps = {}, options = {}, count = 0, picks = 0 }
+        times = {}, sounds = {}, extras = {}, sizes = {}, traps = {}, options = {}, count = 0, picks = 0 }
     -- Its extra bars (Extra bars, Core.lua): the keys this version knows,
     -- true each, four at most (Cooldowns 3 and the like too; a version from
     -- before them counts those as left out).
@@ -814,6 +819,22 @@ local function Clean(data)
             Skip()
         end
     end
+    -- The Buffs and Debuffs bars' entries coloured by time left, as Warn
+    -- at's: names on that bar's lists (a form's too), each one Core.lua can
+    -- keep (ns.TimeColoursValue). A string from before it has none.
+    if data.T ~= nil and type(data.T) ~= "table" then Skip() end
+    for key, set in pairs(Table(data.T)) do
+        if ns.AURA_BARS[key] and type(set) == "table" then
+            local onBar, kept = OnLists(shared.lists, shared.forms, key), {}
+            for name, colours in pairs(set) do
+                local value = onBar[name] and ns.TimeColoursValue(colours) or nil
+                if value then kept[name] = value else Skip() end
+            end
+            if next(kept) then shared.times[key] = kept end
+        else
+            Skip()
+        end
+    end
     -- The Buffs and Debuffs bars' entries that play a sound (Play a sound):
     -- a bar the string has, names on its lists (a form's too), never a
     -- weapon enchant (no aura's), each one of the pulse's sounds but None.
@@ -899,7 +920,7 @@ local function Clean(data)
 end
 
 -- A pasted string's profile: { name, lists, forms, swap, joins, only, pick,
--- style, added, looks, warns, sounds, extras, sizes, traps, options (each entry's
+-- style, added, looks, warns, times (Colour by time left), sounds, extras, sizes, traps, options (each entry's
 -- own ticks: field -> bar -> name -> true), glowSize (or nil), setup (or
 -- nil), count (entries on its bars), picks, skipped }; or nil
 -- and why not (nil only, for an empty box). The string is read from its
@@ -949,6 +970,11 @@ function P.Describe(shared)
         for _ in pairs(set) do warns = warns + 1 end
     end
     if warns > 0 then with[#with + 1] = ("low-time warnings for %d %s"):format(warns, warns == 1 and "aura" or "auras") end
+    local times = 0
+    for _, set in pairs(shared.times or {}) do
+        for _ in pairs(set) do times = times + 1 end
+    end
+    if times > 0 then with[#with + 1] = ("colours by time left for %d %s"):format(times, times == 1 and "aura" or "auras") end
     local extras, sizes = 0, 0
     for _ in pairs(shared.extras or {}) do extras = extras + 1 end
     for _, set in pairs(shared.sizes or {}) do
@@ -1183,6 +1209,17 @@ function P.Export()
         if next(set) then warns[key] = set end
     end
     if next(warns) then data.t = warns end
+    -- And their entries coloured by time left, the same way.
+    local times = {}
+    for key in pairs(ns.AURA_BARS) do
+        local onBar, set = OnLists(data.l, forms, key), {}
+        for name, colours in pairs(ns.TimeColours(key)) do
+            local value = onBar[name] and ns.TimeColoursValue(colours) or nil
+            if value then set[name] = value end
+        end
+        if next(set) then times[key] = set end
+    end
+    if next(times) then data.T = times end
     -- The aura bars' entries that play a sound (Play a sound), those on that
     -- bar's lists (a form's too), never a weapon enchant.
     local sounds = {}

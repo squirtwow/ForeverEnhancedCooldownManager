@@ -1005,67 +1005,158 @@ local function Segments(minutes, switch, noClock)
     return segments
 end
 
--- The rules for the game: each stretch as it's written, red below seconds
--- (a stretch reaching past it goes on from there as before).
-local function WarnRules(segments, seconds)
+-- The rules for the game: each stretch as it's written, in the colour of
+-- each band of time it reaches. bands: from no time left up, each { upto =
+-- the seconds it ends at, code = its colour's |c code, or nil for the
+-- countdown's own }, the last with no upto; a stretch reaching past a band
+-- goes on from there in the next. Warn at's: red below its seconds, then
+-- as before.
+local function BandRules(segments, bands)
     local rules = {}
-    local function Add(segment, threshold, red)
-        rules[#rules + 1] = { threshold = threshold, format = red and (RED .. segment.format .. "|r") or segment.format,
-            step = segment.step, rounding = segment.rounding, components = segment.components }
-    end
     for i, segment in ipairs(segments) do
-        local after = segments[i + 1] and segments[i + 1].from or math.huge
-        if segment.from < seconds then
-            Add(segment, segment.from, true)
-            if seconds < after then Add(segment, seconds, false) end
-        else
-            Add(segment, segment.from, false)
+        local from, after = segment.from, segments[i + 1] and segments[i + 1].from or math.huge
+        for _, band in ipairs(bands) do
+            if from >= after then break end
+            local upto = band.upto or math.huge
+            if upto > from then
+                rules[#rules + 1] = { threshold = from, format = band.code and (band.code .. segment.format .. "|r") or segment.format,
+                    step = segment.step, rounding = segment.rounding, components = segment.components }
+                from = upto
+            end
         end
     end
     return rules
 end
 
-local function WarnFormatter(minutes, seconds)
+-- A number rule formatter of the game's for bands of time (BandRules), in
+-- the Timer text picked: one kept in cache under name (with the format and
+-- the game's switch), false there where the game can't make it. A rule
+-- with two numbers turned down (the game's 1:31) is tried again in minutes;
+-- the first refusal is kept in S[err] for /ccm debug.
+local function BandFormatter(cache, minutes, name, bands, err)
     local switch = not minutes and GameSwitch() or nil
-    local key = (minutes and "minutes" or "game") .. "/" .. seconds .. "/" .. tostring(switch)
-    local made = warnFormatters[key]
+    local key = (minutes and "minutes" or "game") .. "/" .. name .. "/" .. tostring(switch)
+    local made = cache[key]
     if made ~= nil then return made or nil end
-    warnFormatters[key] = false
+    cache[key] = false
     local util, enum = C_StringUtil, Enum
     if type(util) ~= "table" or type(util.CreateNumericRuleFormatter) ~= "function" or type(enum) ~= "table"
         or type(enum.NumericRuleFormatRounding) ~= "table" then return nil end
     local function Make(noClock)
         return pcall(function()
             local formatter = util.CreateNumericRuleFormatter()
-            for _, rule in ipairs(WarnRules(Segments(minutes, switch, noClock), seconds)) do formatter:AddBreakpoint(rule) end
+            for _, rule in ipairs(BandRules(Segments(minutes, switch, noClock), bands)) do formatter:AddBreakpoint(rule) end
             return formatter
         end)
     end
     local ok, result = Make(false)
     if not ok and not minutes then
-        if not S.warnError then S.warnError = tostring(result) end
+        if not S[err] then S[err] = tostring(result) end
         ok, result = Make(true)
     end
     if ok and result then
-        warnFormatters[key] = result
-    elseif not S.warnError then
-        S.warnError = tostring(result)
+        cache[key] = result
+    elseif not S[err] then
+        S[err] = tostring(result)
     end
-    return warnFormatters[key] or nil
+    return cache[key] or nil
 end
 
--- Sets (seconds) or clears (nil) an aura icon's warning, then its numbers
--- in the Timer text picked. Only changes are sent. Out of combat only, as
--- the aura containers' icons change (Buffs.lua F:Warns).
-function S:WarnText(cooldown, seconds)
-    if not cooldown or warned[cooldown] == seconds then return end
-    warned[cooldown] = seconds
+local function WarnFormatter(minutes, seconds)
+    return BandFormatter(warnFormatters, minutes, tostring(seconds), { { upto = seconds, code = RED }, {} }, "warnError")
+end
+
+-- Colour by time left (a player's idea: a dot's countdown green above 10
+-- seconds, yellow from there, red under 5), set spell by spell in each
+-- spell's own box (Core.lua ns.TimeColours): that entry's countdown on the
+-- Buffs and Debuffs bars in three colours, split at two times left. Its
+-- time is secret in a fight, so the game picks the colour, as for Warn at:
+-- a number rule set of the game's as the cooldown's formatter, set out of
+-- combat (Buffs.lua F:Warns), that writes each stretch of time as the Timer
+-- text picked does, in the colour of its band. Nothing in Lua reads or
+-- compares the time. The entry's own Warn at wins (S:TimerText). One rule
+-- set for each text, times and colours, shared by every icon with them;
+-- past TIME_KEEP made, the ones no icon uses now are let go (a drag through
+-- the game's colour picker makes a few hundred).
+local coloured = setmetatable({}, { __mode = "k" }) -- coloured cooldowns: their colours as bands (TimeLook)
+local looks = setmetatable({}, { __mode = "k" }) -- a spell's colours as kept -> TimeLook's, so each is worked out once
+local timeFormatters, timeNames = {}, {} -- by text, colours' name and the game's switch; false where the game can't
+local timeCount = { kept = 0, made = 0, refused = 0 }
+local TIME_KEEP = 40
+
+-- A colour as the |c code that starts text in it.
+local function Code(colour)
+    local function Byte(share) return math.max(0, math.min(255, math.floor(share * 255 + .5))) end
+    return ("|cff%02x%02x%02x"):format(Byte(colour[1]), Byte(colour[2]), Byte(colour[3]))
+end
+
+-- A spell's Colour by time left as kept ({ first time, second time, first,
+-- middle and last colours }) as its three bands, from no time left up (the
+-- last colour under the second time, the middle colour up to the first,
+-- then the first colour), and a name for its rules: { name, bands }. Nil
+-- for times that aren't numbers (Core.lua keeps none).
+local function TimeLook(colours)
+    local look = looks[colours]
+    if look then return look end
+    if type(colours[1]) ~= "number" or type(colours[2]) ~= "number" then return nil end
+    local bands = { { upto = colours[2], code = Code(ns.TimeColour(colours[5])) },
+        { upto = colours[1], code = Code(ns.TimeColour(colours[4])) }, { code = Code(ns.TimeColour(colours[3])) } }
+    look = { name = colours[1] .. "/" .. colours[2] .. "/" .. bands[1].code .. bands[2].code .. bands[3].code, bands = bands }
+    looks[colours] = look
+    return look
+end
+
+local function TimeFormatter(minutes, look)
+    -- (Its key with the game's switch, as BandFormatter keeps it.)
+    local key = (minutes and "minutes" or "game") .. "/" .. look.name .. "/" .. tostring(not minutes and GameSwitch() or nil)
+    local kept = timeFormatters[key]
+    if kept ~= nil then return kept or nil end
+    if timeCount.kept >= TIME_KEEP then
+        local used = {}
+        for _, other in pairs(coloured) do used[other.name] = true end
+        timeCount.kept = 0
+        for other, name in pairs(timeNames) do
+            if used[name] then
+                timeCount.kept = timeCount.kept + 1
+            else
+                timeFormatters[other], timeNames[other] = nil, nil
+            end
+        end
+    end
+    local made = BandFormatter(timeFormatters, minutes, look.name, look.bands, "timeError")
+    timeNames[key], timeCount.kept = look.name, timeCount.kept + 1
+    if made then timeCount.made = timeCount.made + 1 else timeCount.refused = timeCount.refused + 1 end
+    return made
+end
+
+-- For /ccm debug: whether the game made Colour by time left's rules.
+function S:TimeReport()
+    return ("rules made %d, refused %d%s"):format(timeCount.made, timeCount.refused, S.timeError and ("; " .. S.timeError) or "")
+end
+
+-- Sets (seconds) or clears (nil) an aura icon's warning, and its Colour by
+-- time left (colours, as kept: Core.lua ns.TimeColours) or none, then its
+-- numbers in the Timer text picked. Only changes are sent. Out of combat
+-- only, as the aura containers' icons change (Buffs.lua F:Warns).
+function S:WarnText(cooldown, seconds, colours)
+    if not cooldown then return end
+    local look = type(colours) == "table" and TimeLook(colours) or nil
+    local was = coloured[cooldown]
+    if warned[cooldown] == seconds and (was and was.name) == (look and look.name) then return end
+    warned[cooldown], coloured[cooldown] = seconds, look
     self:TimerText(cooldown)
 end
 
 -- A cooldown's warning (seconds), or nil.
 function S:Warned(cooldown)
     return cooldown and warned[cooldown] or nil
+end
+
+-- For the tests: a cooldown's Colour by time left as its rules' name (its
+-- times, then its colours' codes), or nil.
+function S:Coloured(cooldown)
+    local look = cooldown and coloured[cooldown]
+    return look and look.name or nil
 end
 
 -- For /ccm debug: whether the game made the warnings' rules.
@@ -1079,13 +1170,16 @@ end
 
 -- One cooldown's numbers in the Timer text picked: the addon's own, or
 -- Blizzard's (a cosmetic setter, as its countdown's font is). A warned one
--- (Warn at) takes its own rules, in that Timer text, red from its seconds.
+-- (Warn at) takes its own rules, in that Timer text, red from its seconds;
+-- else one coloured by time left (a spell's own, S:WarnText) takes its
+-- three colours' rules.
 function S:TimerText(cooldown)
     if not cooldown then return end
     local minutes = ns.Get("countdownFormat") == "minutes"
-    local warn = warned[cooldown]
-    if not minutes and not warn and not timed[cooldown] then return end
-    local made = warn and WarnFormatter(minutes, warn) or nil
+    local warn, look = warned[cooldown], coloured[cooldown]
+    if not minutes and not warn and not look and not timed[cooldown] then return end
+    local made
+    if warn then made = WarnFormatter(minutes, warn) elseif look then made = TimeFormatter(minutes, look) end
     if not (minutes or made or timed[cooldown]) then return end
     -- Read before the first change, so it can be put back.
     local switch = GameSwitch()

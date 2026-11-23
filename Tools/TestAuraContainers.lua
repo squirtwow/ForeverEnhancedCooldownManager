@@ -5080,6 +5080,182 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- Colour by time left, spell by spell ------------------------------------------------------------------
+-- (A player's idea: a dot's countdown green above 10 seconds, yellow from
+-- there, red under 5; Squirt, 23 Nov 2026: set in each spell's own box.)
+-- The addon can't read an aura's time in a fight, so, as with Warn at, the
+-- game picks the colour from number rules set out of combat: a ticked
+-- entry's countdown on the Buffs and Debuffs bars (packed and fixed) in its
+-- own three colours split at its own two times, written as the Timer text
+-- picked. Never another entry's, the times over your cooldown icons, nor
+-- your cooldown icons' own. Off by default: nothing set. Nothing of an
+-- aura's is read. Entries with the same times and colours share one rule
+-- set; past forty rule sets, those no icon uses are let go. Its own Warn at
+-- wins. Changed in a fight: as it was until the fight ends. Unticked: the
+-- game's own numbers again; off its bar: forgotten.
+;(function()
+    local before = { _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    local NAMES = { ["59e659"] = "green", ffeb40 = "yellow", ff4033 = "red", ff4040 = "warn", b885ff = "purple", ["00ffff"] = "custom",
+        ffffff = "white", ff9426 = "orange" }
+    -- A cooldown's numbers: "unset" with nothing ever set, "none" once cleared, else each rule from its first second.
+    local function Numbers(cooldown)
+        local call = S[cooldown].last.SetCountdownFormatter
+        if not call then return "unset" end
+        if call[1] == nil then return "none" end
+        local out = {}
+        for _, rule in ipairs(call[1].rules) do
+            out[#out + 1] = rule.threshold .. "=" .. rule.format:gsub("|cff(%x%x%x%x%x%x)(.-)|r", function(hex, text)
+                return (NAMES[hex] or hex) .. "(" .. text .. ")"
+            end)
+        end
+        return table.concat(out, " ")
+    end
+    local ns, B, fixed, second, over, own
+    local MOONFIRE = { 10, 5, "green", "yellow", "red" }
+    local function Set()
+        B = ns.Bars
+        B:SetAura("buff", "Thorns", true)
+        B:SetAura("buff", "Clearcasting", true)
+        B:SetAura("debuff", "Moonfire", true)
+        B:SetAura("debuff", "Wrath", true)
+        B:Assign("Wrath", "cd")
+        B:SetOption("cd", "showAuras", true)
+        B:SetOption("debuff", "showMissing", true)
+        B:Changed()
+        fixed, second = B:Get("debuff").holders[1].slot, B:Get("debuff").holders[2].slot
+        over, own = B:Get("cd").auraAnchors[1].parts[1], B:Get("cd").icons[1].cooldown
+    end
+    -- The packed Buffs bar's icon for entry index (Thorns 1, Clearcasting 2).
+    local function Group(index)
+        for _, parts in ipairs(B:Get("buff").groupParts) do
+            if parts.index == index then return parts end
+        end
+    end
+    -- Thorns and Clearcasting (packed), Moonfire and Wrath (fixed), then the time over your Wrath icon and its own countdown.
+    local function All()
+        return Numbers(Group(1).cooldown) .. " | " .. Numbers(Group(2).cooldown) .. " | " .. Numbers(fixed.cooldown) .. " | "
+            .. Numbers(second.cooldown) .. " || " .. Numbers(over.cooldown) .. " " .. Numbers(own)
+    end
+
+    -- An older game without number rules: ticked, every countdown as it was, no errors.
+    Fresh()
+    ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    Set()
+    local took = B:SetTimeColours("debuff", "Moonfire", MOONFIRE)
+    Equal(tostring(took) .. " " .. All() .. " | " .. #printed, "true unset | unset | unset | unset || unset unset | 0",
+        "no number rules in the game: kept, every countdown as it was, no errors")
+
+    Fresh()
+    local makes = 0
+    _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+        makes = makes + 1
+        return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end,
+            ClearBreakpoints = function(self) self.rules = {} end }
+    end }
+    _G.Enum.NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 }
+    _G.Enum.DurationTextBindingProperty = { RemainingDuration = 0, ElapsedDuration = 2, TotalDuration = 4 }
+    ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    Set()
+    Equal(All() .. " | " .. tostring(ns.ProfileLists().timeColours) .. " " .. tostring(B:TimeColours("debuff", "Moonfire")),
+        "unset | unset | unset | unset || unset unset | nil nil", "off by default: no countdown touched, nothing kept")
+
+    -- Ticked for Moonfire alone: its countdown red under 5, yellow under 10, green above, as the game writes it; no other.
+    local reads = AuraReads
+    B:SetTimeColours("debuff", "Moonfire", MOONFIRE)
+    local BANDS = "0=red(%d) 5=yellow(%d) 10=green(%d) 60=green(%dm) 3600=green(%dh)"
+    Equal(All() .. " | " .. (AuraReads - reads), "unset | unset | " .. BANDS .. " | unset || unset unset | 0",
+        "Moonfire's icon in its three colours; the other entries, the time over your cooldown icon and its own countdown left alone;"
+        .. " nothing read")
+    Equal(ns.DebugReport():match("Colour by time left: [^\n]*"), "Colour by time left: 1 spell (debuff: Moonfire 10/5s green yellow red)"
+        .. " | rules made 1, refused 0", "/ccm debug: the spell with it, and one rule set made")
+    -- Wrath with the same times and colours: the same rule set, none made.
+    B:SetTimeColours("debuff", "Wrath", { 10, 5, "green", "yellow", "red" })
+    local shared = rawequal(S[fixed.cooldown].last.SetCountdownFormatter[1], S[second.cooldown].last.SetCountdownFormatter[1])
+    -- Thorns (packed) with its own: 12 and 3 seconds, white, orange and purple.
+    B:SetTimeColours("buff", "Thorns", { 12, 3, "white", "orange", "purple" })
+    local THORNS = "0=purple(%d) 3=orange(%d) 12=white(%d) 60=white(%dm) 3600=white(%dh)"
+    -- (How many rule sets the game made for it so far, as /ccm debug says.)
+    local function Made() return tonumber(ns.DebugReport():match("Colour by time left:[^\n]*rules made (%d+)")) end
+    Equal(tostring(shared) .. " " .. Made() .. " | " .. All(), "true 2 | " .. THORNS .. " | unset | " .. BANDS .. " | " .. BANDS
+        .. " || unset unset", "Wrath shares Moonfire's rule set (two made in all); Thorns packed in its own colours, Clearcasting left alone")
+
+    -- Warn at on Moonfire: its own red wins on its icon; the rest keep their colours. Off again: the colours back.
+    B:SetWarnAt("debuff", "Moonfire", 3)
+    local warned = All()
+    B:SetWarnAt("debuff", "Moonfire", 0)
+    Equal(warned .. " ## " .. Numbers(fixed.cooldown), THORNS .. " | unset | 0=warn(%d) 3=%d 60=%dm 3600=%dh | " .. BANDS
+        .. " || unset unset ## " .. BANDS, "Warn at 3 on Moonfire: its icon red under 3 and plain above, as Warn at's; Warn at off: in"
+        .. " its colours again")
+
+    -- Changed in a fight: the containers' icons as they were until it ends.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetTimeColours("debuff", "Moonfire", { 8, 5, "green", "yellow", "purple" })
+    local fight = Numbers(fixed.cooldown)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    local NEW = "0=purple(%d) 5=yellow(%d) 8=green(%d) 60=green(%dm) 3600=green(%dh)"
+    Equal(fight .. " ## " .. Numbers(fixed.cooldown) .. " | " .. Numbers(second.cooldown), BANDS .. " ## " .. NEW .. " | " .. BANDS,
+        "changed in a fight: as it was until it ends, then 8 seconds and purple; Wrath's as it was")
+
+    -- Timer text's minutes: the same colours in 59s, then 1m.
+    ns.Set("countdownFormat", "minutes")
+    ns.Style:ApplyDetails()
+    Equal(Numbers(fixed.cooldown), "0=purple(%ds) 5=yellow(%ds) 8=green(%ds) 59=green(%dm) 3540=green(%dh)", "with Timer text's minutes")
+    ns.Set("countdownFormat", "game")
+    ns.Style:ApplyDetails()
+    -- A colour of your own (Custom, kept as "#rrggbb").
+    B:SetTimeColours("debuff", "Moonfire", { 8, 5, "#00ffff", "yellow", "purple" })
+    Equal(Numbers(fixed.cooldown), "0=purple(%d) 5=yellow(%d) 8=custom(%d) 60=custom(%dm) 3600=custom(%dh)", "Custom's own colour")
+
+    -- Only what can be kept: the second time under the first, whole seconds 1 to 60, its own colours, on its bar.
+    local refused = {}
+    for _, colours in ipairs({ { 5, 5, "green", "yellow", "red" }, { 5, 10, "green", "yellow", "red" }, { 61, 5, "green", "yellow", "red" },
+        { 10, 0, "green", "yellow", "red" }, { 10, 4.5, "green", "yellow", "red" }, { 10, 5, "gold", "yellow", "red" },
+        { 10, 5, "green", "#12345g", "red" }, { 10, 5, "green", "yellow" }, { 10, 5, "green", "yellow", "red", "white" }, "red" }) do
+        refused[#refused + 1] = tostring(B:SetTimeColours("debuff", "Moonfire", colours))
+    end
+    refused[#refused + 1] = tostring(B:SetTimeColours("cd", "Wrath", MOONFIRE))
+    refused[#refused + 1] = tostring(B:SetTimeColours("debuff", "Rejuvenation", MOONFIRE))
+    Equal(table.concat(refused, " ") .. " | " .. Numbers(fixed.cooldown), "false false false false false false false false false false false false"
+        .. " | 0=purple(%d) 5=yellow(%d) 8=custom(%d) 60=custom(%dm) 3600=custom(%dh)", "the same times, the second over the first,"
+        .. " past 60, 0, half a second, not one of its colours, a broken Custom, four or six of them, not a table, the Cooldowns bar,"
+        .. " an entry not on the bar: turned away, Moonfire's kept")
+
+    -- Many changes (a drag through the game's colour picker): past forty rule
+    -- sets, those no icon uses are let go; Wrath's, still in use, stays.
+    -- (Straight on a cooldown of the addon's own, as the box's preview is.)
+    local wrath = S[second.cooldown].last.SetCountdownFormatter[1]
+    local probe = CreateFrame("Cooldown", nil, UIParent, "CooldownFrameTemplate")
+    for high = 6, 55 do ns.Style:WarnText(probe, nil, { high, 5, "green", "yellow", "red" }) end
+    B:Changed()
+    local kept = rawequal(S[second.cooldown].last.SetCountdownFormatter[1], wrath)
+    local before6 = Made()
+    ns.Style:WarnText(probe, nil, { 54, 5, "green", "yellow", "red" })
+    local last = Made() - before6
+    ns.Style:WarnText(probe, nil, { 6, 5, "green", "yellow", "red" })
+    Equal(tostring(kept) .. " " .. last .. " " .. (Made() - before6) .. " " .. Numbers(probe), "true 0 1 0=red(%d) 5=yellow(%d)"
+        .. " 6=green(%d) 60=green(%dm) 3600=green(%dh)", "Wrath's rule set kept while in use; a recent one kept; an early one let go,"
+        .. " made again when it's back")
+
+    -- Only when missing on Thorns: no icon while it's up, so no colours (kept for when it's unticked).
+    B:SetOnlyWhenMissing("buff", "Thorns", true)
+    local only = tostring(B:Get("buff").times[1]) .. " " .. tostring(B:TimeColours("buff", "Thorns") ~= nil)
+    B:SetOnlyWhenMissing("buff", "Thorns", false)
+    Equal(only .. " | " .. Numbers(Group(1).cooldown), "nil true | " .. THORNS, "Only when missing: none on its icon, kept; unticked: back")
+
+    -- Unticked: the game's own numbers again; off its bar: forgotten.
+    B:SetTimeColours("debuff", "Moonfire", nil)
+    B:SetTimeColours("debuff", "Wrath", nil)
+    B:SetAura("buff", "Thorns", false)
+    Equal(Numbers(fixed.cooldown) .. " | " .. Numbers(second.cooldown) .. " | " .. tostring(B:TimeColours("buff", "Thorns")) .. " "
+        .. tostring(ns.ProfileLists().timeColours) .. " | " .. Numbers(over.cooldown) .. " " .. Numbers(own),
+        "none | none | nil nil | none none", "unticked: plain again; Thorns off its bar: forgotten, none kept; your cooldown icon's"
+        .. " never coloured (the game's own again after Timer text's minutes)")
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = before[1], before[2], before[3]
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- Dim until Warn at: an icon dark until its end is near ---------------------------------------------
 -- (A player's idea: Moonfire's icon ticking down for all 12 seconds when
 -- only its end matters.) Ticked entry by entry, off by default. With a Warn

@@ -10,6 +10,19 @@ local T = ns.Theme
 -- Notes waiting for their version number are "Unreleased".
 ns.NOTES = {
     {
+        version = "1.10.20",
+        sections = {
+            { "Added", {
+                "Colour by time left: a spell's countdown turns green, yellow then red as it runs out (click its icon).",
+                "Lit in any stance: Overpower lights up after a dodge in every stance.",
+                "Always show: the swing timer stays up, empty, between swings.",
+                "Switch with my talents: each talent tree can switch to one of your own profiles, not just its role's.",
+                "Single buffs can hide while your pet is out, or show only in instances (click a buff's icon).",
+                "Warn at 1s, for a countdown that turns red only for its last second.",
+            } },
+        },
+    },
+    {
         version = "1.10.19",
         sections = {
             { "Added", {

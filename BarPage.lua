@@ -151,7 +151,8 @@ end
 -- own ticks from the spell list, so they're there without scrolling to its
 -- row. Like the Look page's panels its shade leaves the footer clear, so
 -- each control still says what it does there. Made the first time it opens.
-local PANEL = { width = 470, at = 96, row = 26, own = 84, tray = { 42, 64 }, soundAt = 150, sound = 160 }
+local PANEL = { width = 470, at = 96, row = 26, own = 84, tray = { 42, 64 }, soundAt = 150, sound = 160, away = { 168, 316 },
+    squeeze = 6 }
 local PANEL_TIME = 75 -- the preview's cooldown, round and round: past a minute, then seconds
 local PANEL_NOTE = "On every bar it's on, and on Blizzard's icon for it while the look is on the Cooldown Manager."
 local PANEL_AURAS = " The Buffs and Debuffs bars change once you're out of combat."
@@ -182,7 +183,8 @@ end
 -- The preview in the spell's look, at its size on its bar (its own, where
 -- its bar can show one; within the tray), drawn by the calls your bars'
 -- icons use. As tall as its bar's Icon height makes it (within the tray
--- too), its art cropped to fit and its numbers by the shorter side.
+-- too), its art cropped to fit and its numbers by the shorter side, in the
+-- colours its countdown takes there (Warn at, Colour by time left).
 local function PaintPanelIcon(icon, bar, name)
     local S = ns.Style
     local data = ns.BarData(bar)
@@ -195,6 +197,11 @@ local function PaintPanelIcon(icon, bar, name)
     icon.art:SetTexture(ns.Spells:Icon(name))
     icon.art:SetDesaturated(ns.Spells:Find(name) == nil)
     local cooldown = icon.cooldown
+    -- On the Buffs and Debuffs pages its Warn at and Colour by time left
+    -- too, where its icon would show them.
+    local B = ns.Bars
+    local usable = B:WarnUsable(bar, name)
+    S:WarnText(cooldown, usable and B:WarnAt(bar, name) or nil, usable and B:TimeColours(bar, name) or nil)
     S:CooldownLook(cooldown)
     cooldown:SetCountdownFont(S:Countdown(math.min(size, high), ns.SpellLook(name)))
     local get = cooldown.GetCountdownFontString
@@ -337,7 +344,34 @@ local function PanelTicks(window, dialog, shade, Changed)
         Changed()
     end)
     window:Hint(trap, "Traps share one cooldown, so this icon shows whichever trap you laid last.")
-    return glow, only, ticks, active, reagents, others, trap
+    -- Lit in any stance: Overpower's alone, on Cooldowns or Utility (a
+    -- player's idea, 23 Nov 2026). One choice for every Overpower icon.
+    local stance = T:Check(dialog, "Lit in any stance", function(self)
+        B:SetAnyStance(self:GetChecked())
+        Changed()
+    end)
+    window:Hint(stance, "Overpower lights up after your target dodges in Berserker or Defensive Stance too,"
+        .. " so you can switch to Battle Stance and use it.")
+    return glow, only, ticks, active, reagents, others, trap, stance
+end
+
+-- Hide with my pet and Only in instances (a player's idea: for single buffs,
+-- not the whole bar), in a buff's own panel on a Buffs page, side by side
+-- beside Only when missing in its row. Off unless ticked.
+local AWAY_AFTER = " If you're in a fight, it changes once the fight ends."
+local function PanelAway(window, dialog, shade, Changed)
+    local B = ns.Bars
+    local pet = T:Check(dialog, "Hide with my pet", function(self)
+        B:SetHideWithPet(shade.bar, shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(pet, "Hides this buff while your pet or demon is out." .. AWAY_AFTER)
+    local inside = T:Check(dialog, "Only in instances", function(self)
+        B:SetOnlyInInstances(shade.bar, shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(inside, "Shows this buff only in dungeons, raids and battlegrounds, and hides it everywhere else." .. AWAY_AFTER)
+    return pet, inside
 end
 
 -- A Cooldowns or Utility bar's tick count (Count ticks on a spell's icon,
@@ -476,7 +510,7 @@ end
 
 -- Warn at N seconds left (a player's idea: Siphon Life with 3 seconds left,
 -- Demon Armor with 10 minutes left), on the Buffs and Debuffs pages: Off,
--- then each time offered, as pills (3s .. 10m).
+-- then each time offered, as pills (1s .. 10m).
 local function WarnLength(seconds)
     if seconds >= 60 then
         local minutes = math.floor(seconds / 60)
@@ -556,6 +590,153 @@ local function PanelDim(window, dialog, shade, Changed)
     return dim
 end
 
+-- Colour by time left (a player's idea: a dot's countdown green, then
+-- yellow, then red as it runs out; set in each spell's own box, not Icon
+-- details: Squirt's ask, 23 Nov 2026), wherever Warn at is: its tick on Glow
+-- when missing's row, right of it, and while it's ticked one row under it:
+-- the first colour, the first time, the middle colour, the second time and
+-- the last colour, left to right as a countdown runs down. Ticked, it starts
+-- at 10 and 5 seconds, green, yellow and red (ns.TIME_DEFAULT). Each time
+-- stops a second short of the other and never moves it (Squirt's test of
+-- the Look page's first version, 23 Nov 2026). Kept for this entry on this
+-- bar alone (Bars.lua B:SetTimeColours).
+local TIME = { swatch = 20, arrow = 12, slider = 104, gap = 6 }
+
+local function TimeNote(bar, name)
+    if not ns.Bars:WarnUsable(bar, name) then
+        if ns.BarData(bar).onlyMissing then
+            return "Not with Only show missing: a buff has no icon while it's on you, so no countdown to colour."
+        end
+        return "Not for a buff shown Only when missing: it has no icon while it's on you, so no countdown to colour."
+    end
+    if not ns.BarData(bar).showTimer then return "Show countdown numbers is off on this bar, so no countdown to colour." end
+    return "Its countdown changes colour as it runs out, at the two times you pick under this. With a Warn at time, Warn at's"
+        .. " red wins."
+end
+
+-- The tick and its row: row.tick, row.parts (the five, left to right);
+-- row:Refresh() shows them as kept, row:Place(line) puts the tick on that
+-- row and, while it's ticked, the colours and times on the next (1 back
+-- when they took a row, else 0); row:SetShown(on) shows or hides it all.
+-- With the bar's countdown numbers off there's nothing to colour: the tick
+-- is greyed (usable while ticked, to untick it) and the row stays shut, so
+-- the box is no taller.
+local function PanelTime(window, dialog, shade, Changed)
+    local B = ns.Bars
+    local row = {}
+    local function Now() return B:TimeColours(shade.bar, shade.name) or ns.TIME_DEFAULT end
+    local function Numbers() return ns.BarData(shade.bar).showTimer and true or false end
+    local function Usable() return B:WarnUsable(shade.bar, shade.name) and Numbers() end
+    local function Note() return TimeNote(shade.bar, shade.name) end
+    -- One of its five changed (at), the rest as kept.
+    local function Set(at, value)
+        local colours = {}
+        for i, kept in ipairs(Now()) do colours[i] = kept end
+        colours[at] = value
+        B:SetTimeColours(shade.bar, shade.name, colours)
+        Changed()
+    end
+    row.tick = T:Check(dialog, "Colour by time left", function(self)
+        B:SetTimeColours(shade.bar, shade.name, self:GetChecked() and ns.TIME_DEFAULT or nil)
+        Changed()
+    end)
+    window:Hint(row.tick, Note)
+    -- A colour's swatch, opening the colours (Custom first, kept as "#rrggbb").
+    local function Colour(at, about, note)
+        local choice = ns.ColourChoice(window, dialog, TIME.swatch, {
+            keys = ns.TIME_COLOUR_KEYS,
+            colourOf = ns.TimeColour,
+            chosen = function()
+                local key = Now()[at]
+                return ns.TIME_COLOURS[key] and key or ns.CUSTOM
+            end,
+            shown = function() return ns.TimeColour(Now()[at]) end,
+            pick = function(key) Set(at, key) end,
+            note = function(key) return ns.TIME_COLOUR_NAMES[key] .. note end,
+            about = function() return Usable() and about or Note() end,
+            custom = function()
+                local key = Now()[at]
+                return ns.TIME_COLOURS[key] and "" or tostring(key):sub(2)
+            end,
+            setCustom = function(hex) Set(at, "#" .. hex) end,
+            restore = function(key, hex)
+                if key == ns.CUSTOM then key = ns.Hex(hex) and ("#" .. ns.Hex(hex)) or ns.TIME_DEFAULT[at] end
+                Set(at, key)
+            end,
+        })
+        choice:SetMotionScriptsWhileDisabled(true)
+        return choice
+    end
+    -- A time's slider, in whole seconds ("10s"): the first stops a second
+    -- over the second, the second a second under the first.
+    local function Step(at, about)
+        local slider = T:Slider(dialog, "", ns.TIME_STEP, 1, TIME.slider, function(value)
+            local now = Now()
+            if at == 1 and value <= now[2] then value = math.min(ns.TIME_STEP[2], now[2] + 1) end
+            if at == 2 and value >= now[1] then value = math.max(ns.TIME_STEP[1], now[1] - 1) end
+            Set(at, value)
+        end, 0)
+        slider.value:SetWidth(30)
+        local set = slider.Set
+        function slider:Set(value)
+            set(self, value)
+            self.value:SetText(value .. "s")
+        end
+        window:Hint(slider, function() return Usable() and about(Now()) or Note() end)
+        return slider
+    end
+    row.parts = {
+        Colour(3, "This spell's countdown colour above the first time. Click for the colours.", " above the first time."),
+        Step(1, function(now)
+            return ("The first time: under %ds left this spell's countdown turns from the first colour to the middle one."):format(now[1])
+        end),
+        Colour(4, "This spell's countdown colour from the first time down to the second. Click for the colours.",
+            " from the first time down to the second."),
+        Step(2, function(now)
+            return ("The second time: under %ds left this spell's countdown takes the last colour, to the end."):format(now[2])
+        end),
+        Colour(5, "This spell's countdown colour under the second time, to the end. Click for the colours.",
+            " under the second time, to the end."),
+    }
+    -- (Its row open: ticked, with the bar's countdown numbers on.)
+    local function Open() return row.tick:GetChecked() and Numbers() end
+    function row:SetShown(on)
+        self.tick:SetShown(on)
+        for _, part in ipairs(self.parts) do part:SetShown(on and Open()) end
+    end
+    function row:Refresh()
+        local kept = B:TimeColours(shade.bar, shade.name)
+        local usable = Usable()
+        self.tick:SetChecked(kept ~= nil)
+        -- (Greyed where it can't show, unless ticked, so it can be unticked.)
+        self.tick:SetUsable(usable or kept ~= nil)
+        local now = Now()
+        self.parts[2]:Set(now[1])
+        self.parts[4]:Set(now[2])
+        for i, part in ipairs(self.parts) do
+            if i % 2 == 0 then
+                part:SetUsable(usable)
+            else
+                part:Paint()
+                part:SetEnabled(usable)
+                part:SetAlpha(usable and 1 or .35)
+            end
+        end
+    end
+    function row:Place(At, line)
+        At(self.tick, PANEL.away[1], line, 2)
+        local open = Open()
+        local x = PANEL.at
+        for i, part in ipairs(self.parts) do
+            part:SetShown(open)
+            if open then At(part, x, line + 1) end
+            x = x + (i % 2 == 1 and TIME.swatch + TIME.arrow or TIME.slider) + TIME.gap
+        end
+        return open and 1 or 0
+    end
+    return row
+end
+
 -- Which of its own ticks the entry has on its bar: Glow when missing on the
 -- Buffs and Debuffs bars, Only when missing and Glow while active on Buffs,
 -- Count ticks on Debuffs for one that ticks, Play a sound on both for one
@@ -563,7 +744,8 @@ end
 -- count for a spell that uses one, and Show the trap I last laid for a
 -- trap, on Cooldowns and Utility. Each shown and set as its row in the list
 -- is (Glow while active, Play a sound and the Cooldowns and Utility bars'
--- own have no row there).
+-- own have no row there). Hide with my pet and Only in instances are set
+-- here too, and shown with Only when missing (shade:Refresh).
 local function PaintTicks(shade, bar, name)
     local B = ns.Bars
     local aura, kind = ns.AURA_BARS[bar] ~= nil, ns.BAR_KIND[bar] -- (an extra bar goes by its kind)
@@ -572,6 +754,8 @@ local function PaintTicks(shade, bar, name)
     shade.glow:SetUsable(B:MissingSpot(bar, name))
     shade.only:SetChecked(B:OnlyWhenMissing(bar, name))
     shade.only:SetUsable(not ns.BarData(bar).onlyMissing)
+    shade.pet:SetChecked(B:HidesWithPet(bar, name))
+    shade.inside:SetChecked(B:OnlyInInstances(bar, name))
     -- Count ticks greyed while its icon can't count (its hover says why),
     -- unless it's ticked, so it can be unticked: on the Debuffs bar shared
     -- with another that's in the way, on a Cooldowns or Utility bar while
@@ -585,6 +769,7 @@ local function PaintTicks(shade, bar, name)
     shade.reagents:SetChecked(B:ShowsReagents(name))
     shade.others:SetChecked(B:HandOthers(bar, name))
     shade.trap:SetChecked(B:ShowsLastTrap(bar, name))
+    shade.stance:SetChecked(B:LitInAnyStance())
     -- Play a sound, and its sound beside it (Chime until one's picked).
     local sound = B:AuraSound(bar, name)
     shade.sound:SetChecked(sound ~= nil)
@@ -596,7 +781,8 @@ local function PaintTicks(shade, bar, name)
     return { aura and shade.glow or nil, kind == "buff" and shade.only or nil,
         ticks and shade.ticks or nil, aura and shade.active or nil,
         B:UsesReagent(bar, name) and shade.reagents or nil, kind == "buff" and entry and entry.hand and shade.others or nil,
-        not aura and ns.Spells:Trap(name) and shade.trap or nil, aura and B:SoundUsable(bar, name) and shade.sound or nil }
+        not aura and ns.Spells:Trap(name) and shade.trap or nil, aura and B:SoundUsable(bar, name) and shade.sound or nil,
+        not aura and spell and (entry.baseName or entry.name) == "Overpower" and shade.stance or nil }
 end
 
 local function SpellPanel(window)
@@ -652,12 +838,15 @@ local function SpellPanel(window)
     shade.ownIcon, shade.iconSize = PanelIconSize(window, dialog, shade, Changed)
     At(shade.ownIcon, PANEL.at, 2, 2)
     At(shade.iconSize, PANEL.at + PANEL.own, 2)
-    shade.glow, shade.only, shade.ticks, shade.active, shade.reagents, shade.others, shade.trap = PanelTicks(window, dialog, shade, Changed)
+    shade.glow, shade.only, shade.ticks, shade.active, shade.reagents, shade.others, shade.trap, shade.stance =
+        PanelTicks(window, dialog, shade, Changed)
+    shade.pet, shade.inside = PanelAway(window, dialog, shade, Changed)
     shade.sound, shade.soundPick = PanelSound(window, dialog, shade, Changed)
     shade.tickLook = PanelTickLook(window, dialog, shade, Changed)
     shade.glowSizeLabel, shade.glowSize, shade.glowSizeUsable = PanelGlowSize(window, dialog, shade, Changed)
     shade.warnLabel, shade.warn = PanelWarn(window, dialog, shade)
     shade.dim = PanelDim(window, dialog, shade, Changed)
+    shade.time = PanelTime(window, dialog, shade, Changed)
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
     note:SetWidth(PANEL.width - 32)
     shade.note = note
@@ -706,6 +895,12 @@ local function SpellPanel(window)
         self.warnLabel:SetShown(aura)
         self.warn:SetShown(aura)
         self.dim:SetShown(aura)
+        -- Colour by time left wherever Warn at is: its tick on Glow when
+        -- missing's row (on Dim until Warn at's while that one isn't
+        -- shown), and its colours and times right under it while ticked.
+        local time = self.time
+        if aura then time:Refresh() end
+        time:SetShown(aura)
         if aura then
             At(self.warnLabel, 16, rows, 4)
             At(self.warn, PANEL.at, rows)
@@ -716,14 +911,28 @@ local function SpellPanel(window)
             self.dim:SetChecked(B:DimsUntilWarn(bar, name))
             self.dim:SetUsable(B:DimUsable(bar, name))
             rows = rows + 1
+            if shown[1] ~= self.glow then rows = rows + time:Place(At, rows - 1) end
         end
-        for _, tick in ipairs({ self.glow, self.only, self.active, self.sound, self.ticks, self.reagents, self.others, self.trap }) do
+        for _, tick in ipairs({ self.glow, self.only, self.active, self.sound, self.ticks, self.reagents, self.others, self.trap,
+            self.stance }) do
             local on = tick == shown[1] or tick == shown[2] or tick == shown[3] or tick == shown[4] or tick == shown[5]
-                or tick == shown[6] or tick == shown[7] or tick == shown[8]
+                or tick == shown[6] or tick == shown[7] or tick == shown[8] or tick == shown[9]
             tick:SetShown(on)
             if on then
                 At(tick, 16, rows, 2)
                 rows = rows + 1
+            end
+            if tick == self.glow and on and aura then rows = rows + time:Place(At, rows - 1) end
+            -- Hide with my pet and Only in instances beside Only when missing
+            -- in its row, shown with it (a Buffs bar's): no row of their own,
+            -- so the Buffs page's tallest panel still fits the window.
+            if tick == self.only then
+                self.pet:SetShown(on)
+                self.inside:SetShown(on)
+                if on then
+                    At(self.pet, PANEL.away[1], rows - 1, 2)
+                    At(self.inside, PANEL.away[2], rows - 1, 2)
+                end
             end
             -- Glow size in the row under Glow while active, shown with it.
             if tick == self.active then
@@ -771,7 +980,13 @@ local function SpellPanel(window)
         local changed = look.font ~= nil or look.size ~= nil or ownSize ~= nil
         defaults:SetEnabled(changed)
         defaults:SetAlpha(changed and 1 or .45)
-        dialog:SetHeight(math.ceil(-top + rows * PANEL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14))
+        -- As tall as its rows need. The fullest box with Colour by time
+        -- left's row open is a touch taller than the window has room for:
+        -- it gives up a few pixels under its note (PANEL.squeeze at most)
+        -- to stay clear of the title bar and the footer.
+        local tall = math.ceil(-top + rows * PANEL.row + 4 + math.max(24, note:GetStringHeight() or 0) + 10 + 22 + 14)
+        local room = math.floor((window:GetHeight() or 0) - (ns.WINDOW_HEADER or 42) - (ns.WINDOW_FOOTER or 28))
+        dialog:SetHeight(room > 0 and math.max(tall - PANEL.squeeze, math.min(tall, room)) or tall)
         PaintPanelIcon(self.preview, bar, name)
     end
     -- Open for an entry on a bar: the preview's cooldown starts part way round.

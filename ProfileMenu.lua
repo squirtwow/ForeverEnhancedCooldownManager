@@ -4,7 +4,8 @@
 -- or Rename, and Share, Import and Find presets at its top (ProfileShare.lua,
 -- Window.lua's Presets page). At its foot,
 -- Roles: Tank, Healer and Damage, a profile for each, and Switch with my
--- talents with each talent tree's role (or None) under it. Profiles hold the spell
+-- talents with each talent tree's role (or None, or one of your profiles)
+-- under it. Profiles hold the spell
 -- lists only (the bars', and the Cooldown pulse's ticks); the rules live in
 -- Core.lua.
 local _, ns = ...
@@ -17,11 +18,15 @@ local LIST_ROWS = 7 -- profiles listed at once; more scroll (7 since Positions p
 -- (Tools/TestHelp.lua measures it).
 local MENU_MAX = 496
 local LIST_WIDTH = WIDTH - 28 -- the list, clear of its scroll thumb
--- A talent tree's Tank, Healer, Damage and None, at the right: each as wide
--- as its word needs (together the choice less its 2 edges), so the tree's
--- name and points keep their room.
+-- A talent tree's pick, at the right: a box naming what it switches to,
+-- whose list holds Tank, Healer, Damage and None, then your profiles, so the
+-- tree's name and points keep their room.
 local TREE_CHOICE = 156
-local TREE_WIDTHS = { tank = 32, healer = 45, damage = 45, none = 32 }
+local PICK_WIDTH = 220 -- the list, wider than its box for profile names
+local PICK_ROW, PICK_PAD = 18, 4
+local PICK_HEAD = 18 -- "Your profiles", between the roles and the profiles
+local PICK_PROFILES = 8 -- profiles the list shows at once; more scroll
+local PICK_LIST = PICK_WIDTH - 2 * PICK_PAD - 8 -- the profiles, clear of their scroll thumb
 local TICK_ROW = 24 -- the Switch with my talents tick's own row, under the role buttons
 local PLACES_ROW = 22 -- the Positions per profile tick's own row, under Use on all characters
 
@@ -314,36 +319,188 @@ function ns.BuildProfileMenu(window, header, anchor)
     window.roleHeading, window.roleButtons = roleHeading, roleButtons
 
     -- Switch with my talents, on its own row under the role buttons, and
-    -- while it's ticked each talent tree under it with its points and its
-    -- role, or None (it never switches); under them what the talents last did.
+    -- while it's ticked each talent tree under it with its points and what
+    -- it switches to: a role's profile, None (it never switches) or one of
+    -- your profiles (a player's idea: two damage trees, each with its own);
+    -- under them what the talents last did.
     local talents = T:Check(panel, "Switch with my talents", function(self)
         window:Say(ns.SetTalentSwitch(self:GetChecked()))
         window:Refresh()
     end)
     talents:SetPoint("TOPLEFT", 10, -236)
-    window:Hint(talents, "When another talent tree takes the lead in points, switch to its role's profile, after any fight.")
-    local roleItems = {}
-    for _, role in ipairs(ns.TREE_ROLE_KEYS) do
-        roleItems[#roleItems + 1] = { key = role, label = ns.TREE_ROLE_NAMES[role], width = TREE_WIDTHS[role] }
+    window:Hint(talents, "When another talent tree takes the lead in points, switch to its role's profile, or the one you picked"
+        .. " for it, after any fight.")
+
+    -- A row in a tree's list: its word, filled in the accent while chosen.
+    local function PickRow(parent, width, onClick)
+        local pick = CreateFrame("Button", nil, parent)
+        pick:SetSize(width, PICK_ROW)
+        pick.fill = pick:CreateTexture(nil, "BACKGROUND")
+        pick.fill:SetAllPoints()
+        pick.fill:Hide()
+        local shine = pick:CreateTexture(nil, "HIGHLIGHT")
+        shine:SetAllPoints()
+        shine:SetColorTexture(1, 1, 1, .08)
+        pick.label = T:Text(pick, "GameFontHighlightSmall")
+        pick.label:SetPoint("LEFT", 8, 0)
+        pick.label:SetPoint("RIGHT", -8, 0)
+        pick.label:SetJustifyH("LEFT")
+        pick.label:SetWordWrap(false)
+        pick:SetScript("OnClick", onClick)
+        return pick
     end
+    local function Paint(pick, chosen)
+        local accent, on = T:Accent(), T:OnAccent()
+        pick.fill:SetShown(chosen)
+        T:Fill(pick.fill, accent)
+        local c = chosen and on or T.TEXT
+        pick.label:SetTextColor(c[1], c[2], c[3])
+    end
+
+    -- A tree's pick: a box naming what it switches to, and under it (or over
+    -- it, near the window's foot) its list, one at a time with the window's
+    -- other pop-ups: the four roles, then your profiles, which scroll past
+    -- PICK_PROFILES. A role lets go of the profile; a profile keeps the role
+    -- under it, for if that profile is deleted.
+    local function TreeChoice(row)
+        local box = CreateFrame("Button", nil, panel, "BackdropTemplate")
+        box:SetSize(TREE_CHOICE, 20)
+        box:SetPoint("TOPRIGHT", -10, -260) -- placed again on refresh
+        T:Flat(box, T.FIELD, T.CONTROL_BORDER)
+        box.label = T:Text(box, "GameFontHighlightSmall")
+        box.label:SetPoint("LEFT", 8, 0)
+        box.label:SetPoint("RIGHT", -18, 0)
+        box.label:SetJustifyH("LEFT")
+        box.label:SetWordWrap(false)
+        local arrow = box:CreateTexture(nil, "ARTWORK")
+        arrow:SetTexture(ns.MEDIA .. "TourArrow.tga")
+        arrow:SetTexCoord(0, 1, 1, 0) -- pointing down
+        arrow:SetSize(8, 5)
+        arrow:SetPoint("RIGHT", -6, 0)
+        arrow:SetVertexColor(T.MUTED[1], T.MUTED[2], T.MUTED[3], 1)
+        local hover = box:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, .06)
+        window:Hint(box, function()
+            return ("What %s switches to when it takes the lead in points: a role, or one of your profiles.")
+                :format(row.tree and row.tree.name or "this tree")
+        end)
+
+        local popup = ns.PagePopup(window, PICK_WIDTH, 2 * PICK_PAD + 4 * PICK_ROW + PICK_HEAD + PICK_ROW)
+        -- Placed under the box from the start (each click places it again),
+        -- so its list is never laid out under a frame with no spot.
+        popup:SetPoint("TOPRIGHT", box, "BOTTOMRIGHT", 0, -4)
+        window:Hint(popup, "A role or one of your profiles for this talent tree. Escape or a click elsewhere closes this.")
+        box.popup = popup
+        local function Picked(act)
+            popup:Close()
+            if row.tree then act(row.tree) end
+            window:Refresh()
+        end
+        box.buttons = {}
+        for i, role in ipairs(ns.TREE_ROLE_KEYS) do
+            local pick = PickRow(popup, PICK_WIDTH - 2 * PICK_PAD, function()
+                Picked(function(tree) ns.SetTreeRole(tree.id, role, tree.name) end)
+            end)
+            pick:SetPoint("TOPLEFT", PICK_PAD, -PICK_PAD - (i - 1) * PICK_ROW)
+            pick.label:SetText(ns.TREE_ROLE_NAMES[role])
+            pick.key = role
+            window:Hint(pick, function()
+                local tree = row.tree and row.tree.name or "this tree"
+                if role == "none" then
+                    return ("When %s takes the lead in points, don't switch: click a role yourself."):format(tree)
+                end
+                return ("When %s takes the lead in points, switch to your %s profile."):format(tree, ns.ROLE_NAMES[role])
+            end)
+            box.buttons[i] = pick
+        end
+        local top = PICK_PAD + 4 * PICK_ROW
+        local heading = T:Text(popup, "GameFontHighlightSmall", T.MUTED)
+        heading:SetPoint("TOPLEFT", PICK_PAD + 8, -(top + 4))
+        heading:SetText("Your profiles")
+        box.heading = heading
+        local list = T:Scroll(popup, PICK_LIST)
+        window:Hint(list.thumb, ns.SCROLL_NOTE)
+        box.list = list
+        local shown = 1 -- profiles the list is tall enough for
+        -- Pinned by two corners, again a moment after the list opens (a
+        -- scroll area pinned while hidden is never placed; see the bar page).
+        local function Pin()
+            list:ClearAllPoints()
+            list:SetPoint("TOPLEFT", popup, "TOPLEFT", PICK_PAD, -(top + PICK_HEAD))
+            list:SetPoint("BOTTOMRIGHT", popup, "TOPLEFT", PICK_PAD + PICK_LIST, -(top + PICK_HEAD + shown * PICK_ROW))
+            list:ScrollTo(list:GetVerticalScroll() or 0)
+        end
+        Pin()
+        popup:HookScript("OnShow", function() C_Timer.After(0, Pin) end)
+        box.profileRows = {}
+        local function ProfileRow(i)
+            local pick = box.profileRows[i]
+            if pick then return pick end
+            pick = PickRow(list.content, PICK_LIST, function(self)
+                local name = self.profile
+                Picked(function(tree) ns.SetTreeProfile(tree.id, name) end)
+            end)
+            pick:SetPoint("TOPLEFT", 0, -(i - 1) * PICK_ROW)
+            window:Hint(pick, function()
+                return ("When %s takes the lead, switch to %s."):format(row.tree and row.tree.name or "this tree",
+                    tostring(pick.profile))
+            end)
+            box.profileRows[i] = pick
+            return pick
+        end
+
+        -- The list filled in: every profile, and what's chosen lit.
+        function box:Fill()
+            local names = ns.ProfileNames()
+            for i, name in ipairs(names) do
+                local pick = ProfileRow(i)
+                pick.profile = name
+                pick.label:SetText(name)
+                Paint(pick, name == self.profile)
+                pick:Show()
+            end
+            for i = #names + 1, #self.profileRows do self.profileRows[i]:Hide() end
+            for _, pick in ipairs(self.buttons) do Paint(pick, self.profile == nil and pick.key == self.selected) end
+            shown = math.max(1, math.min(#names, PICK_PROFILES))
+            list.content:SetHeight(math.max(1, #names * PICK_ROW))
+            popup:SetHeight(2 * PICK_PAD + 4 * PICK_ROW + PICK_HEAD + shown * PICK_ROW)
+            Pin()
+        end
+        -- What the tree switches to: a role (or None), or a profile of yours.
+        function box:SetSelected(role, profile)
+            self.selected = profile and "profile" or role
+            self.profile = profile
+            self.label:SetText(profile or ns.TREE_ROLE_NAMES[role] or "")
+            local c = role == "none" and not profile and T.MUTED or T.TEXT
+            self.label:SetTextColor(c[1], c[2], c[3])
+            if popup:IsOpen() then self:Fill() end
+        end
+        box:SetScript("OnClick", function(self)
+            if popup:IsOpen() then return popup:Close() end
+            self:Fill()
+            -- Under the box, or over it where the window's foot is too close.
+            popup:ClearAllPoints()
+            local bottom, floor = self:GetBottom(), window:GetBottom()
+            if type(bottom) == "number" and type(floor) == "number"
+                and bottom - popup:GetHeight() - 4 < floor + (ns.WINDOW_FOOTER or 0) then
+                popup:SetPoint("BOTTOMRIGHT", self, "TOPRIGHT", 0, 4)
+            else
+                popup:SetPoint("TOPRIGHT", self, "BOTTOMRIGHT", 0, -4)
+            end
+            popup:Open(self)
+        end)
+        box:HookScript("OnHide", function() popup:Close() end)
+        T:Paint(function() if popup:IsOpen() then box:Fill() end end)
+        return box
+    end
+
     local treeRows = {}
     local function TreeRow(i)
         if treeRows[i] then return treeRows[i] end
         local row = {}
         row.name = T:Text(panel, "GameFontHighlightSmall")
-        row.choice = T:Segmented(panel, roleItems, TREE_CHOICE, function(role)
-            if row.tree then ns.SetTreeRole(row.tree.id, role, row.tree.name) end
-            window:Refresh()
-        end)
-        for _, choice in ipairs(row.choice.buttons) do
-            window:Hint(choice, function()
-                local tree = row.tree and row.tree.name or "this tree"
-                if choice.key == "none" then
-                    return ("When %s takes the lead in points, don't switch: click a role yourself."):format(tree)
-                end
-                return ("When %s takes the lead in points, switch to your %s profile."):format(tree, ns.ROLE_NAMES[choice.key])
-            end)
-        end
+        row.choice = TreeChoice(row)
         treeRows[i] = row
         return row
     end
@@ -396,7 +553,7 @@ function ns.BuildProfileMenu(window, header, anchor)
             row.name:SetText(("%s |cff%s%d|r"):format(tree.name, T:Hex(T.MUTED), tree.points))
             row.choice:ClearAllPoints()
             row.choice:SetPoint("TOPRIGHT", -10, -top)
-            row.choice:SetSelected(ns.TreeRole(tree))
+            row.choice:SetSelected(ns.TreeRole(tree), ns.TreeProfile(tree))
             row.name:Show()
             row.choice:Show()
             bottom = top + 20

@@ -24,6 +24,10 @@ local TINT = {
 -- (Overpower after a dodge, Execute on a wounded target, Victory Rush after
 -- a kill), by name, from the game data (Ranks.lua).
 local REACTIVE = ns.REACTIVE or {}
+-- Lit in any stance (a player's idea, 23 Nov 2026): Overpower's point from
+-- the target's dodge, read straight, so it lights in Berserker or Defensive
+-- Stance too, for a stance dance into Battle Stance. Only while ticked.
+local ANY_STANCE = { Overpower = true }
 
 local bars = {}
 local unlocked, inCombat, editMode = false, false, false
@@ -309,6 +313,10 @@ end
 -- Blizzard's.
 local traps = { laid = nil, art = nil, hearing = false }
 local HearTraps
+-- (And HearPoints: your combo points, for Overpower lit in any stance;
+-- pointsHeard, whether they're heard now.)
+local HearPoints
+local pointsHeard = false
 
 -- A ticked trap icon showing the last trap laid, or its own again (laid is
 -- its own, or none yet). Set only when that changes.
@@ -576,6 +584,21 @@ end
 -- counts as castable. True when whether you can cast it changed: the icon is
 -- tinted (blue, grey or red) now and wasn't, or the other way round; or
 -- whether you lack the mana for it (short) changed.
+-- Overpower's point: a warrior gets one only when the target dodges, in any
+-- stance, for a few seconds. Seen in game (23 Nov 2026): the point shows in
+-- your combo points power (UnitPower, open mid-fight) while GetComboPoints
+-- stays 0, so that's read first and GetComboPoints only as a backup. None, no
+-- target or a secret answer counts as no point.
+local function DodgePoint()
+    if not UnitExists("target") then return false end
+    local types = Enum and Enum.PowerType
+    local ok, points = pcall(UnitPower, "player", types and types.ComboPoints or 4)
+    if ok and Open(points) and type(points) == "number" and points > 0 then return true end
+    if not GetComboPoints then return false end
+    ok, points = pcall(GetComboPoints, "player", "target")
+    return ok and Open(points) and type(points) == "number" and points > 0 or false
+end
+
 local function SpellState(icon, hasTarget, data)
     local id = icon.spellID
     local usable, noMana = C_Spell.IsSpellUsable(id)
@@ -590,7 +613,10 @@ local function SpellState(icon, hasTarget, data)
     Tint(icon, tint)
     -- Lit when the game lights it on your action bars, or, for a reactive
     -- ability the game doesn't light (Overpower after a dodge), once usable.
-    SetGlow(icon, Overlayed(id) or (icon.reactive and Open(usable) and usable == true) or false)
+    -- Overpower in another stance (Lit in any stance, ticked): by its point.
+    local lit = Overlayed(id) or (icon.reactive and Open(usable) and usable == true)
+    if not lit and icon.anyStance and ns.Get("anyStance") == true then lit = DodgePoint() end
+    SetGlow(icon, lit or false)
     local cantCast = tint ~= TINT.ready
     local short = Open(noMana) and noMana == true
     -- Show only when I can't afford it (a player's idea): an answer the game keeps secret is handed to it as it is.
@@ -1359,6 +1385,7 @@ local function Layout(bar)
             icon.cooldown:SetHideCountdownNumbers(not data.showTimer)
             icon.count:SetFontObject(Style:Count(icon.face))
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
+            icon.anyStance = not ITEM_KINDS[entry.kind] and ANY_STANCE[entry.baseName or entry.name] == true or nil
             icon.kind, icon.itemID, icon.slot, icon.current = entry.kind, entry.itemID, entry.slot, entry.current
             -- A spot that showed a spell's global cooldown and now holds an item.
             if icon.gcdShown and ITEM_KINDS[entry.kind] then NoGlobal(icon) end
@@ -1384,12 +1411,13 @@ local function Layout(bar)
     end
     for i = count + 1, #bar.icons do
         bar.icons[i]:Hide()
-        bar.icons[i].spellID, bar.icons[i].trap = nil, nil
+        bar.icons[i].spellID, bar.icons[i].trap, bar.icons[i].anyStance = nil, nil, nil
         WatchRange(bar.icons[i], nil)
     end
     bar.count = count
     -- Your casts heard or not, for the trap icons on your bars now.
     HearTraps()
+    HearPoints()
     -- And the icons Key press glow watches.
     Presses()
     bar:SetSize(B:Arrange(bar, bar.icons, count, data))
@@ -2171,7 +2199,8 @@ end
 
 -- An aura bar's entry gone from its list (not just moved along it): its own
 -- choices go with it (the icon shown faded, Glow when missing, Count ticks,
--- Only when missing, Glow while active, Play a sound, Warn at, Dim until Warn at), so
+-- Only when missing, Glow while active, Play a sound, Warn at, Dim until Warn at,
+-- Hide with my pet, Only in instances, Colour by time left), so
 -- putting it back starts afresh, as after a reload (Core.lua Lists). Any
 -- bar's: its own countdown look too (settings per spell), once none of your
 -- lists has it.
@@ -2192,9 +2221,13 @@ local function Forget(key, name)
     ns.MissingPicks(key)[name], ns.GlowMissing(key)[name], ns.CountTicks(key)[name] = nil, nil, nil
     ns.GlowActive(key)[name] = nil
     ns.SetAuraSound(key, name, nil)
-    if ns.BAR_KIND[key] == "buff" then ns.OnlyWhenMissing(key)[name], ns.HandOthers(key)[name] = nil, nil end
+    if ns.BAR_KIND[key] == "buff" then
+        ns.OnlyWhenMissing(key)[name], ns.HandOthers(key)[name] = nil, nil
+        ns.HideWithPet(key)[name], ns.OnlyInInstances(key)[name] = nil, nil -- (Hide with my pet, Only in instances)
+    end
     ns.SetWarnAt(key, name, nil)
     ns.DimUntilWarn(key)[name] = nil
+    ns.SetTimeColours(key, name, nil) -- (Colour by time left)
     return name
 end
 
@@ -2810,6 +2843,36 @@ function B:OnlyWhenMissing(key, name)
     return ns.BAR_KIND[key] == "buff" and ns.OnlyWhenMissing(key)[name] == true
 end
 
+-- Hide with my pet and Only in instances (a player's idea: for single buffs,
+-- not the whole bar, as the Buffs page's Hide w/ pet and Only in instances
+-- are): a buff on a Buffs bar (Buffs 2 too) left off it while your pet or
+-- demon is out, or while you're outside a dungeon, raid or battleground.
+-- The bar is laid out without it (Buffs.lua F:Layout), out of a fight only,
+-- so in one the change shows once it ends (B:AwayChanged). False for an
+-- entry not on a Buffs bar.
+local function SetAway(key, name, set, on)
+    if ns.BAR_KIND[key] ~= "buff" or not IndexOf(key, name) then return false end
+    set(key)[name] = on and true or nil
+    B:Changed()
+    return true
+end
+
+function B:SetHideWithPet(key, name, on)
+    return SetAway(key, name, ns.HideWithPet, on)
+end
+
+function B:HidesWithPet(key, name)
+    return ns.BAR_KIND[key] == "buff" and ns.Ticked("hideWithPet", key, name)
+end
+
+function B:SetOnlyInInstances(key, name, on)
+    return SetAway(key, name, ns.OnlyInInstances, on)
+end
+
+function B:OnlyInInstances(key, name)
+    return ns.BAR_KIND[key] == "buff" and ns.Ticked("onlyInInstances", key, name)
+end
+
 -- Whether a buff's icon has a greyed spot while it's missing (for Glow when
 -- missing): with missing ones greyed or Only show missing, or with it or a
 -- buff of yours joined to it ticked Only when missing (another character's,
@@ -2874,6 +2937,27 @@ end
 function B:WarnAt(key, name)
     if not ns.AURA_BARS[key] then return nil end
     return ns.WarnAt(key)[name]
+end
+
+-- Colour by time left (a player's idea: a dot's countdown green, then
+-- yellow, then red as it runs out), set spell by spell where Warn at is: an
+-- entry on a Buffs or Debuffs bar whose countdown changes colour at two
+-- times left (colours: { first time, second time, first, middle and last
+-- colours }, Core.lua ns.TimeColours; nil for none). The game picks the
+-- colour, as for Warn at (Buffs.lua F:Warns, Style.lua S:WarnText), and the
+-- entry's own Warn at wins. The icons change once out of a fight. False for
+-- an entry not on that bar, or colours that can't be kept.
+function B:SetTimeColours(key, name, colours)
+    if not ns.AURA_BARS[key] or not IndexOf(key, name) then return false end
+    if colours ~= nil and not ns.TimeColoursValue(colours) then return false end
+    if ns.SetTimeColours(key, name, colours) then self:Changed() end
+    return true
+end
+
+-- Its colours as kept, or nil while unticked.
+function B:TimeColours(key, name)
+    if not ns.AURA_BARS[key] then return nil end
+    return ns.TimeColours(key)[name]
 end
 
 -- Whether an entry's warning can show: not on the Buffs bar with Only show
@@ -3423,6 +3507,28 @@ function B:FormChanged()
     return true
 end
 
+-- Hide with my pet and Only in instances, ticked buff by buff (a player's
+-- idea): as your pet comes or goes, or you go in or out of an instance,
+-- each Buffs bar whose buffs left out change (Buffs.lua F:Away) is laid
+-- out again: at once out of a fight; in one, once it ends, as every change
+-- to that bar waits (LayoutAuras). True when any bar changed now.
+function B:AwayChanged()
+    if not (self.started and self:Enabled()) then return false end
+    local changed = false
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = bars[key]
+        if bar and bar.holders and ns.BAR_KIND[key] == "buff" and select(2, ns.BuffBar:Away(key)) ~= bar.awayState then
+            Layout(bar)
+            changed = changed or not bar.pendingLayout
+        end
+    end
+    if not changed then return false end
+    self:UpdateShown()
+    self:RefreshAll()
+    if ns.Layout then ns.Layout:Stack() end
+    return true
+end
+
 -- The entries on a bar that show there for no one (Spells.lua S:Leftover:
 -- a buff's ID ticked on the Cooldowns bar before that was turned away).
 function B:Leftovers(key)
@@ -3561,10 +3667,19 @@ local function BagsChanged()
 end
 
 local function Listing(_, event)
+    -- A new zone (Only in instances, buff by buff): only the Buffs bars whose
+    -- buffs left out change are laid out again (B:AwayChanged), nothing else.
+    if event == "ZONE_CHANGED_NEW_AREA" then
+        B:AwayChanged()
+        return
+    end
     local open = ns.window ~= nil and ns.window:IsShown()
     -- A Buffs bar set to go while your pet is out or outside an instance
-    -- follows at once (B:UpdateShown).
-    if event == "UNIT_PET" or event == "PLAYER_ENTERING_WORLD" then B:UpdateShown() end
+    -- follows at once (B:UpdateShown), and so do the buffs on one ticked to
+    -- (B:AwayChanged, which shows and hides the bars itself when it lays one out).
+    if event == "UNIT_PET" or event == "PLAYER_ENTERING_WORLD" then
+        if not B:AwayChanged() then B:UpdateShown() end
+    end
     if event == "BAG_UPDATE_DELAYED" then
         if open then BagsChanged() end
     else
@@ -3641,6 +3756,11 @@ local function OnEvent(_, event, arg, ...)
         end
     elseif FORM_EVENTS[event] then
         shifting = true
+    elseif event == "UNIT_POWER_FREQUENT" then
+        -- (The unit, then the power's name.) Only your combo points, or a
+        -- name the game keeps secret, light or put out Overpower: never rage.
+        local power = ...
+        if not Open(power) or power == "COMBO_POINTS" then tinting = true end
     elseif event == "ADDON_RESTRICTION_STATE_CHANGED" or event == "ENCOUNTER_END" then
         -- Buffs the game wouldn't answer for may be readable now: read on
         -- the next frame (not as the event comes, when the game may not
@@ -3914,6 +4034,7 @@ local function Switch()
         driver:SetScript("OnUpdate", nil)
         hearing, checking, forming, shifting, wanding = false, false, false, false, false
         traps.hearing = false
+        pointsHeard = false
     end
 end
 
@@ -3946,11 +4067,53 @@ HearTraps = function()
     end
 end
 
+-- Your combo points are heard only while your bars are on, Lit in any stance
+-- is ticked and an Overpower icon shows on one: in a fight too, as that's
+-- when a target dodges. Otherwise nothing is heard and nothing done.
+local function PointsShown()
+    if ns.Get("anyStance") ~= true then return false end
+    for _, key in ipairs(ns.BAR_KEYS) do
+        local bar = bars[key]
+        if bar and bar.kind == "cooldown" then
+            for i = 1, bar.count or 0 do
+                if bar.icons[i].anyStance then return true end
+            end
+        end
+    end
+    return false
+end
+HearPoints = function()
+    local want = listening and PointsShown() or false
+    if want == pointsHeard then return end
+    pointsHeard = want
+    if want then
+        pcall(driver.RegisterUnitEvent, driver, "UNIT_POWER_FREQUENT", "player")
+    else
+        pcall(driver.UnregisterEvent, driver, "UNIT_POWER_FREQUENT")
+    end
+end
+
+-- Lit in any stance (Overpower's panel): on or off, heard or not, and the
+-- glows read again.
+function B:SetAnyStance(on)
+    on = on and true or false
+    if (ns.Get("anyStance") == true) == on then return false end
+    ns.Set("anyStance", on)
+    HearPoints()
+    tinting = true
+    return true
+end
+
+function B:LitInAnyStance()
+    return ns.Get("anyStance") == true
+end
+
 Listen = function()
     Switch()
     HearAuras()
     HearForms()
     HearTraps()
+    HearPoints()
 end
 
 function B:Start()
@@ -3966,6 +4129,8 @@ function B:Start()
     -- go by UNIT_PET too, and its spellbook redraws a pet's spells on
     -- SPELLS_CHANGED (above).
     watch:RegisterUnitEvent("UNIT_PET", "player")
+    -- And a new zone, for buffs ticked Only in instances (B:AwayChanged).
+    watch:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     watch:SetScript("OnEvent", Listing)
     self.watch = watch
     -- Bars come back in full while Edit Mode is open.

@@ -140,6 +140,7 @@ ns.DEFAULTS = {
     castLatencyText = true, -- and how long it is, in ms
     swingTimer = false, -- a swing timer in the cast bar's spot: Auto Shot for hunters, the main hand for everyone
     swingColour = "default", -- its colour: silver, or a bar colour
+    swingAlways = false, -- the swing timer stays up between swings, empty, in and out of combat
     -- Raid Timers: Blizzard's own raid and dungeon timers restyled, each part on its own.
     pullTimer = false, -- the pull and start countdown in your bar design
     pullColour = "default", -- its bar: Blizzard's red, or a bar colour
@@ -224,6 +225,7 @@ ns.DEFAULTS = {
     keybindSize = 100, -- its size, as a share of the automatic size that follows the icon
     keyPressGlow = false, -- a gold border on a Cooldowns/Utility icon while you hold the key that casts it (Bars.lua, Icon details)
     totemTime = false, -- a totem's icon on a Cooldowns/Utility bar shows its totem's time while it stands (IconAuras.lua, Icon details)
+    anyStance = false, -- Overpower lit after a dodge in any stance, not just Battle Stance (Bars.lua; a player's idea, 23 Nov 2026)
     layoutPreview = true, -- the Layout page draws your icons with the Look page's border, shadow and keybinds
     barScale = 100, -- every bar's icons together, as a share of each bar's own size (the Layout page's All bars)
     growArrows = false, -- while your bars are arranged (unlocked or in Edit Mode), an arrow on each for the way it grows
@@ -282,6 +284,7 @@ ns.TEXT_BAR_SIZE = { 0, ns.TEXT_SIZE[2], 0 } -- a bar's own size for it; 0 goes 
 -- 100: no swipe), and the countdown's size, in percent.
 ns.SWIPE_SEE_THROUGH = { 0, 100, 30 }
 ns.COUNTDOWN_SIZE = { 50, 150, 100 }
+ns.TIME_STEP = { 1, 60 } -- Colour by time left's two times (a spell's own, below), in seconds left (min, max)
 -- Cooldown pulse.
 ns.PULSE_SIZE = { 64, 512, 272 }
 ns.PULSE_TIME = { 3, 20, 10 } -- tenths of a second: 0.3 to 2 seconds
@@ -386,6 +389,13 @@ ns.COUNT_COLOUR_KEYS = { "white", "gold", "green", "red", "purple" }
 ns.COUNT_COLOUR_NAMES = { white = "White", gold = "Gold", green = "Green", red = "Red", purple = "Purple" }
 ns.COUNT_COLOURS = { white = { 1, 1, 1 }, gold = { 1, .82, 0 }, green = { .35, .9, .35 }, red = { 1, .25, .2 },
     purple = { .72, .52, 1 } }
+-- Colour by time left's colours (a spell's own box, below): the count
+-- colours, with a yellow and an orange for the middle stretch (six, so the
+-- last swatch's pop-up still fits the window).
+ns.TIME_COLOUR_KEYS = { "green", "yellow", "orange", "red", "white", "purple" }
+ns.TIME_COLOURS = { yellow = { 1, .92, .25 }, orange = { 1, .58, .15 } }
+ns.TIME_COLOUR_NAMES = { yellow = "Yellow", orange = "Orange" }
+for key, colour in pairs(ns.COUNT_COLOURS) do ns.TIME_COLOURS[key], ns.TIME_COLOUR_NAMES[key] = colour, ns.COUNT_COLOUR_NAMES[key] end
 -- Icon details: the swipe's colours (black, white, then the bar colours),
 -- the countdown's spots on the icon, and the edge line's colours (the
 -- game's own line, untinted, then a bar colour to tint it).
@@ -499,7 +509,7 @@ ns.SHARE_LOOK = { "barStyle", "barColour", "colourFade", "barTexture", "font", "
     "prdEnergyLeft", "prdEnergyRight", "prdHealthSize", "prdPowerSize", "prdExtraSize", "prdEnergySize",
     "prdTextNumbers", "prdTextSize", "prdTextFont",
     "castColour", "castHeight", "castTextSize", "castOwnWidth", "castWidth", "castAbove", "castFree", "castNative", "castX", "castY", "castIcon", "castName", "castTime", "castTickColour", "castTickStyle", "castTickWidth", "castTimeFormat",
-    "castLatencyColour", "castLatencyText", "castTickSound", "swingColour",
+    "castLatencyColour", "castLatencyText", "castTickSound", "swingColour", "swingAlways",
     "swipeColour", "swipeSeeThrough", "countdownSize", "countdownColour", "countdownSpot", "countdownFormat", "swipeEdge", "edgeColour",
     "iconStyle", "bigStacks", "pullColour", "pullNumbers", "warningFont", "warningOutline", "warningShadow", "warningColour", "emoteColour", "bossColour",
     "pullBarSize", "pullNumberSize", "warningSize", "emoteSize", "raidSize",
@@ -553,6 +563,9 @@ ns.SHARE_TICKS = {
     { field = "handOthers", code = "h", kinds = { buff = true } }, -- Others only, on a hand's enchant
     { field = "dimUntilWarn", code = "d", kinds = { buff = true, debuff = true } }, -- Dim until Warn at
     { field = "missingPicks", code = "e", kinds = { buff = true, debuff = true } }, -- the entry a joined icon shows while none is up
+    -- (These two since the update after 1.10.19: an older FECM leaves them out and says so.)
+    { field = "hideWithPet", code = "u", kinds = { buff = true } }, -- Hide with my pet
+    { field = "onlyInInstances", code = "b", kinds = { buff = true } }, -- Only in instances
 }
 
 -- Bars: each bar lists spells by name, so the highest known rank is
@@ -740,6 +753,22 @@ end
 
 function ns.CountColour(key)
     return ns.COUNT_COLOURS[key] or ns.HexColour(key) or ns.COUNT_COLOURS.white
+end
+
+-- One of Colour by time left's colours by its key: a named one or Custom's "#rrggbb".
+function ns.TimeColour(key)
+    return ns.TIME_COLOURS[key] or ns.HexColour(key) or ns.COUNT_COLOURS.white
+end
+
+-- Whether a colour can be kept for it: one of its six (ns.TIME_COLOUR_KEYS),
+-- or Custom's own as "#rrggbb" (six hex digits, lower case).
+local TIME_KEYS = {}
+for _, key in ipairs(ns.TIME_COLOUR_KEYS) do TIME_KEYS[key] = true end
+function ns.TimeColourKey(value)
+    if type(value) ~= "string" then return false end
+    if TIME_KEYS[value] then return true end
+    local hex = value:sub(2)
+    return value:sub(1, 1) == "#" and ns.Hex(hex) == hex
 end
 
 -- Shows values (checked by the caller) in place of yours until it's nil again.
@@ -939,11 +968,11 @@ local function RenameSpells(profile)
     for field in pairs(PULSE_LISTS) do RenameSet(profile[field]) end
     if type(profile.spellLook) == "table" then RenameSet(profile.spellLook) end
     -- And each entry's own choices kept by bar: Warn at, its size, Show the
-    -- trap I last laid, Play a sound, and its ticks (Count ticks, the glows,
-    -- Only when missing, Others only, Dim until Warn at, a joined icon's
-    -- shown entry).
-    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound", "missingPicks", "glowMissing", "countTicks",
-        "onlyWhenMissing", "glowActive", "handOthers", "dimUntilWarn" }) do
+    -- trap I last laid, Play a sound, Colour by time left, and its ticks
+    -- (Count ticks, the glows, Only when missing, Others only, Dim until
+    -- Warn at, a joined icon's shown entry, Hide with my pet, Only in instances).
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound", "timeColours", "missingPicks", "glowMissing", "countTicks",
+        "onlyWhenMissing", "glowActive", "handOthers", "dimUntilWarn", "hideWithPet", "onlyInInstances" }) do
         for _, set in pairs(type(profile[field]) == "table" and profile[field] or {}) do
             if type(set) == "table" then RenameSet(set) end
         end
@@ -1013,6 +1042,25 @@ local function RepairWarns(profile)
         end
     end
     profile.warnAt = next(kept) ~= nil and kept or nil
+end
+
+-- A profile's Colour by time left, spell by spell (ns.TimeColours): only an
+-- aura bar's it has, only names on that bar's lists (a form's too), each
+-- one that can be kept (ns.TimeColoursValue), as a table of its own. A
+-- profile with none keeps no table for them.
+local function RepairTimes(profile)
+    if profile.timeColours == nil then return end
+    local sets, kept = type(profile.timeColours) == "table" and profile.timeColours or {}, {}
+    for key, set in pairs(sets) do
+        if ns.AURA_BARS[key] and Present(profile, key) and type(set) == "table" then
+            local listed, own = BarNames(profile, key), {}
+            for name, colours in pairs(set) do
+                if listed[name] then own[name] = ns.TimeColoursValue(colours) end
+            end
+            if next(own) ~= nil then kept[key] = own end
+        end
+    end
+    profile.timeColours = next(kept) ~= nil and kept or nil
 end
 
 -- A profile's sounds (Play a sound): only an aura bar's it has, only names
@@ -1123,8 +1171,11 @@ local function Lists(profile)
     -- on a Debuffs bar: Swap with my form). Count ticks is a Cooldowns or
     -- Utility bar's too (an extra one too: a spell's icon counting its
     -- debuff's ticks, IconAuras.lua): names on its lists, a form's too.
+    -- Only when missing, Others only, Hide with my pet and Only in
+    -- instances are a Buffs bar's alone.
+    local buffsOnly = { onlyWhenMissing = true, handOthers = true, hideWithPet = true, onlyInInstances = true }
     for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers",
-        "dimUntilWarn" }) do
+        "dimUntilWarn", "hideWithPet", "onlyInInstances" }) do
         if type(profile[field]) ~= "table" then profile[field] = {} end
         for key, set in pairs(profile[field]) do
             if field == "countTicks" and not ns.AURA_BARS[key] and Present(profile, key) and type(set) == "table" then
@@ -1132,7 +1183,7 @@ local function Lists(profile)
                     if on ~= true or not OnBarLists(profile, key, name) then set[name] = nil end
                 end
             elseif not (ns.AURA_BARS[key] and Present(profile, key)) or type(set) ~= "table"
-                or ((field == "onlyWhenMissing" or field == "handOthers") and ns.BAR_KIND[key] ~= "buff") then
+                or (buffsOnly[field] and ns.BAR_KIND[key] ~= "buff") then
                 profile[field][key] = nil
             else
                 local listed = BarNames(profile, key)
@@ -1173,6 +1224,7 @@ local function Lists(profile)
     profile.swapForm = type(ticks) == "table" and next(ticks) ~= nil and ticks or nil
     RepairLooks(profile)
     RepairWarns(profile)
+    RepairTimes(profile)
     RepairSounds(profile)
     RepairSizes(profile)
     RepairTraps(profile)
@@ -1208,7 +1260,9 @@ end
 
 -- Role links (class -> role -> profile name; each to a profile that's
 -- there, each profile for one role), each class's talent trees set to a role
--- or None (class -> the tree's group ID -> role), and the main tree each character
+-- or None (class -> the tree's group ID -> role), or linked to a profile of
+-- your own (class -> the tree's group ID -> profile name; one that's gone
+-- is let go, so the tree goes back to its role), and the main tree each character
 -- was last seen with (GUID -> the tree's ID; none until one leads), kept
 -- only while Switch with my talents is on.
 local function RepairRoles(profiles)
@@ -1224,6 +1278,9 @@ local function RepairRoles(profiles)
     end
     db.treeRoles = Keyed(db.treeRoles, function(id, role)
         return Finite(id) and id > 0 and ns.TREE_ROLE_NAMES[role] ~= nil
+    end)
+    db.treeProfiles = Keyed(db.treeProfiles, function(id, name)
+        return Finite(id) and id > 0 and type(name) == "string" and profiles[name] ~= nil
     end)
     local mains = db.mainTrees
     if db.talentSwitch ~= true or type(mains) ~= "table" then
@@ -1681,6 +1738,29 @@ function ns.HandOthers(key)
     return Choices("handOthers", key)
 end
 
+-- This character's buffs on a Buffs bar left off it while your pet is out
+-- (Hide with my pet), and those shown only in a dungeon, raid or
+-- battleground (Only in instances): a player's idea, for single buffs and
+-- not the whole bar. By name, true each.
+function ns.HideWithPet(key)
+    return Choices("hideWithPet", key)
+end
+
+function ns.OnlyInInstances(key)
+    return Choices("onlyInInstances", key)
+end
+
+-- Whether an entry on a bar is ticked under field (or, with no name, any
+-- entry there), read without making a table for that bar: each Buffs bar
+-- asks as it's laid out, and as your pet or zone changes.
+function ns.Ticked(field, key, name)
+    local sets = ns.ProfileLists()[field]
+    local set = type(sets) == "table" and sets[key]
+    if type(set) ~= "table" then return false end
+    if name == nil then return next(set) ~= nil end
+    return set[name] == true
+end
+
 -- This character's entries on a Buffs or Debuffs bar whose icons stay dark
 -- while they're up until their Warn at time is left (Dim until Warn at, a
 -- player's idea: Moonfire not ticking down all 12 seconds), by name, true each.
@@ -1760,7 +1840,7 @@ end
 -- its tray icon opens. Kept by bar and entry, in seconds, only once one is
 -- set (profile.warnAt[key][name] = seconds), so a profile from before loads
 -- unchanged.
-ns.WARN_SECONDS = { 3, 5, 10, 30, 60, 300, 600 } -- the choices offered
+ns.WARN_SECONDS = { 1, 3, 5, 10, 30, 60, 300, 600 } -- the choices offered (1s: a player's idea, a dot's last second)
 ns.WARN_MAX = 3600
 
 -- Whether a number of seconds can be kept: a whole number, 1 to an hour.
@@ -1799,6 +1879,73 @@ function ns.SetWarnAt(key, name, seconds)
     warns[key][name] = seconds
     if next(warns[key]) == nil then warns[key] = nil end
     if next(warns) == nil then ns.ProfileLists().warnAt = nil end
+    return true
+end
+
+-- Colour by time left (a player's idea: a dot's countdown green above 10
+-- seconds, yellow from there, red under 5; set in each spell's own box, not
+-- Icon details, Squirt's ask, 23 Nov 2026): an aura bar's entry whose
+-- countdown changes colour at two times left, in three colours (Style.lua
+-- S:WarnText), where Warn at is offered. Kept by bar and entry only once
+-- ticked (profile.timeColours[key][name] = { first time, second time, first
+-- colour, middle colour, last colour }: whole seconds, the first over the
+-- second; each colour one of ns.TIME_COLOUR_KEYS or Custom's "#rrggbb"), so a
+-- profile from before loads unchanged. The entry's own Warn at still wins.
+ns.TIME_DEFAULT = { 10, 5, "green", "yellow", "red" } -- as it's ticked
+
+-- A Colour by time left as kept, in a table of its own; nil for anything
+-- else (times not whole seconds within ns.TIME_STEP with the first over the
+-- second, a colour that isn't one of its own, or more than those five).
+function ns.TimeColoursValue(value)
+    if type(value) ~= "table" then return nil end
+    local count, limits = 0, ns.TIME_STEP
+    for _ in pairs(value) do count = count + 1 end
+    local function Whole(n) return type(n) == "number" and n == math.floor(n) and n >= limits[1] and n <= limits[2] end
+    if count ~= 5 or not (Whole(value[1]) and Whole(value[2]) and value[2] < value[1]) then return nil end
+    for i = 3, 5 do
+        if not ns.TimeColourKey(value[i]) then return nil end
+    end
+    return { value[1], value[2], value[3], value[4], value[5] }
+end
+
+local function TimeSets(make)
+    local store = ns.ProfileLists()
+    if type(store.timeColours) ~= "table" then
+        if not make then return nil end
+        store.timeColours = {}
+    end
+    return store.timeColours
+end
+
+-- An aura bar's entries coloured by time left (name -> their colours, as
+-- kept), to read: none kept gives an empty table of its own.
+function ns.TimeColours(key)
+    local sets = TimeSets(false)
+    local set = sets and sets[key]
+    return type(set) == "table" and set or {}
+end
+
+-- Sets (its colours, kept in a table of its own) or with nil clears an
+-- entry's Colour by time left on an aura bar. True when it changed. Whether
+-- it's on that bar is the caller's (Bars.lua B:SetTimeColours).
+function ns.SetTimeColours(key, name, colours)
+    local kept = colours ~= nil and ns.TimeColoursValue(colours) or nil
+    if not (ns.AURA_BARS[key] and Present(ns.ProfileLists(), key)) or type(name) ~= "string" or (colours ~= nil and not kept) then
+        return false
+    end
+    local was = ns.TimeColours(key)[name]
+    local same = was == nil and kept == nil
+    if type(was) == "table" and kept then
+        same = true
+        for i = 1, 5 do same = same and was[i] == kept[i] end
+    end
+    if same then return false end
+    local sets = TimeSets(kept ~= nil)
+    if not sets then return false end
+    if type(sets[key]) ~= "table" then sets[key] = {} end
+    sets[key][name] = kept
+    if next(sets[key]) == nil then sets[key] = nil end
+    if next(sets) == nil then ns.ProfileLists().timeColours = nil end
     return true
 end
 
@@ -2032,11 +2179,11 @@ function ns.RemoveBar(key)
         if next(store.swapForm) == nil then store.swapForm = nil end
     end
     for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers", "warnAt",
-        "iconSize", "dimUntilWarn", "lastTrap", "auraSound" }) do
+        "iconSize", "dimUntilWarn", "lastTrap", "auraSound", "hideWithPet", "onlyInInstances", "timeColours" }) do
         local sets = store[field]
         if type(sets) == "table" then sets[key] = nil end
     end
-    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound" }) do
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound", "timeColours" }) do
         if type(store[field]) == "table" and next(store[field]) == nil then store[field] = nil end
     end
     for _, name in ipairs(names) do ns.ForgetSpellLook(name) end
@@ -2204,12 +2351,15 @@ local function Switch(name)
     if ns.Skin and ns.Skin.started then ns.Skin:ApplySpellLooks() end
 end
 
--- Role links follow a profile renamed (to its new name) and let go of one
--- deleted (to nil), for every class.
+-- Role links, and talent trees linked to a profile, follow a profile
+-- renamed (to its new name) and let go of one deleted (to nil: the tree
+-- goes back to its role), for every class.
 local function Relink(from, to)
-    for _, links in pairs(type(db.roles) == "table" and db.roles or {}) do
-        for role, name in pairs(links) do
-            if name == from then links[role] = to end
+    for _, field in ipairs({ "roles", "treeProfiles" }) do
+        for _, links in pairs(type(db[field]) == "table" and db[field] or {}) do
+            for key, name in pairs(type(links) == "table" and links or {}) do
+                if name == from then links[key] = to end
+            end
         end
     end
 end
@@ -2269,9 +2419,10 @@ local function Duplicate(from)
     -- And which entry each joined icon shows, faded, while none is up, which
     -- buffs glow while they're missing, which entries count their ticks,
     -- which buffs show only while they're missing and which glow while up,
-    -- and which entries stay dim until their Warn at time.
+    -- which entries stay dim until their Warn at time, and which buffs go
+    -- while your pet is out or show only in instances.
     for _, field in ipairs({ "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers",
-        "dimUntilWarn" }) do
+        "dimUntilWarn", "hideWithPet", "onlyInInstances" }) do
         profile[field] = {}
         for key, set in pairs(type(from[field]) == "table" and from[field] or {}) do
             profile[field][key] = {}
@@ -2300,6 +2451,16 @@ local function Duplicate(from)
                     profile[field][key] = {}
                     for name, value in pairs(set) do profile[field][key][name] = value end
                 end
+            end
+        end
+    end
+    -- And each entry's Colour by time left, each in a table of its own.
+    if type(from.timeColours) == "table" then
+        profile.timeColours = {}
+        for key, set in pairs(from.timeColours) do
+            if type(set) == "table" then
+                profile.timeColours[key] = {}
+                for name, colours in pairs(set) do profile.timeColours[key][name] = ns.TimeColoursValue(colours) end
             end
         end
     end
@@ -2703,6 +2864,18 @@ function ns.ImportProfile(text, shared, withLook)
             if ns.AURA_BARS[key] and type(set) == "table" then profile.warnAt[key] = CopySet(set) end
         end
     end
+    -- Each entry's Colour by time left, each in a table of its own (Lists
+    -- keeps those on its bar's lists, a form's too). A string from before
+    -- it has none.
+    if type(shared.times) == "table" then
+        profile.timeColours = {}
+        for key, set in pairs(shared.times) do
+            if ns.AURA_BARS[key] and type(set) == "table" then
+                profile.timeColours[key] = {}
+                for spell, colours in pairs(set) do profile.timeColours[key][spell] = ns.TimeColoursValue(colours) end
+            end
+        end
+    end
     -- Each entry's sound (Play a sound; Lists keeps those on its bar's lists, a form's too).
     if type(shared.sounds) == "table" then
         profile.auraSound = {}
@@ -2839,7 +3012,10 @@ end
 -- profile, after the fight if you're in one. Only a change of main tree
 -- switches, so a role picked by hand stays until the next one. A tree set
 -- to None never switches (you pick a role yourself), but still counts as
--- your main tree. A character with no points spent yet has no main tree:
+-- your main tree. A tree can be linked to one of your profiles instead of a
+-- role (a player's idea: a warlock's two damage trees, each with its own
+-- profile), and switches to it by the same rules (db.treeProfiles, class ->
+-- the tree's ID -> profile name). A character with no points spent yet has no main tree:
 -- its first point only notes one. Forever's talents are trait trees: your
 -- class has one, its talent trees are that tree's groups, and a group's
 -- points are what's spent in it, read as the game's own talent frame reads
@@ -2963,24 +3139,54 @@ function ns.TreeRole(tree)
     return class and TREE_ROLES[class] and TREE_ROLES[class][tree.name] or "damage"
 end
 
+-- The profile of your own a tree is linked to, while it's there; nil while
+-- the tree goes by its role.
+function ns.TreeProfile(tree)
+    local class = db and Class()
+    local links = class and type(db.treeProfiles) == "table" and db.treeProfiles[class]
+    local name = type(links) == "table" and links[tree.id]
+    if type(name) == "string" and Profiles()[name] then return name end
+    return nil
+end
+
+-- One of a tree's links for your class saved (field: "treeRoles" or
+-- "treeProfiles"). A new pick for your main tree drops the talents' note
+-- about it (the menu refreshes after), but switches nothing: only a change
+-- of main tree does.
+local function LinkTree(field, class, id, value, changed)
+    if type(db[field]) ~= "table" then db[field] = {} end
+    if type(db[field][class]) ~= "table" then db[field][class] = {} end
+    db[field][class][id] = value
+    local guid = PlayerGUID()
+    if changed and guid and type(db.mainTrees) == "table" and db.mainTrees[guid] == id then DropTalentNote(true) end
+end
+
 -- A tree set to a role (or None) for your class, by its ID (name, the
--- tree's own, gives its default role). A new role for your main tree drops
--- the talents' note about it (the menu refreshes after), but switches
--- nothing: only a change of main tree does.
+-- tree's own, gives its default role). It lets go of any profile the tree
+-- was linked to.
 function ns.SetTreeRole(id, role, name)
     local class = db and Class()
     if not (class and Finite(id) and id > 0 and ns.TREE_ROLE_NAMES[role]) then return end
-    local before = ns.TreeRole({ id = id, name = name })
-    if type(db.treeRoles) ~= "table" then db.treeRoles = {} end
-    if type(db.treeRoles[class]) ~= "table" then db.treeRoles[class] = {} end
-    db.treeRoles[class][id] = role
-    local guid = PlayerGUID()
-    if role ~= before and guid and type(db.mainTrees) == "table" and db.mainTrees[guid] == id then DropTalentNote(true) end
+    local tree = { id = id, name = name }
+    local before, linked = ns.TreeRole(tree), ns.TreeProfile(tree)
+    local links = type(db.treeProfiles) == "table" and db.treeProfiles[class]
+    if type(links) == "table" then links[id] = nil end
+    LinkTree("treeRoles", class, id, role, role ~= before or linked ~= nil)
+end
+
+-- A tree linked to one of your profiles for your class, by its ID: when it
+-- takes the lead, that profile is switched to, whatever its role. Its role
+-- stays saved under it, for when the link goes (the profile deleted).
+function ns.SetTreeProfile(id, profile)
+    local class = db and Class()
+    if not (class and Finite(id) and id > 0 and type(profile) == "string" and Profiles()[profile]) then return end
+    LinkTree("treeProfiles", class, id, profile, profile ~= ns.TreeProfile({ id = id }))
 end
 
 -- Looks at your talents: the main tree changed since it was last seen,
--- its role's profile is switched to (if it has one, and the tree isn't set
--- to None). In a fight it waits for the fight to end. The first look on a
+-- the profile it's linked to is switched to, else its role's profile (if it
+-- has one, and the tree isn't set to None). In a fight it waits for the
+-- fight to end. The first look on a
 -- character (or after the tick goes on) only notes the main tree; with no
 -- points spent (a new character, or talents not sent yet) there's none to
 -- note, so the first tree to lead is only noted too.
@@ -3004,6 +3210,12 @@ function ns.CheckTalents()
     end
     if not main or main.id == last then return end
     db.mainTrees[guid] = main.id
+    local linked = ns.TreeProfile(main)
+    if linked == active then return DropTalentNote() end -- already there
+    if linked then
+        Switch(linked)
+        return TalentNote(("Your main talent tree is now %s: switched to %s."):format(main.name, linked))
+    end
     local role = ns.TreeRole(main)
     if role == "none" then return DropTalentNote() end -- you pick a role yourself
     local word, name = ns.ROLE_NAMES[role], ns.RoleProfile(role)
@@ -3630,6 +3842,12 @@ local function Load()
     db.devTickTest, db.devTickProbe, db.devTickPace = nil, nil, nil -- and of the tick count's test (/ccm ticks)
     db.devSoundLog = nil -- and a development build's aura sound log
     db.devTotemProbe = nil -- and the Totems bar's development check (Totems.lua); this line stays after release
+    -- And Colour by time left as one setting for every countdown, from a
+    -- development build (never released): it's each spell's own now.
+    for _, key in ipairs({ "timeColours", "timeStepHigh", "timeStepLow", "timeColourHigh", "timeColourMid", "timeColourLow" }) do
+        db[key] = nil
+        db[key .. "Custom"] = nil
+    end
     local saved = db.auraSoundIDs
     db.auraSoundIDs = nil
     if ns.BuffBar then ns.BuffBar:DropSavedSounds(saved) end -- sounds the game may still hold from before a reload, let go before any are made

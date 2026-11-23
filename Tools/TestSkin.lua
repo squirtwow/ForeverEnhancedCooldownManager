@@ -4012,6 +4012,34 @@ do
             .. " on each icon, kept after Blizzard's refreshes; back to the game's own formatter and switch")
         _G.C_StringUtil, _G.Enum = util, enum
     end
+    -- Colour by time left (a player's idea), set spell by spell, is the
+    -- addon's own Buffs and Debuffs bars' alone: with spells coloured in the
+    -- profile, Blizzard's icons (its buff icons too) are never sent its
+    -- rules, nor after Blizzard's refreshes or their own looks per spell.
+    do
+        local util, enum = _G.C_StringUtil, _G.Enum
+        _G.C_StringUtil = { CreateNumericRuleFormatter = function() return { AddBreakpoint = function() end } end }
+        _G.Enum = setmetatable({ NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 } }, { __index = enum or {} })
+        local sent = { S[item.Cooldown].formatter, S[buff.Cooldown].formatter }
+        local colours = { 10, 5, "green", "yellow", "red" }
+        local store = ns.ProfileLists()
+        store.timeColours = { buff = { Thorns = colours, Clearcasting = colours }, debuff = { Moonfire = colours, Corruption = colours } }
+        local warned, warnText = {}, ns.Style.WarnText
+        ns.Style.WarnText = function(self, cooldown, ...)
+            if cooldown == item.Cooldown or cooldown == buff.Cooldown then warned[#warned + 1] = "Blizzard's" end
+            return warnText(self, cooldown, ...)
+        end
+        ns.Skin:ApplyIconDetails()
+        ns.Skin:ApplySpellLooks()
+        Refresh()
+        ns.Style.WarnText = warnText
+        local same = rawequal(S[item.Cooldown].formatter, sent[1]) and rawequal(S[buff.Cooldown].formatter, sent[2])
+        store.timeColours = nil
+        ns.Skin:ApplyIconDetails()
+        Equal(tostring(same) .. " " .. #warned .. " " .. tostring(ns.Style:Coloured(item.Cooldown)) .. " " .. #printed, "true 0 nil 0",
+            "spells coloured by time left: no rules sent to Blizzard's icons, after its refreshes either")
+        _G.C_StringUtil, _G.Enum = util, enum
+    end
     -- A failure is reported once, never thrown into Blizzard's refresh.
     local swipe = ns.Style.Swipe
     ns.Style.Swipe = function() error("a broken swipe") end

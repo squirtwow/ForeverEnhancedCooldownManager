@@ -86,6 +86,42 @@ function F:Ticked(bar, key, data)
     return self:Flagged(key, data)
 end
 
+-- Hide with my pet and Only in instances (a player's idea: for single
+-- buffs, not the whole bar), ticked buff by buff on a Buffs bar (Buffs 2
+-- too): whether your pet or demon is out, and whether you're in a dungeon,
+-- raid or battleground. When the game won't say, nothing is left out.
+function F:PetOut()
+    if type(UnitExists) ~= "function" then return false end
+    local out = UnitExists("pet")
+    return Open(out) and out and true or false
+end
+
+function F:Inside()
+    if type(IsInInstance) ~= "function" then return true end
+    local inside = IsInInstance()
+    if not Open(inside) then return true end
+    return inside and true or false
+end
+
+-- The buffs on a Buffs bar left off it now (by name, true each): those
+-- ticked Hide with my pet while your pet is out, and those ticked Only in
+-- instances while you're outside one. Then a word for why, kept as the bar
+-- is laid out, so it's laid out again only when that changes (Bars.lua
+-- B:AwayChanged). The game is asked only while one is ticked.
+function F:Away(key)
+    local away = {}
+    if ns.BAR_KIND[key] ~= "buff" then return away, "" end
+    local pet = ns.Ticked("hideWithPet", key) and self:PetOut()
+    local outside = ns.Ticked("onlyInInstances", key) and not self:Inside()
+    if pet then
+        for name in pairs(ns.HideWithPet(key)) do away[name] = true end
+    end
+    if outside then
+        for name in pairs(ns.OnlyInInstances(key)) do away[name] = true end
+    end
+    return away, (pet and "pet" or "") .. (outside and " outside" or "")
+end
+
 -- Every entry keeping a spot of its own, greyed while missing: with missing
 -- ones greyed, and not with Only show missing, whose spots come and go.
 function F:Fixed(data)
@@ -1255,8 +1291,9 @@ function F:PaintEnchants(bar)
             Fit(parts, across, holder.showTimer ~= false, holder.look,
                 packed and ns.IconHeight(bar.data, across) or holder.high)
             -- Warn at, on a hand entry: its countdown red from its seconds
-            -- left, as an aura's is. (Not yet on a named enchant's: parked.)
-            Style:WarnText(parts.cooldown, ids.hands and bar.warns[i] or nil)
+            -- left, as an aura's is (and Colour by time left with it). (Not
+            -- yet on a named enchant's: parked.)
+            Style:WarnText(parts.cooldown, ids.hands and bar.warns[i] or nil, ids.hands and bar.times[i] or nil)
             if on and ends then
                 parts.cooldown:SetCooldown(ends - total, total)
             else
@@ -1280,6 +1317,7 @@ function F:Create(bar)
     bar.groupParts, bar.names, bar.up, bar.spots, bar.only, bar.imbues = {}, {}, {}, {}, {}, {}
     bar.tickPaces, bar.tickShows, bar.groupTicks, bar.looks, bar.bare = {}, {}, {}, {}, {}
     bar.warns, bar.appliedWarns, bar.actives, bar.dims, bar.trinkets = {}, {}, {}, {}, {}
+    bar.times = {} -- Colour by time left: each entry's colours, as kept (F:Layout)
     for i = 1, ns.BUFF_SLOTS do
         local holder = CreateFrame("Frame", nil, bar)
         holder:EnableMouse(false)
@@ -1637,7 +1675,7 @@ function F:Layout(bar, data)
     local counts = ns.BAR_KIND[bar.key] == "debuff" and ns.CountTicks(bar.key) or {}
     -- Only when missing: the Buffs bar's, and not with Only show missing.
     local flags = self:Flagged(bar.key, data) and ns.OnlyWhenMissing(bar.key) or {}
-    local warns, dims = ns.WarnAt(bar.key), ns.DimUntilWarn(bar.key)
+    local warns, dims, times = ns.WarnAt(bar.key), ns.DimUntilWarn(bar.key), ns.TimeColours(bar.key)
     -- Glow while active: a Buffs or Debuffs bar's own.
     local actives = ns.AURA_BARS[bar.key] and ns.GlowActive(bar.key) or {}
     -- A packed bar's slots sit in its container, scaled with the packed
@@ -1657,6 +1695,11 @@ function F:Layout(bar, data)
     -- no room left is noted too (crowded). Else the list showing.
     local units, forms, slotOf, crowded = ns.Bars:Units(bar.key), nil, {}, {}
     if self:Follows(bar.key, data) then units, forms = ns.Bars:FormUnits(bar.key) end
+    -- Hide with my pet and Only in instances: the buffs ticked to be left
+    -- off now, as another character's are (the rest of an icon joined to
+    -- one still shows), and why, so the bar is laid out again as that changes.
+    local away
+    away, bar.awayState = self:Away(bar.key)
     for _, group in ipairs(units) do
         local ids, entry, picked, glow, yours, only = {}, nil, nil, false, {}, false
         local active = false -- (any of yours in it ticked Glow while active)
@@ -1670,7 +1713,7 @@ function F:Layout(bar, data)
         local enchants, allEnchants, named = {}, weapons, false
         for _, name in ipairs(group) do
             local found = ns.Spells:Find(name)
-            if found and found.ids and ns.Spells:ForMe(name, bar.key) then
+            if found and found.ids and ns.Spells:ForMe(name, bar.key) and not away[name] then
                 entry = entry or found
                 if picks[name] and not picked then picked = found end -- the first picked, as B:Picked
                 glow = glow or glows[name] == true
@@ -1749,11 +1792,15 @@ function F:Layout(bar, data)
             bar.actives[count] = active and not (only or self:OnlyMissing(data) or bar.imbues[count]) or nil
             -- Warn at: the first of yours with one, unless it shows only
             -- while it's missing (it has no icon while it's up).
-            local warn
+            -- And Colour by time left the same way: the first of yours with
+            -- it (its own Warn at still wins: Style.lua S:TimerText).
+            local warn, colours
             for _, name in ipairs(yours) do
                 warn = warn or warns[name]
+                colours = colours or times[name]
             end
             bar.warns[count] = not (only or self:OnlyMissing(data)) and warn or nil
+            bar.times[count] = not (only or self:OnlyMissing(data)) and colours or nil
             -- Dim until Warn at: the icon art to dim it with (its entry's),
             -- while it warns; not on a weapon enchant's own spot (no aura's).
             bar.dims[count] = dim and bar.warns[count] and not bar.imbues[count] and entry.icon or nil
@@ -1765,6 +1812,7 @@ function F:Layout(bar, data)
         bar.slotIDs[i], bar.names[i], bar.tickPaces[i], bar.tickShows[i], bar.only[i] = nil, nil, nil, nil, nil
         bar.looks[i], bar.holders[i].look, bar.warns[i], bar.holders[i].ownSize = nil, nil, nil, nil
         bar.imbues[i], bar.bare[i], bar.actives[i], bar.dims[i], bar.trinkets[i] = nil, nil, nil, nil, nil
+        bar.times[i] = nil
     end
     for _, parts in ipairs(bar.groupParts) do
         parts.cooldown:SetHideCountdownNumbers(not data.showTimer)
@@ -2146,12 +2194,13 @@ end
 -- no spot. Out of combat only (F:Apply); each only sent as it changes, and a
 -- rule the game turns down leaves no edge. A dimmed icon the game turns down
 -- (the edge alone taken) leaves the edge alone, as without it (said in
--- /ccm debug: F:WarnReport).
+-- /ccm debug: F:WarnReport). Colour by time left goes on the same
+-- countdowns with it (Style.lua S:WarnText: Warn at wins).
 function F:Warns(bar)
     local packed = self:Packed(bar.data)
     for i = 1, ns.BUFF_SLOTS do
         local holder, warn = bar.holders[i], bar.warns[i]
-        if holder.slot then Style:WarnText(holder.slot.cooldown, warn) end
+        if holder.slot then Style:WarnText(holder.slot.cooldown, warn, bar.times[i]) end
         local mark = holder.mark
         if mark then
             local seconds = not packed and warn or nil
@@ -2195,7 +2244,7 @@ function F:Warns(bar)
         end
     end
     for _, parts in ipairs(bar.groupParts) do
-        if parts.index then Style:WarnText(parts.cooldown, bar.warns[parts.index]) end
+        if parts.index then Style:WarnText(parts.cooldown, bar.warns[parts.index], bar.times[parts.index]) end
     end
 end
 
