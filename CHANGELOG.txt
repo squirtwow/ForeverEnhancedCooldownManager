@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.10.21
+
+### Added
+- Cooldown only: one icon can show its cooldown instead of its buff or debuff time (click its icon).
+- Buffs pages find consumables by name: type elixir, flask or mongoose in the add box.
+- Light up for anyone's debuffs: a Debuffs bar can light its icons for the debuffs anyone cast, not just yours.
+- In colour: missing buffs can show in colour instead of grey (Buffs page).
+
+### Fixed
+- Chastise shows on a shadow priest's bars, and Boot Knife counts as a rogue debuff.
+- Reactive abilities light up on clients in other languages.
+
 ## 1.10.20
 
 ### Added

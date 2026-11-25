@@ -1854,6 +1854,23 @@ end)()
     Equal(tostring(bp.options.keepGreyed:IsVisible()) .. " " .. tostring(bp.options.showSelf:IsVisible()) .. " "
         .. tostring(bp.options.showNames:IsVisible()) .. " " .. tostring(bp.options.keepGreyed.usable),
         "true true true true", "(Keep them greyed with no target, usable, beside Show your debuffs on you, checked there)")
+    -- Light up for anyone's debuffs (a player's idea, 23 Nov 2026): the
+    -- Debuffs page's own tick, in a row of its own under Keep them greyed
+    -- with no target, off, saying what it does; not on a Buffs page.
+    local anyone = bp.optionsArea.ticks.anyCaster
+    local anyNote = type(anyone.hint) == "function" and anyone.hint(anyone) or tostring(anyone.hint)
+    local anyAt = S[anyone].points[1]
+    anyone:Click()
+    Equal(table.concat({ tostring(anyone:IsVisible()), S[anyone.text].text, tostring(ns.BarData("debuff").anyCaster),
+        tostring(anyAt[1]), tostring(anyAt[2]), tostring(anyAt[3]) }, " ") .. " | " .. anyNote,
+        "true Light up for anyone's debuffs true TOPLEFT 0 -129 | Each icon lights up while its debuff is on your target, whoever"
+        .. " cast it, so another player's counts too. Unticked, only the ones you cast count. A change in a fight shows"
+        .. " once it ends.", "(Light up for anyone's debuffs on the Debuffs page, a row of its own: a click ticks it, saying what it does)")
+    Check("debuff", "debuff with anyone's debuffs")
+    ns.Bars:SetOption("debuff", "anyCaster", false)
+    w:Select("buff")
+    Equal(tostring(anyone:IsVisible()), "false", "(not on a Buffs page)")
+    w:Select("debuff")
     -- Group one-at-a-time spells: the General page's, beside Use my bars,
     -- ticked by default, saying what it does.
     w:Select("general")
@@ -1893,6 +1910,10 @@ end)()
         tostring(opts.tickChoice:IsVisible()), tostring(opts.tickFrom:GetChecked()), opts.tickAt.selected, S[opts.tickSize.value].text,
         tostring(opts.tickEdge:IsVisible()), tostring(opts.tickEdge:GetChecked()) }, " "),
         "true true true true true TOPLEFT 100% true false", "(they show: top left, from 1, at 100%, not on the edge)")
+    -- And Light up for anyone's debuffs under their two rows.
+    local countAt = S[bp.optionsArea.ticks.anyCaster].points[1]
+    Equal(tostring(countAt[1]) .. " " .. tostring(countAt[2]) .. " " .. tostring(countAt[3]), "TOPLEFT 0 -173",
+        "(Light up for anyone's debuffs moves under the tick count's two rows)")
     opts.tickEdge:Click()
     Equal(tostring(ns.BarData("debuff").tickEdge) .. " | " .. Note(opts.tickEdge), "true | Centres the count on the icon's edge at its"
         .. " spot, half outside, so it covers less of the icon. Not for the centre.", "(On the edge ticks, saying what it does)")
@@ -1994,6 +2015,27 @@ end)()
         .. " like a Seal that fell off.", "(with Show missing buffs greyed: usable, saying what it does)")
     thorns.glow:Click()
     Equal(tostring(B:GlowsMissing("buff", "Thorns")), "true", "(ticked)")
+    -- In colour (a player's ask, 24 Nov 2026): the Buffs page's own tick,
+    -- beside Show spell names, usable with missing buffs greyed or Only show
+    -- missing, greyed with why without either.
+    local colour = bp.optionsArea.ticks.missingColour
+    colour:Click()
+    Equal(tostring(colour:IsVisible()) .. " " .. tostring(colour.usable) .. " " .. tostring(ns.BarData("buff").missingColour)
+        .. " | " .. Note(colour), "true true true | Missing buffs show in colour in their spots instead of grey, still faded.",
+        "(In colour on the Buffs page: a click ticks it, saying what it does)")
+    B:SetOption("buff", "missingColour", false)
+    B:SetOption("buff", "showMissing", false)
+    w:Refresh()
+    colour:Click()
+    Equal(tostring(colour.usable) .. " " .. tostring(ns.BarData("buff").missingColour) .. " | " .. Note(colour), "false false | Tick Show"
+        .. " missing buffs greyed or Only show missing first: this shows those spots in colour.",
+        "(without either tick: greyed, saying what it needs, and a click does nothing)")
+    B:SetOption("buff", "onlyMissing", true)
+    w:Refresh()
+    Equal(tostring(colour.usable), "true", "(usable with Only show missing too)")
+    B:SetOption("buff", "onlyMissing", false)
+    B:SetOption("buff", "showMissing", true)
+    w:Refresh()
     B:SetGlowMissing("buff", "Thorns", false)
     B:SetAura("buff", "Thorns", false)
     B:SetOption("buff", "showMissing", missing)
@@ -4607,6 +4649,168 @@ end)()
         .. " icon shows the one you laid last. | true", "a trap showing the last one laid: Count ticks says it counts its own trap alone")
     Check(panel, "Cooldowns, a trap counting its ticks")
     Equal(table.concat(found, " | "), "", "every piece inside its panel or page and none on another, under the title bar, clear of the footer")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Cooldown only in a Cooldowns or Utility spell's own panel ----------------------------------------
+-- (Squirt, 25 Nov 2026: he put Stormstrike on a Cooldowns bar showing buff
+-- and debuff times and its icon showed its debuff's 12 seconds in place of
+-- its 8 second cooldown.) A spell's tray icon on the Cooldowns or Utility
+-- page (Cooldowns 2's too) opens its panel with the tick a row above Count
+-- ticks, off at first, saying what it does, not marked experimental, and
+-- fitting. It's only there where it can do something: a spell's panel on a
+-- bar showing buff and debuff times, not an item's (an item puts no aura on
+-- anyone), not the Debuffs page's, and not while the bar shows only what you
+-- can't afford. Ticked on a bar that then stops showing the times it stays,
+-- so it can always be unticked, and says the bar shows none. Ticked, Count
+-- ticks is greyed with a hover saying why (that count shows only while the
+-- debuff's time does); with both ticked, as a profile from before can have
+-- them and as ticking Count ticks first leaves them, both stay as the player
+-- left them, Count ticks is still clickable so it can be undone, and the
+-- tick count's own rows stay under it, below both ticks.
+
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true,
+        bars = { cd = { spells = { "Moonfire", "Wrath", "item:5512" } } } })
+    for _, timer in ipairs(timers) do timer() end
+    local B = ns.Bars
+    table.insert(book[2].items, { name = "Stormstrike", subName = "Rank 1", spellID = 17364, iconID = 132314 })
+    ns.Spells:Stale()
+    B:Assign("Stormstrike", "cd")
+    B:SetAura("debuff", "Moonfire", true)
+    SlashCmdList.FECM("")
+    local w = FECMFrame
+    w:Select("cd")
+    local bp = w.pages.bar
+    local function Note(control) return type(control.hint) == "function" and control.hint(control) or tostring(control.hint) end
+    local function Fits(text) return Fit.Wide(text, "GameFontHighlightSmall") <= 2 * S[w.note].width end
+    local function Y(region) return S[region].points[1][3] end
+    local found = {}
+    local function Check(panel, label)
+        local problems = Fit.Problems(panel.dialog)
+        local _, top, _, bottom = Fit.Rect(panel.dialog)
+        if top < 42 or bottom > 560 - 28 then problems = problems .. ("the panel at %.1f to %.1f, over the title bar or the footer"):format(top, bottom) end
+        if problems ~= "" then found[#found + 1] = label .. ": " .. problems end
+    end
+    -- A spell's panel, opened from its tray icon.
+    local function Open(name)
+        for _, icon in ipairs(bp.icons) do
+            if icon:IsVisible() and icon.spellName == name then icon:Click() end
+        end
+        return w.spellPanel
+    end
+    local function Shown(panel)
+        return S[panel.title].text .. " " .. tostring(panel.coolOnly:IsVisible()) .. " " .. tostring(panel.coolOnly:GetChecked())
+    end
+    local COOL = "Shows this spell's cooldown, not its buff or debuff time, so a longer debuff can't cover it. The rest of the bar"
+        .. " shows theirs. A change in a fight shows once it ends."
+    local NONE = "This bar shows no buff or debuff time, so this icon shows its cooldown already."
+    local CLASH = "Not with Cooldown only: the count shows while this icon shows its debuff's time, and Cooldown only leaves that out."
+
+    -- The bar not showing buff and debuff times: nothing to leave out, so no
+    -- tick in Moonfire's panel.
+    local panel = Open("Moonfire")
+    Equal(Shown(panel) .. " " .. tostring(ns.BarData("cd").showAuras), "MOONFIRE false false false",
+        "the bar not showing buff and debuff times: no Cooldown only in its panel")
+    Check(panel, "Cooldowns, no times")
+    -- With them shown: the tick there, off, a row above Count ticks, saying
+    -- what it does within two lines of the footer.
+    B:SetOption("cd", "showAuras", true)
+    panel:Refresh()
+    Equal(Shown(panel) .. " | " .. S[panel.coolOnly.text].text .. " | " .. tostring(Y(panel.coolOnly) - Y(panel.ticks)) .. " | "
+        .. Note(panel.coolOnly) .. " | " .. tostring(Fits(Note(panel.coolOnly))),
+        "MOONFIRE true false | Cooldown only | 26 | " .. COOL .. " | true",
+        "with the times shown: the tick there, off, a row above Count ticks, saying what it does and fitting")
+    Check(panel, "Cooldowns, Cooldown only off")
+    -- Ticked: kept for that bar and entry, and Count ticks greyed with its
+    -- hover saying why.
+    panel.coolOnly:Click()
+    Equal(tostring(B:CooldownOnly("cd", "Moonfire")) .. " " .. tostring(panel.coolOnly:GetChecked()) .. " | "
+        .. tostring(panel.ticks:IsVisible()) .. " " .. tostring(panel.ticks:GetChecked()) .. " " .. tostring(panel.ticks.usable)
+        .. " | " .. Note(panel.ticks) .. " | " .. tostring(Fits(Note(panel.ticks))),
+        "true true | true false false | " .. CLASH .. " | true",
+        "ticked: kept, and Count ticks greyed with its hover saying why it can't count")
+    Check(panel, "Cooldowns, Cooldown only ticked")
+    -- The bar's times turned off while it's ticked: the tick stays, so it can
+    -- be unticked, and says the bar shows none; Count ticks points at the
+    -- bar's own tick again.
+    B:SetOption("cd", "showAuras", false)
+    panel:Refresh()
+    Equal(Shown(panel) .. " | " .. Note(panel.coolOnly) .. " | " .. Note(panel.ticks), "MOONFIRE true true | " .. NONE
+        .. " | Tick Show buff and debuff time first: the count shows while this icon shows its debuff's time on your target.",
+        "the bar's times off while it's ticked: the tick stays so it can be unticked, saying the bar shows none")
+    Check(panel, "Cooldowns, ticked with no times")
+    -- Unticked there: gone from the panel again, nothing kept.
+    panel.coolOnly:Click()
+    Equal(Shown(panel) .. " " .. tostring(ns.ProfileLists().cooldownOnly), "MOONFIRE false false nil",
+        "unticked: gone from the panel again, and nothing kept")
+    -- Show only when I can't afford it: the bar shows no times then either,
+    -- so no tick.
+    B:SetOption("cd", "showAuras", true)
+    B:SetOption("cd", "onlyShort", true)
+    panel:Refresh()
+    local short = Shown(panel)
+    B:SetOption("cd", "onlyShort", false)
+    panel:Refresh()
+    -- Stormstrike, whose debuff can't be counted (no pace in the game data):
+    -- the tick there on its own, with no Count ticks row. Wrath, with no
+    -- debuff of its own, has it too: nothing is left out until it's ticked.
+    local storm = Open("Stormstrike")
+    local stance = Shown(storm) .. " " .. tostring(storm.ticks:IsVisible())
+    local wrath = Open("Wrath")
+    Equal(short .. " | " .. stance .. " | " .. Shown(wrath) .. " " .. tostring(wrath.ticks:IsVisible()),
+        "MOONFIRE false false | STORMSTRIKE true false false | WRATH true false false",
+        "with Show only when I can't afford it: no tick; Stormstrike and Wrath: the tick with no Count ticks row")
+    Check(storm, "Cooldowns, Stormstrike")
+    -- An item's panel has none, and nor has the same spell's on the Debuffs
+    -- page (its icons show their own debuffs' times, and have no cooldown to
+    -- show instead).
+    bp.icons[3]:Click()
+    local item = S[panel.title].text .. " " .. tostring(panel.coolOnly:IsVisible())
+    w:Select("debuff")
+    bp.icons[1]:Click()
+    Equal(item .. " | " .. Shown(panel), "ITEM 5512 false | MOONFIRE false false",
+        "an item's panel has none, and nor has the Debuffs page's")
+    Check(panel, "Debuffs, Moonfire")
+
+    -- Cooldowns 2, an extra bar: the tick there too, kept for that bar alone.
+    B:AddBar("cd")
+    B:Assign("Moonfire", "cd2")
+    B:SetOption("cd2", "showAuras", true)
+    w:Select("cd2")
+    local two = Open("Moonfire")
+    two.coolOnly:Click()
+    Equal(Shown(two) .. " " .. tostring(B:CooldownOnly("cd2", "Moonfire")) .. " " .. tostring(B:CooldownOnly("cd", "Moonfire")),
+        "MOONFIRE true true true false", "on Cooldowns 2 too, kept for that bar alone")
+    Check(two, "Cooldowns 2, ticked")
+    B:SetCooldownOnly("cd2", "Moonfire", false)
+    B:Assign("Moonfire", "cd")
+    B:RemoveBar("cd2")
+
+    -- Both ticked, as a profile from before can have them and as ticking
+    -- Count ticks first and Cooldown only after leaves them: both stay as the
+    -- player left them, Count ticks still clickable so it can be undone, its
+    -- hover saying why it isn't counting, and the tick count's own rows under
+    -- Count ticks, below both ticks (nothing between them).
+    w:Select("cd")
+    B:SetCountTicks("cd", "Moonfire", true)
+    B:SetCooldownOnly("cd", "Moonfire", true)
+    panel = Open("Moonfire")
+    local look = panel.tickLook
+    Equal(tostring(panel.ticks:GetChecked()) .. " " .. tostring(panel.ticks.usable) .. " " .. tostring(panel.coolOnly:GetChecked())
+        .. " | " .. Note(panel.ticks) .. " | " .. tostring(Y(panel.coolOnly) - Y(panel.ticks)) .. " "
+        .. tostring(Y(panel.ticks) > Y(look.at)) .. " " .. tostring(Y(look.at) > Y(look.size)),
+        "true true true | " .. CLASH .. " | 26 true true",
+        "both ticked: both as the player left them, Count ticks still clickable, and its rows under it, below both ticks")
+    Check(panel, "Cooldowns, both ticked")
+    -- Cooldown only unticked: Count ticks counts again, its hover its own.
+    panel.coolOnly:Click()
+    Equal(tostring(B:CountsTicks("cd", "Moonfire")) .. " " .. tostring(panel.ticks.usable) .. " | " .. Note(panel.ticks),
+        "true true | While this icon shows its debuff's time on your target, counts its ticks there, every 3 seconds for Moonfire,"
+        .. " starting again when you reapply it.",
+        "unticked: Count ticks counts again, saying what it does")
+    Check(panel, "Cooldowns, counting again")
+    Equal(table.concat(found, " | "), "", "every piece inside its panel and none on another, under the title bar, clear of the footer")
     Equal(#printed, 0, "no errors")
 end)()
 

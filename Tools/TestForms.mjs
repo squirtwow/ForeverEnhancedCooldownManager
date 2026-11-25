@@ -1,7 +1,7 @@
 // Forms.lua is generated, never edited by hand: rebuilding it from the game's
-// tables (Tools/GenerateForms.mjs, build 1.60.1.70938) must give the file
+// tables (Tools/GenerateForms.mjs, build 1.60.1.71091) must give the file
 // byte for byte. Skipped when the tables aren't on this computer
-// (C:\AddonDev\_ForeverData\changes-2026-11-13\wago-70938). What the file says is also
+// (C:\AddonDev\_ForeverData\changes-2026-11-25\wago-71091). What the file says is also
 // checked straight from it (no tables needed): the forms, each one's list on
 // a bar that swaps with your form (Dire Bear Form's is Bear Form's) and the
 // spells that put you in each, and the rule each
@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const cache = join(root, '..', '_ForeverData', 'changes-2026-11-13', 'wago-70938');
+const cache = join(root, '..', '_ForeverData', 'changes-2026-11-25', 'wago-71091');
 const TABLES = ['SpellName', 'Spell', 'SpellMisc', 'SpellShapeshift', 'SpellShapeshiftForm', 'SpellAuraRestrictions', 'SpellEffect',
   'SkillLine', 'SkillLineAbility', 'TraitDefinition'];
 const text = readFileSync(join(root, 'Forms.lua'), 'utf8');
@@ -124,6 +124,7 @@ test('each spell\'s rule, from the game\'s own data', () => {
     2050: '0', 8092: 'any', 17: 'any', // Lesser Heal; Mind Blast, Power Word: Shield
     528: 'any', 552: 'any', // Cure Disease, Abolish Disease: in Shadowform too since build 70753 (Blizzard's notes agree)
     6346: 'any', 1277455: 'any', // Fear Ward (build 70888) and Confounding Flash (build 70938): in Shadowform too
+    1277331: 'any', 1277335: 'any', // Chastise, first and last rank: in Shadowform too since build 71091
     1240720: '0', 1240721: '0', 1316995: '0', // Penance: not with Shadowform's aura on you (SpellAuraRestrictions)
     331: '0', 403: '0', // Healing Wave, Lightning Bolt: not as a wolf
     17364: '0', 16188: '0', // Stormstrike, Nature's Swiftness: on a shaman tab's line with no class mask, not as a wolf

@@ -313,9 +313,12 @@ end
 -- poison's debuff on the target, a totem's buff on everyone near it:
 -- ns.SPELL_AURAS, and by the aura's name ns.NAME_AURAS) carries that too,
 -- and an aura that's one buff in several IDs carries them all (a totem
--- buff's other ranks, Well Fed from another food). With no name, just the
--- IDs known and their auras (a spell pinned to one ID). A name a later
--- build changed counts as the new one too.
+-- buff's other ranks, Well Fed from another food). A consumable's buff
+-- carries the same buff from the other items of its name (ns.NAME_AURAS
+-- again: the greater potion's Fire Protection beside the potion's, every
+-- Scroll of Agility rank's Agility). With no name, just the IDs known and
+-- their auras (a spell pinned to one ID). A name a later build changed
+-- counts as the new one too.
 local function BuffIDs(name, known)
     local ids, seen = {}, {}
     local function Add(list)
@@ -1303,6 +1306,29 @@ local function AuraNames()
     return found
 end
 
+-- The buff a consumable puts on you (Elixir of the Mongoose, Flask of the
+-- Titans, Rallying Cry of the Dragonslayer), by its name in lower case:
+-- ns.ITEM_BUFFS, from the game data, holds each name with the spell ID of the
+-- buff it puts on. No one learns one as a spell, and the game finds none by a
+-- name while it isn't on you, so the add box looks them up here, as it does
+-- the food buffs (AuraNames). Only the Buffs bar takes one (Bars.lua Vet).
+-- Made the first time it's needed, and again if the list itself changes: the
+-- add box reads it on every keystroke.
+local buffNames, buffNamesFrom = nil, nil
+local function ItemBuffs()
+    if buffNames and buffNamesFrom == ns.ITEM_BUFFS then return buffNames end
+    local found = {}
+    for name in pairs(ns.ITEM_BUFFS or {}) do
+        local lower = name:lower()
+        -- Two names the same but for their capitals (none in the data now):
+        -- the first alphabetically, so the same one is found every time.
+        if not found[lower] or name < found[lower] then found[lower] = name end
+    end
+    -- Nothing in the list yet: try again next time rather than keep an empty one.
+    if next(found) then buffNames, buffNamesFrom = found, ns.ITEM_BUFFS end
+    return found
+end
+
 -- Whether an entry on a bar is for you. One profile can serve every class and
 -- race: each character passes over what only other characters can have, which
 -- stays in the profile for them. Anything in your own spellbook, procs or bags
@@ -1503,8 +1529,10 @@ end
 -- data, shows the icon of its first ID your class has (iconID), else its
 -- first ID's: a name classes share under IDs of their own (a rogue's Poised
 -- and a druid's, a druid's Claw and a pet's) can have an icon for each
--- (ns.ID_CLASSES), and a first rank is the one you'd learn first.
-function S:Suggest(text, limit)
+-- (ns.ID_CLASSES), and a first rank is the one you'd learn first. With the
+-- bar they're for, the names only another bar takes are left out of the
+-- search (the consumable buffs, which the Buffs bar alone takes).
+function S:Suggest(text, limit, bar)
     text = type(text) == "string" and text:lower():match("^%s*(.-)%s*$") or ""
     if #text < 2 then return {} end
     Ready()
@@ -1536,6 +1564,16 @@ function S:Suggest(text, limit)
     for name, id in pairs(ns.IMBUE_SPELLS or {}) do Consider(name, nil, id, false) end
     -- Food buffs no one learns (Well Fed), for the Buffs bar too.
     for name, id in pairs(AuraNames()) do Consider(name, nil, id, false) end
+    -- The buff a consumable puts on you (type "elixir" or "mongoose"): no list
+    -- of yours has one, as nobody casts it. Its icon is the buff's own
+    -- (spellID, BarPage.lua). Only for the Buffs bar, which is the only one
+    -- that takes one (Bars.lua Vet): there are hundreds of them, enough for a
+    -- short search to crowd out the spells another bar's page could show, and
+    -- that page would look up every one of them to turn it away. With no bar
+    -- given, they're all offered.
+    if bar == nil or (ns.BAR_KIND and ns.BAR_KIND[bar]) == "buff" then
+        for name, id in pairs(ns.ITEM_BUFFS or {}) do Consider(name, nil, id, false) end
+    end
     -- Passives with an aura of their own too (Plainsrunning's speed buff): the
     -- spellbook passes over them, and that aura can go on the Buffs or Debuffs
     -- bar. Where one can't go, the caller turns it away (S:AddNote,
@@ -1580,6 +1618,14 @@ function S:Resolve(text, bar)
     for key, entry in pairs(byKey) do
         if entry.name:lower() == lower then return key, nil, PetJoin(entry, bar) end
     end
+    -- A consumable's buff (Elixir of the Mongoose): by the buff's own ID from
+    -- the game data, as the game finds no name for a buff that isn't on you.
+    -- One lookup, and ahead of the lists below, because the add box resolves
+    -- every name it offers again on every keystroke (BarPage.lua) and no name
+    -- here is in any of those lists: the game data leaves out every name they
+    -- hold (Tools/GenerateRanks.mjs), so none of them would answer first.
+    local buff = ItemBuffs()[lower]
+    if buff then return buff, { ns.ITEM_BUFFS[buff] } end
     for name, ids in pairs(ns.RANKS or {}) do
         if name:lower() == lower then
             -- A pet's ability goes by the pet's own spell (PetSpells),

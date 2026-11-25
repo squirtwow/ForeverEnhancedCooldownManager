@@ -1417,13 +1417,14 @@ function H.Sane(ns, shared)
             if v ~= true or not listed[name] or not trapNames[name:match("^[^@#]+")] then return "a trap " .. tostring(name) end
         end
     end
-    -- Each entry's own ticks: only the eight carried, each on a bar of a kind
+    -- Each entry's own ticks: only the nine carried, each on a bar of a kind
     -- that has it, names on that bar's lists (a form's too), true each;
     -- Count ticks only for one that ticks, Others only for a hand's enchant.
     if type(shared.options) ~= "table" then return "options" end
     local kinds = { countTicks = { debuff = true, cd = true, util = true }, glowMissing = { buff = true, debuff = true },
         glowActive = { buff = true, debuff = true }, handOthers = { buff = true }, dimUntilWarn = { buff = true, debuff = true },
-        missingPicks = { buff = true, debuff = true }, hideWithPet = { buff = true }, onlyInInstances = { buff = true } }
+        missingPicks = { buff = true, debuff = true }, hideWithPet = { buff = true }, onlyInInstances = { buff = true },
+        cooldownOnly = { cd = true, util = true } }
     for field, sets in pairs(shared.options) do
         if not kinds[field] or type(sets) ~= "table" then return "an option " .. tostring(field) end
         for key, set in pairs(sets) do
@@ -1469,6 +1470,10 @@ function H.Sane(ns, shared)
             -- Show only when I can't afford it: the same.
             if field == "onlyShort" and (type(v) ~= "boolean" or key:find("^buff") or key:find("^debuff")) then
                 return "show only when I can't afford it on " .. key
+            end
+            -- Light up for anyone's debuffs: a Debuffs bar's, true or false.
+            if field == "anyCaster" and (type(v) ~= "boolean" or not key:find("^debuff")) then
+                return "anyone's debuffs on " .. key
             end
         end
     end
@@ -1616,7 +1621,7 @@ do
     end
     Equal(table.concat(fields, ","), "size,heightPct,spacing,perRow,whenReady,onCooldown,dimUnusable,dimOpacity,outOfCombat,showMissing,"
         .. "onlyMissing,greyedNoTarget,showNames,showTimer,showAuras,showGCD,selfDebuffs,grow,wrap,point,x,y,tickAt,tickSize,tickColour,"
-        .. "tickFrom,tickEdge,tickCustom,glowProcs,onlyShort,keepColour,hidePet,hideOutside,missingColour,debuffKeys",
+        .. "tickFrom,tickEdge,tickCustom,glowProcs,onlyShort,keepColour,hidePet,hideOutside,missingColour,debuffKeys,anyCaster",
         "each bar setting shared has its own check, and only those; Swap with my form isn't one (it's the profile's)")
     -- Every bar setting a bar keeps is shared (ns.BarData), Glow for more
     -- procs too since 15 Nov 2026: none left behind.
@@ -2178,6 +2183,85 @@ do
     Equal(#printed, 0, "no errors")
 end
 
+-- Cooldown only on a Cooldowns or Utility spell in profiles and strings ------------------------------
+-- (Squirt, 25 Nov 2026: Stormstrike's icon showed its debuff's 12 seconds in
+-- place of its 8 second cooldown.) Kept with the profile as the other per-
+-- entry ticks are (bar -> name -> true): at load only names on a Cooldowns
+-- or Utility bar's lists (a form's too), true each, so a profile from before
+-- it loads as it was; copied with Copy, sharing nothing; and carried in a
+-- shared string under C (every small letter was taken by then), so a setup
+-- posted for a class shows what its screenshots do. A string from 1.10.20 or
+-- before has none; odd ones are left out and counted. A letter must never
+-- change once strings are out, so every tick's letter is pinned here.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local saved = { notesSeen = "dev", helpSeen = true, useBars = true, chars = { ["Player-1-0001"] = "Mine" }, profiles = {
+        Mine = { cd = { "Moonfire", "Wrath" }, util = { "Rake" }, buff = {}, debuff = { "Moonfire" },
+            swapForm = { cd = true }, forms = { [5] = { cd = { "Lacerate" } } },
+            -- Lacerate is on Bear Form's Cooldowns list only: its tick is kept too.
+            cooldownOnly = { cd = { Moonfire = true, Lacerate = true, Wrath = "yes", Gone = true }, util = { Rake = true },
+                debuff = { Moonfire = true } } } } }
+    local ns = Start(saved)
+    local P, B = ns.ProfileShare, ns.Bars
+    local db = ForeverEnhancedCooldownManagerDB
+    -- Every tick's letter, so a letter can't quietly change or be used twice.
+    local codes = {}
+    for _, tick in ipairs(ns.SHARE_TICKS) do codes[#codes + 1] = tick.code .. "=" .. tick.field end
+    Equal(table.concat(codes, " "), "k=countTicks o=glowMissing v=glowActive h=handOthers d=dimUntilWarn e=missingPicks"
+        .. " u=hideWithPet b=onlyInInstances C=cooldownOnly", "each entry's own ticks, each under the letter it has always had")
+    local MINE = '{["cd"]={["Lacerate"]=true,["Moonfire"]=true},["util"]={["Rake"]=true}}'
+    Equal(H.Text(db.profiles.Mine.cooldownOnly) .. " | " .. tostring(B:CooldownOnly("cd", "Moonfire")) .. " "
+        .. tostring(B:CooldownOnly("cd", "Wrath")) .. " " .. tostring(B:CooldownOnly("debuff", "Moonfire")), MINE .. " | true false false",
+        "loaded: only names on a Cooldowns or Utility bar's lists (a form's too), true each; the Debuffs bar's dropped")
+    -- Copy: the new profile has it too, sharing no table with yours.
+    ns.CopyProfile("Copy")
+    local copy, mine = db.profiles.Copy.cooldownOnly, db.profiles.Mine.cooldownOnly
+    Equal(ns.ProfileName() .. " " .. H.Text(copy) .. " " .. tostring(copy ~= mine and copy.cd ~= mine.cd), "Copy " .. MINE .. " true",
+        "Copy carries it, sharing nothing")
+    B:SetCooldownOnly("cd", "Moonfire", false)
+    Equal(tostring(copy.cd.Moonfire) .. " " .. tostring(mine.cd.Moonfire), "nil true", "unticked on the copy: yours as it was")
+    -- In a string: carried under C, counted among its icon options, and the
+    -- string changes with the tick.
+    ns.UseProfile("Mine")
+    local ticked = P.Export()
+    B:SetCooldownOnly("cd", "Moonfire", false)
+    B:SetCooldownOnly("util", "Rake", false)
+    local plain = P.Export()
+    B:SetCooldownOnly("cd", "Moonfire", true)
+    B:SetCooldownOnly("util", "Rake", true)
+    local shared = P.Read(ticked)
+    Equal(table.concat({ tostring(ticked == plain), H.Text(P.Read(plain).options.cooldownOnly), H.Text(shared.options.cooldownOnly),
+        H.Sane(ns, shared) .. "|" .. shared.skipped, P.Describe(shared) }, " | "),
+        'false | {["cd"]={["Lacerate"]=true}} | ' .. MINE .. " | |0 | Holds 4 bar entries, with icons for 1 form, 3 icon options"
+        .. " and its look and layout.",
+        "carried in the string and counted among its icon options; unticked, the two go from it (Bear Form's Lacerate stays)")
+    -- Imported: the new profile has it, yours is left as it was, and the same
+    -- string comes back out.
+    P.Import("Theirs", shared, true)
+    Equal(ns.ProfileName() .. " " .. tostring(B:CooldownOnly("cd", "Moonfire")) .. " " .. tostring(B:CooldownOnly("util", "Rake")) .. " "
+        .. tostring(B:CooldownOnly("cd", "Wrath")) .. " | " .. H.Text(db.profiles.Theirs.cooldownOnly) .. " | "
+        .. H.Text(db.profiles.Mine.cooldownOnly) .. " | " .. tostring(P.Export() == ticked),
+        "Theirs true true false | " .. MINE .. " | " .. MINE .. " | true",
+        "imported: the new profile has it, yours as it was, and the very same string back")
+    -- From before it, none; odd ones left out and counted: a name not on its
+    -- lists, not true, the Buffs and Debuffs bars (which have no cooldowns to
+    -- show instead), a bar it hasn't; not a table. An item's entry is kept,
+    -- and does nothing: an item puts no buff or debuff on anyone, so its icon
+    -- never showed a time to leave out.
+    local function Lists() return { cd = { "Moonfire", "Wrath", "item:118" }, util = { "Rake" }, buff = { "Rejuvenation" },
+        debuff = { "Moonfire" } } end
+    local old = P.Read(H.String({ a = "1.10.20", l = Lists() }))
+    local odd = P.Read(H.String({ l = Lists(), C = { cd = { Moonfire = true, Gone = true, Wrath = "yes", ["item:118"] = true },
+        util = { Rake = true }, buff = { Rejuvenation = true }, debuff = { Moonfire = true }, cd2 = { Moonfire = true } } }))
+    local wrong = P.Read(H.String({ l = Lists(), C = "Moonfire" }))
+    Equal(table.concat({ H.Text(old.options.cooldownOnly) .. " " .. old.skipped, H.Text(odd.options.cooldownOnly) .. " " .. odd.skipped
+        .. " " .. H.Sane(ns, odd), H.Text(wrong.options.cooldownOnly) .. " " .. wrong.skipped }, " | "),
+        '{} 0 | {["cd"]={["Moonfire"]=true,["item:118"]=true},["util"]={["Rake"]=true}} 5  | {} 1',
+        "from 1.10.20 or before: none, nothing left out; odd ones left out and counted; an item's kept and does nothing")
+    Equal(#printed, 0, "no errors")
+end
+
 -- Every icon option in strings ----------------------------------------------------------------------
 -- (Squirt, 15 Nov 2026: "yea add it", so a setup from the FECM Setups
 -- website looks and works as its screenshots.) Each entry's own ticks go
@@ -2733,6 +2817,81 @@ do
     local bad = P.Read(H.String({ l = Lists(), g = { s = {}, b = { debuff = { greyedNoTarget = "yes" } }, l = {}, k = {} } }))
     Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.debuff.greyedNoTarget), "|1 nil",
         "anything but true or false: left out, and counted")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Missing buffs in colour in strings -------------------------------------------------------------
+-- The Buffs bar's In colour (a player's ask, 24 Nov 2026) goes with the look
+-- and layout like the Debuffs bar's. A string from 1.10.20 or before (or
+-- with no version) says nothing of it, so yours stays; one made since that
+-- leaves it out has it off. On a cooldown bar, which has none, it's left out
+-- and counted.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:SetAura("buff", "Thorns", true)
+    B:SetOption("buff", "showMissing", true)
+    B:SetOption("buff", "missingColour", true)
+    local shared = P.Read(P.Export())
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. tostring(shared.setup.bars.buff.missingColour), "|0 true",
+        "out and back with the look: the Buffs bar's In colour carried")
+    local function Lists() return { cd = {}, util = {}, buff = { "Thorns" }, debuff = {} } end
+    local function Took(name, version)
+        B:SetOption("buff", "missingColour", true)
+        P.Import(name, P.Read(H.String({ a = version, l = Lists(), g = { s = {}, b = {}, l = {}, k = {} } })), true)
+        return tostring(ns.BarData("buff").missingColour)
+    end
+    Equal(Took("Old", "1.10.20") .. " " .. Took("None", nil) .. " " .. Took("New", "dev"), "true true false",
+        "from 1.10.20 or before yours stays; made since and left out: off")
+    local odd = P.Read(H.String({ a = "dev", l = Lists(), g = { s = {}, b = { cd = { missingColour = true } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped, "|1", "on a cooldown bar, which has none: left out and counted")
+    Equal(#printed, 0, "no errors")
+end
+
+-- Light up for anyone's debuffs in strings -------------------------------------------------------
+-- The Debuffs bar's tick (a player's idea, 23 Nov 2026) goes with the look
+-- and layout like its other settings, an extra Debuffs bar's too. A string
+-- from 1.10.20 or before (or with no version) says nothing of it, so yours
+-- stays; one made since that leaves it out has it off. On a Buffs or
+-- cooldown bar, which have none, it's left out and counted, and so is
+-- anything but true or false.
+
+do
+    character = { guid = "Player-1-0001", name = "Zriel", realm = "Zephras" }
+    local ns = Start({ notesSeen = "dev", helpSeen = true, useBars = true })
+    local P, B = ns.ProfileShare, ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    B:SetOption("debuff", "anyCaster", true)
+    local shared = P.Read(P.Export())
+    Equal(H.Sane(ns, shared) .. "|" .. shared.skipped .. " " .. tostring(shared.setup.bars.debuff.anyCaster) .. " "
+        .. tostring(shared.setup.bars.buff.anyCaster), "|0 true nil",
+        "out and back with the look: the Debuffs bar's carried, the Buffs bar's left out (it has none)")
+    local function Lists() return { cd = {}, util = {}, buff = {}, debuff = { "Moonfire" } } end
+    local function Took(name, version)
+        B:SetOption("debuff", "anyCaster", true)
+        P.Import(name, P.Read(H.String({ a = version, l = Lists(), g = { s = {}, b = {}, l = {}, k = {} } })), true)
+        return tostring(ns.BarData("debuff").anyCaster)
+    end
+    Equal(Took("Old", "1.10.20") .. " " .. Took("None", nil) .. " " .. Took("New", "dev"), "true true false",
+        "from 1.10.20 or before yours stays; made since and left out: off")
+    local odd = P.Read(H.String({ a = "dev", l = Lists(), g = { s = {}, b = { buff = { anyCaster = true },
+        cd = { anyCaster = true }, debuff = { anyCaster = true } }, l = {}, k = {} } }))
+    P.Import("Odd", odd, true)
+    Equal(H.Sane(ns, odd) .. "|" .. odd.skipped .. " " .. tostring(ns.BarData("debuff").anyCaster) .. " "
+        .. tostring(ns.BarData("buff").anyCaster), "|2 true false",
+        "on the Debuffs bar it comes; on the Buffs and Cooldowns bars, which have none, it's left out and counted")
+    local bad = P.Read(H.String({ a = "dev", l = Lists(), g = { s = {}, b = { debuff = { anyCaster = "yes" } }, l = {}, k = {} } }))
+    Equal(H.Sane(ns, bad) .. "|" .. bad.skipped .. " " .. tostring(bad.setup.bars.debuff.anyCaster), "|1 nil",
+        "anything but true or false: left out, and counted")
+    -- An extra Debuffs bar's own, out and back with it.
+    B:AddBar("debuff")
+    B:SetOption("debuff2", "anyCaster", true)
+    local extra = P.Read(P.Export())
+    Equal(H.Sane(ns, extra) .. "|" .. extra.skipped .. " " .. tostring(extra.setup.bars.debuff2.anyCaster), "|0 true",
+        "Debuffs 2 has its own, carried with the bar")
+    B:RemoveBar("debuff2")
     Equal(#printed, 0, "no errors")
 end
 

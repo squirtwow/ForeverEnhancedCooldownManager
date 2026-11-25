@@ -6,7 +6,9 @@
 -- slot for an aura on you and one for a debuff on your target, laid over it.
 -- The container is only told which spell IDs to watch out of combat; a change
 -- made in a fight waits for it to end. Nothing of Blizzard's is touched. Off
--- until a bar's "Show buff and debuff time" is ticked. With it, a spell's
+-- until a bar's "Show buff and debuff time" is ticked, and one icon can be
+-- left out of it (Cooldown only in its own panel: that icon shows its
+-- cooldown while the rest of the bar shows their times). With it, a spell's
 -- icon can count its debuff's ticks too (Count ticks, below). The same way,
 -- a spell's icon can glow for a proc the game doesn't light (Glow for more
 -- procs, below).
@@ -172,9 +174,16 @@ end
 -- own IDs where they differ (ns.Spells). A fixed rank's, its own ID's
 -- (Vanish's stealth for Vanish at rank 1). Spells only: items, trinkets and
 -- ammo put no aura of their own.
-local function IDs(icon)
+-- None for an icon ticked Cooldown only in its own panel (Squirt, 25 Nov
+-- 2026: Stormstrike's icon showed its debuff's 12 seconds over its 8 second
+-- cooldown), so both its slots stay off and it shows its plain cooldown
+-- while the rest of the bar still shows their times (A:Apply). Its count of
+-- the debuff's ticks goes with them (Counted, below), as that count shows
+-- only while the time does.
+local function IDs(bar, icon)
     if not icon or not icon:IsShown() then return nil end
     if icon.kind ~= "spell" and icon.kind ~= "rank" then return nil end
+    if ns.CooldownOnly(bar.key, icon.name) then return nil end
     local entry = ns.Spells:Find(icon.name)
     local set, sorted = {}, {}
     for _, id in ipairs(entry and entry.ids or ns.Spells:AuraIDs(icon.spellID)) do
@@ -212,7 +221,9 @@ local function Counted(bar)
         local icon = bar.icons[i]
         local pace = icon and not seen[icon.name] and B:CountsTicks(bar.key, icon.name) and B:TickPace(icon.name)
         local ids, sorted
-        if pace then ids, sorted = IDs(icon) end
+        -- (None for an icon ticked Cooldown only: IDs gives it no spells, so
+        -- it gets no count slot either.)
+        if pace then ids, sorted = IDs(bar, icon) end
         if ids then
             seen[icon.name] = true
             counted[#counted + 1] = { name = icon.name, pace = pace, ids = ids, sorted = table.concat(sorted, ",") }
@@ -322,7 +333,8 @@ function A:TickReport(bar, name)
     local B = ns.Bars
     if not (bar and B:CountsTicks(bar.key, name)) then return "" end
     local how = bar.data and bar.data.onlyShort and "off with Show only when I can't afford it"
-        or not self:On(bar) and "Show buff and debuff time is off" or "no slot yet"
+        or not self:On(bar) and "Show buff and debuff time is off"
+        or ns.CooldownOnly(bar.key, name) and "off with Cooldown only" or "no slot yet"
     for _, slot in ipairs(self:On(bar) and bar.tickSlots or {}) do
         if slot.name == name then
             how = slot.ticks and ("slot " .. slot.key .. ", rule " .. tostring(slot.ticks.rule)) or "the game can't draw it"
@@ -397,7 +409,7 @@ function A:Apply(bar)
     for i, _ in ipairs(bar.auraAnchors) do
         local icon = i <= wanted and bar.icons[i] or nil
         local ids, sorted
-        if icon then ids, sorted = IDs(icon) end
+        if icon then ids, sorted = IDs(bar, icon) end
         local signature = ids and (icon.name .. ":" .. table.concat(sorted, ",")) or ""
         if bar.auraApplied[i] ~= signature then
             bar.auraApplied[i] = signature
@@ -784,10 +796,16 @@ end
 
 -- One cooldown bar's totem icons: each with its totem's time while it
 -- stands, the rest without. standing: from StandingTotems, or nil for none.
+-- None for an icon ticked Cooldown only: a totem's time is laid over its
+-- icon in the same spot and the same gold edge as a buff's, so leaving it
+-- there would show a totem's whole minute in place of the cooldown the tick
+-- asks for. By the entry's own name, its rank and all, as the tick is kept
+-- (the name stripped of its rank is only for which totem stands).
 local function TotemBar(bar, standing)
     if not (bar and bar.kind == "cooldown" and bar.icons) then return end
     for i, icon in ipairs(bar.icons) do
         local slot = standing and i <= (bar.count or 0) and icon.spellID and icon.name
+            and not ns.CooldownOnly(bar.key, icon.name)
             and standing[(icon.name:gsub("@.*$", ""))]
         if slot then
             ShowTotem(icon, bar.data or ns.BarData(bar.key), slot)

@@ -2232,7 +2232,8 @@ end)()
         [8076] = "Strength of Earth", [8162] = "Strength of Earth", [25362] = "Strength of Earth", [19506] = "Trueshot Aura",
         [20906] = "Trueshot Aura", [1248406] = "Well Fed", [1248420] = "Well Fed", [19709] = "Well Fed", [1225782] = "Well Fed",
         [401877] = "Prayer of Mending", [1240849] = "Prayer of Mending", [3355] = "Freezing Trap", [14309] = "Freezing Trap",
-        [8182] = "Frost Resistance", [10477] = "Frost Resistance" }
+        [8182] = "Frost Resistance", [10477] = "Frost Resistance", [17538] = "Elixir of the Mongoose",
+        [17626] = "Flask of the Titans", [7233] = "Fire Protection", [17543] = "Fire Protection" }
     for name, ids in pairs(data.RANKS) do
         for _, id in ipairs(ids) do NAMES[id] = NAMES[id] or name end
     end
@@ -2368,6 +2369,35 @@ end)()
     Equal(offered .. " | " .. Said("buff", "Well Fed") .. " | " .. List("buff") .. " | " .. Lit("buff", 19709) .. " | "
         .. Lit("buff", 1248420) .. " | " .. Lit("buff", 1225782), "yes | true Added Well Fed to Buffs. | Well Fed | g1 | g1 | g1",
         "Well Fed offered while typing, added by name, lit by any food's buff (a feast's too)")
+    Equal(#printed, 0, "no errors")
+
+    -- A consumable's buff by name beside it (a player's ask, 25 Nov 2026:
+    -- "elixir" and "mongoose" found nothing in the add box): nobody casts
+    -- one, so it's offered and found by the game data's name for it
+    -- (ns.ITEM_BUFFS), and the icon lights for its own buff only, not
+    -- another elixir's. Its ID typed after goes to that icon, and a flask
+    -- beside it is an icon of its own.
+    Start("WARRIOR")
+    offered = "no"
+    for _, item in ipairs(Sp:Suggest("mongoose", 50)) do
+        if item.name == "Elixir of the Mongoose" then offered = "yes " .. tostring(item.spellID) end
+    end
+    Equal(offered .. " | " .. Said("buff", "Elixir of the Mongoose") .. " | " .. List("buff") .. " | "
+        .. Custom("Elixir of the Mongoose") .. " | " .. Watched("buff") .. " | " .. Lit("buff", 17537) .. "/" .. Lit("buff", 17538),
+        "yes 17538 | true Added Elixir of the Mongoose to Buffs. | Elixir of the Mongoose | 17538 | g1 17538 | /g1",
+        "the elixir offered while typing, added by name, watching and lit by its own buff, not Brute Force's")
+    Equal(tostring(Sp:Pin(17538, "buff")) .. " | " .. Said("buff", "17538") .. " | " .. B:Get("buff").count .. " | "
+        .. Said("buff", "Flask of the Titans") .. " | " .. Watched("buff") .. " | " .. Lit("buff", 17626),
+        "nil | true Elixir of the Mongoose is already on Buffs. | 1 | true Added Flask of the Titans to Buffs. | "
+        .. "g1 17538 | g2 17626 | g2", "its ID after is the same icon, and a flask goes on as its own, lit by its buff")
+    -- Where two consumables give a buff of one name, one icon watches both
+    -- (the game data joins them by name): Fire Protection lights for the
+    -- greater potion's buff as well as the potion's, so a raid's icon isn't
+    -- dark for whoever drank the other one.
+    Start("WARRIOR")
+    Equal(Said("buff", "Fire Protection") .. " | " .. Watched("buff") .. " | " .. Lit("buff", 7233) .. "/" .. Lit("buff", 17543),
+        "true Added Fire Protection to Buffs. | g1 7233,17543 | g1/g1",
+        "both fire protection potions light the one icon")
     Equal(#printed, 0, "no errors")
 
     -- The totem's Frost Resistance shares its name with a hunter's pet's
@@ -4369,6 +4399,178 @@ end)()
     B:Assign("Flame Shock", nil)
     Equal(tostring(B:CountsTicks("util", "Flame Shock")) .. " " .. tostring((ns.ProfileLists().countTicks.util or {})["Flame Shock"]),
         "false nil", "taken off: no longer kept")
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = before[1], before[2], before[3]
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Cooldown only: one icon's cooldown in place of its buff or debuff time --------------------------
+-- (Squirt, 25 Nov 2026: he put Stormstrike on a Cooldowns bar showing buff
+-- and debuff times, and its icon showed the 12 seconds of the debuff it
+-- leaves on the target instead of its own 8 second cooldown.) Ticked in a
+-- spell's own panel, that one icon is left out of the bar's times: the
+-- spells an icon's slots watch are the one gate (IDs), so both its slots go
+-- off, the name its place is held under goes with them, its anchor parks out
+-- of sight and the icon's own cooldown underneath is all that's left, while
+-- every other icon on the bar keeps its time. Its count of its debuff's
+-- ticks goes too (that count shows only while the time does), and an icon
+-- ticked before the bar is laid out has no count slot made at all. Its glow
+-- for a proc the game doesn't light stays: that's a glow, not a time, and
+-- goes by the proc's own buff. Off by default; ticked in a fight, nothing is
+-- asked of the container until it ends; a profile with Count ticks ticked
+-- too keeps both, with Cooldown only winning.
+;(function()
+    local before = { _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    -- A fresh game with the number rules (for Count ticks), a shaman's
+    -- Stormstrike and Flame Shock known, and a warlock's Shadow Bolt for the
+    -- proc glow.
+    local function Game()
+        Fresh()
+        _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+            return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end,
+                ClearBreakpoints = function(self) self.rules = {} end }
+        end }
+        _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = { Up = 1, Down = 2 }, { ElapsedDuration = 2 }
+        table.insert(book[2].items, { name = "Stormstrike", subName = "Rank 1", spellID = 17364, iconID = 132314 })
+        table.insert(book[2].items, { name = "Flame Shock", subName = "Rank 1", spellID = 8050, iconID = 135813 })
+        -- (A warlock's Shadow Bolt, the one spell Shadow Trance lights.)
+        table.insert(book[2].items, { name = "Shadow Bolt", subName = "Rank 1", spellID = 686, iconID = 136197 })
+    end
+    Game()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B, A = ns.Bars, ns.IconAuras
+    local cd, p, t
+    local function Grab()
+        cd = B:Get("cd")
+        p, t = S[cd.auraContainers.p], S[cd.auraContainers.t]
+    end
+    -- Your Stormstrike and your Flame Shock, both up on your target.
+    local DEBUFFS = { { id = 17364, harmful = true, mine = true }, { id = 8050, harmful = true, mine = true } }
+    -- A spell's place on the bar with those debuffs up: its two slots on or
+    -- off, the name the place is held under, whether its anchor sits over its
+    -- icon (SetAllPoints leaves it no point of its own) or out of sight at
+    -- -10000, and whether the game shows its overlay.
+    local function Spot(name)
+        local i
+        for at = 1, cd.count do
+            if cd.icons[at].name == name then i = at end
+        end
+        if not i then return "not on the bar" end
+        local anchor, slot = cd.auraAnchors[i], t.slots["t" .. i]
+        local point = S[anchor].points[1]
+        t.Update(DEBUFFS)
+        return ("%s/%s %s %s %s"):format(tostring(p.slots["p" .. i].enabled), tostring(slot.enabled), tostring(cd.auraNames[i]),
+            point and (tostring(point[1]) .. " " .. tostring(point[4]))
+                or (Last(anchor, "SetAllPoints") == cd.icons[i] and "over its icon" or "elsewhere"), tostring(InSight(slot.button)))
+    end
+    B:Assign("Stormstrike", "cd")
+    B:Assign("Flame Shock", "cd")
+    B:SetOption("cd", "showAuras", true)
+    Grab()
+    local reads = AuraReads
+
+    -- Off by default: nothing kept, and both icons show their debuff's time,
+    -- Stormstrike's 12 seconds over its own 8 second cooldown.
+    Equal(tostring(ns.ProfileLists().cooldownOnly) .. " | " .. Spot("Stormstrike") .. " | " .. Spot("Flame Shock") .. " | "
+        .. tostring(B:CooldownOnly("cd", "Stormstrike")),
+        "nil | true/true Stormstrike over its icon true | true/true Flame Shock over its icon true | false",
+        "off by default: nothing kept, both icons' slots on over them, each showing its debuff's time")
+    -- Ticked for Stormstrike: kept, and its slots told no spells at all, so
+    -- both go off, its name goes with them, its anchor parks and the game
+    -- shows nothing over it with its debuff up. The bar still shows the
+    -- times and Flame Shock's icon still shows its dot's.
+    Equal(tostring(B:SetCooldownOnly("cd", "Stormstrike", true)) .. " " .. tostring(B:CooldownOnly("cd", "Stormstrike")) .. " | "
+        .. Spot("Stormstrike") .. " | " .. Spot("Flame Shock") .. " | " .. tostring(A:On(cd)) .. " "
+        .. tostring(ns.BarData("cd").showAuras),
+        "true true | false/false nil CENTER -10000 false | true/true Flame Shock over its icon true | true true",
+        "ticked: its slots off, its name and anchor gone with them, nothing shown over it; the bar's times and the rest of it untouched")
+    -- Its own cooldown is what's left: read for its own spell and set on its
+    -- own icon, as it always was.
+    local icon
+    for i = 1, cd.count do
+        if cd.icons[i].name == "Stormstrike" then icon = cd.icons[i] end
+    end
+    cooldownCalls = {}
+    B:RefreshAll()
+    local read = false
+    for _, id in ipairs(cooldownCalls) do if id == 17364 then read = true end end
+    Equal(tostring(read) .. " " .. tostring(Last(icon.cooldown, "SetCooldownFromDurationObject") ~= nil), "true true",
+        "its own cooldown is all that's left: read for Stormstrike's own spell and set on its icon")
+
+    -- Count ticks on Flame Shock: its count slot on, counting while its
+    -- debuff is up. Ticked Cooldown only too, the count goes with the time,
+    -- as it only shows while that does: the one gate leaves the count slot
+    -- no spells either, so it goes off, forgets its spell, hides and parks.
+    -- The tick stays as the player left it, and /ccm debug says why.
+    B:SetCountTicks("cd", "Flame Shock", true)
+    local k1, slot = t.slots.k1, cd.tickSlots[1]
+    local counting = tostring(k1.enabled) .. " " .. tostring(slot.name) .. " " .. tostring(S[slot.ticks.frame].shown)
+    B:SetCooldownOnly("cd", "Flame Shock", true)
+    local parked = S[slot.anchor].points[1]
+    Equal(counting .. " | " .. tostring(k1.enabled) .. " " .. tostring(slot.name) .. " " .. tostring(S[slot.ticks.frame].shown) .. " "
+        .. tostring(parked and parked[4]) .. " | " .. tostring(B:CountsTicks("cd", "Flame Shock")) .. " | " .. Spot("Flame Shock"),
+        "true Flame Shock true | false nil false -10000 | true | false/false nil CENTER -10000 false",
+        "the count goes with the time: its slot off, its spell forgotten, its count hidden and parked, its tick left as it was")
+    Equal(A:TickReport(cd, "Flame Shock"), " | counts ticks every 3 s: off with Cooldown only",
+        "/ccm debug says why it isn't counting: off with Cooldown only")
+    B:SetCooldownOnly("cd", "Flame Shock", false)
+    Equal(tostring(k1.enabled) .. " " .. tostring(slot.name) .. " " .. tostring(S[slot.ticks.frame].shown) .. " | " .. Spot("Flame Shock"),
+        "true Flame Shock true | true/true Flame Shock over its icon true", "unticked: its debuff's time and its count both back")
+
+    -- Glow for more procs is a glow, not a time: it goes by the proc's own
+    -- buff in a container of its own, never the spells the times watch, so a
+    -- Shadow Bolt ticked Cooldown only still lights for Shadow Trance.
+    B:Assign("Shadow Bolt", "cd")
+    B:SetOption("cd", "glowProcs", true)
+    Grab()
+    B:SetCooldownOnly("cd", "Shadow Bolt", true)
+    local box = S[cd.procGlow.container]
+    box.Update({ { id = 17941 } })
+    Equal(Spot("Shadow Bolt") .. " | " .. tostring(box.slots.g1.enabled) .. " "
+        .. tostring(box.slots.g1.filters.includeSpellIDs[17941]) .. " " .. tostring(S[box.slots.g1.button].shown),
+        "false/false nil CENTER -10000 false | true true true",
+        "its time off, its proc glow untouched: still told Shadow Trance, and lit by it")
+    B:SetCooldownOnly("cd", "Shadow Bolt", false)
+
+    -- Ticked in a fight: its time still showing with nothing asked of the
+    -- container, then off with nothing left behind once the fight ends, as
+    -- every change to these containers waits (A:Apply).
+    B:SetCooldownOnly("cd", "Stormstrike", false)
+    Grab()
+    local calls = containerCallsInCombat
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetCooldownOnly("cd", "Stormstrike", true)
+    local fight = Spot("Stormstrike") .. " " .. tostring(cd.auraPending) .. " " .. (containerCallsInCombat - calls)
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight .. " | " .. Spot("Stormstrike") .. " " .. tostring(cd.auraPending) .. " | " .. (AuraReads - reads),
+        "true/true Stormstrike over its icon true true 0 | false/false nil CENTER -10000 false nil | 0",
+        "ticked in a fight: its time still up with nothing asked of the container, then off once it ends; no aura read by the addon")
+
+    -- A profile with both ticked for one entry (an older one, or a shared
+    -- string): Cooldown only wins, nothing errors, and no count slot is even
+    -- made. The ticks that can't be kept are dropped as it loads: a name no
+    -- list has, a Debuffs bar (which can't hold this tick), and one that
+    -- isn't true.
+    local saved = ForeverEnhancedCooldownManagerDB
+    local mine = saved.profiles[ns.ProfileName()]
+    mine.cooldownOnly = { cd = { ["Flame Shock"] = true, Gone = true, Stormstrike = "yes" }, debuff = { Moonfire = true } }
+    mine.countTicks = { cd = { ["Flame Shock"] = true } }
+    Game()
+    ns = Load(saved)
+    B, A = ns.Bars, ns.IconAuras
+    Grab()
+    local kept = {}
+    for key, set in pairs(ns.ProfileLists().cooldownOnly or {}) do
+        for name in pairs(set) do kept[#kept + 1] = key .. ":" .. name end
+    end
+    table.sort(kept)
+    Equal(table.concat(kept, " ") .. " | " .. tostring(B:CountsTicks("cd", "Flame Shock")) .. " "
+        .. tostring(B:CooldownOnly("cd", "Flame Shock")) .. " " .. tostring(cd.tickSlots) .. " | " .. Spot("Flame Shock") .. " | "
+        .. Spot("Stormstrike"),
+        "cd:Flame Shock | true true nil | false/false nil CENTER -10000 false | true/true Stormstrike over its icon true",
+        "reloaded with both ticked: both kept, its plain cooldown and no count slot made at all; the odd ones dropped,"
+        .. " so Stormstrike's time is back")
     _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = before[1], before[2], before[3]
     Equal(#printed, 0, "no errors")
 end)()
@@ -6579,7 +6781,9 @@ end)()
 -- time while it stands (GetTotemDuration's duration object), with the gold
 -- edge of a buff's time. Which totem stands is read from GetTotemInfo (its
 -- rank's numerals left off), or while that's secret, the last totem of that
--- element you cast. Off by default: nothing made or heard.
+-- element you cast. Off by default: nothing made or heard. An icon ticked
+-- Cooldown only in its own panel shows none of it: that tick leaves out
+-- every time laid over its icon, so its cooldown is what's left.
 ;(function()
     Fresh()
     table.insert(book[2].items, { name = "Strength of Earth Totem", subName = "Rank 1", spellID = 8075, iconID = 136023 })
@@ -6634,6 +6838,28 @@ end)()
     Equal(off .. " | " .. ticked .. " | " .. gone, "none none none false | true/2 none none 1 1 | false/2 none none",
         "off: nothing made; ticked: Strength of Earth's icon shows slot 2's time (rank numerals left off); its totem gone, hidden")
 
+    -- An icon ticked Cooldown only in its own panel is left out of these
+    -- too: a totem's time is laid over the icon in the same spot and the same
+    -- gold edge as a buff's, and would show a totem's whole minute in place
+    -- of the cooldown that tick asks for. The next icon's totem time stays,
+    -- and unticked the time is back.
+    standing[2], up[2] = "Strength of Earth Totem IV", true
+    Fire("PLAYER_TOTEM_UPDATE", 2)
+    local coolOff = Shows(Icon("Strength of Earth Totem"))
+    B:SetCooldownOnly("cd", "Strength of Earth Totem", true)
+    local coolOn = Shows(Icon("Strength of Earth Totem"))
+    standing[1], up[1] = "Searing Totem", true
+    Fire("PLAYER_TOTEM_UPDATE", 1)
+    local others = Shows(Icon("Searing Totem"))
+    B:SetCooldownOnly("cd", "Strength of Earth Totem", false)
+    Equal(coolOff .. " | " .. coolOn .. " | " .. others .. " | " .. Shows(Icon("Strength of Earth Totem")),
+        "true/2 | false/2 | true/1 | true/2",
+        "ticked Cooldown only: its totem's time left out too, the next icon's still shown; unticked, it's back")
+    standing[1], up[1] = nil, false
+    Fire("PLAYER_TOTEM_UPDATE", 1)
+    standing[2], up[2] = nil, false
+    Fire("PLAYER_TOTEM_UPDATE", 2)
+
     -- In a fight the slots are secret: your Searing Totem cast says slot 1 is
     -- it, and the game picks whether its time shows. Nothing secret misused.
     secret, up[1] = true, SECRET
@@ -6653,6 +6879,179 @@ end)()
     B:Relayout("cd")
     Equal(All() .. " " .. #printed, "false/2 false/1 none 0", "unticked: hidden, and not shown again; no errors")
     _G.GetTotemInfo, _G.GetTotemDuration = nil, nil
+end)()
+
+-- Light up for anyone's debuffs ---------------------------------------------------------------------
+-- (A player's idea, 23 Nov 2026: a warlock who wants to see which curses the
+-- other warlocks in his raid already have on the boss, beside his own curse
+-- group.) A Debuffs bar's slots and groups watch "HARMFUL|PLAYER", which the
+-- game fixes as each is added, so only the debuffs you cast light its icons.
+-- With the tick on the bar uses a second set of its own ("ab1".., "aw1.." and
+-- "ag1..") watching "HARMFUL", made the first time it's on and never in a
+-- fight, and the first set goes right off, so one aura never lights two
+-- icons. Off by default: nothing more is made and nothing changes.
+;(function()
+    local before = { _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty }
+    local function Game()
+        _G.C_StringUtil = { CreateNumericRuleFormatter = function()
+            return { rules = {}, AddBreakpoint = function(self, rule) table.insert(self.rules, rule) end,
+                ClearBreakpoints = function(self) self.rules = {} end }
+        end }
+        _G.Enum.NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 }
+        _G.Enum.DurationTextBindingProperty = { RemainingDuration = 0, ElapsedDuration = 2, TotalDuration = 4 }
+    end
+    -- Every slot and group of either set that's switched on: its key, what it
+    -- watches, and whether it's kept to a player's (nil: whoever cast it).
+    local function On(bar)
+        local s, keys, out = S[bar.container], {}, {}
+        for key in pairs(s.slots) do keys[#keys + 1] = key end
+        for key in pairs(s.groups) do keys[#keys + 1] = key end
+        table.sort(keys)
+        for _, key in ipairs(keys) do
+            local piece = s.slots[key] or s.groups[key]
+            if piece.enabled then
+                out[#out + 1] = key .. " " .. tostring(piece.filter) .. " " .. tostring((piece.filters or {}).isFromPlayerOrPlayerPet)
+            end
+        end
+        return table.concat(out, " | ")
+    end
+    -- The icons the game shows for these auras, in order.
+    local function Lit(bar, auras)
+        local s, lit = S[bar.container], {}
+        s.Update(auras)
+        for key, group in pairs(s.groups) do
+            if #group.active > 0 then lit[#lit + 1] = key end
+        end
+        for key, slot in pairs(s.slots) do
+            if S[slot.button].shown then lit[#lit + 1] = key end
+        end
+        table.sort(lit)
+        return table.concat(lit, " ")
+    end
+    -- How many slots the container holds now.
+    local function Made(bar)
+        local slots = 0
+        for _ in pairs(S[bar.container].slots) do slots = slots + 1 end
+        return slots
+    end
+    -- An edge slot's rule as text ("edge N" the ring N across).
+    local function Rules(formatter)
+        if formatter == nil then return "none" end
+        local out = {}
+        for _, rule in ipairs(formatter.rules) do
+            out[#out + 1] = rule.threshold .. "=" .. rule.format:gsub("|T[^:]*LowEdge:(%d+):%d+:[^|]*|t", "edge %1")
+        end
+        return table.concat(out, " ")
+    end
+    local MINE = { id = 8921, harmful = true, mine = true } -- your Moonfire
+    local THEIRS = { id = 8921, harmful = true, other = true } -- another player's
+
+    Fresh()
+    Game()
+    local ns = Load({ useBars = true, notesSeen = "dev", helpSeen = true })
+    local B = ns.Bars
+    B:SetAura("debuff", "Moonfire", true)
+    local bar = B:Get("debuff")
+    local reads = AuraReads
+    Runs()
+    Equal(tostring(ns.BarData("debuff").anyCaster) .. " " .. tostring(bar.anySlots) .. " " .. Made(bar) .. " | " .. On(bar),
+        "false nil 32 | g1 HARMFUL|PLAYER true",
+        "off by default: nothing more than the bar's own 32 slots, its packed group watching the debuffs you cast")
+    Equal(Lit(bar, { MINE }) .. " | " .. Lit(bar, { THEIRS }), "g1 | ",
+        "your Moonfire lights its icon; another player's doesn't, as before")
+    -- Ticked: the second set made and switched on, the first right off.
+    B:SetOption("debuff", "anyCaster", true)
+    local box = S[bar.container]
+    Equal(tostring(bar.anySlots) .. " " .. tostring(bar.anyMarks) .. " " .. tostring(bar.anyGroups) .. " " .. Made(bar) .. " | "
+        .. box.late .. " late [" .. Runs() .. "] " .. containerCallsInCombat .. " | " .. On(bar), "true true 1 64 | 0 late [] 0 | ag1 HARMFUL nil",
+        "ticked: 16 more spots and 16 more edge slots, and a packed group of its own, watching every caster's Moonfire; only that"
+            .. " set is on; no icon made late, none of the container's own code run inside the addon's, nothing asked in a fight")
+    Equal(Lit(bar, { MINE }) .. " | " .. Lit(bar, { THEIRS }) .. " | " .. Lit(bar, { MINE, THEIRS }), "ag1 | ag1 | ag1",
+        "yours lights it, another player's lights it too, and both at once still light the one icon")
+    -- Unticked: its own set back, the second off.
+    B:SetOption("debuff", "anyCaster", false)
+    Equal(On(bar) .. " | " .. Lit(bar, { THEIRS }) .. " | " .. Lit(bar, { MINE }), "g1 HARMFUL|PLAYER true |  | g1",
+        "unticked: its own set on again and the anyone's set off, so another player's no longer lights it")
+    -- Fixed spots with Warn at: the anyone's spot and its own edge slot, on
+    -- the same spells, the ring under 3 seconds as before.
+    B:SetOption("debuff", "showMissing", true)
+    B:SetWarnAt("debuff", "Moonfire", 3)
+    B:SetOption("debuff", "anyCaster", true)
+    local holder = bar.holders[1]
+    Equal(On(bar) .. " | " .. tostring(holder.slot == holder.anySlot) .. " " .. tostring(holder.mark == holder.anyMark) .. " "
+        .. Rules(holder.mark.formatter) .. " | " .. Lit(bar, { THEIRS }),
+        "ab1 HARMFUL nil | aw1 HARMFUL nil | true true 0=edge 45 3= | ab1 aw1",
+        "with missing debuffs greyed: the anyone's spot and its edge slot on, the ring under 3 seconds, and another player's"
+            .. " Moonfire lights both")
+    B:SetOption("debuff", "anyCaster", false)
+    Equal(On(bar) .. " | " .. tostring(holder.slot == holder.mineSlot) .. " " .. Rules(holder.mark.formatter) .. " | "
+        .. Lit(bar, { THEIRS }) .. " | " .. Lit(bar, { MINE }), "b1 HARMFUL|PLAYER true | w1 HARMFUL|PLAYER true | true 0=edge 45 3= |  | b1 w1",
+        "unticked: its own spot and edge slot back, the ring as it was, and only yours lights them")
+    -- Ticked in a fight: nothing until it ends, then the anyone's set.
+    Fire("PLAYER_REGEN_DISABLED")
+    lockdown = true
+    B:SetOption("debuff", "anyCaster", true)
+    local fight = On(bar) .. " " .. containerCallsInCombat
+    lockdown = false
+    Fire("PLAYER_REGEN_ENABLED")
+    Equal(fight .. " | " .. On(bar), "b1 HARMFUL|PLAYER true | w1 HARMFUL|PLAYER true 0 | ab1 HARMFUL nil | aw1 HARMFUL nil",
+        "ticked in a fight: the bar as it was with nothing asked of the container, then the anyone's set once it ends")
+    -- The Buffs bar has none: the tick can't be set there, and nothing is made.
+    B:SetOption("buff", "anyCaster", true)
+    Equal(tostring(ns.BarData("buff").anyCaster) .. " " .. tostring(B:Get("buff").anySlots) .. " " .. (AuraReads - reads),
+        "false nil 0", "the Buffs bar has none: nothing kept and nothing made, and no aura read by the addon throughout")
+    -- /ccm debug: each Debuffs bar's own line says whether it's on.
+    B:AddBar("debuff")
+    B:SetAura("debuff2", "Wrath", true)
+    local said = {}
+    for line in ns.DebugReport():gmatch("[^\n]+") do
+        if line:find("anyone's debuffs", 1, true) then said[#said + 1] = line:match("anyone's debuffs.*$") end
+    end
+    Equal(table.concat(said, " | ") .. " | " .. #printed, "anyone's debuffs on | anyone's debuffs off | 0",
+        "/ccm debug says which Debuffs bars have it on: Debuffs on, Debuffs 2 off; no errors")
+    B:RemoveBar("debuff2")
+    -- Should the game turn the anyone's set's edge slots down, its own words
+    -- go in /ccm debug with the rest for a player's bug report, and the tick
+    -- still works with no ring while it's on (the countdown still turns red).
+    B:AddBar("debuff")
+    B:SetAura("debuff2", "Moonfire", true)
+    local two = B:Get("debuff2")
+    local addSlot = two.container.AddAuraSlot
+    rawset(two.container, "AddAuraSlot", function(self, key, ...)
+        if key:sub(1, 2) == "aw" then error("no edge slot here", 0) end
+        return addSlot(self, key, ...)
+    end)
+    ns.BuffBar.markError = nil -- (said once: nothing has said it yet in this block)
+    B:SetOption("debuff2", "anyCaster", true)
+    rawset(two.container, "AddAuraSlot", addSlot)
+    Equal(tostring(two.anySlots) .. " " .. tostring(two.anyMarks) .. " | " .. tostring(ns.BuffBar.markError) .. " | " .. On(two)
+        .. " | " .. Lit(two, { THEIRS }) .. " | " .. #printed,
+        "true false | anyone's debuffs: no edge slot here | ag1 HARMFUL nil | ag1 | 0",
+        "the anyone's edge slots turned down: the tick still lights another player's, and the game's own words go in the report")
+    -- And should the game make those edge slots but turn their number rules
+    -- down for a spot (MarkLook), that spot has no mark of its own: only the
+    -- set in use is ever driven, so no edge slot is switched on and nothing
+    -- is written on the set that's off. (Its own bar: the one above keeps
+    -- the tick on, and a bar put back takes its settings up again.)
+    B:AddBar("debuff")
+    B:SetAura("debuff3", "Wrath", true)
+    local three = B:Get("debuff3")
+    B:SetOption("debuff3", "showMissing", true)
+    B:SetWarnAt("debuff3", "Wrath", 3)
+    local spot = three.holders[1]
+    local was = Rules(spot.mineMark and spot.mineMark.formatter)
+    ns.BuffBar.markError = nil -- (said once: what the game turns down next is the spot's rules)
+    _G.C_StringUtil = { CreateNumericRuleFormatter = function() error("no rules", 0) end }
+    B:SetOption("debuff3", "anyCaster", true)
+    Game()
+    Equal(tostring(three.anyMarks) .. " " .. tostring(spot.anyMark) .. " " .. tostring(spot.mark == nil) .. " "
+        .. tostring(ns.BuffBar.markError) .. " | " .. On(three) .. " | " .. Rules(spot.mineMark.formatter) .. " / " .. was
+        .. " | " .. #printed,
+        "true nil true no rules | ab1 HARMFUL nil | 0=edge 45 3= / 0=edge 45 3= | 0",
+        "its spot's rules turned down: no mark on the spot, no edge slot switched on, the set that's off left as it was")
+    B:RemoveBar("debuff3")
+    B:RemoveBar("debuff2")
+    _G.C_StringUtil, _G.Enum.NumericRuleFormatRounding, _G.Enum.DurationTextBindingProperty = before[1], before[2], before[3]
 end)()
 
 Equal(SecretMisuse[1], nil, "no secret misused anywhere")

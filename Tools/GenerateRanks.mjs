@@ -10,10 +10,13 @@
 // another ID a spell leads to, and the auras that are one buff in several
 // IDs, so the Buffs and Debuffs bars light for them, and which of those no
 // one learns as a spell, which no one sees on a cooldown bar.
-// Reads Blizzard's own game tables for build 1.60.1.70753 (wago.tools db2
-// exports of SpellName, Spell, SpellEffect, SpellMisc, SkillLineAbility,
-// ChrRaces, SpellAuraRestrictions, SpellPower, SpellCooldowns,
-// TraitDefinition, Item, ItemEffect and ItemXItemEffect).
+// And the buff each consumable puts on you, by name, so an elixir, a flask or
+// a world buff scroll can be added by name as a spell can.
+// Reads Blizzard's own game tables for build 1.60.1.71091 (wago.tools db2
+// exports of SpellName, Spell, SpellEffect, SpellMisc, SpellDuration,
+// SpellCategories, SkillLineAbility, ChrRaces, SpellAuraRestrictions,
+// SpellPower, SpellCooldowns, TraitDefinition, Item, ItemSparse, ItemEffect
+// and ItemXItemEffect).
 // Pass a cache directory; missing tables are downloaded into it. A table
 // already there is used whatever its build, so give each build a new, empty
 // one. No addon code or data is an input.
@@ -22,7 +25,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.70959';
+const BUILD = '1.60.1.71091';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = process.argv[2];
 assert(cache, 'Pass a cache directory');
@@ -811,14 +814,16 @@ const spellAuraLines = [...spellAuras.keys()].map(id => ` [${id}]={${spellAuras.
 // poison for an entry named Wound Poison, whose later ranks are spells of
 // other names (Wound Poison II...). Only those the name's own spells in
 // ns.RANKS aren't, or don't lead to already. Not a rune-only name's: no one
-// has it.
-const nameAuraLines = [];
+// has it. The consumable buffs below add to this list, by name as well (the
+// greater potion's buff beside the potion's), so its lines are made at the
+// end.
+const nameAuras = new Map();
 for (const name of [...aurasByName.keys()].sort()) {
     if (runeNames.has(name)) continue;
     const own = [...(groups.get(name)?.keys() || [])];
     const already = new Set([...own, ...own.flatMap(id => spellAuras.get(id) || [])]);
     const extra = [...aurasByName.get(name)].filter(aura => !already.has(aura)).sort((a, b) => a - b);
-    if (extra.length > 0 && !/[\\"\n]/.test(name)) nameAuraLines.push(` [${JSON.stringify(name)}]={${extra.join(',')}},`);
+    if (extra.length > 0 && !/[\\"\n]/.test(name)) nameAuras.set(name, extra);
 }
 
 // Auras that are one buff in several IDs, for a buff kept by one of them:
@@ -917,8 +922,7 @@ for (const ids of [...auraLinks.buff.values(), ...auraLinks.debuff.values(), ...
         if (!learnable.has(id) && !traitSpells.has(id) && !taught.has(id) && !TALENT_DEBUFFS.has(id)) auraOnly.add(id);
     }
 }
-for (const id of auraOnly) assert(!rankedIDs.has(id) && !listedIDs.has(id), `${names.get(id)} (${id}) is a spell and an aura no one learns`);
-const auraOnlyLines = [...auraOnly].sort((a, b) => a - b).map(id => ` [${id}]=true,`);
+// (The consumable buffs below join them, so its lines are made at the end.)
 // The debuffs ns.RANKS holds for the Debuffs bar alone, by ID: TALENT_DEBUFFS'
 // and CLASSLESS_DEBUFFS' (above), which no one casts. The addon never goes by
 // one on another bar (Spells.lua): a name with nothing else goes on the
@@ -926,6 +930,178 @@ const auraOnlyLines = [...auraOnly].sort((a, b) => a - b).map(id => ` [${id}]=tr
 const debuffAuras = [...TALENT_DEBUFFS.keys(), ...CLASSLESS_DEBUFFS].sort((a, b) => a - b);
 for (const id of debuffAuras) assert(rankedIDs.has(id), `${names.get(id)} (${id}) isn't in ns.RANKS`);
 const debuffAuraLines = debuffAuras.map(id => ` [${id}]=true,`);
+
+// The buffs a consumable puts on you, by name (2026-11-25, a player's
+// report: typing an ID into the add box found Elixir of the Mongoose, but
+// typing "elixir" or "mongoose" found nothing, since no table above holds
+// what an item casts). A consumable is an item of the Consumable class
+// (Item ClassID 0: its potions, elixirs, flasks, scrolls, food and drink,
+// and the "other" subclass Forever's world buff scrolls, juices and ales
+// sit in), with a name of its own (ItemSparse), used from the bag
+// (ItemEffect TriggerType 0). The buff is that use's spell, or what it sets
+// off, or what that sets off in turn (as food's is read above), when the
+// spell is shown and lands on your side (`shownAura` and reach.buff, as
+// everywhere above) and lasts a second or more, or until it's cancelled
+// (SpellDuration, as Tools/MakeTrinketBuffs.mjs reads a trinket's). So a
+// healing or mana potion with no aura of its own is left out, as is a use
+// that only hits your target (Discombobulator Ray) and one whose aura is
+// gone in an instant.
+// Left out too:
+// * A buff that is itself a spell someone learns (`learnable`, a talent, one
+//   taught to a pet), as ns.AURA_ONLY leaves those out: the spell lists
+//   offer it already, and every ID here is an aura no one learns.
+// * A bandage's First Aid: what it puts on whoever you bandage is the heal it
+//   channels, under the profession's own name, nothing to watch. It's left
+//   out by the mechanic the game marks a bandage with, since nothing else
+//   tells them apart: Blizzard files bandages as bandages (Crystal Infused
+//   Bandage) and as "other" consumables (Forever's Dense Runecloth Bandage),
+//   each with a First Aid of its own, and none of those spells has a
+//   SkillLineAbility row.
+// * Whatever goes on a weapon: an oil, a stone, a poison, a lure, a scroll's
+//   imbue. Each puts a temporary enchant on the weapon, not an aura on you,
+//   so no rule here finds it, and the Main hand and Off hand enchant entries
+//   show those already (ns.HAND_ENCHANTS and ns.WEAPON_ENCHANTS, Buffs.lua),
+//   with an imbue found by name already (ns.IMBUE_SPELLS). An oil you drink
+//   is another matter: Fishliver Oil's buff and Oil of Immolation's fire
+//   shield are here.
+// * The test, deprecated, unused and placeholder items, by name, as
+//   Tools/MakeTrinketBuffs.mjs leaves them out.
+// * A name ns.RANKS holds, which someone learns and the add box offers
+//   already (Fire Resistance from a Flame Deflector, a totem's and a pet's
+//   name too; Water Breathing, Slow Fall), and a name ns.AURA_FAMILIES
+//   offers by name already (Well Fed, Food, Drink, Blessed Sunfruit: the same
+//   check Spells.lua's AuraNames() makes). So the add box never has one name
+//   twice, though an entry taken by such a name watches that spell's IDs, not
+//   the item's buff.
+// * A name a spell someone or a pet learns has as well, where that spell's
+//   own effect lasts a second or more: the imp's Fire Shield, three minutes,
+//   against the fifteen seconds of an Oil of Immolation, and the succubus's
+//   Lesser Invisibility, five minutes, against an Invisibility Potion's. A
+//   warlock typing one of those means his pet's buff, so the item's is left
+//   out rather than answered in its place. The recipe that makes an item
+//   carries the item's name too and is no such spell: it puts nothing on
+//   anyone, so it lasts no time at all.
+// * An aura the game itself marks as a debuff (SpellMisc AURA_IS_DEBUFF, the
+//   flag the debuff rules above read): the Buffs bar reads helpful auras
+//   only, so it could never light for one. In this build that's a Dreamless
+//   Sleep, which stuns you while it heals, Poison Mushroom from a Poisonous
+//   Mushroom, Sneezing Fit, Venomous Blood and Sayge's Carnie Buff (his real
+//   fortunes are marked buffs and stay).
+// A name several of them share (Fire Protection, from the potion and the
+// greater potion; Agility, from two elixirs and four scrolls; Soulstone
+// Resurrection, from every soulstone) is kept by its longest-lasting ID, and
+// by the lowest of those where they last the same: the buff you watch, not
+// the moment of eating or drinking that leads to it (Fizzy Energy Drink's 21
+// seconds of drinking, which sets off its 15 minutes). The others of that
+// name join it by name (ns.NAME_AURAS, as a poison's later ranks join its
+// name above), so one entry lights for whichever of them the item you used
+// put on you: the greater potion as well as the potion, Scroll of Agility IV
+// as well as the first scroll.
+// Quest items are left out, junk and all (Blizzard files the Jujus and
+// Un'Goro's crystals there): Squirt's call, if a player asks for them.
+const CONSUMABLE = 0, ON_USE = 0, BANDAGE_MECHANIC = 16;
+const JUNK_ITEM = name => /test|deprecated|unused|\[PH\]|\[DEP\]/i.test(name);
+const durationOf = new Map((await table('SpellDuration')).map(row => [+row.ID, +row.Duration]));
+const itemNames = new Map((await table('ItemSparse')).map(row => [+row.ID, row.Display_lang]));
+const mechanics = new Map((await table('SpellCategories')).map(row => [+row.SpellID, +row.Mechanic]));
+// How long a spell's aura lasts in milliseconds, Infinity until it's
+// cancelled, and 0 for one gone in an instant or with no duration at all.
+const heldFor = id => {
+    const row = misc.get(id), held = row ? durationOf.get(+row.DurationIndex) : undefined;
+    return held === -1 ? Infinity : held >= 1000 ? held : 0;
+};
+const lastingBuff = id => heldFor(id) > 0 && shownAura(id) && reach.get(id).buff && !passive(id)
+    && !learnable.has(id) && !traitSpells.has(id) && !taught.has(id);
+// The names ns.AURA_FAMILIES offers by itself: every name in a family whose
+// every ID is an aura no one learns, bar one ns.RANKS holds (AuraNames()).
+const familyNames = new Set();
+for (const ids of families) {
+    if (!ids.every(id => auraOnly.has(id))) continue;
+    for (const id of ids) if (!groups.has(names.get(id))) familyNames.add(names.get(id));
+}
+// The names a spell someone or a pet learns holds, where that spell's own
+// effect lasts: every ID of each name, then the ones learned.
+const idsNamed = new Map();
+for (const [id, name] of names) {
+    if (!name) continue;
+    if (!idsNamed.has(name)) idsNamed.set(name, []);
+    idsNamed.get(name).push(id);
+}
+const spellNames = new Set();
+for (const [name, ids] of idsNamed) {
+    if (ids.some(id => heldFor(id) > 0 && (learnable.has(id) || traitSpells.has(id) || taught.has(id)))) spellNames.add(name);
+}
+const itemBuffs = new Map(), bandaged = new Set();
+function taken(id, depth) {
+    const name = names.get(id);
+    if (name && !/[\\"\n]/.test(name) && lastingBuff(id)) {
+        if (mechanics.get(id) === BANDAGE_MECHANIC) {
+            bandaged.add(name);
+        } else if (!groups.has(name) && !familyNames.has(name) && !spellNames.has(name)
+            && (flags(id) & AURA_IS_DEBUFF) === 0) {
+            if (!itemBuffs.has(name)) itemBuffs.set(name, new Set());
+            itemBuffs.get(name).add(id);
+        }
+    }
+    if (depth < 2) for (const then of triggers.get(id) || []) taken(then, depth + 1);
+}
+const itemUses = new Map((await table('ItemEffect')).map(row => [+row.ID, row]));
+const consumableItems = new Map(itemRows.filter(row => +row.ClassID === CONSUMABLE)
+    .map(row => [+row.ID, itemNames.get(+row.ID)]));
+for (const row of itemEffects) {
+    const item = consumableItems.get(+row.ItemID), use = itemUses.get(+row.ItemEffectID);
+    if (!item || JUNK_ITEM(item) || !use || +use.TriggerType !== ON_USE) continue;
+    const spell = +use.SpellID;
+    if (spell > 0) taken(spell, 0);
+}
+// Each name's IDs, the one it's kept by first: the longest-lasting, and the
+// lowest where they last the same.
+const heldOrder = (a, b) => (heldFor(a) === heldFor(b) ? a - b : heldFor(a) > heldFor(b) ? -1 : 1);
+const itemBuffIDs = new Map([...itemBuffs].map(([name, ids]) => [name, [...ids].sort(heldOrder)]));
+// A bandage's heal is all that mechanic hides, so the rule goes when it
+// isn't needed.
+assert.deepEqual([...bandaged].sort(), ['First Aid'],
+    'the bandage mechanic hides more than First Aid now: check BANDAGE_MECHANIC');
+// The elixir the player asked for, so the build fails if the rules above
+// stop finding a consumable's buff or the data renames this one, and Fire
+// Protection, whose two potions are what the raids drink: both IDs or the
+// icon stays dark for whoever drinks the other one.
+assert.deepEqual(itemBuffIDs.get('Elixir of the Mongoose'), [17538],
+    'Elixir of the Mongoose (17538) is no longer a consumable buff: check the rules above');
+assert.deepEqual(itemBuffIDs.get('Fire Protection'), [7233, 17543],
+    'Fire Protection no longer comes from both potions: check the rules above');
+// And what the last two rules leave out in this build, so the build says so
+// if either stops finding it.
+assert(!itemBuffIDs.has('Dreamless Sleep') && !itemBuffIDs.has('Poison Mushroom')
+    && !itemBuffIDs.has('Fire Shield') && !itemBuffIDs.has('Lesser Invisibility')
+    && itemBuffIDs.has('Sayge\'s Dark Fortune of Damage'),
+    'a debuff or a pet buff\'s name is a consumable buff now, or a real fortune went with them:'
+        + ' check AURA_IS_DEBUFF and spellNames');
+const itemBuffLines = [...itemBuffIDs.keys()].sort()
+    .map(name => ` [${JSON.stringify(name)}]=${itemBuffIDs.get(name)[0]},`);
+// The rest of a name's IDs join the one kept, by name (ns.NAME_AURAS above),
+// so an entry added by name lights for whichever of them you drank, read or
+// ate. None of these names is one of that list's own, and none is in an aura
+// family, so nothing takes another's place.
+for (const name of [...itemBuffIDs.keys()].sort()) {
+    const extra = itemBuffIDs.get(name).slice(1).sort((a, b) => a - b);
+    if (extra.length === 0) continue;
+    assert(!nameAuras.has(name), `${name}: ns.NAME_AURAS holds it already`);
+    nameAuras.set(name, extra);
+}
+const nameAuraLines = [...nameAuras.keys()].sort()
+    .map(name => ` [${JSON.stringify(name)}]={${nameAuras.get(name).join(',')}},`);
+// A consumable's buff is an aura no one learns too (ns.AURA_ONLY above), so
+// the Cooldowns and Utility bars show it for no one: Clear takes one a
+// profile ticked there before such an add was turned away.
+for (const [name, ids] of itemBuffIDs) {
+    for (const id of ids) {
+        assert(!familyOf.has(id), `${name} (${id}) is in an aura family as well`);
+        auraOnly.add(id);
+    }
+}
+for (const id of auraOnly) assert(!rankedIDs.has(id) && !listedIDs.has(id), `${names.get(id)} (${id}) is a spell and an aura no one learns`);
+const auraOnlyLines = [...auraOnly].sort((a, b) => a - b).map(id => ` [${id}]=true,`);
 
 // The pets' own abilities that a class list above names, by the class whose
 // pet has them, each with the pet's spell IDs (ns.PET_SPELLS). The addon
@@ -1103,6 +1279,8 @@ const out = [
     '-- one buff in several IDs (a totem buff\'s ranks, Well Fed from any food),',
     '-- which of those auras no one learns as a spell, by ID, the debuffs',
     '-- in ns.RANKS no one casts (Charge Stun), for the Debuffs bar alone, by ID,',
+    '-- the buff a consumable puts on you (Elixir of the Mongoose, Rallying Cry',
+    '-- of the Dragonslayer), by name, so the add box finds one by name,',
     '-- the pets\' abilities a class list names (a demon\'s Seduction, a hunter',
     '-- pet\'s Growl), with the pet\'s own spell IDs, by class and name,',
     '-- the reactive abilities, usable only once something happens in the',
@@ -1148,6 +1326,9 @@ const out = [
     'ns.DEBUFF_AURAS = {',
     ...debuffAuraLines,
     '}',
+    'ns.ITEM_BUFFS = {',
+    ...itemBuffLines,
+    '}',
     'ns.PET_SPELLS = {',
     ' HUNTER={',
     ...hunterPetLines,
@@ -1166,4 +1347,4 @@ const out = [
 ].join('\n');
 await writeFile(join(root, 'Ranks.lua'), out);
 const debuffCount = [...debuffs.values()].reduce((sum, set) => sum + set.size, 0);
-console.log(`Ranks.lua: ${groups.size} spells, ${abilities.length} class ability rows, ${racials} racial spells, ${debuffCount} class debuffs, ${ownerLines.length} spells with their classes, ${raceLines.length} with their races, ${passiveLines.length} passive, ${auraLinks.buff.size} passives with a buff and ${auraLinks.debuff.size} with a debuff of their own, ${spellAuraLines.length} spells and ${nameAuraLines.length} names leading to an aura with another ID, ${families.length} auras in several IDs, ${auraOnly.size} auras no one learns, ${debuffAuras.length} debuffs no one casts, ${demonLines.length} demon and ${hunterPetLines.length} hunter pet abilities a class list names, ${reactive.size} reactive, ${cooldownLines.length} with a cooldown.`);
+console.log(`Ranks.lua: ${groups.size} spells, ${abilities.length} class ability rows, ${racials} racial spells, ${debuffCount} class debuffs, ${ownerLines.length} spells with their classes, ${raceLines.length} with their races, ${passiveLines.length} passive, ${auraLinks.buff.size} passives with a buff and ${auraLinks.debuff.size} with a debuff of their own, ${spellAuraLines.length} spells and ${nameAuraLines.length} names leading to an aura with another ID, ${families.length} auras in several IDs, ${auraOnly.size} auras no one learns, ${debuffAuras.length} debuffs no one casts, ${itemBuffIDs.size} consumable buffs in ${[...itemBuffIDs.values()].reduce((sum, ids) => sum + ids.length, 0)} IDs, ${demonLines.length} demon and ${hunterPetLines.length} hunter pet abilities a class list names, ${reactive.size} reactive, ${cooldownLines.length} with a cooldown.`);

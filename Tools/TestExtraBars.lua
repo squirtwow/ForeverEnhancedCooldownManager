@@ -1181,6 +1181,21 @@ end
         "true true 0 true true false false 16 slots, 2 on true",
         "its own options, kept as a Debuffs bar's (missing greyed, kept with no target, from 0), Count ticks its own: Debuffs"
         .. " left as it was; fixed spots, a slot each")
+    -- Light up for anyone's debuffs (a player's idea): Debuffs 2's own too,
+    -- with a set of spots of its own; Debuffs has none of either.
+    B:SetOption("debuff2", "anyCaster", true)
+    local anyHere, anyThere = 0, 0
+    for key in pairs(S[bar.container].slots) do
+        if key:find("^ab") then anyHere = anyHere + 1 end
+    end
+    for key in pairs(S[debuff.container].slots) do
+        if key:find("^ab") then anyThere = anyThere + 1 end
+    end
+    Equal(table.concat({ tostring(data.anyCaster), tostring(base.anyCaster), anyHere, anyThere,
+        tostring(S[bar.container].slots.ab1.enabled), tostring(S[bar.container].slots.b1.enabled) }, " "),
+        "true false 16 0 true false",
+        "Debuffs 2's own: its 16 anyone's spots made and on, its first set off; Debuffs untouched, with none made")
+    B:SetOption("debuff2", "anyCaster", false)
     -- A new target: both Debuffs bars look again at once.
     local before = { S[debuff.container].refreshes or 0, S[bar.container].refreshes or 0 }
     target = true
@@ -2173,6 +2188,35 @@ end)()
     Fire("PLAYER_TARGET_CHANGED")
     local holder = B:Get("debuff").holders[1]
     Equal(S[holder].width .. " " .. tostring(holder.glowHost and S[holder.glowHost].width), "54 54", "its glow as big as its spot")
+    Equal(#printed, 0, "no errors")
+end)()
+
+-- Cooldown only on Cooldowns 2 -----------------------------------------------------------------------
+-- (Squirt, 25 Nov 2026: Stormstrike's icon showed its debuff's time in place
+-- of its cooldown.) An extra bar keeps its own: ticked for a spell on
+-- Cooldowns 2, that icon's two slots go off and the name its place is held
+-- under goes with them, so it shows its plain cooldown, while Cooldowns' own
+-- icon keeps its buff and debuff time. Kept for that bar, and gone with it.
+;(function()
+    local ns = Start({ useBars = true, notesSeen = "dev", helpSeen = true, bars = { cd = { spells = { "Moonfire" } } } })
+    local B = ns.Bars
+    B:AddBar("cd")
+    B:Assign("Wrath", "cd2")
+    B:SetOption("cd", "showAuras", true)
+    B:SetOption("cd2", "showAuras", true)
+    -- A bar's first place: its two slots on or off, and the name it's held under.
+    local function Spot(key)
+        local bar = B:Get(key)
+        local p, t = S[bar.auraContainers.p].slots.p1, S[bar.auraContainers.t].slots.t1
+        return ("%s/%s %s"):format(tostring(p.enabled), tostring(t.enabled), tostring(bar.auraNames[1]))
+    end
+    local before = Spot("cd") .. " | " .. Spot("cd2")
+    Equal(tostring(B:SetCooldownOnly("cd2", "Wrath", true)) .. " " .. before .. " | " .. Spot("cd") .. " | " .. Spot("cd2") .. " | "
+        .. tostring(B:CooldownOnly("cd2", "Wrath")) .. " " .. tostring(B:CooldownOnly("cd", "Moonfire")),
+        "true true/true Moonfire | true/true Wrath | true/true Moonfire | false/false nil | true false",
+        "ticked on Cooldowns 2: that icon's slots off and its name gone with them; Cooldowns' own icon keeps its time")
+    B:RemoveBar("cd2")
+    Equal(tostring(ns.ProfileLists().cooldownOnly), "nil", "Cooldowns 2 taken out: its tick gone with it")
     Equal(#printed, 0, "no errors")
 end)()
 

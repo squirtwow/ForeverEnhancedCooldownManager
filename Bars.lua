@@ -22,12 +22,23 @@ local TINT = {
 }
 -- Abilities that only become usable after something happens in the fight
 -- (Overpower after a dodge, Execute on a wounded target, Victory Rush after
--- a kill), by name, from the game data (Ranks.lua).
-local REACTIVE = ns.REACTIVE or {}
+-- a kill), by name, from the game data (Ranks.lua), and by the spell ID of
+-- every rank as well: your spellbook gives each spell's name in the client's
+-- own language, so on a client that isn't English only the IDs match (a
+-- player's report, 23 Nov 2026).
+local function Gated(names)
+    local set, ranks = {}, ns.RANKS or {}
+    for name in pairs(names) do
+        set[name] = true
+        for _, id in ipairs(ranks[name] or {}) do set[id] = true end
+    end
+    return set
+end
+local REACTIVE = Gated(ns.REACTIVE or {})
 -- Lit in any stance (a player's idea, 23 Nov 2026): Overpower's point from
 -- the target's dodge, read straight, so it lights in Berserker or Defensive
 -- Stance too, for a stance dance into Battle Stance. Only while ticked.
-local ANY_STANCE = { Overpower = true }
+local ANY_STANCE = Gated({ Overpower = true })
 
 local bars = {}
 local unlocked, inCombat, editMode = false, false, false
@@ -452,6 +463,20 @@ end
 -- Whether an icon shows an item (your ammunition, your Soul Shards) rather
 -- than a spell.
 local ITEM_KINDS = { item = true, slot = true, family = true, ammo = true, shards = true }
+
+-- Whether a spell on a bar is a reactive ability, and whether it's the one
+-- Lit in any stance can light (Overpower). Both read the English name and
+-- every rank's spell ID, so a client in another language is matched by ID.
+-- An item is never either.
+function B:Reactive(entry)
+    return entry ~= nil and not ITEM_KINDS[entry.kind]
+        and (REACTIVE[entry.baseName or entry.name] == true or REACTIVE[entry.spellID] == true)
+end
+
+function B:AnyStance(entry)
+    return entry ~= nil and not ITEM_KINDS[entry.kind]
+        and (ANY_STANCE[entry.baseName or entry.name] == true or ANY_STANCE[entry.spellID] == true)
+end
 
 -- Show reagent count (ticked in a spell's own panel): how many times your
 -- reagents let you cast it, in the spot an item's count goes. The game can
@@ -1384,8 +1409,8 @@ local function Layout(bar)
             icon.cooldown:SetCountdownFont(Style:Countdown(icon.face, icon.look))
             icon.cooldown:SetHideCountdownNumbers(not data.showTimer)
             icon.count:SetFontObject(Style:Count(icon.face))
-            icon.spellID, icon.name, icon.reactive = entry.spellID, name, REACTIVE[entry.baseName or entry.name] == true
-            icon.anyStance = not ITEM_KINDS[entry.kind] and ANY_STANCE[entry.baseName or entry.name] == true or nil
+            icon.spellID, icon.name, icon.reactive = entry.spellID, name, B:Reactive(entry)
+            icon.anyStance = B:AnyStance(entry) or nil
             icon.kind, icon.itemID, icon.slot, icon.current = entry.kind, entry.itemID, entry.slot, entry.current
             -- A spot that showed a spell's global cooldown and now holds an item.
             if icon.gcdShown and ITEM_KINDS[entry.kind] then NoGlobal(icon) end
@@ -1562,12 +1587,15 @@ function B:Report(add, say)
                     -- (Show the trap I last laid, when ticked: the trap it shows.)
                     local trap = icon.trap and (" | shows the trap last laid: " .. tostring(icon.laidShown or icon.trap)
                         .. ", heard " .. tostring(traps.hearing)) or ""
+                    -- (Cooldown only, when ticked: this icon is left out of
+                    -- the bar's buff and debuff times.)
+                    local cool = self:CooldownOnly(key, icon.name) and " | cooldown only" or ""
                     -- (Count ticks, when ticked: its pace and its count's slot.)
                     add(("  %d. %s | %s %s | reactive %s | usable %s, no mana %s | glow %s (%s%s) | size %s | range watched %s"
-                        .. " | can't cast %s | short %s%s%s%s"):format(i, say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID),
+                        .. " | can't cast %s | short %s%s%s%s%s"):format(i, say(icon.name), say(icon.kind), say(icon.spellID or icon.itemID),
                         tostring(icon.reactive), say(usable), say(noMana), tostring(glow:IsShown()), glow.proc and "proc" or "edge", loop,
                         say(icon:GetWidth()), tostring(icon.ranged == true), tostring(icon.cantCast == true),
-                        tostring(icon.short), icon.shortSecret and " (game's own)" or "", trap,
+                        tostring(icon.short), icon.shortSecret and " (game's own)" or "", trap, cool,
                         ns.IconAuras:TickReport(bar, icon.name)))
                 end
             end
@@ -1588,10 +1616,19 @@ function B:Report(add, say)
                 if glows then add(glows) end
             elseif ns.BAR_KIND[key] == "debuff" then
                 -- Its greyed spots: ticked, kept with no target, and up now
-                -- (a player asking why they go without one).
+                -- (a player asking why they go without one). Then Light up
+                -- for anyone's debuffs: ticked, and whether the game made
+                -- that set of slots and its edge slots for Warn at
+                -- (Buffs.lua AnySlots).
                 local data = bar.data
-                add(("  missing greyed %s, keep greyed with no target %s, out of combat %s, greyed spots up %s"):format(
-                    tostring(data.showMissing), tostring(data.greyedNoTarget), tostring(data.outOfCombat), tostring(bar.enemy)))
+                local anyone = "off"
+                if data.anyCaster then
+                    anyone = bar.anySlots == nil and "on, not made yet" or bar.anySlots == false and "on, slots refused"
+                        or bar.anyMarks == false and "on, no edge slots" or "on"
+                end
+                add(("  missing greyed %s, keep greyed with no target %s, out of combat %s, greyed spots up %s,"
+                    .. " anyone's debuffs %s"):format(tostring(data.showMissing), tostring(data.greyedNoTarget),
+                    tostring(data.outOfCombat), tostring(bar.enemy), anyone))
             end
         end
     end
@@ -2208,11 +2245,12 @@ local function Forget(key, name)
     if name then
         ns.ForgetSpellLook(name)
         -- And its icon's own size on this bar, and on a Cooldowns or Utility
-        -- bar its Show the trap I last laid and Count ticks, once none of
-        -- its lists has it.
+        -- bar its Show the trap I last laid, Count ticks and Cooldown only,
+        -- once none of its lists has it.
         ns.ForgetOwnSize(key, name)
         ns.ForgetLastTrap(key, name)
         ns.ForgetCountTicks(key, name)
+        ns.ForgetCooldownOnly(key, name)
     end
     if not (ns.AURA_BARS[key] and name) then return name end
     -- (Still on another of the bar's lists, a form's on a Debuffs bar
@@ -2263,6 +2301,7 @@ function B:Assign(name, key)
         ns.ForgetOwnSize(current, name)
         ns.ForgetLastTrap(current, name)
         ns.ForgetCountTicks(current, name)
+        ns.ForgetCooldownOnly(current, name)
     end
     if not key then ns.ForgetSpellLook(name) end
     if key then
@@ -2404,6 +2443,18 @@ local function Vet(key, text)
     -- once added (B:Fits), and not offered on the other bars' pages.
     if not entry and ns.IMBUE_SPELLS and ns.IMBUE_SPELLS[found] and ns.BAR_KIND[key] ~= "buff" then
         return false, found .. " only goes on the Buffs bar, where it lights while it's on your weapon.", true
+    end
+    -- A consumable's buff (Elixir of the Mongoose, Flask of the Titans;
+    -- ns.ITEM_BUFFS): the Buffs bar's alone the same way, and not offered on
+    -- the other bars' pages. Nobody casts one as a spell, so a cooldown bar
+    -- has nothing to count down, and nothing of it lands on your target for
+    -- the Debuffs bar. One on a Buffs bar already is turned away here too,
+    -- where an imbue is turned away by its entry's kind (B:Fits above): a
+    -- consumable's entry is a plain spell, so without this a name typed on a
+    -- cooldown bar in a fight could go on while the game keeps what you know
+    -- secret, and sit there showing nothing.
+    if ns.ITEM_BUFFS and ns.ITEM_BUFFS[found] and ns.BAR_KIND[key] ~= "buff" then
+        return false, found .. " only goes on the Buffs bar, where it lights while it's on you.", true
     end
     local passive = ns.Spells:AddNote(text, key)
     if passive then return false, passive end
@@ -3170,6 +3221,24 @@ function B:ShowsLastTrap(key, name)
     return not ns.AURA_BARS[key] and ns.LastTrap(key, name)
 end
 
+-- Cooldown only (Squirt, 25 Nov 2026: Stormstrike's icon showed its
+-- debuff's 12 seconds in place of its 8 second cooldown): ticked for a
+-- spell's entry on a Cooldowns or Utility bar (an extra one too), its icon
+-- shows its cooldown and never a time laid over it (its buff's or debuff's,
+-- or its totem's with Totem time), while the rest of the bar shows theirs
+-- (IconAuras.lua). Its Count ticks can't show then (that count only shows
+-- while the debuff's time does), so its panel greys it and says why. False
+-- for anything else.
+function B:SetCooldownOnly(key, name, on)
+    if ns.AURA_BARS[key] or not IndexOf(key, name) then return false end
+    if ns.SetCooldownOnly(key, name, on) then self:Changed() end
+    return true
+end
+
+function B:CooldownOnly(key, name)
+    return not ns.AURA_BARS[key] and ns.CooldownOnly(key, name)
+end
+
 -- The trap you laid last this session, by name, or nil before one.
 -- For the tests.
 function B:LastLaid()
@@ -3416,8 +3485,13 @@ function B:SetOption(key, field, value)
     local apart = field == "swapForm" and not ns.AURA_BARS[key] and ns.KeepApart(value and (key == "cd" and "util" or "cd") or key)
     if not self.started then return end
     if apart then return self:Rebuild() end
-    -- In colour: the Debuffs bar's greyed spots change at once, in a fight too.
-    if field == "missingColour" and bars[key] then ns.BuffBar:PaintMissing(bars[key]) end
+    -- In colour: an aura bar's greyed spots change at once, in a fight too,
+    -- a weapon enchant's own spot with them (PaintMissing leaves those to
+    -- PaintEnchants, which owns them).
+    if field == "missingColour" and bars[key] then
+        ns.BuffBar:PaintMissing(bars[key])
+        ns.BuffBar:PaintEnchants(bars[key])
+    end
     -- Swap with my form ticked: the form you're in now, read before the bar
     -- shows its list.
     ns.FollowForm()

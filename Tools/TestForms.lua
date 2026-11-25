@@ -2045,14 +2045,15 @@ do
         local note = S[w.note].text
         S[tick].scripts.OnLeave(tick)
         Equal(tostring(S[tick].shown) .. " " .. tostring(tick:GetChecked()) .. " " .. tostring(S[editing].shown) .. " " .. S[area].height
-            .. " | " .. note, "true false false 156 | Each form gets its own debuffs on this bar, swapped as you change.",
-            "its page: the tick, off, the options a row taller for it, its note saying what it does")
+            .. " | " .. note, "true false false 178 | Each form gets its own debuffs on this bar, swapped as you change.",
+            "its page: the tick, off, the options a row taller for it (and a row for Light up for anyone's debuffs), its note"
+                .. " saying what it does")
         tick:Click()
         local pick, label = S[editing].points[1], S[editing.label].points[1]
         Equal(tostring(ns.Swaps("debuff")) .. " " .. Ticks(Profile(ns)) .. " " .. tostring(S[B.driver].events.UPDATE_SHAPESHIFT_FORM)
             .. " | " .. Spots(bar) .. " | " .. Away(bar) .. " | " .. List(ns, "debuff", 1) .. " | " .. tostring(S[editing].shown) .. " "
             .. S[editing.name].text .. " " .. pick[2] .. " " .. pick[3] .. " " .. label[2] .. " " .. label[3] .. " " .. S[area].height,
-            "true debuff true | Rake 40 | Faerie Fire 80 | Moonfire, Demoralizing Roar | Rake,Faerie Fire | true Cat Form 420 -151 320 -155 178",
+            "true debuff true | Rake 40 | Faerie Fire 80 | Moonfire, Demoralizing Roar | Rake,Faerie Fire | true Cat Form 420 -151 320 -155 200",
             "ticked in cat form: on in the profile, your form heard, cat form's own list at once (no Moonfire or Demoralizing Roar),"
                 .. " the rest out of sight; Editing under it, the options a row taller again")
         Equal(Slots(bar) .. " | " .. S[bar].width .. "x" .. S[bar].height, "all | 156x36",
@@ -2062,7 +2063,7 @@ do
         w:Refresh()
         local at = S[tick].points[1]
         pick = S[editing].points[1]
-        Equal(at[2] .. " " .. at[3] .. " " .. pick[2] .. " " .. pick[3] .. " " .. S[area].height, "320 -173 420 -195 222",
+        Equal(at[2] .. " " .. at[3] .. " " .. pick[2] .. " " .. pick[3] .. " " .. S[area].height, "320 -173 420 -195 244",
             "with a debuff counting its ticks: the tick and Editing under the tick count's rows, the options taller for them")
         -- Editing: Normal's list from cat form, then put back.
         editing.back:Click()

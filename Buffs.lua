@@ -39,8 +39,12 @@ end
 -- What the container is told about a slot or group: its spell IDs, and on
 -- the Debuffs bar, only a player's (the bar's "HARMFUL|PLAYER" filter then
 -- keeps only yours: this flag alone lets any player's through).
-local function Filters(bar, ids)
-    return { includeSpellIDs = ids, isFromPlayerOrPlayerPet = ns.AURA_BARS[bar.key].mine or nil }
+-- any: a slot or group of the Debuffs bar's anyone's set (Light up for
+-- anyone's debuffs), whose own filter has no "PLAYER" in it. There it's the
+-- filter that does the work and no flag goes with the IDs, so whoever cast
+-- the debuff its icon lights.
+local function Filters(bar, ids, any)
+    return { includeSpellIDs = ids, isFromPlayerOrPlayerPet = not any and ns.AURA_BARS[bar.key].mine or nil }
 end
 
 function F:Available()
@@ -143,9 +147,22 @@ function F:KeepGreyed(data)
     return data ~= nil and data.greyedNoTarget == true and self:Fixed(data)
 end
 
--- Missing in colour (the Debuffs bar's own, a player's idea): its missing
--- debuffs' spots keep their colour, still faded (ns.BarData keeps it off on
--- the Buffs bar).
+-- Light up for anyone's debuffs (a Debuffs bar's own, a player's idea, 23
+-- Nov 2026: a warlock who wants to see which curses the other warlocks in
+-- his raid already have on the boss, beside his own curse group). Its icons
+-- light for their debuffs whoever cast them, through a second set of slots
+-- and groups watching "HARMFUL" rather than "HARMFUL|PLAYER" (AnySlots).
+-- (ns.BarData keeps it off on a Buffs bar, and only a bar with an open
+-- filter of its own can have it.)
+function F:Anyone(key, data)
+    local aura = ns.AURA_BARS[key]
+    return aura ~= nil and aura.open ~= nil and data ~= nil and data.anyCaster == true
+end
+
+-- Missing in colour (the Buffs and Debuffs bars, a player's idea): the
+-- missing spots keep their colour, still faded. On a Buffs bar it goes with
+-- missing buffs greyed or Only show missing (ns.BarData keeps it off on a
+-- cooldown bar).
 function F:InColour(data)
     return data ~= nil and data.missingColour == true
 end
@@ -199,7 +216,9 @@ function F:Details(bar)
     for _, parts in ipairs(bar.groupParts or {}) do Detail(parts, BASE, parts.index and looks[parts.index], parts.high) end
     for _, holder in ipairs(bar.holders or {}) do
         Style:Shape(holder.shape) -- the spot itself, at its size as laid out
-        if holder.slot then Detail(holder.slot, holder.size or BASE, holder.look, holder.high) end
+        -- (Every set on the spot: the one in use and, with Light up for
+        -- anyone's debuffs made, the other, so both are ready.)
+        for _, parts in ipairs(holder.slots or {}) do Detail(parts, holder.size or BASE, holder.look, holder.high) end
         if holder.enchant then Detail(holder.enchant, holder.size or BASE, holder.look, holder.high) end
     end
     self:Keys(bar) -- the numbers just placed again: clear of a key once more
@@ -280,7 +299,10 @@ function F:Keys(bar)
         if parts.index then Set(parts, on and names[parts.index] or nil, BASE, parts.high, looks[parts.index]) end
     end
     for i, holder in ipairs(bar.holders or {}) do
-        if holder.slot then Set(holder.slot, on and names[i] or nil, holder.size or BASE, holder.high, holder.look) end
+        -- (Every set on the spot, so the other is ready too: SlotLook.)
+        for _, parts in ipairs(holder.slots or {}) do
+            Set(parts, on and names[i] or nil, holder.size or BASE, holder.high, holder.look)
+        end
         SpotKey(holder, on and holder.slot and names[i] or nil)
     end
 end
@@ -724,11 +746,19 @@ function F.Guard(look)
 end
 
 -- A slot's numbers take its holder's size; a later size change refits them.
-local function SlotLook(holder, key)
+-- any: the Debuffs bar's second slot on this spot (Light up for anyone's
+-- debuffs), which looks the same and sits in the same place. holder.slots
+-- holds every set's pieces, for the looks that go on all of them (F:Details,
+-- F:Keys, F:Layout); holder.slot is the set in use (Live), which the counts,
+-- warnings and glows go on.
+local function SlotLook(holder, key, any)
     return function(button)
         button:SetAllPoints(holder)
-        holder.slot = Look(button, holder.size or BASE, holder.showTimer ~= false, false, ns.BAR_KIND[key] == "debuff", holder.look,
+        local parts = Look(button, holder.size or BASE, holder.showTimer ~= false, false, ns.BAR_KIND[key] == "debuff", holder.look,
             ns.AURA_BARS[key] ~= nil, holder.high, ns.BAR_KIND[key] == "buff")
+        holder.slots = holder.slots or {}
+        holder.slots[#holder.slots + 1] = parts
+        if any then holder.anySlot = parts else holder.mineSlot, holder.slot = parts, parts end
     end
 end
 
@@ -812,7 +842,10 @@ end
 -- A w-slot's icon: over its entry's spot, never taking the mouse, drawing
 -- only its time left (nothing until a rule is set) on a layer above the
 -- b-slot's icon, its sweep and its counts. Made as the slot is added.
-local function MarkLook(holder)
+-- any: the Debuffs bar's edge slot for its anyone's set (Light up for
+-- anyone's debuffs), kept beside the first; holder.mark is the set in use
+-- (Live), which F:Warns writes its rule on.
+local function MarkLook(holder, any)
     return function(button)
         button:EnableMouse(false)
         button:SetAllPoints(holder)
@@ -828,7 +861,8 @@ local function MarkLook(holder)
                 { property = Enum.DurationTextBindingProperty.RemainingDuration, formatter = formatter } } } })
             return { frame = frame, text = text, formatter = formatter, rule = "" }
         end)
-        holder.mark = ok and mark or nil
+        local made = ok and mark or nil
+        if any then holder.anyMark = made else holder.mineMark, holder.mark = made, made end
         if not ok and not F.markError then F.markError = tostring(mark) end
     end
 end
@@ -1277,7 +1311,9 @@ function F:PaintEnchants(bar)
         local holder, ids = bar.holders[i], bar.imbues[i]
         if ids then
             local on, ends, total, id, slot, bare = EnchantOn(ids)
-            holder.icon:SetDesaturated(not on)
+            -- (In colour: a missing enchant's spot keeps its colour too, so
+            -- a Windfury or poison spot isn't grey while it's off.)
+            holder.icon:SetDesaturated(not on and not self:InColour(bar.data))
             holder.icon:SetAlpha(on and 1 or .45)
             -- (Glow when missing: over it, unlike an aura's icon, so it goes;
             -- and never on a hand with no weapon, where nothing's missing.)
@@ -1769,7 +1805,8 @@ function F:Layout(bar, data)
             local fits = packed and fit or own
             holder.size, holder.high, holder.showTimer, holder.look = fits, packed and fitHigh or ownHigh, data.showTimer, look
             bar.looks[count] = look
-            if holder.slot then Fit(holder.slot, fits, data.showTimer, look, holder.high) end
+            -- (Every set on the spot, so the other is ready too: SlotLook.)
+            for _, parts in ipairs(holder.slots or {}) do Fit(parts, fits, data.showTimer, look, holder.high) end
             -- (What a hand entry shows while nothing is on it: F:PaintEnchants.)
             local text = #group > 1 and (entry.name .. " +" .. (#group - 1)) or entry.name
             holder.icon:SetTexture(entry.icon)
@@ -1958,6 +1995,105 @@ function F:ApplySelf(bar, packed, spacing, scale, tall)
     end
 end
 
+-- Light up for anyone's debuffs ------------------------------------------------------
+-- (A player's idea, 23 Nov 2026.) A Debuffs bar shows the debuffs you cast:
+-- its slots and groups watch "HARMFUL|PLAYER", which the game fixes as each
+-- is added, and only what they watch for can be changed after
+-- (SetAuraSlotCandidateFilters). So with the tick on the bar uses a second
+-- set of its own, watching "HARMFUL" with no "PLAYER" in it: the same 16
+-- spots ("ab1".."ab16" beside "b1".."b16"), the same edge slots for Warn at
+-- ("aw1"..), and the same packed groups ("ag1"..). One set is switched on
+-- and the other right off, so an aura never lights two icons.
+--
+-- The set is made the first time the tick is on, as the Debuffs bar's
+-- container for your debuffs on you is (SelfContainer) and as a cooldown
+-- bar's glow slots are (IconAuras.lua): out of a fight (F:Apply waits for
+-- it to end), on a bar already holding its container, so the bar is never
+-- shown or hidden for it, and each icon's look given as its slot is added
+-- and never after. Made once; if the game turns a set down, that's said
+-- once (/ccm debug) and not tried again: with no second set the tick leaves
+-- the bar as it was, and with no second edge set Warn at's ring is the one
+-- thing missing while it's on (the countdown still turns red).
+local function AnySlots(bar)
+    if bar.anySlots ~= nil then return bar.anySlots end
+    local aura = ns.AURA_BARS[bar.key]
+    if not (bar.container and aura and aura.open) then return false end
+    local ok, err = pcall(function()
+        for i = 1, ns.BUFF_SLOTS do
+            F.Add(bar.container, "AddAuraSlot", "ab" .. i, aura.open,
+                { initializeFrame = F.Guard(SlotLook(bar.holders[i], bar.key, true)) })
+            bar.container:SetAuraSlotEnabled("ab" .. i, false)
+        end
+    end)
+    bar.anySlots = ok
+    if not ok then
+        -- Half made: every slot of it that the game did make goes off, so
+        -- none is left watching every debuff on your target.
+        for i = 1, ns.BUFF_SLOTS do pcall(bar.container.SetAuraSlotEnabled, bar.container, "ab" .. i, false) end
+        if not F.lastError then
+            F.lastError = tostring(err)
+            print("|cffffd100" .. ns.TITLE .. ":|r anyone's debuffs on the " .. ns.BAR_NAMES[bar.key]
+                .. " bar couldn't start. Please report this: " .. F.lastError)
+        end
+        return false
+    end
+    -- Its edge slots with them, where the bar has edge slots at all.
+    if bar.marks and CanMark() then
+        -- Why the game turned them down goes in F.markError with the rest,
+        -- for a player's bug report (/ccm debug), as the first set's does.
+        local madeMarks, whyMarks = pcall(function()
+            for i = 1, ns.BUFF_SLOTS do
+                F.Add(bar.container, "AddAuraSlot", "aw" .. i, aura.open,
+                    { initializeFrame = F.Guard(MarkLook(bar.holders[i], true)) })
+                bar.container:SetAuraSlotEnabled("aw" .. i, false)
+            end
+        end)
+        bar.anyMarks = madeMarks
+        if not madeMarks then
+            for i = 1, ns.BUFF_SLOTS do pcall(bar.container.SetAuraSlotEnabled, bar.container, "aw" .. i, false) end
+            if not F.markError then F.markError = "anyone's debuffs: " .. tostring(whyMarks) end
+        end
+    end
+    return true
+end
+
+-- Which set of pieces the bar's spots use now: the anyone's one while the
+-- tick is on and it was made, else the one it always had. The counts
+-- (F:Ticks), Warn at (F:Warns) and Glow while active (F:Actives) go on the
+-- set in use; the looks go on both (SlotLook). Only ever the set in use: a
+-- piece the game never made leaves its spot with none (nil), so nothing is
+-- drawn on the set that's switched off.
+local function Live(bar, any)
+    for _, holder in ipairs(bar.holders) do
+        if any then
+            holder.slot, holder.mark = holder.anySlot, holder.anyMark
+        else
+            holder.slot, holder.mark = holder.mineSlot, holder.mineMark
+        end
+    end
+end
+
+-- The tick just ticked or unticked: every slot and group of the set the bar
+-- no longer uses goes right off, and what it has sent so far is let go, so
+-- the set now in use is sent afresh below. True when it changed.
+local function SwapSets(bar, any)
+    if (bar.anyNow == true) == any then return false end -- (never used yet: as off, so nothing is sent again)
+    bar.anyNow = any
+    local gone = any and "" or "a" -- (the set in use until now; its slots are there)
+    for i = 1, ns.BUFF_SLOTS do
+        if (bar.applied[i] or "") ~= "" then bar.container:SetAuraSlotEnabled(gone .. "b" .. i, false) end
+        if (bar.appliedWarns[i] or "") ~= "" then bar.container:SetAuraSlotEnabled(gone .. "w" .. i, false) end
+        bar.applied[i], bar.appliedWarns[i] = nil, nil
+    end
+    for i = 1, math.max(bar.groups, bar.anyGroups or 0) do
+        if (bar.appliedGroups[i] or "") ~= "" and i <= (any and bar.groups or bar.anyGroups or 0) then
+            bar.container:SetAuraGroupEnabled(gone .. "g" .. i, false)
+        end
+        bar.appliedGroups[i] = nil
+    end
+    return true
+end
+
 -- Tells the secure container which entries go where. Never in combat; a change
 -- made then waits for the fight to end. Only what changed is sent.
 -- Icon height on a packed bar: its icons, the game's, are BASE across and
@@ -2007,6 +2143,15 @@ function F:Apply(bar)
         container:ClearAllPoints()
         if x == 0 then container:SetPoint(point, bar, point) else container:SetPoint(point, bar, point, x / scale, 0) end
     end
+    -- Light up for anyone's debuffs: which set of slots and groups the bar
+    -- uses, made here the first time it's on (nothing changes for a bar
+    -- without it: "a" is the anyone's set's letter, "" its own).
+    local any = on and self:Anyone(bar.key, data) and AnySlots(bar) or false
+    local letter = any and "a" or ""
+    if bar.anySlots then
+        SwapSets(bar, any)
+        Live(bar, any)
+    end
     for i = 1, ns.BUFF_SLOTS do
         -- Fixed slots: every entry's, or on a packed bar those ticked Only
         -- when missing.
@@ -2017,9 +2162,9 @@ function F:Apply(bar)
         local signature = Signature(ids)
         if bar.applied[i] ~= signature then
             bar.applied[i] = signature
-            local key = "b" .. i
+            local key = letter .. "b" .. i
             if ids then
-                container:SetAuraSlotCandidateFilters(key, Filters(bar, ids))
+                container:SetAuraSlotCandidateFilters(key, Filters(bar, ids, any))
                 container:SetAuraSlotEnabled(key, true)
             else
                 container:SetAuraSlotEnabled(key, false)
@@ -2028,8 +2173,10 @@ function F:Apply(bar)
     end
     -- Warn at: the edge slots, on the same spells as their entry's fixed
     -- spot, for a warned entry with a spot that stays (not on a packed bar,
-    -- nor one shown only while it's missing).
-    if bar.marks then
+    -- nor one shown only while it's missing). The set in use has its own
+    -- (anyMarks); where the game turned those down there's no ring while
+    -- anyone's debuffs is on, as on a game without the rules at all.
+    if any and bar.anyMarks or not any and bar.marks then
         for i = 1, ns.BUFF_SLOTS do
             local ids = on and not packed and bar.warns[i] and bar.holders[i].mark and not self:Hides(bar, i)
                 and bar.slotIDs[i] or nil
@@ -2037,9 +2184,9 @@ function F:Apply(bar)
             local signature = Signature(ids)
             if bar.appliedWarns[i] ~= signature then
                 bar.appliedWarns[i] = signature
-                local key = "w" .. i
+                local key = letter .. "w" .. i
                 if ids then
-                    container:SetAuraSlotCandidateFilters(key, Filters(bar, ids))
+                    container:SetAuraSlotCandidateFilters(key, Filters(bar, ids, any))
                     container:SetAuraSlotEnabled(key, true)
                 else
                     container:SetAuraSlotEnabled(key, false)
@@ -2053,24 +2200,29 @@ function F:Apply(bar)
     local function Index(i)
         return data.grow == "left" and ns.BUFF_SLOTS + 1 - i or i
     end
+    -- (The set in use keeps its own count of the groups made for it.)
+    local made = any and (bar.anyGroups or 0) or bar.groups
     if on and packed then
-        for i = bar.groups + 1, bar.count do
-            AddGroup(container, "g" .. i, ns.AURA_BARS[bar.key].filter, { initializeFrame = F.Guard(GroupLook(bar, i)), maxFrameCount = 1,
-                candidateFilters = Filters(bar, bar.slotIDs[i]), layout = { layoutIndex = Index(i), groupSpacing = spacing } })
-            bar.groups = i
+        local aura = ns.AURA_BARS[bar.key]
+        for i = made + 1, bar.count do
+            AddGroup(container, letter .. "g" .. i, any and aura.open or aura.filter,
+                { initializeFrame = F.Guard(GroupLook(bar, i)), maxFrameCount = 1,
+                candidateFilters = Filters(bar, bar.slotIDs[i], any), layout = { layoutIndex = Index(i), groupSpacing = spacing } })
+            made = i
+            if any then bar.anyGroups = i else bar.groups = i end
             bar.appliedGroups[i] = Signature(bar.slotIDs[i]) .. "|" .. spacing .. "|" .. Index(i) .. tall
         end
     end
-    for i = 1, bar.groups do
+    for i = 1, made do
         -- (Not one ticked Only when missing: its own slot shows it. Nor a
         -- weapon enchant: its own spot.)
         local ids = on and packed and bar.only[i] ~= true and not bar.imbues[i] and bar.slotIDs[i] or nil
         local signature = ids and (Signature(ids) .. "|" .. spacing .. "|" .. Index(i) .. tall) or ""
         if bar.appliedGroups[i] ~= signature then
             bar.appliedGroups[i] = signature
-            local key = "g" .. i
+            local key = letter .. "g" .. i
             if ids then
-                container:SetAuraGroupCandidateFilters(key, Filters(bar, ids))
+                container:SetAuraGroupCandidateFilters(key, Filters(bar, ids, any))
                 container:SetAuraGroupLayout(key, { layoutIndex = Index(i), groupSpacing = spacing })
                 container:SetAuraGroupEnabled(key, true)
             else
@@ -2642,7 +2794,10 @@ function F:WarnReport(bar, i)
     local warn = bar and bar.warns and bar.warns[i]
     if not warn then return "" end
     local holder = bar.holders[i]
+    -- (With anyone's debuffs on, the ring is that set's edge slot; where the
+    -- game turned those down there's none.)
     local edge = not bar.marks and "none (the game can't)" or self:Packed(bar.data) and "none (packed)"
+        or bar.anyNow and not bar.anyMarks and "none (anyone's debuffs)"
         or (bar.appliedWarns[i] or "") ~= "" and ("on, rule " .. tostring(holder.mark and holder.mark.rule)) or "off"
     local glow = holder.lowHost and holder.lowHost.glow
     -- Dim until Warn at, when ticked: on, or why not.

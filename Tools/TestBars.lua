@@ -1933,6 +1933,54 @@ do
     Equal(#printed, 0, "no errors from Lit in any stance")
 end
 
+-- A client in another language (a player's report, 23 Nov 2026): your
+-- spellbook gives every spell's name in that language, so the reactive
+-- abilities are found by the spell IDs of their ranks instead of by their
+-- English names. Lower ranks and Lit in any stance the same way; an item
+-- never counts.
+do
+    Environment()
+    book = { { name = "Waffen", items = {
+        { name = "Ueberwaeltigen", subName = "Rang 1", spellID = 7384, iconID = 1 },
+        { name = "Rache", subName = "Rang 1", spellID = 6572, iconID = 1 },
+        { name = "Hinrichten", subName = "Rang 2", spellID = 20658, iconID = 1 },
+        { name = "Hinrichten", subName = "Rang 1", spellID = 5308, iconID = 1 },
+        { name = "Kniesehne", subName = "Rang 1", spellID = 1715, iconID = 1 },
+    } } }
+    local gns = Load({ useBars = true })
+    local GB = gns.Bars
+    for _, key in ipairs({ "Ueberwaeltigen", "Rache", "Hinrichten", "Hinrichten@1", "Kniesehne" }) do
+        GB:Assign(key, "cd")
+    end
+    local bar = GB:Get("cd")
+    Equal(bar.count, 5, "all five on the bar, named in the client's language")
+    local flags = {}
+    for i = 1, bar.count do
+        flags[i] = bar.icons[i].name .. "=" .. tostring(bar.icons[i].reactive) .. "/" .. tostring(bar.icons[i].anyStance)
+    end
+    Equal(table.concat(flags, " "),
+        "Ueberwaeltigen=true/true Rache=true/nil Hinrichten=true/nil Hinrichten@1=true/nil Kniesehne=false/nil",
+        "found by spell ID: the reactive ones and Overpower's own choice, a lower rank too; Hamstring neither")
+    local function Lit()
+        local names = {}
+        for i = 1, bar.count do
+            if S[bar.icons[i].glow].shown then names[#names + 1] = bar.icons[i].name end
+        end
+        return table.concat(names, ", ")
+    end
+    usable[7384], usable[6572], usable[20658], usable[5308], usable[1715] = true, true, true, true, true
+    GB:RefreshAll()
+    Equal(Lit(), "Ueberwaeltigen, Rache, Hinrichten, Hinrichten@1",
+        "the gold edge still goes on each reactive ability, whatever the client's language")
+    usable[7384] = false
+    GB:RefreshAll()
+    Equal(Lit(), "Rache, Hinrichten, Hinrichten@1", "and goes once it's used")
+    Equal(tostring(GB:Reactive(nil)) .. " " .. tostring(GB:Reactive({ kind = "item", name = "Rache", itemID = 1 })),
+        "false false", "nothing and an item are never reactive")
+    usable[7384], usable[6572], usable[20658], usable[5308], usable[1715] = nil, nil, nil, nil, nil
+    Equal(#printed, 0, "no errors on a client in another language")
+end
+
 -- Buffs bar -------------------------------------------------------------------------------
 
 Environment()
@@ -2305,9 +2353,39 @@ Fire("PLAYER_REGEN_ENABLED")
     Equal(tostring(ns.BarData("buff").greyedNoTarget) .. " " .. tostring(ns.BarData("debuff").greyedNoTarget), "false false",
         "only the Debuffs bar's, and only true or false")
 end)()
--- Missing in colour (a player's idea, the Debuffs bar's own): the missing
--- debuffs' spots in colour instead of grey, still faded; off unless ticked,
--- and never on the Buffs bar.
+-- Light up for anyone's debuffs (a player's idea, 23 Nov 2026: a warlock who
+-- wants to see which curses the other warlocks in his raid already have on
+-- the boss): the bar's icons light for their debuffs whoever cast them,
+-- through a second set of slots and groups of its own. Off unless ticked, the
+-- Debuffs bars' only. (What the sets watch and what lights them is checked in
+-- Tools/TestAuraContainers.lua.)
+;(function()
+    local F = ns.BuffBar
+    Equal(tostring(ns.BarData("debuff").anyCaster) .. " " .. tostring(ns.BarData("buff").anyCaster) .. " "
+        .. tostring(ns.BarData("cd").anyCaster) .. " " .. tostring(F:Anyone("debuff", ns.BarData("debuff"))),
+        "false false false false", "off unless ticked, on every bar")
+    B:SetOption("debuff", "anyCaster", true)
+    Equal(tostring(ns.BarData("debuff").anyCaster) .. " " .. tostring(F:Anyone("debuff", ns.BarData("debuff"))) .. " "
+        .. tostring(F:Anyone("buff", { anyCaster = true })) .. " " .. tostring(F:Anyone("cd", { anyCaster = true })),
+        "true true false false", "ticked on the Debuffs bar; never on a Buffs or cooldown bar, which have no filter of their own for it")
+    Equal(tostring(debuffs.anySlots) .. " " .. tostring(debuffs.anyNow) .. " " .. tostring(debuffs.holders[1].anySlot ~= nil) .. " "
+        .. tostring(debuffs.holders[1].slot == debuffs.holders[1].anySlot), "true true true true",
+        "its second set made the first time it's on, and its spots now use it")
+    B:SetOption("debuff", "anyCaster", false)
+    Equal(tostring(debuffs.anyNow) .. " " .. tostring(debuffs.holders[1].slot == debuffs.holders[1].mineSlot) .. " "
+        .. tostring(debuffs.anySlots), "false true true",
+        "unticked: its spots use its own set again, the second one kept for next time")
+    -- Only the Debuffs bars': saved true on another bar, or anything but
+    -- true, reads as off.
+    ns.BarData("buff").anyCaster = true
+    ns.BarData("cd").anyCaster = true
+    ns.BarData("debuff").anyCaster = "yes"
+    Equal(tostring(ns.BarData("buff").anyCaster) .. " " .. tostring(ns.BarData("cd").anyCaster) .. " "
+        .. tostring(ns.BarData("debuff").anyCaster), "false false false", "only the Debuffs bars', and only true or false")
+end)()
+-- Missing in colour (a player's idea): the missing spots in colour instead
+-- of grey, still faded; off unless ticked. The Debuffs bar's first, then the
+-- Buffs bar's (a player's ask, 24 Nov 2026), never a cooldown bar's.
 ;(function()
     local spot = debuffs.holders[1]
     local function Grey() return tostring(S[spot.icon].desaturated) .. " " .. tostring(S[spot.icon].alpha) end
@@ -2330,10 +2408,30 @@ end)()
     Fire("PLAYER_REGEN_ENABLED")
     Equal(fight .. " | " .. Grey(), "false 0.45 | true 0.45 | false 0.45", "in a fight: in colour and grey at once, and still right after it")
     B:SetOption("debuff", "missingColour", false)
-    ns.BarData("buff").missingColour = true
+    -- The Buffs bar's own (a player's ask, 24 Nov 2026): its missing buffs'
+    -- spots in colour too, with missing buffs greyed on.
+    B:SetOption("buff", "showMissing", true)
+    local buffSpot = B:Get("buff").holders[1]
+    local function Faded() return tostring(S[buffSpot.icon].desaturated) .. " " .. tostring(S[buffSpot.icon].alpha) end
+    Equal(tostring(ns.BarData("buff").missingColour) .. " " .. Faded(), "false true 0.45",
+        "a missing buff's spot: off unless ticked, grey")
+    B:SetOption("buff", "missingColour", true)
+    Equal(Faded(), "false 0.45", "ticked: the missing buff's spot in colour, still faded")
+    -- And with Only show missing instead, which hides a buff while it's on you.
+    B:SetOption("buff", "showMissing", false)
+    B:SetOption("buff", "onlyMissing", true)
+    buffSpot = B:Get("buff").holders[1]
+    Equal(Faded(), "false 0.45", "Only show missing: the spots it leaves are in colour too")
+    B:SetOption("buff", "missingColour", false)
+    Equal(Faded(), "true 0.45", "unticked: grey again")
+    B:SetOption("buff", "onlyMissing", false)
+    -- Only an aura bar's, and only true or false.
+    ns.BarData("buff").missingColour = "yes"
     ns.BarData("debuff").missingColour = "yes"
-    Equal(tostring(ns.BarData("buff").missingColour) .. " " .. tostring(ns.BarData("debuff").missingColour), "false false",
-        "missing in colour: only the Debuffs bar's, and only true or false")
+    ns.BarData("cd").missingColour = true
+    Equal(tostring(ns.BarData("buff").missingColour) .. " " .. tostring(ns.BarData("debuff").missingColour) .. " "
+        .. tostring(ns.BarData("cd").missingColour), "false false false",
+        "missing in colour: the Buffs and Debuffs bars' only, and only true or false")
 end)()
 B:SetOption("debuff", "showMissing", false)
 -- Show keybinds (a player's idea, the Debuffs bar's own): the key that casts
@@ -5867,6 +5965,146 @@ end)()
     w:Hide()
 end)()
 
+-- Cooldown only, kept by bar and entry (Squirt, 25 Nov 2026: he put
+-- Stormstrike on a Cooldowns bar showing buff and debuff times and its icon
+-- showed its debuff's 12 seconds in place of its 8 second cooldown). Ticked
+-- in a spell's own panel on a Cooldowns or Utility bar (an extra one too),
+-- that icon shows its cooldown and never its buff or debuff time (the slots
+-- themselves are in Tools/TestAuraContainers.lua). Off by default; only for
+-- an entry on one of that bar's lists, never an aura bar's or a bar you
+-- haven't. Kept by bar and entry in the profile, with nothing left once it's
+-- unticked; gone with the entry, with the entry moved to another bar and
+-- with the bar taken out; carried by a copy of the profile; kept over a
+-- reload with the ones that can't be kept dropped, and it follows a spell
+-- the game renames. /ccm debug says which icon has it. (In a function of its
+-- own: the main chunk is at 200 locals.)
+;(function()
+    local SPELLBOOK = {
+        { name = "Stormstrike", subName = "Rank 1", spellID = 17364, iconID = 132314 },
+        { name = "Flame Shock", subName = "Rank 1", spellID = 8050, iconID = 135813 },
+        { name = "Earth Shock", subName = "Rank 1", spellID = 8042, iconID = 136026 },
+        { name = "Lightning Bolt", subName = "Rank 1", spellID = 403, iconID = 136048 },
+    }
+    local saved = { useBars = true, notesSeen = "dev",
+        bars = { cd = { spells = { "Stormstrike", "Flame Shock" }, showAuras = true }, util = { spells = { "Lightning Bolt" } } } }
+    Start(1, "SHAMAN", saved, SPELLBOOK)
+    -- Every bar's ticks as the profile keeps them, or none at all.
+    local function Kept()
+        local sets, out = ns.ProfileLists().cooldownOnly, {}
+        for _, key in ipairs(ns.ALL_BAR_KEYS) do
+            local names = {}
+            for name, on in pairs(type(sets) == "table" and sets[key] or {}) do names[#names + 1] = name .. "=" .. tostring(on) end
+            table.sort(names)
+            if #names > 0 then out[#out + 1] = key .. ":" .. table.concat(names, ",") end
+        end
+        return type(sets) == "table" and table.concat(out, " ") or "none"
+    end
+
+    -- Off by default, nothing kept. Turned away for a spell not on that bar,
+    -- for the Debuffs bar (which shows its own debuffs' times, and has no
+    -- cooldowns to show instead) though Flame Shock is on it, and for a bar
+    -- you haven't added.
+    B:SetAura("debuff", "Flame Shock", true)
+    Equal(table.concat({ tostring(B:CooldownOnly("cd", "Stormstrike")), Kept(),
+        tostring(B:SetCooldownOnly("cd", "Lightning Bolt", true)), tostring(B:SetCooldownOnly("debuff", "Flame Shock", true)),
+        tostring(B:SetCooldownOnly("cd2", "Stormstrike", true)), Kept() }, " "), "false none false false false none",
+        "off by default with nothing kept; turned away for a spell not on that bar, the Debuffs bar and a bar you haven't")
+    B:SetAura("debuff", "Flame Shock", false)
+    -- Ticked for Stormstrike on Cooldowns: kept by bar and entry, and read
+    -- back for that bar alone (Utility's Lightning Bolt is its own).
+    Equal(tostring(B:SetCooldownOnly("cd", "Stormstrike", true)) .. " " .. tostring(B:CooldownOnly("cd", "Stormstrike")) .. " "
+        .. tostring(B:CooldownOnly("util", "Stormstrike")) .. " " .. Kept(), "true true false cd:Stormstrike=true",
+        "ticked: kept by bar and entry, for that bar alone")
+    -- Flame Shock ticked too, then both unticked: nothing kept, not even an
+    -- empty table, so a profile from before this loads as it did.
+    B:SetCooldownOnly("cd", "Flame Shock", true)
+    local two = Kept()
+    B:SetCooldownOnly("cd", "Flame Shock", false)
+    B:SetCooldownOnly("cd", "Stormstrike", false)
+    Equal(two .. " | " .. Kept() .. " " .. tostring(ns.ProfileLists().cooldownOnly), "cd:Flame Shock=true,Stormstrike=true | none nil",
+        "two on one bar; unticked: nothing kept and no table left")
+    -- Taken off the bar: its tick goes with it.
+    B:SetCooldownOnly("cd", "Stormstrike", true)
+    B:TakeOff("cd", "Stormstrike")
+    Equal(Kept() .. " " .. tostring(B:CooldownOnly("cd", "Stormstrike")), "none false", "taken off the bar: its tick gone with it")
+    -- Moved to Utility: its Cooldowns tick goes with it (the cooldown bars
+    -- keep a spell apart), and it's ticked there on its own.
+    B:Assign("Stormstrike", "cd")
+    B:SetCooldownOnly("cd", "Stormstrike", true)
+    B:Assign("Stormstrike", "util")
+    local moved = Kept()
+    B:SetCooldownOnly("util", "Stormstrike", true)
+    Equal(moved .. " | " .. Kept(), "none | util:Stormstrike=true", "moved to Utility: its Cooldowns tick gone, ticked there on its own")
+    -- Cooldowns 2, an extra bar: the same there, and its tick goes when the
+    -- bar is taken out, leaving no table behind.
+    B:AddBar("cd")
+    Equal(tostring(B:Transfer("util", "cd2", "Stormstrike")) .. " " .. Kept(), "true none",
+        "moved to Cooldowns 2: its Utility tick gone with it")
+    B:SetCooldownOnly("cd2", "Stormstrike", true)
+    local extra = Kept()
+    B:RemoveBar("cd2")
+    Equal(extra .. " | " .. Kept() .. " " .. tostring(ns.ProfileLists().cooldownOnly), "cd2:Stormstrike=true | none nil",
+        "ticked on Cooldowns 2; the bar taken out: its tick with it, and no table left")
+    -- An item's entry takes it and nothing changes: an item puts no buff or
+    -- debuff on anyone, so its icon never showed a time to leave out. Its
+    -- panel doesn't offer the tick (Tools/TestHelp.lua), so only an edited
+    -- string could set one.
+    B:Assign("Stormstrike", "cd")
+    B:AddItem("cd", 5512)
+    Equal(tostring(B:SetCooldownOnly("cd", "family:healthstone", true)) .. " "
+        .. tostring(B:CooldownOnly("cd", "family:healthstone")), "true true",
+        "an item's entry takes it: nothing to leave out, so nothing changes")
+    B:SetCooldownOnly("cd", "family:healthstone", false)
+    B:TakeOff("cd", "family:healthstone")
+    -- A copy of the profile carries it.
+    B:SetCooldownOnly("cd", "Stormstrike", true)
+    local own = ns.ProfileName()
+    ns.CopyProfile("Raid")
+    Equal(tostring(ns.ProfileName()) .. " " .. tostring(B:CooldownOnly("cd", "Stormstrike")) .. " " .. Kept(),
+        "Raid true cd:Stormstrike=true", "a copy of the profile carries it")
+    ns.UseProfile(own)
+    -- /ccm debug: the ticked icon's line says so, and no other does.
+    local lines = {}
+    B:Report(function(line) lines[#lines + 1] = line end, tostring)
+    local text = table.concat(lines, "\n")
+    Equal(tostring(text:match("%d%. Stormstrike[^\n]*"):find(" | cooldown only", 1, true) ~= nil) .. " "
+        .. tostring(text:match("%d%. Flame Shock[^\n]*"):find("cooldown only", 1, true) ~= nil), "true false",
+        "/ccm debug says which icon shows its cooldown only")
+
+    -- Kept over a reload, with a form's own list counting (Swap with my
+    -- form keeps Earth Shock on Cooldowns for one form only). The ones that
+    -- can't be kept are dropped as it loads: a name no list has, one that
+    -- isn't true, an aura bar's, a bar the profile hasn't, and a set that
+    -- isn't a table.
+    local profile = ns.ProfileLists()
+    profile.forms = { [1] = { cd = { "Earth Shock" } } }
+    profile.cooldownOnly.cd["Earth Shock"] = true
+    profile.cooldownOnly.cd.Ghost, profile.cooldownOnly.cd["Flame Shock"] = true, "yes"
+    profile.cooldownOnly.buff, profile.cooldownOnly.cd3, profile.cooldownOnly.util = { Thorns = true }, { Stormstrike = true }, "odd"
+    Start(1, "SHAMAN", ForeverEnhancedCooldownManagerDB, SPELLBOOK)
+    Equal(Kept() .. " | " .. tostring(B:CooldownOnly("cd", "Stormstrike")), "cd:Earth Shock=true,Stormstrike=true | true",
+        "reloaded: Stormstrike's kept and a form's Earth Shock with it; the rest dropped")
+    -- A warrior on the same profile (Use on all) keeps it for when the bar
+    -- shows that spell again.
+    Start(1, "WARRIOR", ForeverEnhancedCooldownManagerDB, { SPELLBOOK[4] })
+    Equal(Kept(), "cd:Earth Shock=true,Stormstrike=true", "a warrior on the same profile: kept for when it shows again")
+
+    -- It follows a spell the game renames (Core.lua RenameSpells): saved
+    -- under Elemental Mastery with your spellbook showing Lightning
+    -- Mastery, the entry and its tick both move to the new name.
+    local was = named[16166]
+    named[16166] = "Lightning Mastery"
+    Start(1, "SHAMAN", { useBars = true, notesSeen = "dev", everyone = "Mine", profiles = { Mine = { joins = { buff = {}, debuff = {} },
+        cd = { "Elemental Mastery" }, util = {}, buff = {}, debuff = {},
+        cooldownOnly = { cd = { ["Elemental Mastery"] = true } } } } },
+        { { name = "Lightning Mastery", subName = "Rank 1", spellID = 16166, iconID = 1 } })
+    Equal(List("cd") .. " " .. Kept() .. " " .. tostring(B:CooldownOnly("cd", "Lightning Mastery")),
+        "Lightning Mastery cd:Lightning Mastery=true true", "a spell the game renamed: its entry and its tick both move to the new name")
+    named[16166] = was
+    Equal(#printed, 0, "no errors")
+    w:Hide()
+end)()
+
 -- Regeneration: a mage's active spell, and a troll's passive racial. A troll
 -- warrior added its own (and a tauren's Endurance) before passives were
 -- turned away: neither shows, on any bar, and both stay in the profile.
@@ -6324,6 +6562,157 @@ end)()
     Equal(#printed, 0, "no errors")
 end)()
 
+-- The buff a consumable puts on you goes on the Buffs bar by its name (a
+-- player's ask, 25 Nov 2026: typing "elixir" or "mongoose" in the add box
+-- found nothing, only the ID did). Nobody casts one, and the game finds no
+-- name for a buff that isn't on you, so the names come from the game data
+-- (ns.ITEM_BUFFS): offered while typing, after your own spells of a like
+-- name, each with the icon of the buff it puts on. Typed or searched in any
+-- case, or by its ID, it lands on the one entry. It's the Buffs bar's alone,
+-- like a scroll's imbue: not offered nor taken on Cooldowns, Utility or
+-- Debuffs, by name or by ID.
+;(function()
+    Start(2, "HUNTER", nil, {
+        { name = "Mongoose Bite", subName = "Rank 1", spellID = 1495, iconID = 132206 },
+        { name = "Aimed Shot", subName = "Rank 1", spellID = 19434, iconID = 135130 },
+    })
+    named[17538] = "Elixir of the Mongoose"
+    -- The data: each name with one spell ID, and no name the spells, the
+    -- passives or the weapon enchants have, so none is offered twice. A use
+    -- that leaves no buff on you (a potion that only heals) isn't in it.
+    local count, numbers, clash = 0, 0, {}
+    for name, id in pairs(ns.ITEM_BUFFS) do
+        count = count + 1
+        if type(id) == "number" then numbers = numbers + 1 end
+        if ns.RANKS[name] or ns.PASSIVES[name] or ns.IMBUE_SPELLS[name] or ns.WEAPON_ENCHANTS[name] then
+            clash[#clash + 1] = name
+        end
+    end
+    Equal(count .. " " .. numbers .. " " .. (#clash > 0 and table.concat(clash, ",") or "none") .. " "
+        .. ns.ITEM_BUFFS["Elixir of the Mongoose"] .. " " .. ns.ITEM_BUFFS["Flask of the Titans"] .. " "
+        .. tostring(ns.ITEM_BUFFS["Healing Potion"]), "235 235 none 17538 17626 nil",
+        "235 consumable buffs, a spell ID each, no name of a spell, a passive or a weapon enchant; no plain healing potion")
+    -- Where several consumables give a buff of one name, the rest join the ID
+    -- it's kept under (ns.NAME_AURAS), so one icon lights whichever you used:
+    -- the greater potion's Fire Protection as well as the potion's, every
+    -- soulstone's. Left out of the names: one a pet gives under that name
+    -- (the imp's Fire Shield, the succubus's Lesser Invisibility, which the
+    -- pet's own lists offer), and one the game marks as a debuff (Dreamless
+    -- Sleep stuns you while it heals; the Buffs bar reads helpful auras only,
+    -- so it could never light for it). Each is an aura no one learns as well
+    -- (ns.AURA_ONLY), so Clear takes one a profile ticked on a cooldown bar
+    -- before this.
+    Equal(ns.ITEM_BUFFS["Fire Protection"] .. " " .. table.concat(ns.NAME_AURAS["Fire Protection"] or {}, ",") .. " | "
+        .. table.concat(ns.NAME_AURAS["Soulstone Resurrection"] or {}, ",") .. " | "
+        .. tostring(ns.ITEM_BUFFS["Fire Shield"]) .. " " .. tostring(ns.ITEM_BUFFS["Lesser Invisibility"]) .. " "
+        .. tostring(ns.ITEM_BUFFS["Dreamless Sleep"]) .. " " .. tostring(ns.ITEM_BUFFS["Poison Mushroom"]) .. " | "
+        .. tostring(ns.AURA_ONLY[17538]),
+        "7233 17543 | 20762,20763,20764,20765 | nil nil nil nil | true",
+        "both fire protection potions under the one name, every soulstone's; no pet's buff, no sleep potion and no"
+            .. " poisoning; an aura no one learns")
+    local hit = ns.Spells:Suggest("mongoose", 50)
+    Equal(#hit .. " | " .. hit[1].name .. " " .. hit[1].tier .. " | " .. hit[2].name .. " " .. hit[2].spellID .. " " .. hit[2].tier,
+        "2 | Mongoose Bite 1 | Elixir of the Mongoose 17538 5",
+        "your own Mongoose Bite first, then the elixir, by the ID of the buff it puts on")
+    local flasks = {}
+    for _, item in ipairs(ns.Spells:Suggest("flask", 50)) do flasks[#flasks + 1] = item.name .. " " .. item.spellID end
+    Equal(table.concat(flasks, ", "), "Flask of Natural Accuracy 1293740, Flask of Natural Aggression 1293741, "
+        .. "Flask of Natural Precision 1293742, Flask of the Titans 17626", "every flask by name, each with its own buff")
+    local elixirs = {}
+    for _, item in ipairs(ns.Spells:Suggest("elixir", 8)) do elixirs[#elixirs + 1] = item.name end
+    Equal(#elixirs .. " " .. elixirs[1] .. " to " .. elixirs[8], "8 Elixir of Brute Force to Elixir of Endless Mana",
+        "elixir offers the eight that start with it, alphabetically, so a few more letters finds the one you want")
+    local name, ids, given = ns.Spells:Resolve("elixir of THE mongoose", "buff")
+    Equal(tostring(name) .. " " .. table.concat(ids or {}, ",") .. " " .. tostring(given), "Elixir of the Mongoose 17538 nil",
+        "typed in any case, found by the buff's ID from the data")
+    name, ids, given = ns.Spells:Resolve("17538", "buff")
+    Equal(tostring(name) .. " " .. table.concat(ids or {}, ",") .. " " .. tostring(given), "Elixir of the Mongoose 17538 17538",
+        "and its ID gives the same name and the same ID, so both ways go on one entry")
+    Equal(tostring(B:WouldShow("buff", "Elixir of the Mongoose")) .. " " .. tostring(B:WouldShow("cd", "Elixir of the Mongoose"))
+        .. " " .. tostring(B:WouldShow("util", "Elixir of the Mongoose")) .. " "
+        .. tostring(B:WouldShow("debuff", "Elixir of the Mongoose")), "true false false false",
+        "it could show on Buffs, and on no other bar")
+    local ok, said = B:Add("cd", "Elixir of the Mongoose")
+    Equal(tostring(ok) .. " " .. tostring(said),
+        "false Elixir of the Mongoose only goes on the Buffs bar, where it lights while it's on you.",
+        "nor taken on Cooldowns by name")
+    Equal(tostring((B:Add("cd", "17538"))) .. " " .. tostring((B:Add("util", "Elixir of the Mongoose"))) .. " "
+        .. tostring((B:Add("debuff", "Elixir of the Mongoose"))) .. " | " .. List("cd") .. List("util") .. List("debuff"),
+        "false false false | ", "nor by its ID, nor on Utility or Debuffs")
+    w:Select("cd")
+    Search("mongoose")
+    Equal(tostring(Other("Elixir of the Mongoose") ~= nil) .. " " .. tostring(Row("Mongoose Bite") ~= nil), "false true",
+        "not offered on the Cooldowns page, where your own Mongoose Bite is listed as ever")
+    w:Select("debuff")
+    Search("mongoose")
+    Equal(tostring(Other("Elixir of the Mongoose") ~= nil), "false", "nor on the Debuffs page")
+    -- What one keystroke reads. The page sends the bar with the text, so a
+    -- Cooldowns page is never offered a consumable buff and never looks one
+    -- up: searching "eli" there reads nothing at all, where every elixir in
+    -- the pool would have been read and turned away one by one. A Buffs page
+    -- reads no further than the eight it can show. Neither asks the game to
+    -- name one: they come named in the data.
+    local function Cost(bar, text)
+        w:Select(bar)
+        local read, names = 0, 0
+        local would, naming = B.WouldShow, C_Spell.GetSpellName
+        B.WouldShow = function(self, ...) read = read + 1 return would(self, ...) end
+        _G.C_Spell.GetSpellName = function(...) names = names + 1 return naming(...) end
+        Search(text)
+        B.WouldShow, _G.C_Spell.GetSpellName = would, naming
+        local shown = 0
+        for _, f in ipairs(frames) do
+            if f.other and S[f].shown then shown = shown + 1 end
+        end
+        Search("")
+        return read .. " read, " .. shown .. " offered, " .. names .. " named"
+    end
+    Equal(Cost("buff", "eli"), "8 read, 8 offered, 0 named", "the Buffs page stops at the eighth name it can show")
+    Equal(Cost("cd", "eli") .. " | " .. Cost("cd", "str"), "0 read, 0 offered, 0 named | 19 read, 3 offered, 0 named",
+        "a Cooldowns page reads no elixir, and still offers its own spells")
+    -- And the reason the bar goes with the text: two dozen names of every
+    -- kind would be elixirs before Distracting Shot, which this page can
+    -- show.
+    local function WouldOffer(bar)
+        local out = {}
+        for _, found in ipairs(ns.Spells:Suggest("str", 24, bar)) do
+            if #out < 8 and not ns.Spells:AddNote(found.name, "cd") and B:WouldShow("cd", found.name) then
+                out[#out + 1] = found.name
+            end
+        end
+        return table.concat(out, ", ")
+    end
+    Equal(WouldOffer("cd") .. " | " .. WouldOffer(nil), "Strider Kick, Raptor Strike, Distracting Shot | Strider Kick, Raptor Strike",
+        "the Cooldowns page keeps all three; asked for every name, two dozen of them push Distracting Shot off the end")
+    w:Select("buff")
+    local texture = C_Spell.GetSpellTexture
+    _G.C_Spell.GetSpellTexture = function(id) return id == 17538 and 134821 or texture(id) end
+    Search("mongoose")
+    local row = Other("Elixir of the Mongoose")
+    Equal(tostring(row ~= nil) .. " " .. tostring(row and S[row.name].text) .. " " .. tostring(row and S[row.icon].texture),
+        "true Elixir of the Mongoose 134821", "offered on the Buffs page, with the icon of the buff it puts on")
+    _G.C_Spell.GetSpellTexture = texture
+    row.check:Click()
+    Equal(List("buff") .. " | " .. table.concat(ns.CustomSpells()["Elixir of the Mongoose"] or {}, ",") .. " | " .. S[w.note].text,
+        "Elixir of the Mongoose | 17538 | Added Elixir of the Mongoose to Buffs.",
+        "ticked: on Buffs, remembered by that buff's ID")
+    local added = ns.Spells:Find("Elixir of the Mongoose")
+    Equal(added.kind .. " " .. added.line .. " " .. added.spellID .. " " .. table.concat(added.ids, ","), "spell Added 17538 17538",
+        "listed under Added, watching the one buff")
+    -- A name two consumables share: the entry goes by the ID it's kept under
+    -- and watches the other's buff too, so the icon lights for the greater
+    -- potion as well as the potion.
+    named[7233], named[17543] = "Fire Protection", "Fire Protection"
+    local took = B:Add("buff", "fire protection")
+    local potion = ns.Spells:Find("Fire Protection")
+    Equal(tostring(took) .. " " .. tostring(potion and potion.spellID) .. " " .. table.concat(potion and potion.ids or {}, ","),
+        "true 7233 7233,17543", "added by name, watching both potions' buffs")
+    named[7233], named[17543] = nil, nil
+    w:Hide()
+    named[17538] = nil
+    Equal(#printed, 0, "no errors")
+end)()
+
 -- An item that puts a weapon enchant on (a poison, a stone, a scroll), held
 -- over or dropped on the Buffs bar, goes on as what it casts: the entry of
 -- that name in your lists (a rogue's Instant Poison, a warlock's Firestone),
@@ -6398,6 +6787,20 @@ end)()
     Fire("UNIT_INVENTORY_CHANGED", "player")
     NextFrame(B)
     Equal(tostring(buff.holders[1].enchantLit) .. " " .. tostring(buff.holders[2].enchantLit), "false true", "and the imbue its own")
+    -- In colour (a player's ask, 24 Nov 2026): a weapon enchant's own spot
+    -- takes it too, so a missing Windfury or poison spot isn't grey; lit, it
+    -- is in full colour as ever.
+    local spot = buff.holders[1].icon
+    local off = tostring(S[spot].desaturated) .. " " .. tostring(S[spot].alpha)
+    B:SetOption("buff", "missingColour", true)
+    local painted = tostring(S[spot].desaturated) .. " " .. tostring(S[spot].alpha)
+    onHand = 624
+    Fire("UNIT_INVENTORY_CHANGED", "player")
+    NextFrame(B)
+    local lit = tostring(S[spot].desaturated) .. " " .. tostring(S[spot].alpha)
+    B:SetOption("buff", "missingColour", false)
+    Equal(off .. " | " .. painted .. " | " .. lit, "true 0.45 | false 0.45 | false 1",
+        "a missing poison's spot: grey, in colour as it's ticked, and in full colour while the poison is on")
     _G.C_PaperDollInfo = nil
     named[1302304] = nil
     C_Item.GetItemSpell = itemSpell

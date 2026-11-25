@@ -318,6 +318,7 @@ local BAR_CHECKS = {
     hideOutside = Bool,
     missingColour = Bool,
     debuffKeys = Bool,
+    anyCaster = Bool,
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.heightPct[3], spacing = ns.BAR_LIMITS.spacing[3],
@@ -327,7 +328,7 @@ local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.h
     showAuras = false, showGCD = false, selfDebuffs = false, grow = "centre", wrap = "down",
     tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false, tickCustom = "",
     glowProcs = false, onlyShort = false, keepColour = false, hidePet = false, hideOutside = false,
-    missingColour = false, debuffKeys = false }
+    missingColour = false, debuffKeys = false, anyCaster = false }
 -- A bar setting only some bars have, and which: Glow for more procs and Show
 -- only when I can't afford it are a cooldown bar's (Cooldowns, Utility, and
 -- their extra bars). On any other bar a string's is left out and counted,
@@ -337,8 +338,9 @@ local BAR_FITS = { glowProcs = function(key) return not ns.AURA_BARS[key] end,
     keepColour = function(key) return not ns.AURA_BARS[key] end,
     hidePet = function(key) return ns.BAR_KIND[key] == "buff" end,
     hideOutside = function(key) return ns.BAR_KIND[key] == "buff" end,
-    missingColour = function(key) return ns.BAR_KIND[key] == "debuff" end,
-    debuffKeys = function(key) return ns.BAR_KIND[key] == "debuff" end }
+    missingColour = function(key) return ns.AURA_BARS[key] ~= nil end, -- (the Buffs bars' too since 24 Nov 2026)
+    debuffKeys = function(key) return ns.BAR_KIND[key] == "debuff" end,
+    anyCaster = function(key) return ns.BAR_KIND[key] == "debuff" end }
 local function Fits(field, key)
     local fits = BAR_FITS[field]
     return not fits or fits(key)
@@ -376,7 +378,8 @@ local LAYOUT_DEFAULTS = { on = false, gap = ns.ROW_GAP[3], spacing = ns.ICON_GAP
 -- bar -> name -> true), each entry's own ticks (ns.SHARE_TICKS, each under
 -- its letter: k Count ticks, o Glow when missing, v Glow while active, h
 -- Others only, d Dim until Warn at, e the entry a joined icon shows while
--- none is up, u Hide with my pet, b Only in instances; bar -> name ->
+-- none is up, u Hide with my pet, b Only in instances, C Cooldown only
+-- (every small letter was taken by then); bar -> name ->
 -- true), how big the buffs' glows while up
 -- are (s: Glow size, a percent), each entry's sound (y: bar -> name ->
 -- sound key, Play a sound) and the aura bars' entries coloured by time
@@ -491,19 +494,28 @@ end
 -- bar's own settings (ns.TOTEM_LOOK; its tick is a part, ns.SHARE_PARTS)
 -- and Hide spent flash (prdHideSpent, a player's idea). And a cooldown
 -- bar's Keep colour (a player's ask), carried only since the update after
--- 1.10.18.
+-- 1.10.18. And a Buffs bar's In colour (a player's ask), carried only since
+-- the update after 1.10.20: a string from then or before leaves each Buffs
+-- bar's as it is, and says nothing else, as the Debuffs bars' and the rest
+-- travelled before it. A Debuffs bar's Light up for anyone's debuffs (a
+-- player's idea) is carried from then too, so the same strings leave yours
+-- alone.
 local CARRIED_AFTER = "1.10.13"
 local HEIGHT_AFTER = "1.10.14"
 local SOUND_AFTER = "1.10.15"
 local IDEAS_AFTER = "1.10.16"
 local STACKS_AFTER = "1.10.17"
 local COLOUR_AFTER = "1.10.18"
+local BUFF_COLOUR_AFTER = "1.10.20"
 local NEW_LOOK = { "pulseResets" }
 local NEWER_LOOK = { "pulseProcSound" }
 local NEWEST_LOOK = { "prdOwnWidth", "prdWidth", "prdComboHeight", "prdComboAt" }
 local NEW_COOLDOWN = { "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom" }
 local function Kept(version)
-    if ns.CompareVersions(version, COLOUR_AFTER) == 1 then return nil end
+    if ns.CompareVersions(version, BUFF_COLOUR_AFTER) == 1 then return nil end
+    -- A string after 1.10.20 carries everything; up to it, only a Buffs
+    -- bar's In colour is left as it is, and up to 1.10.18 the rest too.
+    local colour = ns.CompareVersions(version, COLOUR_AFTER) ~= 1
     local older = ns.CompareVersions(version, CARRIED_AFTER) ~= 1
     local tall = ns.CompareVersions(version, HEIGHT_AFTER) ~= 1
     local quiet = ns.CompareVersions(version, SOUND_AFTER) ~= 1
@@ -525,9 +537,15 @@ local function Kept(version)
     end
     for _, key in ipairs(ns.ALL_BAR_KEYS) do
         local own = {}
-        if not ns.AURA_BARS[key] then own.keepColour = true end
-        if ns.BAR_KIND[key] == "buff" then own.hidePet, own.hideOutside = true, true end
-        if ns.BAR_KIND[key] == "debuff" then own.missingColour, own.debuffKeys = true, true end -- (Missing in colour, Show keybinds: since 1.10.18 too)
+        -- A Buffs bar's In colour and a Debuffs bar's Light up for anyone's
+        -- debuffs: since 1.10.20 too.
+        if ns.BAR_KIND[key] == "buff" then own.missingColour = true end
+        if ns.BAR_KIND[key] == "debuff" then own.anyCaster = true end
+        if colour then
+            if not ns.AURA_BARS[key] then own.keepColour = true end
+            if ns.BAR_KIND[key] == "buff" then own.hidePet, own.hideOutside = true, true end
+            if ns.BAR_KIND[key] == "debuff" then own.missingColour, own.debuffKeys = true, true end -- (Missing in colour, Show keybinds: since 1.10.18 too)
+        end
         if ideas and not ns.AURA_BARS[key] then own.onlyShort = true end
         if tall then own.heightPct = true end
         if older then
@@ -884,8 +902,8 @@ local function Clean(data)
         end
     end
     -- Each entry's own ticks (ns.SHARE_TICKS: Count ticks, Glow when
-    -- missing, Glow while active, Others only, Dim until Warn at, and the
-    -- entry a joined icon shows while none is up), each under its letter: a
+    -- missing, Glow while active, Others only, Dim until Warn at, Cooldown
+    -- only, and the entry a joined icon shows while none is up), each under its letter: a
     -- bar the string has, of a kind that has it, names on its lists (a
     -- form's too) that can have it, true each.
     for _, tick in ipairs(ns.SHARE_TICKS) do

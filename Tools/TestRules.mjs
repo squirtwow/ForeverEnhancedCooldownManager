@@ -10,7 +10,8 @@
 // mouse but for the box that moves it. And the pulse's link with Forever
 // Enhanced Cooldown Pulse: one shared global, made only when missing, its
 // code the same as that addon's Link.lua when it's beside this one. And no
-// option marked experimental.
+// option marked experimental. And the generated consumable buffs are one
+// sorted list with a spell ID each.
 // Run with: node --test Tools/TestRules.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -493,9 +494,10 @@ test("Blizzard's aura containers never run the addon's code while they update", 
   assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua', 'Pulse.lua', 'Totems.lua'], 'the only containers');
   assert.deepEqual(where(/:AddAura(Slot|Group)\(/), [], 'no slot or group added but through F.Add');
   const looks = files.flatMap(name => (code[name].match(/initializeFrame\s*=\s*[^,}]+/g) || []).map(look => `${name}: ${look.trim()}`));
-  assert.equal(looks.length, 9,
-    'nine looks: Buffs bar spots, their edges (Warn at), packed entries, your debuffs, buff and debuff times, proc pulses,'
-    + " glows for more procs, tick counts on cooldown icons, the Totems bar's range warning");
+  assert.equal(looks.length, 11,
+    "eleven looks: Buffs bar spots, their edges (Warn at), the anyone's debuffs set's spots and its edges, packed entries,"
+    + " your debuffs, buff and debuff times, proc pulses, glows for more procs, tick counts on cooldown icons, the Totems"
+    + " bar's range warning");
   assert.deepEqual(looks.filter(look => !/: initializeFrame = (F|ns\.BuffBar)\.Guard\(/.test(look)), [], 'every look guarded');
   const buffs = code['Buffs.lua'];
   assert.match(buffs, /function F\.Add\(container, method, \.\.\.\)\r?\n\s+adding = true\r?\n\s+local ok, result = pcall\(container\[method\], container, \.\.\.\)\r?\n\s+adding = false\r?\n/);
@@ -504,7 +506,9 @@ test("Blizzard's aura containers never run the addon's code while they update", 
   assert.deepEqual([...buffs.matchAll(/maxFrameCount = (\w+)/g)].map(match => match[1]).sort(), ['1', 'SELF_MAX']);
   assert.ok(Number(buffs.match(/local SELF_MAX = (\d+)/)[1]) <= 10, 'your debuffs: no more than the ten made up front');
   assert.match(buffs, /local function AddGroup\(container, key, filter, options\)\r?\n\s+F\.Add\(container, "AddAuraGroup", key, filter, options\)[\s\S]*?container:SetAuraGroupMaxFrameCount\(key, made\)/);
-  assert.equal(count(buffs, /AddGroup\(container, "/g), 2, 'both kinds of group added through AddGroup');
+  // (A packed entry's key carries the set's letter: "g1" or, with Light up
+  // for anyone's debuffs on, "ag1".)
+  assert.equal(count(buffs, /AddGroup\(container, (letter \.\. )?"/g), 2, 'both kinds of group added through AddGroup');
 });
 
 // The addon reads your buffs in two places only, both in Buffs.lua: OnYou,
@@ -651,4 +655,23 @@ test('the shared update notices: one global, the same file as in every other add
     compared++;
   }
   console.log(`compared with ${compared} other addons`);
+});
+
+// The consumable buffs in the generated data (Ranks.lua ns.ITEM_BUFFS, the
+// names the add box finds an elixir or a flask by): one line each, a name
+// with one spell ID, sorted by name, no name twice. Sorted so a rebuild on a
+// later game build shows only what changed; Tools/TestBars.lua checks the
+// names and IDs themselves.
+test('the generated consumable buffs are one sorted list, a spell ID each', () => {
+  const data = readFileSync(new URL('Ranks.lua', root), 'utf8');
+  const block = data.match(/^ns\.ITEM_BUFFS = \{\r?\n([\s\S]*?)^\}/m);
+  assert.ok(block, 'ns.ITEM_BUFFS is in the generated data');
+  const names = block[1].split(/\r?\n/).filter(line => line.trim() !== '').map(line => {
+    const row = line.match(/^ \["([^"]+)"\]=(\d+),$/);
+    assert.ok(row, `a name with its spell ID: ${line}`);
+    return row[1];
+  });
+  assert.ok(names.length > 200, `plenty of them: ${names.length}`);
+  assert.equal(new Set(names).size, names.length, 'each name once');
+  assert.deepEqual(names, [...names].sort(), 'sorted by name');
 });

@@ -566,6 +566,10 @@ ns.SHARE_TICKS = {
     -- (These two since the update after 1.10.19: an older FECM leaves them out and says so.)
     { field = "hideWithPet", code = "u", kinds = { buff = true } }, -- Hide with my pet
     { field = "onlyInInstances", code = "b", kinds = { buff = true } }, -- Only in instances
+    -- (Cooldown only, since the update after 1.10.20: an older FECM leaves
+    -- it out and says so. Every small letter is taken, so its code is a
+    -- capital, as Colour by time left's is.)
+    { field = "cooldownOnly", code = "C", kinds = { cd = true, util = true } }, -- Cooldown only
 }
 
 -- Bars: each bar lists spells by name, so the highest known rank is
@@ -596,9 +600,12 @@ ns.BAR_KIND = { cd = "cd", util = "util", buff = "buff", debuff = "debuff" }
 -- The bars fed by Blizzard's secure aura container, and what each watches.
 -- Debuffs: only yours ("PLAYER": you, your pet or vehicle), so another
 -- player's same debuff on your target never lights your icon.
+-- open: what a Debuffs bar watches instead with Light up for anyone's
+-- debuffs ticked (a player's idea), the same harmful auras with no "PLAYER"
+-- in it, so a raid's curses light their icons too (Buffs.lua AnySlots).
 ns.AURA_BARS = {
     buff = { unit = "player", filter = "HELPFUL", word = "buff" },
-    debuff = { unit = "target", filter = "HARMFUL|PLAYER", mine = true, word = "debuff" },
+    debuff = { unit = "target", filter = "HARMFUL|PLAYER", open = "HARMFUL", mine = true, word = "debuff" },
 }
 -- Each extra bar: "<Kind> 2" or "<Kind> 3", of its kind, watching what it does.
 for kind, extras in pairs(ns.EXTRAS_OF) do
@@ -648,7 +655,7 @@ ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 ns.SHARE_BAR_FIELDS = { "size", "heightPct", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "showGCD", "selfDebuffs", "grow", "wrap", "point",
     "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom", "glowProcs", "onlyShort",
-    "keepColour", "hidePet", "hideOutside", "missingColour", "debuffKeys" }
+    "keepColour", "hidePet", "hideOutside", "missingColour", "debuffKeys", "anyCaster" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -968,11 +975,12 @@ local function RenameSpells(profile)
     for field in pairs(PULSE_LISTS) do RenameSet(profile[field]) end
     if type(profile.spellLook) == "table" then RenameSet(profile.spellLook) end
     -- And each entry's own choices kept by bar: Warn at, its size, Show the
-    -- trap I last laid, Play a sound, Colour by time left, and its ticks
-    -- (Count ticks, the glows, Only when missing, Others only, Dim until
-    -- Warn at, a joined icon's shown entry, Hide with my pet, Only in instances).
+    -- trap I last laid, Play a sound, Colour by time left, Cooldown only,
+    -- and its ticks (Count ticks, the glows, Only when missing, Others only,
+    -- Dim until Warn at, a joined icon's shown entry, Hide with my pet,
+    -- Only in instances).
     for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound", "timeColours", "missingPicks", "glowMissing", "countTicks",
-        "onlyWhenMissing", "glowActive", "handOthers", "dimUntilWarn", "hideWithPet", "onlyInInstances" }) do
+        "onlyWhenMissing", "glowActive", "handOthers", "dimUntilWarn", "hideWithPet", "onlyInInstances", "cooldownOnly" }) do
         for _, set in pairs(type(profile[field]) == "table" and profile[field] or {}) do
             if type(set) == "table" then RenameSet(set) end
         end
@@ -1147,6 +1155,24 @@ local function RepairTraps(profile)
     profile.lastTrap = next(kept) ~= nil and kept or nil
 end
 
+-- A profile's Cooldown only ticks: the same, only a Cooldowns or Utility bar
+-- it has (an extra one too), only names on that bar's lists, true each.
+-- None kept leaves no table, so a profile from before this loads unchanged.
+local function RepairCooldownOnly(profile)
+    if profile.cooldownOnly == nil then return end
+    local sets, kept = type(profile.cooldownOnly) == "table" and profile.cooldownOnly or {}, {}
+    for key, set in pairs(sets) do
+        if not ns.AURA_BARS[key] and Present(profile, key) and type(set) == "table" then
+            local own = {}
+            for name, on in pairs(set) do
+                if on == true and type(name) == "string" and OnBarLists(profile, key, name) then own[name] = true end
+            end
+            if next(own) ~= nil then kept[key] = own end
+        end
+    end
+    profile.cooldownOnly = next(kept) ~= nil and kept or nil
+end
+
 -- A profile's lists, repaired in place, with their joins: on the Buffs and
 -- Debuffs bars, the names joined to the entry just before them.
 local function Lists(profile)
@@ -1228,6 +1254,7 @@ local function Lists(profile)
     RepairSounds(profile)
     RepairSizes(profile)
     RepairTraps(profile)
+    RepairCooldownOnly(profile)
     if not GlowSizeValue(profile.glowActiveSize) then profile.glowActiveSize = nil end
     RenameSpells(profile)
     -- Positions per profile: its spots and sizes, repaired as they're used.
@@ -2081,6 +2108,44 @@ function ns.ForgetLastTrap(key, name)
     if ns.LastTrap(key, name) and not OnBarLists(ns.ProfileLists(), key, name) then ns.SetLastTrap(key, name, false) end
 end
 
+-- Cooldown only (Squirt, 25 Nov 2026: he put Stormstrike on a Cooldowns bar
+-- showing buff and debuff times and its icon showed the 12 seconds of its
+-- debuff, not its 8 second cooldown): a spell's entry on a Cooldowns or
+-- Utility bar (an extra one too) whose icon shows its cooldown and never a
+-- time laid over it (its buff's or debuff's, or its totem's with Totem
+-- time), while the rest of that bar shows theirs (IconAuras.lua). Ticked in
+-- the panel its tray icon opens. Kept by bar and
+-- entry in the profile (profile.cooldownOnly[bar][name] = true), only once
+-- one is ticked, so a profile from before loads unchanged. Shared strings
+-- carry it (C, ProfileShare.lua), so a preset's icons show what its
+-- screenshots do.
+function ns.CooldownOnly(key, name)
+    local sets = ns.ProfileLists().cooldownOnly
+    local set = type(sets) == "table" and sets[key]
+    return type(set) == "table" and type(name) == "string" and set[name] == true
+end
+
+-- Ticks it, or with false unticks it: only for an entry on one of a
+-- Cooldowns or Utility bar's lists, on a bar you have. True when it changed.
+function ns.SetCooldownOnly(key, name, on)
+    local store = ns.ProfileLists()
+    if type(name) ~= "string" or ns.AURA_BARS[key] or not Present(store, key) then return false end
+    if on and not OnBarLists(store, key, name) then return false end
+    if ns.CooldownOnly(key, name) == (on and true or false) then return false end
+    local sets = type(store.cooldownOnly) == "table" and store.cooldownOnly or {}
+    local set = type(sets[key]) == "table" and sets[key] or {}
+    set[name] = on and true or nil
+    sets[key] = next(set) ~= nil and set or nil
+    store.cooldownOnly = next(sets) ~= nil and sets or nil
+    return true
+end
+
+-- An entry gone from a bar: its tick there goes too, once none of that
+-- bar's lists has it.
+function ns.ForgetCooldownOnly(key, name)
+    if ns.CooldownOnly(key, name) and not OnBarLists(ns.ProfileLists(), key, name) then ns.SetCooldownOnly(key, name, false) end
+end
+
 -- Extra bars ---------------------------------------------------------------------
 -- Another bar of a kind (Cooldowns 2 and 3, Utility 2 and 3, Buffs 2 and 3,
 -- Debuffs 2 and 3), a copy of it in everything but Swap with my form (an
@@ -2179,11 +2244,11 @@ function ns.RemoveBar(key)
         if next(store.swapForm) == nil then store.swapForm = nil end
     end
     for _, field in ipairs({ "joins", "missingPicks", "glowMissing", "countTicks", "onlyWhenMissing", "glowActive", "handOthers", "warnAt",
-        "iconSize", "dimUntilWarn", "lastTrap", "auraSound", "hideWithPet", "onlyInInstances", "timeColours" }) do
+        "iconSize", "dimUntilWarn", "lastTrap", "auraSound", "hideWithPet", "onlyInInstances", "timeColours", "cooldownOnly" }) do
         local sets = store[field]
         if type(sets) == "table" then sets[key] = nil end
     end
-    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound", "timeColours" }) do
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound", "timeColours", "cooldownOnly" }) do
         if type(store[field]) == "table" and next(store[field]) == nil then store[field] = nil end
     end
     for _, name in ipairs(names) do ns.ForgetSpellLook(name) end
@@ -2441,9 +2506,10 @@ local function Duplicate(from)
     -- And how big its buffs' glows while they're up are (Glow size).
     profile.glowActiveSize = GlowSizeValue(from.glowActiveSize) and from.glowActiveSize or nil
     -- And each warned entry's seconds (Warn at N seconds left), each icon's
-    -- own size, each trap ticked Show the trap I last laid and each entry's
-    -- sound (Play a sound) (Lists checks them).
-    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound" }) do
+    -- own size, each trap ticked Show the trap I last laid, each entry's
+    -- sound (Play a sound) and each icon ticked Cooldown only (Lists checks
+    -- them).
+    for _, field in ipairs({ "warnAt", "iconSize", "lastTrap", "auraSound", "cooldownOnly" }) do
         if type(from[field]) == "table" then
             profile[field] = {}
             for key, set in pairs(from[field]) do
@@ -3321,12 +3387,17 @@ function ns.BarData(key)
     -- A Debuffs bar only (a player's idea): its missing debuffs greyed
     -- stay with no enemy targeted, off unless ticked.
     bar.greyedNoTarget = kind == "debuff" and bar.greyedNoTarget == true
-    -- A Debuffs bar only (a player's idea): its missing debuffs' spots in
-    -- colour rather than grey, still faded. Off unless ticked.
-    bar.missingColour = kind == "debuff" and bar.missingColour == true
+    -- The Buffs and Debuffs bars (a player's idea, and on the Buffs bar
+    -- since a player asked for his missing buffs in colour, 24 Nov 2026):
+    -- its missing spots in colour rather than grey, still faded. Off unless
+    -- ticked.
+    bar.missingColour = ns.AURA_BARS[key] ~= nil and bar.missingColour == true
     -- A Debuffs bar only (a player's idea): the key that casts each debuff
     -- on its icon, with the Look page's keybinds on. Off unless ticked.
     bar.debuffKeys = kind == "debuff" and bar.debuffKeys == true
+    -- A Debuffs bar only (a player's idea): its icons light up for their
+    -- debuffs whoever cast them, not only you. Off unless ticked.
+    bar.anyCaster = kind == "debuff" and bar.anyCaster == true
     -- A Buffs bar only (a player's idea): the bar gone while your pet is
     -- out, or while you're outside a dungeon, raid or battleground, each
     -- off unless ticked (Bars.lua UpdateShown).

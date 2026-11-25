@@ -10,7 +10,8 @@ local ICON, GAP = 32, 12 -- icons in the tray; the gap fits the join button
 -- options the spell list under them still shows two rows and more.
 local TIGHT = 8
 local ROW, HEADER_ROW = 22, 20 -- spell list rows
--- The options' height: the Buffs and Debuffs bars', two rows more on a
+-- The options' height: the Buffs and Debuffs bars' (a Debuffs bar a row
+-- more for Light up for anyone's debuffs), two rows more on a
 -- Debuffs bar counting ticks, and on the Cooldowns and Utility bars two rows
 -- more for On cooldown's tick and Dimmed icons, then Show the global
 -- cooldown's tick under them, which ends at its foot, so the spell list
@@ -125,6 +126,11 @@ local function TicksNote(bar, name, label)
         if not ns.BarData(bar).showAuras then
             return "Tick Show buff and debuff time first: the count shows while this icon shows its debuff's time on your target."
         end
+        -- An icon left out of the times (Cooldown only) has no debuff time
+        -- to count along with.
+        if name and B:CooldownOnly(bar, name) then
+            return "Not with Cooldown only: the count shows while this icon shows its debuff's time, and Cooldown only leaves that out."
+        end
         -- A trap showing the trap last laid still counts (and times) its own
         -- trap's debuff alone, whichever trap's picture it shows.
         if name and B:ShowsLastTrap(bar, name) then
@@ -140,6 +146,20 @@ local function TicksNote(bar, name, label)
         return "Can't count while it shares an icon with " .. (found and found.name or clash) .. ": the game can't tell the two apart."
     end
     return "Counts its ticks on its icon, " .. every .. ", starting again when you reapply it."
+end
+
+-- Cooldown only, in a spell's own panel on a Cooldowns or Utility bar
+-- (Squirt, 25 Nov 2026: Stormstrike's icon showed its debuff's 12 seconds
+-- in place of its 8 second cooldown): what it does, or that the bar shows
+-- no times anyway (it's shown there only while it's ticked, so it can be
+-- unticked).
+local function CoolNote(bar)
+    local data = ns.BarData(bar)
+    if data.onlyShort or not data.showAuras then
+        return "This bar shows no buff or debuff time, so this icon shows its cooldown already."
+    end
+    return "Shows this spell's cooldown, not its buff or debuff time, so a longer debuff can't cover it. The rest of the bar"
+        .. " shows theirs. A change in a fight shows once it ends."
 end
 
 -- Settings per spell ---------------------------------------------------------------
@@ -352,7 +372,17 @@ local function PanelTicks(window, dialog, shade, Changed)
     end)
     window:Hint(stance, "Overpower lights up after your target dodges in Berserker or Defensive Stance too,"
         .. " so you can switch to Battle Stance and use it.")
-    return glow, only, ticks, active, reagents, others, trap, stance
+    -- Cooldown only: a spell's alone, on a Cooldowns or Utility bar showing
+    -- buff and debuff times (Squirt, 25 Nov 2026), so one icon can be left
+    -- out of them. In the row above Count ticks (shade:Refresh), as a ticked
+    -- Count ticks opens the tick count's own rows under it and those would
+    -- sit between the two ticks otherwise.
+    local coolOnly = T:Check(dialog, "Cooldown only", function(self)
+        B:SetCooldownOnly(shade.bar, shade.name, self:GetChecked())
+        Changed()
+    end)
+    window:Hint(coolOnly, function() return CoolNote(shade.bar) end)
+    return glow, only, ticks, active, reagents, others, trap, stance, coolOnly
 end
 
 -- Hide with my pet and Only in instances (a player's idea: for single buffs,
@@ -746,6 +776,9 @@ end
 -- is (Glow while active, Play a sound and the Cooldowns and Utility bars'
 -- own have no row there). Hide with my pet and Only in instances are set
 -- here too, and shown with Only when missing (shade:Refresh).
+-- Cooldown only is a spell's on a Cooldowns or Utility bar showing buff and
+-- debuff times (an item's icon shows none of its own), and stays there while
+-- it's ticked on a bar that stopped showing them, so it can be unticked.
 local function PaintTicks(shade, bar, name)
     local B = ns.Bars
     local aura, kind = ns.AURA_BARS[bar] ~= nil, ns.BAR_KIND[bar] -- (an extra bar goes by its kind)
@@ -759,9 +792,11 @@ local function PaintTicks(shade, bar, name)
     -- Count ticks greyed while its icon can't count (its hover says why),
     -- unless it's ticked, so it can be unticked: on the Debuffs bar shared
     -- with another that's in the way, on a Cooldowns or Utility bar while
-    -- the debuff's time isn't shown.
+    -- the debuff's time isn't shown, or while this icon is left out of the
+    -- times (Cooldown only).
     local counts = aura and not B:TickClash(bar, name)
         or not aura and ns.BarData(bar).showAuras == true and not ns.BarData(bar).onlyShort
+            and not B:CooldownOnly(bar, name)
     shade.ticks:SetChecked(B:CountsTicks(bar, name))
     shade.ticks:SetUsable(shade.ticks:GetChecked() or counts)
     shade.active:SetChecked(B:GlowsActive(bar, name))
@@ -770,6 +805,7 @@ local function PaintTicks(shade, bar, name)
     shade.others:SetChecked(B:HandOthers(bar, name))
     shade.trap:SetChecked(B:ShowsLastTrap(bar, name))
     shade.stance:SetChecked(B:LitInAnyStance())
+    shade.coolOnly:SetChecked(B:CooldownOnly(bar, name))
     -- Play a sound, and its sound beside it (Chime until one's picked).
     local sound = B:AuraSound(bar, name)
     shade.sound:SetChecked(sound ~= nil)
@@ -778,11 +814,15 @@ local function PaintTicks(shade, bar, name)
     -- item puts no debuff on anyone.)
     local spell = entry and (entry.kind == "spell" or entry.kind == "rank")
     local ticks = B:TickPace(name) ~= nil and (kind == "debuff" or not aura and spell)
+    -- Cooldown only: while this bar shows buff and debuff times for a spell's
+    -- icon to be left out of, or while it's ticked already.
+    local times = not aura and spell and (ns.BarData(bar).showAuras == true and not ns.BarData(bar).onlyShort
+        or B:CooldownOnly(bar, name))
     return { aura and shade.glow or nil, kind == "buff" and shade.only or nil,
         ticks and shade.ticks or nil, aura and shade.active or nil,
         B:UsesReagent(bar, name) and shade.reagents or nil, kind == "buff" and entry and entry.hand and shade.others or nil,
         not aura and ns.Spells:Trap(name) and shade.trap or nil, aura and B:SoundUsable(bar, name) and shade.sound or nil,
-        not aura and spell and (entry.baseName or entry.name) == "Overpower" and shade.stance or nil }
+        not aura and spell and B:AnyStance(entry) and shade.stance or nil, times and shade.coolOnly or nil }
 end
 
 local function SpellPanel(window)
@@ -838,7 +878,7 @@ local function SpellPanel(window)
     shade.ownIcon, shade.iconSize = PanelIconSize(window, dialog, shade, Changed)
     At(shade.ownIcon, PANEL.at, 2, 2)
     At(shade.iconSize, PANEL.at + PANEL.own, 2)
-    shade.glow, shade.only, shade.ticks, shade.active, shade.reagents, shade.others, shade.trap, shade.stance =
+    shade.glow, shade.only, shade.ticks, shade.active, shade.reagents, shade.others, shade.trap, shade.stance, shade.coolOnly =
         PanelTicks(window, dialog, shade, Changed)
     shade.pet, shade.inside = PanelAway(window, dialog, shade, Changed)
     shade.sound, shade.soundPick = PanelSound(window, dialog, shade, Changed)
@@ -913,10 +953,13 @@ local function SpellPanel(window)
             rows = rows + 1
             if shown[1] ~= self.glow then rows = rows + time:Place(At, rows - 1) end
         end
-        for _, tick in ipairs({ self.glow, self.only, self.active, self.sound, self.ticks, self.reagents, self.others, self.trap,
-            self.stance }) do
-            local on = tick == shown[1] or tick == shown[2] or tick == shown[3] or tick == shown[4] or tick == shown[5]
-                or tick == shown[6] or tick == shown[7] or tick == shown[8] or tick == shown[9]
+        -- (Which of them this entry has, as PaintTicks gives them back: in
+        -- any of its places, and it leaves gaps for the ones it hasn't.)
+        local has = {}
+        for _, tick in pairs(shown) do has[tick] = true end
+        for _, tick in ipairs({ self.glow, self.only, self.active, self.sound, self.coolOnly, self.ticks, self.reagents, self.others,
+            self.trap, self.stance }) do
+            local on = has[tick] == true
             tick:SetShown(on)
             if on then
                 At(tick, 16, rows, 2)
@@ -1443,12 +1486,24 @@ function ns.BuildBarPage(window, page, width)
     local hideOutside = Option("Only in instances", "hideOutside", -107,
         "This bar shows only in dungeons, raids and battlegrounds, and hides everywhere else. It comes back while unlocked"
             .. " and in Edit Mode.", 160)
-    -- The Debuffs bar only (a player's idea), beside Show missing debuffs
-    -- greyed (its label longer than the Buffs one, so further right than
-    -- Hide w/ pet): its missing debuffs' spots in colour, still faded. Off
-    -- unless ticked. A short label, to end before New rows.
+    -- The Buffs and Debuffs bars (a player's idea, the Buffs bar's since a
+    -- player asked for his missing buffs in colour): their missing spots in
+    -- colour, still faded. Off unless ticked.
+    -- On a Debuffs bar, beside Show missing debuffs greyed (its label longer
+    -- than the Buffs one, so further right than Hide w/ pet), with a short
+    -- label to end before New rows. A Buffs bar has Hide w/ pet in that spot
+    -- and no room for a row of its own (its page is the tightest: four tray
+    -- rows), so there it sits beside Show spell names, in Show keybinds's
+    -- spot, which only a Debuffs bar uses (its spot set on refresh).
     local missingColour = Option("In colour", "missingColour", -85, function()
-        if not ns.BarData(state.bar).showMissing then
+        local data = ns.BarData(state.bar)
+        if ns.BAR_KIND[state.bar] == "buff" then
+            if not (data.showMissing or ns.BuffBar:OnlyMissing(data)) then
+                return "Tick Show missing buffs greyed or Only show missing first: this shows those spots in colour."
+            end
+            return "Missing buffs show in colour in their spots instead of grey, still faded."
+        end
+        if not data.showMissing then
             return "Tick Show missing debuffs greyed first: this shows those spots in colour."
         end
         return "Missing debuffs show in colour in their spots instead of grey, still faded."
@@ -1466,7 +1521,17 @@ function ns.BuildBarPage(window, page, width)
             .. " In a fight a key change shows once the fight ends."
     end, 470)
     debuffKeys:SetWidth(18 + (debuffKeys.text:GetStringWidth() or 0)) -- the label is its click area
-    options.ticks = { hidePet = hidePet, hideOutside = hideOutside, missingColour = missingColour, debuffKeys = debuffKeys }
+    -- The Debuffs bar only (a player's idea, 23 Nov 2026: a warlock who
+    -- wants to see which curses the other warlocks in his raid already have
+    -- on the boss, beside his own curse group): its icons light up for their
+    -- debuffs whoever cast them, not only you. A row of its own under Keep
+    -- them greyed with no target, or under the tick count's two rows while
+    -- they show (its spot set on refresh). Off unless ticked.
+    local anyCaster = Option("Light up for anyone's debuffs", "anyCaster", -129,
+        "Each icon lights up while its debuff is on your target, whoever cast it, so another player's counts too."
+            .. " Unticked, only the ones you cast count. A change in a fight shows once it ends.", 0)
+    options.ticks = { hidePet = hidePet, hideOutside = hideOutside, missingColour = missingColour, debuffKeys = debuffKeys,
+        anyCaster = anyCaster }
     local showNames = Option("Show spell names", "showNames", -22, "Each spell's name under its icon.")
     local showTimer = Option("Show countdown numbers", "showTimer", -44, "The numbers counting down on this bar's icons.")
     -- The cooldown bars only: an icon shows the time left on the buff its
@@ -2132,8 +2197,14 @@ function ns.BuildBarPage(window, page, width)
                         icon = C_Spell.GetSpellTexture(id), pinned = pinned or nil }
                 end
             else
-                -- Eight at most, from more names, as some may not show here.
-                for _, found in ipairs(ns.Spells:Suggest(text, 24)) do
+                -- Eight at most, from two dozen names, as some may not show
+                -- here (another class's spell, a buff's name on a cooldown
+                -- bar). The bar goes with the text, so the search leaves out
+                -- the names only another bar takes: there are hundreds of
+                -- consumable buffs, enough for a short search to fill two
+                -- dozen names on its own, and this page would look up every
+                -- one of them only to turn it away.
+                for _, found in ipairs(ns.Spells:Suggest(text, 24, state.bar)) do
                     if #others < 8 and not known[found.name] and not ns.Spells:AddNote(found.name, state.bar)
                         and B:WouldShow(state.bar, found.name) then
                         others[#others + 1] = { name = found.name, label = found.name, lookup = found.name,
@@ -2318,9 +2389,18 @@ function ns.BuildBarPage(window, page, width)
         keepGreyed:SetShown(kind == "debuff")
         keepGreyed:SetChecked(data.greyedNoTarget)
         keepGreyed:SetUsable(data.showMissing)
-        options.ticks.missingColour:SetShown(kind == "debuff")
-        options.ticks.missingColour:SetChecked(data.missingColour)
-        options.ticks.missingColour:SetUsable(data.showMissing)
+        -- In colour: on a Debuffs bar beside missing debuffs greyed, on a
+        -- Buffs bar beside Show spell names (its own row is full), usable
+        -- with either tick that leaves greyed spots.
+        local colour = options.ticks.missingColour
+        colour:SetShown(aura ~= nil)
+        colour:SetChecked(data.missingColour)
+        colour:SetUsable(data.showMissing == true or (kind == "buff" and data.onlyMissing == true))
+        if aura and colour.placedAt ~= kind then
+            colour.placedAt = kind
+            colour:ClearAllPoints()
+            colour:SetPoint("TOPLEFT", kind == "buff" and 470 or 232, kind == "buff" and -22 or -85)
+        end
         -- Show keybinds: beside Show spell names, or in its spot while packed
         -- debuffs have no names; usable with the Look page's keybinds on.
         local keys = options.ticks.debuffKeys
@@ -2332,6 +2412,17 @@ function ns.BuildBarPage(window, page, width)
             keys.placedAt = keysAt
             keys:ClearAllPoints()
             keys:SetPoint("TOPLEFT", keysAt, -22)
+        end
+        -- Light up for anyone's debuffs: a row of its own on the left, under
+        -- the tick count's two rows while those show.
+        local anyone = options.ticks.anyCaster
+        anyone:SetShown(kind == "debuff")
+        anyone:SetChecked(data.anyCaster)
+        local anyAt = counting and -173 or -129
+        if anyone.placedAt ~= anyAt then
+            anyone.placedAt = anyAt
+            anyone:ClearAllPoints()
+            anyone:SetPoint("TOPLEFT", 0, anyAt)
         end
         showNames:SetChecked(data.showNames)
         outOfCombat:SetSelected(data.outOfCombat)
@@ -2370,7 +2461,11 @@ function ns.BuildBarPage(window, page, width)
             editing.label:ClearAllPoints()
             editing.label:SetPoint("TOPLEFT", 320, swapAt - 26)
         end
-        if aura then options:SetHeight((counting and OPTIONS_TALL or OPTIONS) + (forms and 22 or 0) + (picking and 22 or 0)) end
+        -- (A Debuffs page is a row taller for Light up for anyone's debuffs.)
+        if aura then
+            options:SetHeight((counting and OPTIONS_TALL or OPTIONS) + (forms and 22 or 0) + (picking and 22 or 0)
+                + (kind == "debuff" and 22 or 0))
+        end
         -- Show only when I can't afford it: under Editing while that shows,
         -- the options a row taller then; in its spot otherwise.
         if not aura then
