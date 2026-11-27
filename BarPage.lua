@@ -488,7 +488,8 @@ local function PanelSound(window, dialog, shade, Changed)
             return "Plays a sound the moment this debuff lands on your target, in a fight too. Another player's same debuff plays it"
                 .. " too: the game can't tell whose it is."
         end
-        return "Plays a sound the moment this buff lands on you, in a fight too."
+        return "Plays a sound the moment this buff lands on you, in a fight too. Another player's same buff plays it too:"
+            .. " the game can't tell whose it is."
     end)
     local picker = CreateFrame("Frame", nil, dialog, "BackdropTemplate")
     picker:SetSize(PANEL.sound, 20)
@@ -1431,7 +1432,13 @@ function ns.BuildBarPage(window, page, width)
         window:Refresh()
     end, sliderLabel)
     across:SetPoint("TOPLEFT", 0, -65)
-    window:Hint(across, "How many icons fit across before the next row starts.")
+    window:Hint(across, function()
+        local data = ns.BarData(state.bar)
+        if ns.AURA_BARS[state.bar] and ns.BuffBar:Packed(data) then
+            return "The game lays these buffs out in one row. Tick Show missing buffs greyed to use rows."
+        end
+        return "How many icons fit across before the next row starts."
+    end)
     page.size, page.height, page.spacing, page.across = size, height, spacing, across
 
     local function Option(label, field, y, note, x)
@@ -1758,6 +1765,21 @@ function ns.BuildBarPage(window, page, width)
     -- own, off unless ticked. Its short label fits the row's right half.
     local keepColour = Option("Keep colour", "keepColour", -173,
         "This bar's icons stay in colour while they cool down, instead of turning grey.", 210)
+    -- Beside Dim when you can't cast it, the cooldown bars only (two players
+    -- asked): icons hidden by When ready or On cooldown give up their spots
+    -- out of combat. Its short label fits the row's right half.
+    local closeGaps = Option("Close gaps", "closeGaps", -129, function()
+        local data = ns.BarData(state.bar)
+        local note = "Out of combat, an icon hidden by When ready or On cooldown gives up its spot, so the rest close up."
+            .. " In combat every icon keeps its own spot, as the game won't say which are ready."
+        if not (data.whenReady == "hide" or data.onCooldown == "hide" or data.onlyShort) then
+            note = note .. " Nothing on this bar hides yet: set When ready or On cooldown to Hide."
+        end
+        return note
+    end, 222)
+    -- (Kept on Keep colour beside it: the page's Refresh is at the game's
+    -- 60 upvalues, so it reaches this one through that one.)
+    keepColour.closeGaps = closeGaps
     -- The cooldown bars only (a player's idea): the bar's icons hidden, each
     -- shown only while you lack the mana, rage or energy for it, each bar its
     -- own, off unless ticked. In the right column under New rows, or under
@@ -1830,7 +1852,7 @@ function ns.BuildBarPage(window, page, width)
         return false
     end
     page.options = { whenReady = whenReady, onCooldown = onCooldown, dimUnusable = dimUnusable, dimOpacity = dimOpacity,
-        showGCD = showGCD, glowProcs = glowProcs, onlyShort = onlyShort, keepColour = keepColour, showMissing = showMissing, keepGreyed = keepGreyed,
+        showGCD = showGCD, glowProcs = glowProcs, onlyShort = onlyShort, keepColour = keepColour, closeGaps = closeGaps, showMissing = showMissing, keepGreyed = keepGreyed,
         onlyMissing = onlyMissing, hidePet = hidePet, hideOutside = hideOutside, showNames = showNames, showTimer = showTimer, showAuras = showAuras, swapForm = swapForm,
         editing = editing,
         showSelf = showSelf, outOfCombat = outOfCombat, grow = grow, wrap = wrap,
@@ -2113,7 +2135,7 @@ function ns.BuildBarPage(window, page, width)
     local function Fits(entry, onlyTicked)
         local item, kind = ns.Spells:IsItem(entry), ns.BAR_KIND[state.bar]
         if kind == "buff" then return not item and entry.kind ~= "rank" end
-        if entry.kind == "enchant" or entry.kind == "trinket" then return false end
+        if entry.kind == "enchant" or entry.kind == "trinket" or entry.kind == "potion" then return false end
         if kind == "debuff" then return not item and entry.kind ~= "rank" and entry.kind ~= "proc" end
         if item then return ns.Get("listItems") or onlyTicked end
         return entry.kind ~= "proc"
@@ -2322,23 +2344,28 @@ function ns.BuildBarPage(window, page, width)
         height:Set(data.heightPct)
         spacing:Set(data.spacing)
         across:Set(data.perRow)
-        -- Packed buffs are laid out by the game in one row.
+        -- Packed buffs are laid out by the game in one row: Icons per row
+        -- and New rows greyed with why, never hidden (a player took the
+        -- slider going away for a bug, 27 Nov 2026).
         local oneRow = aura ~= nil and ns.BuffBar:Packed(data)
-        across:SetShown(not oneRow)
-        wrap:SetShown(not oneRow)
-        wrap.label:SetShown(not oneRow)
+        across:SetUsable(not oneRow)
         local held = ns.Layout ~= nil and ns.Layout:Active()
         for _, pills in ipairs({ grow, wrap }) do
             pills.held = held
             pills:SetAlpha(held and .4 or 1)
             pills.label:SetAlpha(held and .4 or 1)
         end
+        if oneRow then
+            wrap.held = "The game lays these buffs out in one row. Tick Show missing buffs greyed to use rows."
+            wrap:SetAlpha(.4)
+            wrap.label:SetAlpha(.4)
+        end
         grow:SetSelected(data.grow)
         wrap:SetSelected(data.wrap)
         -- When ready, On cooldown, its tick, Dimmed icons and Show the global
         -- cooldown: the cooldown bars only, taller for them.
         for _, part in ipairs({ whenReady, whenReady.label, onCooldown, onCooldown.label, dimUnusable, dimOpacity, showGCD, glowProcs,
-            onlyShort, keepColour }) do
+            onlyShort, keepColour, keepColour.closeGaps }) do
             part:SetShown(not aura)
         end
         -- Show only when I can't afford it: When ready, On cooldown and Dim
@@ -2368,6 +2395,7 @@ function ns.BuildBarPage(window, page, width)
         dimOpacity:SetUsable(Dims(data))
         showGCD:SetChecked(data.showGCD)
         keepColour:SetChecked(data.keepColour)
+        keepColour.closeGaps:SetChecked(data.closeGaps)
         glowProcs:SetChecked(data.glowProcs)
         glowProcs:SetUsable(not data.onlyShort)
         showMissing:SetShown(aura ~= nil)

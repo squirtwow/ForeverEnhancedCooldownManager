@@ -51,7 +51,9 @@ function run(command, args, { timeout, ...options } = {}) {
 // The longest a Lua suite may take: TestBars takes 15 to 20 minutes.
 export const LUA_TIMEOUT = 30 * 60 * 1000;
 // The least heap (MB) a Lua suite is given: TestBars' need, with room.
-export const LUA_HEAP = 14336;
+// 14 GB stopped being enough on 27 Nov 2026 (it died with no output at all,
+// which is what running out looks like here, and passed at once on 20).
+export const LUA_HEAP = 20480;
 
 // A Lua suite's result: passed only with its closing line and no traceback.
 export function judgeLua(code, output) {
@@ -64,7 +66,7 @@ export function judgeLua(code, output) {
 
 export async function runLua(kit, file, timeout = LUA_TIMEOUT) {
   // TestBars needs far more than node's default heap (over 8 GB since
-  // 1.10.14, about 9 in use: 14 GB given); the rest are small. A bigger heap
+  // 1.10.14, over 14 since 27 Nov 2026: 20 GB given); the rest are small. A bigger heap
   // set in NODE_OPTIONS is kept, a smaller one raised to that.
   const own = process.env.NODE_OPTIONS ?? '';
   const asked = Number(own.match(/--max-old-space-size=(\d+)/)?.[1] ?? 0);

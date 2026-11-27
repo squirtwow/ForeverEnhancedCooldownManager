@@ -864,7 +864,7 @@ P.PROCS = {
     PRIEST = { { 15271 }, { 1326168 }, { 27813 } }, -- Spirit Tap, Dark Inspiration, Blessed Recovery
     ROGUE = { { 14143 }, { 1329282 }, { 1310703 } }, -- Remorseless, Quick Getaway, Venom
     SHAMAN = { { 16246 }, { 16257 }, { 408505 }, { 30165 }, { 1238931 }, { 415144 } }, -- Clearcasting, Flurry, Maelstrom Weapon, Elemental Devastation, Improved Stormstrike, Mental Dexterity
-    WARLOCK = { { 17941 }, { 440873 }, { 1242853 } }, -- Shadow Trance, Decimation, Soul Harvest
+    WARLOCK = { { 17941 }, { 1293816 }, { 426311 }, { 440873 }, { 1242853 } }, -- Shadow Trance, Shadow, Flame, Decimation, Soul Harvest
     WARRIOR = { { 12966 }, { 12880 }, { 16488 }, { 1323969 } }, -- Flurry, Enrage, Blood Craze, Gore Drinker
 }
 -- Each side of a ring (Ring: top, bottom, left, right): the way from a

@@ -12,6 +12,7 @@ SquirtVersions.lua
 Style.lua
 Skin.lua
 Resource.lua
+ResourceExtras.lua
 CastBar.lua
 RaidTimers.lua
 Ranks.lua
@@ -22,7 +23,11 @@ Buffs.lua
 IconAuras.lua
 Bars.lua
 Pulse.lua
+Fill.lua
+FillBars.lua
 Totems.lua
+Dots.lua
+DotsBand.lua
 Layout.lua
 Theme.lua
 BarPage.lua
@@ -31,6 +36,8 @@ CastBarPage.lua
 RaidTimersPage.lua
 PulsePage.lua
 TotemsPage.lua
+FillPage.lua
+DotsPage.lua
 ComboSetUp.lua
 ProfileShare.lua
 ProfileMenu.lua

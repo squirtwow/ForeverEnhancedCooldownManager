@@ -187,6 +187,9 @@ function ns.DebugReport()
     if ns.Style then Fonts(Add) end
     if ns.Bars and ns.Bars.Report then ns.Bars:Report(Add, Say) end
     if ns.Totems and ns.Totems.Report then ns.Totems:Report(Add, Say) end
+    if ns.Dots and ns.Dots.Report then ns.Dots:Report(Add) end
+    -- The band on the target's health bar: whether it found a frame to sit on.
+    if ns.DotsBand and ns.DotsBand.Report then ns.DotsBand:Report(Add) end
     return table.concat(lines, "\n")
 end
 

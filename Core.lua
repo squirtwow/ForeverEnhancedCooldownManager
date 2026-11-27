@@ -75,6 +75,8 @@ ns.DEFAULTS = {
     prdSkin = true, -- Blizzard's Personal Resource Display in the same design
     prdHideRepeat = true, -- its second mana bar hidden while the main one is mana
     prdHideSpent = false, -- the flash of power just spent on its power bar tinted clear (a player's idea)
+    prdByAmount = false, -- health red when low to green when full, power darker as it empties (ResourceExtras.lua)
+    prdQueued = false, -- a next-swing spell's cost as a dark band on its power bar until it goes off (ResourceExtras.lua)
     prdHealth = "default", -- its bars' colours: Blizzard's, or a bar colour
     prdPower = "default",
     prdMatch = true, -- while a layout holds your bars, the display is as wide as your widest row
@@ -195,6 +197,48 @@ ns.DEFAULTS = {
     totemOrder = "efwa", -- the elements in order: e earth, f fire, w water, a air
     totemX = -300, -- where its middle sits: from the middle of the screen, left of your bars
     totemY = -175,
+    -- Resource fill (More; Fill.lua): a spell you can't pay for right now
+    -- goes dark and fills up from the bottom with the power it needs, as that
+    -- power comes back. Your own bars' icons, and your action bars with
+    -- their own tick (FillBars.lua).
+    fill = false, -- on or off
+    fillBars = false, -- the same fill on your action bars' buttons (FillBars.lua)
+    fillStyle = "liquid", -- the look: liquid, flat, frost, ember or arcane
+    fillMove = "normal", -- how much it moves: calm, normal or lively
+    fillStrength = 70, -- how strong the fill's colour is, in percent
+    fillDarkness = 45, -- how dark the part you can't pay for goes, in percent
+    fillBubbles = true, -- the bubbles rising in it (sparkles, sparks or motes, by the look)
+    fillFlash = true, -- one flash the moment you can pay for it
+    fillLine = true, -- a bright line along the surface
+    fillDim = true, -- the spell darkens while you can't pay for it
+    fillCost = false, -- what it costs, on the icon
+    -- DoTs (More; Dots.lua, DotsBand.lua): the damage over time spells you
+    -- have running on your target, with the damage still to come marked on
+    -- its health bar. Auras seal in a fight, so the times are our own clock's
+    -- (your casts), and the figures come from each spell's own description.
+    dots = false, -- on or off
+    dotBand = true, -- the band on the target's health bar
+    dotLine = true, -- a bright line at the band's left edge
+    dotSkull = true, -- a skull on the portrait once the band covers the rest of the health
+    dotList = true, -- the list of the spells you have running
+    dotOthers = false, -- other players' damage over time spells on your target too
+    dotNameplates = false, -- the band on enemy nameplates as well as the target frame
+    dotBandColour = "default", -- the band's colour: the spell's school, or a bar colour
+    dotLineColour = "white", -- the line's colour: white, black or a bar colour
+    dotBandStrength = 55, -- how strong the band's colour is over the health bar, in percent
+    dotSize = 28, -- the list's icons, as a bar's
+    dotSpacing = 4,
+    dotRowHeight = 14, -- each row's own bar, beside its icon
+    dotPerRow = 8, -- how many rows there are before the list starts another column
+    dotGrow = "centre", -- which way a row grows (ns.GROW)
+    dotWrap = "down", -- where a new row goes (ns.WRAP)
+    dotNumbers = true, -- the damage still to come, on each row
+    dotTimer = true, -- the seconds left, on each row
+    dotAmber = true, -- a spell with a few seconds left goes amber
+    dotProcs = true, -- list the ones a hit sets off (listed and timed, never counted in the band)
+    dotOutOfCombat = "show", -- show, fade or hide out of combat
+    dotX = 0, -- where the list's middle sits: from the middle of the screen
+    dotY = -210,
     iconBorder = "off", -- a thin border round each icon ("icon") or whole bars ("bar")
     iconShadow = "off", -- and a soft shadow, the same way
     barDarkness = 0, -- the empty part of your bars and the restyled ones: 0 as before, 100 solid black (Look page)
@@ -238,6 +282,44 @@ ns.DEFAULTS = {
     updateNotice = true, -- a line in chat when a newer version is out (General page; SquirtVersions.lua)
     noWhatsNew = false, -- What's new no longer opens by itself after an update (General page; Notes.lua)
 }
+-- One power type by name, or the number it always has where the game's own
+-- list is missing (as Resource.lua reads it).
+local function PowerType(name, fallback)
+    local kinds = Enum and Enum.PowerType
+    local kind = kinds and kinds[name]
+    return type(kind) == "number" and kind or fallback
+end
+-- Resource fill: the powers it fills with, in the order its page lists them,
+-- each with the game's power type, the name the game keeps its own colour
+-- under, and a colour setting of its own. Health and combo points are left
+-- out. Each colour takes a named one, Default (the game's own) or Custom,
+-- with Custom's own colour kept beside it as the look's colours are. These
+-- are kept out of a shared profile, which never carries one of them (and so
+-- the tests' NOT_SHARED lists them), so nobody else's string changes how
+-- your fill looks; like every other setting here they are saved for the
+-- whole account, not per character.
+ns.FILL_POWERS = {
+    { key = "mana", kind = PowerType("Mana", 0), token = "MANA", name = "Mana", setting = "fillMana" },
+    { key = "rage", kind = PowerType("Rage", 1), token = "RAGE", name = "Rage", setting = "fillRage" },
+    { key = "energy", kind = PowerType("Energy", 3), token = "ENERGY", name = "Energy", setting = "fillEnergy" },
+}
+-- No Focus row: on this client a hunter casts from mana (Arcane Shot is a
+-- share of base mana, Aimed Shot 75 Mana), and Focus is a hunter pet's power.
+-- The fill only ever reads your own power, never a pet's, so a Focus colour
+-- could never be drawn. Mana, Rage and Energy cover every class.
+for _, power in ipairs(ns.FILL_POWERS) do
+    ns.DEFAULTS[power.setting] = "default"
+    ns.DEFAULTS[power.setting .. "Custom"] = ""
+end
+
+-- The DoTs page's two colours (Dots.lua): each takes a named colour, Default
+-- (the spell's own school for the band, white for the line) or Custom, with
+-- Custom's own colour kept beside it as the look's colours are. Like the
+-- Resource fill's these are kept out of a shared profile, so nobody else's
+-- string changes how your band looks (and so the tests' NOT_SHARED lists them).
+ns.DOT_COLOURS = { "dotBandColour", "dotLineColour" }
+for _, key in ipairs(ns.DOT_COLOURS) do ns.DEFAULTS[key .. "Custom"] = "" end
+
 -- Custom colours (a colour row's pop-up, Custom): each colour setting can
 -- hold "custom", its own colour kept beside it as six hex digits in the
 -- setting's name with Custom after it ("" until one is picked). The named
@@ -293,6 +375,16 @@ ns.PULSE_LONG_TIME = { 3, 50, 25 } -- 0.3 to 5 seconds
 ns.PULSE_SEE_THROUGH = { 0, 90, 80 }
 ns.PULSE_GROW = { 100, 160, 135 }
 ns.PULSE_PLACE = { -4000, 4000, 0 }
+-- Resource fill: how strong the fill's colour is, and how dark the part you
+-- can't pay for goes (percent).
+ns.FILL_STRENGTH = { 20, 100, 70 }
+ns.FILL_DARKNESS = { 0, 80, 45 }
+-- DoTs: how strong the band's colour is over the health bar (percent), how
+-- tall each row's own bar is beside its icon, and how many rows the list has
+-- before it starts another column beside them.
+ns.DOT_STRENGTH = { 20, 100, 55 }
+ns.DOT_ROW = { 6, 40, 14 }
+ns.DOT_PER_ROW = { 1, 12, 8 }
 -- Totems bar.
 ns.TOTEM_PER_ROW = { 1, 4, 4 }
 ns.TOTEM_PLACE = { -4000, 4000, 0 }
@@ -306,6 +398,7 @@ local NUMBERS = { castHeight = ns.CAST_HEIGHT, castTextSize = ns.CAST_TEXT_SIZE,
     warningSize = ns.RAID_SIZE, emoteSize = ns.RAID_SIZE, raidSize = ns.RAID_SIZE_ALL, pulseSize = ns.PULSE_SIZE, pulseTime = ns.PULSE_TIME,
     pulseLongSize = ns.PULSE_LONG_SIZE, pulseLongTime = ns.PULSE_LONG_TIME,
     pulseSeeThrough = ns.PULSE_SEE_THROUGH, pulseGrow = ns.PULSE_GROW,
+    fillStrength = ns.FILL_STRENGTH, fillDarkness = ns.FILL_DARKNESS,
     pulseX = ns.PULSE_PLACE, pulseY = ns.PULSE_PLACE, minimapX = ns.MINIMAP_PLACE, minimapY = ns.MINIMAP_PLACE,
     prdTextSize = ns.TEXT_SIZE, prdHealthSize = ns.TEXT_BAR_SIZE, prdPowerSize = ns.TEXT_BAR_SIZE,
     prdExtraSize = ns.TEXT_BAR_SIZE, prdEnergySize = ns.TEXT_BAR_SIZE,
@@ -362,6 +455,16 @@ for _, key in ipairs(ns.PULSE_SOUND_KEYS) do AURA_SOUNDS[key] = key ~= "none" or
 function ns.AuraSoundValue(value) return type(value) == "string" and AURA_SOUNDS[value] == true end
 ns.PULSE_STYLE_KEYS = { "quick", "long" }
 ns.PULSE_STYLE_NAMES = { quick = "Quick", long = "Long" }
+-- Resource fill: its five looks, and how much the fill moves (Fill.lua draws
+-- each one).
+ns.FILL_STYLE_KEYS = { "liquid", "flat", "frost", "ember", "arcane" }
+ns.FILL_STYLE_NAMES = { liquid = "Liquid", flat = "Flat", frost = "Frost", ember = "Ember", arcane = "Arcane" }
+ns.FILL_MOVE_KEYS = { "calm", "normal", "lively" }
+ns.FILL_MOVE_NAMES = { calm = "Calm", normal = "Normal", lively = "Lively" }
+-- And the colours one of its powers can fill in: the game's own, then a bar
+-- colour.
+ns.FILL_COLOUR_KEYS = { "default" }
+for _, key in ipairs(ns.BAR_COLOUR_KEYS) do ns.FILL_COLOUR_KEYS[#ns.FILL_COLOUR_KEYS + 1] = key end
 -- The display's health and power text: where on each bar, what each spot
 -- shows (the centre always shows something), how numbers are written, and
 -- its font: the Look page's, or one of the game's own just for it.
@@ -474,13 +577,35 @@ for _, key in ipairs(ns.COUNT_COLOUR_KEYS) do CHOICES.countdownColour[key] = tru
 for _, key in ipairs(ns.COUNTDOWN_SPOTS) do CHOICES.countdownSpot[key] = true end
 for _, key in ipairs(ns.COUNTDOWN_FORMATS) do CHOICES.countdownFormat[key] = true end
 for _, key in ipairs(ns.EDGE_COLOUR_KEYS) do CHOICES.edgeColour[key] = true end
+-- Resource fill: its look, how much it moves, and one colour a power.
+CHOICES.fillStyle, CHOICES.fillMove = {}, {}
+for _, key in ipairs(ns.FILL_STYLE_KEYS) do CHOICES.fillStyle[key] = true end
+for _, key in ipairs(ns.FILL_MOVE_KEYS) do CHOICES.fillMove[key] = true end
 -- Every colour setting takes Custom too, and its colour beside it: six hex
--- digits, or "" for none picked yet.
+-- digits, or "" for none picked yet. The fill's own colours keep theirs the
+-- same way (ns.FILL_POWERS). Like every setting here they are saved for the
+-- whole account; what is true of them is that a share string never carries
+-- them.
 local CUSTOM_KEPT = {}
 for _, key in ipairs(ns.COLOUR_SETTINGS) do
     CHOICES[key][ns.CUSTOM] = true
     CUSTOM_KEPT[key .. "Custom"] = true
 end
+for _, power in ipairs(ns.FILL_POWERS) do
+    CHOICES[power.setting] = { [ns.CUSTOM] = true }
+    for _, key in ipairs(ns.FILL_COLOUR_KEYS) do CHOICES[power.setting][key] = true end
+    CUSTOM_KEPT[power.setting .. "Custom"] = true
+end
+-- DoTs: the band's colour (the spell's school, or a bar colour) and the
+-- line's (white, black or a bar colour), each with Custom and its own colour
+-- beside it, as the Resource fill's powers are.
+ns.DOT_BAND_COLOUR_KEYS = { "default" }
+for _, key in ipairs(ns.BAR_COLOUR_KEYS) do ns.DOT_BAND_COLOUR_KEYS[#ns.DOT_BAND_COLOUR_KEYS + 1] = key end
+CHOICES.dotBandColour = { [ns.CUSTOM] = true }
+for _, key in ipairs(ns.DOT_BAND_COLOUR_KEYS) do CHOICES.dotBandColour[key] = true end
+CHOICES.dotLineColour = { [ns.CUSTOM] = true }
+for _, key in ipairs(ns.TICK_COLOUR_KEYS) do CHOICES.dotLineColour[key] = true end
+for _, key in ipairs(ns.DOT_COLOURS) do CUSTOM_KEPT[key .. "Custom"] = true end
 
 function ns.Valid(key, value)
     local default = ns.DEFAULTS[key]
@@ -655,7 +780,7 @@ ns.BAR_POINTS = POINTS -- for checking a shared profile's (ProfileShare.lua)
 ns.SHARE_BAR_FIELDS = { "size", "heightPct", "spacing", "perRow", "whenReady", "onCooldown", "dimUnusable", "dimOpacity", "outOfCombat",
     "showMissing", "onlyMissing", "greyedNoTarget", "showNames", "showTimer", "showAuras", "showGCD", "selfDebuffs", "grow", "wrap", "point",
     "x", "y", "tickAt", "tickSize", "tickColour", "tickFrom", "tickEdge", "tickCustom", "glowProcs", "onlyShort",
-    "keepColour", "hidePet", "hideOutside", "missingColour", "debuffKeys", "anyCaster" }
+    "keepColour", "hidePet", "hideOutside", "missingColour", "debuffKeys", "anyCaster", "closeGaps" }
 -- Out of combat a bar shows, fades or hides; it comes back in full in combat,
 -- with an enemy targeted, while unlocked, or in Edit Mode.
 ns.OUT_OF_COMBAT = { "show", "fade", "hide" }
@@ -671,6 +796,15 @@ CHOICES.totemGrow, CHOICES.totemWrap, CHOICES.totemOutOfCombat, CHOICES.totemOrd
 for _, key in ipairs(ns.GROW) do CHOICES.totemGrow[key] = true end
 for _, key in ipairs(ns.WRAP) do CHOICES.totemWrap[key] = true end
 for _, key in ipairs(ns.OUT_OF_COMBAT) do CHOICES.totemOutOfCombat[key] = true end
+-- DoTs: the band's strength, its list's icons as a bar's, and where the list
+-- sits (ns.TOTEM_PLACE is the shared "dragged anywhere on screen" range).
+NUMBERS.dotBandStrength, NUMBERS.dotSize, NUMBERS.dotSpacing = ns.DOT_STRENGTH, ns.BAR_LIMITS.size, ns.BAR_LIMITS.spacing
+NUMBERS.dotPerRow, NUMBERS.dotX, NUMBERS.dotY = ns.DOT_PER_ROW, ns.TOTEM_PLACE, ns.TOTEM_PLACE
+NUMBERS.dotRowHeight = ns.DOT_ROW
+CHOICES.dotGrow, CHOICES.dotWrap, CHOICES.dotOutOfCombat = {}, {}, {}
+for _, key in ipairs(ns.GROW) do CHOICES.dotGrow[key] = true end
+for _, key in ipairs(ns.WRAP) do CHOICES.dotWrap[key] = true end
+for _, key in ipairs(ns.OUT_OF_COMBAT) do CHOICES.dotOutOfCombat[key] = true end
 do
     local function Orders(done, left)
         if left == "" then
@@ -3418,6 +3552,9 @@ function ns.BarData(key)
     -- in colour while they cool down, not greyed. Off unless ticked; shared
     -- with the look and layout (ProfileShare.lua).
     bar.keepColour = not ns.AURA_BARS[key] and bar.keepColour == true
+    -- Close up gaps: out of combat, an icon hidden by When ready or On
+    -- cooldown gives up its spot. A cooldown bar's only, off unless ticked.
+    bar.closeGaps = not ns.AURA_BARS[key] and bar.closeGaps == true
     bar.selfDebuffs = bar.selfDebuffs == true -- the Buffs and Debuffs bars: debuffs you put on yourself, off unless ticked
     -- The tick count of the Debuffs bar, and of the Cooldowns and Utility
     -- bars (Count ticks on a spell's icon, IconAuras.lua), each bar its own:
@@ -3621,6 +3758,32 @@ end
 function ns.SetPulseStyle(key, style)
     if not db or type(key) ~= "string" or key == "" then return end
     ns.PulseStyles()[key] = style == "long" and "long" or nil
+end
+
+-- DoTs (Dots.lua): the damage over time spells you never want in the list,
+-- by name -> true. Everything you cast is listed until you untick it, so
+-- this holds only what you took out and an empty table means the whole
+-- list. Kept in this character's profile beside the Cooldown pulse's ticks,
+-- and put right as it's read (as ns.CustomSpells is), so no pass over the
+-- profiles has to know about it.
+function ns.DotsLeftOut()
+    local out = PulseList("dotLeftOut")
+    for name, on in pairs(out) do
+        if type(name) ~= "string" or name == "" or on ~= true then out[name] = nil end
+    end
+    return out
+end
+
+-- Whether a spell of that name belongs in the list: everything does until
+-- it's unticked.
+function ns.DotListed(name)
+    if type(name) ~= "string" or name == "" then return false end
+    return ns.DotsLeftOut()[name] ~= true
+end
+
+function ns.SetDotListed(name, listed)
+    if not db or type(name) ~= "string" or name == "" then return end
+    ns.DotsLeftOut()[name] = (not listed) and true or nil
 end
 
 -- Spells added by name or ID that aren't in your spellbook: name -> spell IDs.
@@ -3942,6 +4105,12 @@ local function Load()
         db[key .. "Custom"] = hex
         if db[key] == ns.CUSTOM and not hex then db[key] = nil end
     end
+    -- And the Resource fill's own colours, the same way.
+    for _, power in ipairs(ns.FILL_POWERS) do
+        local hex = ns.Hex(db[power.setting .. "Custom"])
+        db[power.setting .. "Custom"] = hex
+        if db[power.setting] == ns.CUSTOM and not hex then db[power.setting] = nil end
+    end
     ns.ResolveProfile()
     ListenTalents()
     for key in pairs(ns.RELOAD) do ns.loaded[key] = ns.Get(key) end
@@ -3976,7 +4145,11 @@ local function Load()
     if ns.RaidTimers then ns.RaidTimers:Start() end
     if ns.Bars then ns.Bars:Start() end
     if ns.Pulse then ns.Pulse:Start() end
+    if ns.Fill then ns.Fill:Start() end
+    if ns.FillBars then ns.FillBars:Start() end
     if ns.Totems then ns.Totems:Start() end
+    if ns.Dots then ns.Dots:Start() end
+    if ns.DotsBand then ns.DotsBand:Start() end
     if ns.Layout then ns.Layout:Start() end
     if ns.MinimapButton then ns.MinimapButton:Start() end
     if ns.Notes then ns.Notes:Start() end

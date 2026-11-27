@@ -20,6 +20,7 @@ local BG_ATLAS = "UI-HUD-CoolDownManager-Bar-BG" -- the art behind each bar
 local MANA = Enum and Enum.PowerType and Enum.PowerType.Mana or 0
 
 local bars = setmetatable({}, { __mode = "k" }) -- restyled bars and what's added to them
+R.restyled = bars -- (read by ResourceExtras.lua: Colour by amount)
 local painting = setmetatable({}, { __mode = "k" }) -- a colour the addon is setting itself
 
 -- Something went wrong restyling the display: you're told once.
@@ -231,6 +232,9 @@ local function Look(bar, state)
     painting[bar] = true
     Style:FillColour(bar, colour, outline and .45 or 1)
     painting[bar] = nil
+    -- Colour by amount, over that (ResourceExtras.lua), from the colour it has now.
+    state.colourNow = colour
+    if ns.ResourceExtras then ns.ResourceExtras:Paint(bar, state) end
     -- A 1px edge round the bar: black, or the bar's colour for Outline; with
     -- Thick edges, a second pixel inside it, and Block's warm line inside those.
     local edge = outline and colour or { 0, 0, 0 }
@@ -1161,6 +1165,10 @@ local function Hook()
         Restyle(health, "prdHealth", HEAL_PIECES)
         Restyle(frame.PowerBar, "prdPower", COST_PIECES, true)
         Restyle(frame.AlternatePowerBar, "prdPower")
+        -- (ResourceExtras.lua: the extra bar is always mana, and the swing
+        -- cost goes on the main power bar.)
+        if bars[frame.AlternatePowerBar] then bars[frame.AlternatePowerBar].powerType = 0 end
+        if ns.ResourceExtras then ns.ResourceExtras.main = frame.PowerBar end
     end
     -- Combo points, for the classes that have them (the row may be up
     -- already, away from the display while it was switched off), and

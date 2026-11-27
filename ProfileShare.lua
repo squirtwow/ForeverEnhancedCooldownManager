@@ -229,6 +229,8 @@ local function Entry(value)
     if key:find("#", 1, true) then return ns.Spells:Pinned(key) and key or nil end
     if key:find("^hand:") then return ns.Spells.HAND_KEYS and ns.Spells.HAND_KEYS[key] and key or nil end
     if key:find("^trinket:") then return ns.Spells.TRINKET_KEYS and ns.Spells.TRINKET_KEYS[key] and key or nil end
+    -- A potion's buff (Spells.lua): "potion:" and its item ID.
+    if key:find("^potion:") then return key:match("^potion:[1-9]%d?%d?%d?%d?%d?%d?%d?%d?$") and key or nil end
     if key:find("^proc:") then
         local id = tonumber(key:match("^proc:([1-9]%d?%d?%d?%d?%d?%d?%d?%d?%d?)$"))
         for _, list in pairs(ns.Pulse and ns.Pulse.PROCS or {}) do
@@ -262,7 +264,8 @@ end
 local function BarEntry(value, key)
     local entry = Entry(value)
     if entry and entry:find("^proc:") then return nil end
-    if entry and (entry:find("^hand:") or entry:find("^trinket:")) and not (key and ns.BAR_KIND[key] == "buff") then return nil end
+    if entry and (entry:find("^hand:") or entry:find("^trinket:") or entry:find("^potion:"))
+        and not (key and ns.BAR_KIND[key] == "buff") then return nil end
     return entry
 end
 
@@ -319,6 +322,7 @@ local BAR_CHECKS = {
     missingColour = Bool,
     debuffKeys = Bool,
     anyCaster = Bool,
+    closeGaps = Bool,
 }
 P.BAR_CHECKS = BAR_CHECKS
 local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.heightPct[3], spacing = ns.BAR_LIMITS.spacing[3],
@@ -328,7 +332,7 @@ local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.h
     showAuras = false, showGCD = false, selfDebuffs = false, grow = "centre", wrap = "down",
     tickAt = "TOPLEFT", tickSize = ns.TICK_SIZE[3], tickColour = "white", tickFrom = 1, tickEdge = false, tickCustom = "",
     glowProcs = false, onlyShort = false, keepColour = false, hidePet = false, hideOutside = false,
-    missingColour = false, debuffKeys = false, anyCaster = false }
+    missingColour = false, debuffKeys = false, anyCaster = false, closeGaps = false }
 -- A bar setting only some bars have, and which: Glow for more procs and Show
 -- only when I can't afford it are a cooldown bar's (Cooldowns, Utility, and
 -- their extra bars). On any other bar a string's is left out and counted,
@@ -336,6 +340,7 @@ local BAR_DEFAULTS = { size = ns.BAR_LIMITS.size[3], heightPct = ns.BAR_LIMITS.h
 local BAR_FITS = { glowProcs = function(key) return not ns.AURA_BARS[key] end,
     onlyShort = function(key) return not ns.AURA_BARS[key] end,
     keepColour = function(key) return not ns.AURA_BARS[key] end,
+    closeGaps = function(key) return not ns.AURA_BARS[key] end,
     hidePet = function(key) return ns.BAR_KIND[key] == "buff" end,
     hideOutside = function(key) return ns.BAR_KIND[key] == "buff" end,
     missingColour = function(key) return ns.AURA_BARS[key] ~= nil end, -- (the Buffs bars' too since 24 Nov 2026)

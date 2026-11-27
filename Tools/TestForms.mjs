@@ -1,7 +1,7 @@
 // Forms.lua is generated, never edited by hand: rebuilding it from the game's
-// tables (Tools/GenerateForms.mjs, build 1.60.1.71091) must give the file
+// tables (Tools/GenerateForms.mjs, build 1.60.1.71139) must give the file
 // byte for byte. Skipped when the tables aren't on this computer
-// (C:\AddonDev\_ForeverData\changes-2026-11-25\wago-71091). What the file says is also
+// (C:\AddonDev\_ForeverData\changes-2026-11-26\wago-71139). What the file says is also
 // checked straight from it (no tables needed): the forms, each one's list on
 // a bar that swaps with your form (Dire Bear Form's is Bear Form's) and the
 // spells that put you in each, and the rule each
@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const cache = join(root, '..', '_ForeverData', 'changes-2026-11-25', 'wago-71091');
+const cache = join(root, '..', '_ForeverData', 'changes-2026-11-26', 'wago-71139');
 const TABLES = ['SpellName', 'Spell', 'SpellMisc', 'SpellShapeshift', 'SpellShapeshiftForm', 'SpellAuraRestrictions', 'SpellEffect',
   'SkillLine', 'SkillLineAbility', 'TraitDefinition'];
 const text = readFileSync(join(root, 'Forms.lua'), 'utf8');

@@ -12,7 +12,7 @@
 // one learns as a spell, which no one sees on a cooldown bar.
 // And the buff each consumable puts on you, by name, so an elixir, a flask or
 // a world buff scroll can be added by name as a spell can.
-// Reads Blizzard's own game tables for build 1.60.1.71091 (wago.tools db2
+// Reads Blizzard's own game tables for build 1.60.1.71139 (wago.tools db2
 // exports of SpellName, Spell, SpellEffect, SpellMisc, SpellDuration,
 // SpellCategories, SkillLineAbility, ChrRaces, SpellAuraRestrictions,
 // SpellPower, SpellCooldowns, TraitDefinition, Item, ItemSparse, ItemEffect
@@ -25,7 +25,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
-const BUILD = '1.60.1.71091';
+const BUILD = '1.60.1.71139';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const cache = process.argv[2];
 assert(cache, 'Pass a cache directory');
@@ -858,7 +858,10 @@ const itemEffects = await table('ItemXItemEffect');
 // What eating and drinking cast (Food, Drink, Nutritious Food), by name. A
 // consumable filed elsewhere that casts one of them is food too (build
 // 70959: Prowler Steak and Sunrise Omelette are "Other", SubclassID 8, and
-// their Food gives a Well Fed of its own).
+// their Food gives a Well Fed of its own). Which food casts what moves about:
+// build 71139 put the clam dishes and Murloc Fin Soup on Nutritious Food
+// instead of Food, so the Food 5006 and the Well Fed 19708 no food leads to
+// any more left their families.
 const foodSpellNames = new Set(itemEffects.filter(row => foods.has(+row.ItemID))
     .map(row => names.get(itemSpells.get(+row.ItemEffectID))).filter(Boolean));
 const consumables = new Set(itemRows.filter(row => +row.ClassID === FOOD_AND_DRINK.ClassID).map(row => +row.ID));

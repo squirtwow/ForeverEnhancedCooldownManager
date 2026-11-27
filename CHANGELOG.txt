@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.10.22
+
+### Added
+- Potions: the potions you carry that give a buff, beside Trinkets on the Buffs page.
+- Close gaps: icons hidden by When ready or On cooldown close up out of combat (Cooldowns and Utility pages).
+- Colour by amount: your health bar goes from green to red as it drops, and your power bar darkens as it empties.
+- Show queued swing cost: Heroic Strike, Cleave, Maul or Raptor Strike shows its cost on your power bar until it lands.
+
+### Changed
+- Play a sound on a buff now says another player's same buff plays it too.
+- Spell data brought up to game build 71139.
+- Buffs page: Icons per row and New rows show greyed with why, instead of vanishing, while buffs sit in one row.
+
+### Fixed
+- A warlock's Shadow and Flame procs show on the Buffs page.
+
 ## 1.10.21
 
 ### Added

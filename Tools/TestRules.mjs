@@ -47,6 +47,20 @@ test('the .toc loads every file once, each after what it needs', () => {
   assert.ok(at('Pulse.lua') < at('Totems.lua') && at('Buffs.lua') < at('Totems.lua'), 'Totems.lua after Pulse.lua and Buffs.lua');
   assert.ok(at('PulsePage.lua') < at('TotemsPage.lua') && at('TotemsPage.lua') < at('Window.lua'),
     'TotemsPage.lua after PulsePage.lua, before Window.lua');
+  // The Resource fill draws on your bars' icons, so it loads after them; its page follows the Totems one under More.
+  assert.ok(at('Bars.lua') < at('Fill.lua') && at('Fill.lua') < at('Window.lua'), 'Fill.lua after Bars.lua, before Window.lua');
+  // Its fill on your action bars is drawn by Fill.lua, so it loads after it.
+  assert.ok(at('Fill.lua') < at('FillBars.lua') && at('FillBars.lua') < at('Window.lua'),
+    'FillBars.lua after Fill.lua, before Window.lua');
+  assert.ok(at('TotemsPage.lua') < at('FillPage.lua') && at('FillPage.lua') < at('Window.lua'),
+    'FillPage.lua after TotemsPage.lua, before Window.lua');
+  // The DoTs part reads which spells are DoTs from the bars' own spell data,
+  // so it loads after them; the band it draws loads after the part itself,
+  // and its page follows the Resource fill's under More.
+  assert.ok(at('Bars.lua') < at('Dots.lua') && at('Dots.lua') < at('DotsBand.lua') && at('DotsBand.lua') < at('Window.lua'),
+    'Dots.lua after Bars.lua, DotsBand.lua after it, both before Window.lua');
+  assert.ok(at('FillPage.lua') < at('DotsPage.lua') && at('DotsPage.lua') < at('Window.lua'),
+    'DotsPage.lua after FillPage.lua, before Window.lua');
   // The combo points' Set up pop-up: after the pages, before the window that opens it (it uses the theme).
   assert.ok(at('Theme.lua') < at('ComboSetUp.lua') && at('TotemsPage.lua') < at('ComboSetUp.lua')
     && at('ComboSetUp.lua') < at('ProfileShare.lua') && at('ComboSetUp.lua') < at('Window.lua'),
@@ -123,6 +137,35 @@ test('the proc list is the same as Forever Enhanced Cooldown Pulse\'s, when it\'
     assert.deepEqual(ours, theirProcs, 'line for line');
   });
 
+// A class line's spell IDs, by class token ("WARLOCK = { { 17941 }, ... },").
+function classIDs(lines) {
+  const found = {};
+  for (const line of lines) {
+    const named = line.match(/^([A-Z]+)\s*=\s*(.*)$/);
+    if (named) found[named[1]] = (named[2].match(/\d+/g) || []).map(Number);
+  }
+  return found;
+}
+
+// The pulse's list is built from the Buffs bar's own (Spells.lua S.PROCS)
+// plus the passive buffs that qualify, so every proc on a Buffs bar pulses
+// too once it's ticked. A warlock's Shadow and Flame (26 Nov 2026) are named
+// by their talent's text alone, so they are only ever in these lists by hand.
+test("the Buffs bar's procs are all in the pulse's proc list", () => {
+  const lines = code['Spells.lua'].split(/\r?\n/);
+  const start = lines.findIndex(line => line.startsWith('local PROCS = {'));
+  const end = lines.findIndex((line, i) => i > start && line.trimEnd() === '}');
+  assert.ok(start >= 0 && end > start, "the Buffs bar's proc list found");
+  const ours = classIDs(lines.slice(start + 1, end).map(line => line.trim()));
+  const pulse = classIDs((procsBlock(code['Pulse.lua']) || []).slice(1, -1));
+  assert.equal(Object.keys(ours).length, 9, 'a line for each class');
+  for (const [token, ids] of Object.entries(ours)) {
+    assert.ok(ids.length > 0, `${token} has a proc`);
+    for (const id of ids) assert.ok((pulse[token] || []).includes(id), `${token}'s ${id} is in the pulse's list`);
+  }
+  assert.deepEqual(ours.WARLOCK, [17941, 1293816, 426311], "a warlock's Shadow Trance, Shadow and Flame");
+});
+
 test('nothing opens Edit Mode, a panel or Cooldown Settings from addon code', () => {
   for (const pattern of [/ShowUIPanel/, /HideUIPanel/, /EnterEditMode/, /ExitEditMode/, /C_EditMode/, /CooldownViewerSettings/,
     /OpenToCategory/, /RunMacroText/, /SlashCmdList\s*(\.\s*EDITMODE|\[\s*["']EDITMODE)/, /ChatEdit_SendText/]) {
@@ -173,6 +216,27 @@ test('the only sizes set on Blizzard\'s frames are Raid Timers\' own two calls',
   assert.deepEqual(where(/(?<!\bB):SetScale\(/).sort(), ['Buffs.lua', 'RaidTimers.lua', 'TotemsPage.lua']);
   assert.equal(count(code['TotemsPage.lua'], /:SetScale\(/g), 1, 'one scale call on the Totems page');
   assert.match(code['TotemsPage.lua'], /self\.preview:SetScale\(scale\)/, 'on its own preview');
+});
+
+test("the DoTs band is the only file that reaches for Blizzard's target frame or a nameplate", () => {
+  // Every line of the DoTs part that touches a frame of Blizzard's lives in
+  // DotsBand.lua, so that rule can be read in one file. (RaidTimers.lua's boss
+  // frames are its own, by name, and are checked in its own suite.)
+  assert.deepEqual(where(/_G\.TargetFrame|C_NamePlate/), ['DotsBand.lua']);
+  // And what it does with what it finds is read it. This is every call and
+  // every method name it looks for on the frame, its health bar, its portrait,
+  // the bar's own fill, a plate and a plate's unit frame. GetChildren is a read
+  // as well: it is how the health bar is found on a plate whose shape this does
+  // not know by name, which is what a plate another addon has restyled is.
+  // GetAlpha, GetFrameStrata, GetName and GetParent are reads too (27 Nov
+  // 2026): whether a bar is really drawn (EraUI's look fades Blizzard's to 0),
+  // where ours must sit above a restyled plate's bar, and /ccm debug's report.
+  const asked = (code['DotsBand.lua'].match(/\b(?:frame|bar|portrait|fill|plate|unit)[:.]([A-Z]\w*)/g) || [])
+    .map(call => call.replace(/^[a-z]+[:.]/, ''));
+  assert.deepEqual([...new Set(asked)].sort(),
+    ['CreateTexture', 'GetAlpha', 'GetChildren', 'GetFrameLevel', 'GetFrameStrata', 'GetName', 'GetParent', 'GetStatusBarTexture',
+      'GetWidth', 'IsShown', 'IsVisible'],
+    'reads only: nothing of Blizzard\'s is ever set');
 });
 
 // The pulse link's shared part, from "local link = _G.ForeverPulseLink" to
@@ -491,13 +555,14 @@ test("Escape closes the windows through the game's own list", () => {
 // for more than ten, and AddGroup holds a group to the icons made.
 // Tools/TestBars.lua checks it runs that way.
 test("Blizzard's aura containers never run the addon's code while they update", () => {
-  assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(), ['Buffs.lua', 'IconAuras.lua', 'Pulse.lua', 'Totems.lua'], 'the only containers');
+  assert.deepEqual(where(/CustomAuraContainerTemplate/).sort(),
+    ['Buffs.lua', 'Dots.lua', 'IconAuras.lua', 'Pulse.lua', 'Totems.lua'], 'the only containers');
   assert.deepEqual(where(/:AddAura(Slot|Group)\(/), [], 'no slot or group added but through F.Add');
   const looks = files.flatMap(name => (code[name].match(/initializeFrame\s*=\s*[^,}]+/g) || []).map(look => `${name}: ${look.trim()}`));
-  assert.equal(looks.length, 11,
-    "eleven looks: Buffs bar spots, their edges (Warn at), the anyone's debuffs set's spots and its edges, packed entries,"
+  assert.equal(looks.length, 12,
+    "twelve looks: Buffs bar spots, their edges (Warn at), the anyone's debuffs set's spots and its edges, packed entries,"
     + " your debuffs, buff and debuff times, proc pulses, glows for more procs, tick counts on cooldown icons, the Totems"
-    + " bar's range warning");
+    + " bar's range warning, the DoTs list's icons");
   assert.deepEqual(looks.filter(look => !/: initializeFrame = (F|ns\.BuffBar)\.Guard\(/.test(look)), [], 'every look guarded');
   const buffs = code['Buffs.lua'];
   assert.match(buffs, /function F\.Add\(container, method, \.\.\.\)\r?\n\s+adding = true\r?\n\s+local ok, result = pcall\(container\[method\], container, \.\.\.\)\r?\n\s+adding = false\r?\n/);
@@ -518,8 +583,33 @@ test("Blizzard's aura containers never run the addon's code while they update", 
 // answer through pcall, and Open() before it's tested (and an answer's end
 // time Open() too), so a secret or unreadable one counts as no answer.
 // Tools/TestAuraContainers.lua checks what it does with them.
+// Dots.lua reads your target's debuffs the same way, in one place, to put
+// its own list straight out of a fight: in one the game answers nil for
+// every index, on every unit, with any filter (proved in game, 26 Nov 2026).
+// Yours alone, unless other players' spells are ticked, when it asks for
+// everyone's and tells them apart by the caster on the aura.
 test('your buffs are read only by Only show missing and Warn at, out of combat, each answer through pcall and Open()', () => {
-  assert.deepEqual(where(/C_UnitAuras|UnitAura\(|UnitBuff\(|UnitDebuff\(|GetAuraDataBy|AuraBySpellID/), ['Buffs.lua'], 'one file reads auras');
+  assert.deepEqual(where(/C_UnitAuras|UnitAura\(|UnitBuff\(|UnitDebuff\(|GetAuraDataBy|AuraBySpellID/),
+    ['Buffs.lua', 'Dots.lua'], 'two files read auras');
+  const dots = code['Dots.lua'];
+  assert.equal(count(dots, /GetAuraDataByIndex/g), 1, "one ask: the DoTs list's reconcile");
+  assert.match(dots, /local function Readable\(\)\r?\n\s+if InCombatLockdown\(\) then return false end\r?\n\s+local fighting = UnitAffectingCombat/,
+    'never in a fight');
+  assert.match(dots, /local ok, secret = pcall\(ask\)\r?\n\s+if not \(ok and Open\(secret\) and secret == false\) then return false end/,
+    'nor while auras are said to be secret');
+  assert.match(dots, /if not Readable\(\) then return false end/, 'the reconcile runs only when readable');
+  assert.match(dots, /local ok = pcall\(function\(\)\r?\n\s+for i = 1, MOST_AURAS do\r?\n\s+local aura = get\("target", i, filter\)/,
+    'the whole read inside one pcall');
+  // Yours alone, unless other players' spells are ticked: then everyone's, so
+  // the band behind yours has something to read. Those are the only two
+  // filters in the file, and the wider one is behind that tick.
+  assert.match(dots, /local theirs = Others\(\) and \{\} or nil\r?\n\s+local filter = theirs and "HARMFUL" or "HARMFUL\|PLAYER"/,
+    "everyone's only where other players' spells are wanted, yours alone otherwise");
+  assert.deepEqual([...new Set(dots.match(/"HARMFUL[^"]*"/g))].sort(), ['"HARMFUL"', '"HARMFUL|PLAYER"'],
+    'and no other filter anywhere');
+  assert.match(dots, /"AddAuraSlot", key, "HARMFUL\|PLAYER"/,
+    "while the container's own slots watch yours alone: an icon in the list is always a cast of yours");
+  assert.match(dots, /if not \(type\(aura\) == "table" and Open\(aura\)\) then return nil end/, 'the answer Open() before any field');
   const buffs = code['Buffs.lua'];
   assert.equal(count(buffs, /GetPlayerAuraBySpellID/g), 2, 'two asks: OnYou and TimeLeft');
   assert.equal(count(buffs, /local ok, aura = pcall\(get, id\)\r?\n\s+if not ok or not Open\(aura\) then\r?\n\s+unknown = true/g), 2,
@@ -674,4 +764,34 @@ test('the generated consumable buffs are one sorted list, a spell ID each', () =
   assert.ok(names.length > 200, `plenty of them: ${names.length}`);
   assert.equal(new Set(names).size, names.length, 'each name once');
   assert.deepEqual(names, [...names].sort(), 'sorted by name');
+});
+
+// Eating leaves one Well Fed whatever the food is, so every aura a food leads
+// to belongs in the same family (Ranks.lua ns.AURA_FAMILIES): a Buffs bar
+// entry for Well Fed lights for any of them. Build 71139 moved the clam
+// dishes and Murloc Fin Soup from Food onto Nutritious Food, which gives Food
+// 435 and Well Fed 1248406, and left Food 5006 and Well Fed 19708 with no
+// food leading to them, so those two are in no family and in no list of
+// auras no one learns.
+test('the auras food leads to are one family each', () => {
+  const data = readFileSync(new URL('Ranks.lua', root), 'utf8');
+  const block = data.match(/^ns\.AURA_FAMILIES = \{\r?\n([\s\S]*?)^\}/m);
+  assert.ok(block, 'ns.AURA_FAMILIES is in the generated data');
+  const families = block[1].split(/\r?\n/).filter(line => line.trim() !== '').map(line => {
+    const row = line.match(/^ \{([\d,]+)\},$/);
+    assert.ok(row, `a family of aura IDs: ${line}`);
+    return row[1].split(',').map(Number);
+  });
+  const familyOf = id => families.find(ids => ids.includes(id));
+  const food = familyOf(433), wellFed = familyOf(19705);
+  assert.ok(food, 'the Food auras are a family');
+  assert.ok(wellFed, 'the Well Fed auras are a family');
+  for (const id of [435, 1127, 1129, 1131]) assert.ok(food.includes(id), `Food ${id} is in the Food family`);
+  for (const id of [1248406, 1248420, 1249519]) assert.ok(wellFed.includes(id), `Well Fed ${id} is in the Well Fed family`);
+  const only = data.match(/^ns\.AURA_ONLY = \{\r?\n([\s\S]*?)^\}/m);
+  assert.ok(only, 'ns.AURA_ONLY is in the generated data');
+  for (const id of [5006, 19708]) {
+    assert.equal(familyOf(id), undefined, `${id}: no food leads to it, so it is in no family`);
+    assert.equal(only[1].includes(`[${id}]=true,`), false, `${id}: no food leads to it, so it is not an aura no one learns`);
+  }
 });

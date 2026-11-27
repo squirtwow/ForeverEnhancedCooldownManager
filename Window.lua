@@ -862,6 +862,22 @@ local function TextPanel(window)
     fontLabel:SetText("Font")
     local fonts = { key = "prdTextFont", pills = fontChoice, parts = { { fontLabel, 16, -4 }, { fontChoice, PANEL_AT, 0 } } }
     rows[#rows + 1] = fonts
+    -- The bars themselves, under the text's choices (two players' ideas,
+    -- 28 Nov 2026; ResourceExtras.lua): the Look page has no room left.
+    local function Extra(label, key, note)
+        local check = T:Check(dialog, label, function(self)
+            ns.Set(key, self:GetChecked() and true or false)
+            if ns.ResourceExtras then ns.ResourceExtras:Refresh() end
+        end)
+        window:Hint(check, note)
+        return check
+    end
+    shade.byAmount = Extra("Colour by amount", "prdByAmount",
+        "Your health bar turns yellow at half and red as it runs low. Your power bar keeps its colour and darkens as it empties.")
+    shade.queued = Extra("Show queued swing cost", "prdQueued",
+        "Heroic Strike, Cleave, Maul or Raptor Strike waiting for your next swing: what it will cost shows as a dark band"
+        .. " at the end of your power bar until the swing goes off.")
+    rows[#rows + 1] = { parts = { { shade.byAmount, 16, 0 }, { shade.queued, math.floor(PANEL_WIDTH / 2), 0 } } }
     shade.rows, shade.fonts = rows, fonts.pills
 
     local note = T:Text(dialog, "GameFontHighlightSmall", T.MUTED)
@@ -900,6 +916,8 @@ local function TextPanel(window)
             if shown then y = y - PANEL_ROW end
         end
         for kind, slider in pairs(sizes) do slider:Set(ns.Resource:TextSize(kind)) end
+        shade.byAmount:SetChecked(ns.Get("prdByAmount") == true)
+        shade.queued:SetChecked(ns.Get("prdQueued") == true)
         fonts.pills.buttons[1].label:SetFontObject(ns.Style:SampleFont(ns.Get("font")))
         note:ClearAllPoints()
         note:SetPoint("TOPLEFT", 16, y - 4)
@@ -1629,7 +1647,8 @@ local function TextRow(window, Choice, x)
         window.textPanel = window.textPanel or TextPanel(window)
         window.textPanel:Open()
     end)
-    window:Hint(setUp, "Where the text goes on each bar, what it shows, and its size and font, with a preview.")
+    window:Hint(setUp, "Where the text goes on each bar, what it shows, and its size and font, with a preview."
+        .. " Also Colour by amount and Show queued swing cost.")
     window.prdText, window.prdTextSetUp = tick, setUp
     local row = {}
     function row:Refresh()
@@ -2792,6 +2811,8 @@ local NAV_NOTES = {
     raid = "Blizzard's pull countdown, raid warnings and boss cast bars, in your look.",
     pulse = "A big icon in the middle of your screen when a cooldown is ready.",
     totems = "Your totems on a bar of their own: each one's time left, and red when you're out of its range.",
+    fill = "A spell you can't pay for fills up from the bottom with the power it needs.",
+    dots = "The damage your spells still have to deal, marked on your target's health bar.",
 }
 
 local function NavItem(window, nav, key, label, y, previews)
@@ -3562,12 +3583,23 @@ local function BuildWindow()
     Listed("general", "General")
     -- More: pages beyond the Cooldown Manager and your bars, headed like
     -- your bars: Raid Timers, then Cooldown pulse, then Totems (shamans
-    -- only). New files, so each only after a full restart. (A little closer
-    -- under General than it was, for Presets' room at the top.)
+    -- only), then Resource fill, then DoTs. New files, so each only after a
+    -- full restart. (A little closer under General than it was, for Presets'
+    -- room at the top.)
     local raidPage = ns.BuildRaidTimersPage ~= nil
     local pulsePage = ns.BuildPulsePage ~= nil
     local totemsPage = ns.BuildTotemsPage ~= nil and ns.Totems ~= nil and ns.Totems:ForMe()
-    if raidPage or pulsePage or totemsPage then
+    -- The Resource fill is finished and tested in game, but it is held back
+    -- from this release with the DoTs page below it (27 Nov 2026).
+    -- ns.FILL_PAGE_READY = true is the whole switch to turn it back on.
+    local fillPage = ns.FILL_PAGE_READY == true and ns.BuildFillPage ~= nil and ns.Fill ~= nil
+    -- The DoTs page is finished but for its list, where a row takes a few
+    -- seconds and then shows only its icon, so it is kept out of the window
+    -- for now (27 Nov 2026). Everything else of it is built and swapped in,
+    -- and ns.DOTS_PAGE_READY = true is the whole switch to turn it back on
+    -- once that row is fixed. Nothing else needs changing.
+    local dotsPage = ns.DOTS_PAGE_READY == true and ns.BuildDotsPage ~= nil and ns.Dots ~= nil
+    if raidPage or pulsePage or totemsPage or fillPage or dotsPage then
         local moreRule = nav:CreateTexture(nil, "BORDER")
         moreRule:SetPoint("TOPLEFT", 12, -(y + 3))
         moreRule:SetPoint("RIGHT", -12, 0)
@@ -3582,12 +3614,16 @@ local function BuildWindow()
         if raidPage then Listed("raid", "Raid Timers") end
         if pulsePage then Listed("pulse", "Cooldown pulse") end
         if totemsPage then Listed("totems", "Totems") end
+        if fillPage then Listed("fill", "Resource fill") end
+        if dotsPage then Listed("dots", "DoTs") end
     end
     -- The bars' room (LayBars): the list's height (489) less What's new at
     -- its foot with 3 over it (12 + 22 + 3), Presets and the heading over
     -- the bars (56) and everything under them (204 with Raid Timers and
-    -- Cooldown pulse): 192, the four's; a shaman's Totems row takes 28 more,
-    -- so the rows are laid out shorter at the first refresh (LayBars).
+    -- Cooldown pulse): 192, the four's; the Resource fill's row takes 28
+    -- more, the DoTs row 28 after that, and a shaman's Totems row 28 again,
+    -- so the rows are laid out shorter at the first refresh (LayBars), down
+    -- to the least a row takes, and the list scrolls past that.
     window.barRoom = (HEIGHT - HEADER - FOOTER - 1) - (12 + 22 + 3) - LIST_TOP - (y - 2 - bars)
     if window.barRoom < window.barHeight then window.barsLaid = nil end
     -- What's new in this version, at the foot of the list.
@@ -3625,6 +3661,14 @@ local function BuildWindow()
         window.pages.totems = Page()
         ns.BuildTotemsPage(window, window.pages.totems, WIDTH - NAV - 2)
     end
+    if fillPage then
+        window.pages.fill = Page()
+        ns.BuildFillPage(window, window.pages.fill, WIDTH - NAV - 2)
+    end
+    if dotsPage then
+        window.pages.dots = Page()
+        ns.BuildDotsPage(window, window.pages.dots, WIDTH - NAV - 2)
+    end
     BuildGeneral(window, window.pages.general)
     ns.BuildBarPage(window, window.pages.bar, WIDTH - NAV - 2)
 
@@ -3639,6 +3683,7 @@ local function BuildWindow()
         if self.presetsPanel then self.presetsPanel:Hide() end
         if self.iconPanel then self.iconPanel:Hide() end
         if self.spellPanel then self.spellPanel:Hide() end
+        if self.dotsPanel then self.dotsPanel:Hide() end -- Which spells (DotsPage.lua)
         self:Refresh()
         if ns.Tour then ns.Tour:Sync() end
     end
@@ -3704,6 +3749,7 @@ function ns.ShowWindow()
     if window.presetsPanel then window.presetsPanel:Hide() end
     if window.iconPanel then window.iconPanel:Hide() end
     if window.spellPanel then window.spellPanel:Hide() end
+    if window.dotsPanel then window.dotsPanel:Hide() end -- Which spells (DotsPage.lua)
     window:Show()
     window:Raise()
 end

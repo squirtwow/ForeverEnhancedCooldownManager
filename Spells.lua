@@ -19,13 +19,17 @@ local BAGS = 4
 -- Buffs that talents put on you, which have no spellbook entry. The Forever
 -- client holds only these IDs (checked against its game data). Dark
 -- Inspiration (build 70425) is the buff, never its hidden talent (1326159).
+-- A warlock's Shadow (1293816) and Flame (426311), the two 20 second damage
+-- buffs Shadow and Flame gives (a player's report, 26 Nov 2026), are named by
+-- the talent's own text alone ($1293816d and $426311d in 426316), so nothing
+-- in the tables leads to them and the generated lists can't find them.
 local PROCS = {
     DRUID = { 16870, 16886 }, -- Clearcasting, Nature's Grace
     MAGE = { 12536 }, -- Clearcasting
     PRIEST = { 15271, 1326168 }, -- Spirit Tap, Dark Inspiration
     SHAMAN = { 16246, 16257 }, -- Clearcasting, Flurry
     WARRIOR = { 12966, 12880 }, -- Flurry, Enrage
-    WARLOCK = { 17941 }, -- Shadow Trance
+    WARLOCK = { 17941, 1293816, 426311 }, -- Shadow Trance, Shadow, Flame
     ROGUE = { 14143 }, -- Remorseless
     HUNTER = { 6150 }, -- Quick Shots
     PALADIN = { 20050, 20128 }, -- Vengeance, Redoubt
@@ -156,7 +160,8 @@ function S:ByName(map, name)
     return ByName(map, name)
 end
 
-S.LINES = { procs = "Procs", items = "Items", added = "Added", totems = "Totems", weapons = "Weapon enchants", trinkets = "Trinkets" }
+S.LINES = { procs = "Procs", items = "Items", added = "Added", totems = "Totems", weapons = "Weapon enchants", trinkets = "Trinkets",
+    potions = "Potions" }
 
 -- Healthstones and potions come in ranks, and you carry whichever you have:
 -- a family is one entry for every rank of one, showing the best you carry.
@@ -756,15 +761,100 @@ local function AddTrinkets()
     end
 end
 
+-- Potions (a player's ask, beside Trinkets): each potion you carry whose use
+-- puts a buff on you, in a Potions section of its own, the Buffs bar's
+-- alone, lit while that buff is on you. "potion:<item ID>" (ProfileShare.lua
+-- knows it), resting on the potion's own picture. A potion is a consumable
+-- the game files as one, or one named so. One whose use only restores health
+-- or mana leaves nothing to watch: its spell's text gives no time (no "sec",
+-- "min", "hour" or "Lasts") and is left out, as are the Healing and Mana
+-- Potions families (Items). One whose text isn't loaded yet is listed.
+local POTION_CLASS, POTION_SUBCLASS = 0, 1
+local POTION_WORD = "Potion"
+
+local function Lasts(spell)
+    local api = C_Spell and C_Spell.GetSpellDescription
+    if type(api) ~= "function" then return true end
+    local ok, text = pcall(api, spell)
+    if not ok or not Open(text) or type(text) ~= "string" or text == "" then return true end
+    return text:find("%d+ sec") or text:find("%d+ min") or text:find("hour") or text:find("Lasts") or false
+end
+
+local function IsPotion(itemID, name)
+    if familyOf[itemID] then return false end
+    local info = C_Item and C_Item.GetItemInfoInstant
+    if type(info) == "function" then
+        local ok, _, _, _, _, _, class, sub = pcall(info, itemID)
+        if ok and Open(class) and Open(sub) and class == POTION_CLASS and sub == POTION_SUBCLASS then return true end
+    end
+    return type(name) == "string" and name:find(POTION_WORD, 1, true) ~= nil
+end
+
+-- One potion's entry. carried: it's in your bags, so it must be a potion
+-- with a buff to list; else it's one already on a Buffs bar, kept as it is.
+-- A potion the game hadn't loaded when it was read (one just out of the mail,
+-- seen 27 Nov 2026: listed only once it was moved in the bags): asked to load,
+-- and read again once it has (GET_ITEM_INFO_RECEIVED, S:TrinketWaiting).
+local potionWaiting = {}
+
+local function AddPotion(itemID, link, icon, carried)
+    local name = ItemName(itemID, link)
+    local ok, _, spell = pcall(C_Item.GetItemSpell, itemID)
+    if not (ok and Open(spell) and type(spell) == "number") then
+        local cached = C_Item.IsItemDataCachedByID
+        local loaded = type(cached) ~= "function" or cached(itemID)
+        if Open(loaded) and loaded == false and type(C_Item.RequestLoadItemDataByID) == "function" then
+            potionWaiting[itemID] = true
+            pcall(C_Item.RequestLoadItemDataByID, itemID)
+        end
+        return
+    end
+    if carried and not (IsPotion(itemID, name) and Lasts(spell)) then return end
+    Add({ key = "potion:" .. itemID, name = name, kind = "potion", line = S.LINES.potions, itemID = itemID,
+        ids = BuffIDs(nil, { spell }), icon = icon or (C_Item.GetItemIconByID and C_Item.GetItemIconByID(itemID)),
+        rankText = "" })
+end
+
+local function AddPotions()
+    if not (C_Container and C_Container.GetContainerNumSlots) then return end
+    for bag = 0, BAGS do
+        for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            local itemID = info and info.itemID
+            if itemID and Open(itemID) and not byKey["potion:" .. itemID] then
+                AddPotion(itemID, info.hyperlink, info.iconFileID, true)
+            end
+        end
+    end
+    -- A potion on a Buffs bar stays when you've drunk your last one (seen
+    -- 27 Nov 2026: it went off the bar the moment it was drunk), so its buff
+    -- still lights for as long as it lasts.
+    if type(ns.BarLists) ~= "function" then return end
+    for _, key in ipairs(ns.BAR_KEYS or {}) do
+        if ns.BAR_KIND and ns.BAR_KIND[key] == "buff" then
+            for _, spells in ipairs(ns.BarLists(key)) do
+                for _, name in ipairs(spells) do
+                    local id = type(name) == "string" and tonumber(name:match("^potion:(%d+)$"))
+                    if id and not byKey[name] then AddPotion(id, nil, nil, false) end
+                end
+            end
+        end
+    end
+end
+
 -- Whether a trinket slot was last read in a fight, so isn't read yet: read
 -- again as it ends (Bars.lua).
 function S:TrinketsHeld()
     return held
 end
 
--- Whether a trinket worn now waits for the game to load it (its use unknown):
--- read again once it has (GET_ITEM_INFO_RECEIVED, Bars.lua).
+-- Whether a trinket worn now, or a potion carried, waits for the game to load
+-- it (its use unknown): read again once it has (GET_ITEM_INFO_RECEIVED, Bars.lua).
 function S:TrinketWaiting(itemID)
+    if potionWaiting[itemID] then
+        potionWaiting[itemID] = nil
+        return true
+    end
     for _, read in pairs(worn) do
         if read.why == "loading" and read.item == itemID then return true end
     end
@@ -812,8 +902,10 @@ local function ScanItems()
             end
         end
     end
-    -- Your trinkets' buffs, after the items (the Buffs page lists no items).
+    -- Your trinkets' buffs, after the items (the Buffs page lists no items),
+    -- then the buffs of the potions you carry.
     AddTrinkets()
+    AddPotions()
 end
 
 -- Whether you or your pet know any of these spells: nil while the game

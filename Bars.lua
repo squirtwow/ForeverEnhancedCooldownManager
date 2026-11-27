@@ -86,6 +86,41 @@ local function Hides(data)
     return cooling == 0 or ready == 0
 end
 
+-- Close up gaps (two players asked): out of combat an icon hidden by When
+-- ready or On cooldown gives up its spot, so the rest close up round it. In
+-- a fight whether a spell is ready is secret, so every icon keeps its spot
+-- then, and the bar closes up again as it ends. icon.gapHidden is what the
+-- last open read said; gapsDue asks for the bars to be laid out again.
+local gapsDue = false
+
+local function Gap(icon, data, active)
+    if not data.closeGaps or inCombat or InCombatLockdown() or not Open(active) then return end
+    local cooling, ready = Alphas(data, icon.cantCast, icon.short)
+    local hidden = ((active and cooling) or (not active and ready)) == 0 or nil
+    if hidden ~= icon.gapHidden then
+        icon.gapHidden = hidden
+        gapsDue = true
+    end
+end
+
+-- The icons a bar lays out: all of them, or with Close up gaps out of a
+-- fight, those showing. One left out sits hidden in the middle of the bar,
+-- still read, so it comes back as soon as it shows.
+local function Ungapped(bar, count, data)
+    if not data.closeGaps or inCombat or InCombatLockdown() or unlocked or editMode then return bar.icons, count end
+    local list = {}
+    for i = 1, count do
+        local icon = bar.icons[i]
+        if icon.gapHidden then
+            icon:ClearAllPoints()
+            icon:SetPoint("CENTER", bar, "CENTER")
+        else
+            list[#list + 1] = icon
+        end
+    end
+    return list, #list
+end
+
 -- Bag items, healthstones and potions you carry none of, by their key on the
 -- bar: left off your bars, which close up, so a profile shared with another
 -- character doesn't show that one's potions. Read outside a fight only, so
@@ -281,6 +316,12 @@ local function NewIcon(bar)
     -- Square, or drawn like Blizzard's (Icon details' Icons) as it's laid
     -- out, its name then under Blizzard's frame.
     icon.shape = Style:ShapeKit(icon, icon.texture, { icon.cooldown }, false, icon.label)
+    -- The Resource fill's layers, made here with the icon and never later, so
+    -- a fill is never the reason anything is built (this icon's other layers
+    -- are made on the same terms); nothing shows until it's ticked on
+    -- (Fill.lua). A new file only after a full restart, so it may not be
+    -- there yet.
+    if ns.Fill then ns.Fill:Build(icon) end
     return icon
 end
 
@@ -419,6 +460,7 @@ local function RefreshItem(icon, data, follows)
         icon.texture:SetDesaturated(active and not data.keepColour)
         local cooling, ready = Alphas(data, icon.cantCast, icon.short)
         Alpha(icon, active and cooling or ready)
+        Gap(icon, data, active)
     end
     local count
     if icon.kind == "item" or icon.kind == "family" then
@@ -590,10 +632,17 @@ local function SpellCooldown(icon, data)
         else
             Alpha(icon, 1)
         end
+        Gap(icon, data, active)
     else
         icon.cooldown:Clear()
         icon.texture:SetDesaturated(false)
-        if data.onlyShort then ShortAlpha(icon) else Alpha(icon, 1) end
+        if data.onlyShort then
+            ShortAlpha(icon)
+            Gap(icon, data, false)
+        elseif icon.gapHidden then
+            -- (Shown in full here, whatever When ready says: its spot back.)
+            icon.gapHidden, gapsDue = nil, true
+        end
     end
     if data.showGCD then
         Global(icon, active)
@@ -635,6 +684,21 @@ local function SpellState(icon, hasTarget, data)
     elseif Open(usable) and not usable then
         tint = Open(noMana) and noMana and TINT.mana or TINT.unusable
     end
+    -- Resource fill, while it's ticked on (Fill.lua): a spell you can't pay
+    -- for fills from the bottom with the power it needs instead of turning
+    -- blue, so the icon keeps its own colours while it does. The game's
+    -- answers are only trusted while both are open; while it holds one back
+    -- the fill stays as it was. Whether you're short is the game's own answer
+    -- and not the tint the icon ended up with: a spell you can't pay for that
+    -- your target is out of reach of keeps filling, and never flashes as
+    -- though you could pay for it, while the blue tint stays the only one the
+    -- fill takes the place of.
+    -- (Each Open() is named again beside the answer it guards instead of
+    -- being folded into answered, so the rule that every secret answer is
+    -- read open first can see it on the line that reads it: TestRules.)
+    local answered = Open(usable) and Open(noMana)
+    local shortPower = Open(usable) and not usable and Open(noMana) and noMana == true
+    if ns.Fill and ns.Fill:Icon(icon, shortPower, answered) and tint == TINT.mana then tint = TINT.ready end
     Tint(icon, tint)
     -- Lit when the game lights it on your action bars, or, for a reactive
     -- ability the game doesn't light (Overpower after a dodge), once usable.
@@ -1409,6 +1473,8 @@ local function Layout(bar)
             icon.cooldown:SetCountdownFont(Style:Countdown(icon.face, icon.look))
             icon.cooldown:SetHideCountdownNumbers(not data.showTimer)
             icon.count:SetFontObject(Style:Count(icon.face))
+            -- (A spot holding another spell now: its last open read isn't this one's.)
+            if icon.name ~= name then icon.gapHidden = nil end
             icon.spellID, icon.name, icon.reactive = entry.spellID, name, B:Reactive(entry)
             icon.anyStance = B:AnyStance(entry) or nil
             icon.kind, icon.itemID, icon.slot, icon.current = entry.kind, entry.itemID, entry.slot, entry.current
@@ -1445,9 +1511,13 @@ local function Layout(bar)
     HearPoints()
     -- And the icons Key press glow watches.
     Presses()
-    bar:SetSize(B:Arrange(bar, bar.icons, count, data))
+    -- (With Close up gaps, out of a fight, only the icons showing: Ungapped.)
+    local laid, shown = Ungapped(bar, count, data)
+    bar:SetSize(B:Arrange(bar, laid, shown, data))
     -- Buff and debuff times over the icons, when ticked (IconAuras.lua).
     ns.IconAuras:Layout(bar, data)
+    -- And the Resource fill's layers, sized to the icons they sit on (Fill.lua).
+    if ns.Fill then ns.Fill:Layout(bar, data) end
     BarDecor(bar)
     Place(bar)
     Arrows(bar)
@@ -2403,6 +2473,10 @@ function B:Fits(key, entry, byID)
     -- (Trinket 1 or Trinket 2: the buff your trinket's use puts on you, Spells.lua.)
     if entry.kind == "trinket" and ns.BAR_KIND[key] ~= "buff" then
         return false, entry.name .. " only goes on the Buffs bar, where it lights while your trinket's buff is on you."
+    end
+    -- (A potion's buff, Spells.lua: on you, so the Buffs bar's too.)
+    if entry.kind == "potion" and ns.BAR_KIND[key] ~= "buff" then
+        return false, entry.name .. " only goes on the Buffs bar, where it lights while its buff is on you."
     end
     local passive = not byID and ns.Spells:PassiveNote(entry.key, key)
     if passive then return false, passive end
@@ -3859,6 +3933,18 @@ local function OnEvent(_, event, arg, ...)
             B:FormChanged()
             if ns.window and ns.window:IsShown() then ns.window:Refresh() end
         end
+        -- Close up gaps: every icon back in its own spot for the fight, as
+        -- whether one is ready is secret in it. Laid out again as it ends.
+        local closed = false
+        for _, key in ipairs(ns.BAR_KEYS) do
+            local bar = bars[key]
+            if bar and bar.kind == "cooldown" and bar.data and bar.data.closeGaps then closed = true end
+        end
+        if closed then
+            Relay()
+            if ns.Layout then ns.Layout:Stack() end
+            gapsDue = true
+        end
         B:UpdateShown()
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
@@ -3999,11 +4085,20 @@ local function Tick()
         shifting = false
         if ns.FollowForm() and B:FormChanged() and ns.window and ns.window:IsShown() then ns.window:Refresh() end
     end
-    if not (dirty or cooling or tinting) then return end
-    local part
-    if not dirty and not (cooling and tinting) then part = cooling and "cooldown" or "state" end
-    dirty, cooling, tinting = false, false, false
-    if B.started and B:Enabled() then Each(part) end
+    if dirty or cooling or tinting then
+        local part
+        if not dirty and not (cooling and tinting) then part = cooling and "cooldown" or "state" end
+        dirty, cooling, tinting = false, false, false
+        if B.started and B:Enabled() then Each(part) end
+    end
+    -- An icon came or went on a bar with Close up gaps: the bars laid out
+    -- again round the ones showing (out of a fight only, Ungapped).
+    if gapsDue and not inCombat and not InCombatLockdown() then
+        gapsDue = false
+        Relay()
+        B:UpdateShown()
+        if ns.Layout then ns.Layout:Stack() end
+    end
 end
 
 -- Your buffs coming and going (UNIT_AURA for you) are heard only while the

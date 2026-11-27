@@ -54,7 +54,18 @@ do
     -- Methods an addon file looks for on purpose and does without where a
     -- frame lacks them: Skin.lua's Read finds these getters of Blizzard's
     -- cooldown items on them, and none on the window's sample Tracked Bar.
-    local LOOKS = { ["Skin.lua GetBaseSpellID"] = true, ["Skin.lua GetEquipSlot"] = true }
+    -- DotsBand.lua's are mostly keys rather than methods: the shapes
+    -- Blizzard's target frame and its nameplates have had
+    -- (HealthBarsContainer.healthBar, Portrait, UnitFrame), not all of which
+    -- this client's own frames have. Its search tries each shape and takes
+    -- whichever one the frame really has, so a frame without one answers
+    -- nothing rather than being noted a miss. GetStatusBarTexture is in the
+    -- list for the same reason: finding a health bar on a nameplate another
+    -- addon has restyled means asking each of the plate's own children whether
+    -- it is a status bar at all, and most of them are not.
+    local LOOKS = { ["Skin.lua GetBaseSpellID"] = true, ["Skin.lua GetEquipSlot"] = true,
+        ["DotsBand.lua HealthBarsContainer"] = true, ["DotsBand.lua Portrait"] = true,
+        ["DotsBand.lua UnitFrame"] = true, ["DotsBand.lua GetStatusBarTexture"] = true }
     -- The first Lua code up the stack past WidgetHas and the widget's
     -- __index, if it's an addon file's: its file and line.
     local function Addon(key)
@@ -169,6 +180,13 @@ function Proto:SetParent(parent)
         table.insert(S[parent].kids, self)
     end
 end
+
+-- The game has this and the mock did not, so anything that hangs itself off
+-- a frame's parent fell back to the frame instead and the suite passed a
+-- path it had never run (27 Nov 2026: the DoTs band moved off the health bar
+-- because a unit frame addon sets that bar to no opacity, and the test for
+-- it could not tell the difference).
+function Proto:GetParent() return S[self].parent end
 function Proto:Show() Toggled(self, true) end
 function Proto:Hide() Toggled(self, false) end
 function Proto:SetShown(v) Toggled(self, v and true or false) end
@@ -183,8 +201,18 @@ function Proto:HookScript(k, fn)
         fn(...)
     end
 end
-function Proto:RegisterEvent(e) S[self].events[e] = true end
-function Proto:RegisterUnitEvent(e) S[self].events[e] = true end
+-- Like the game: the combat log is shut to addons on this client (seen in
+-- game, 26 Nov 2026, build 1.60.1.71139), and registering for it is itself a
+-- blocked action that puts a warning box on the player's screen. So the mock
+-- game refuses it outright, and any attempt to register for it fails the
+-- suite there and then rather than quietly working here and warning in game.
+-- (A global: this file's main chunk is at Lua's 200 locals.)
+function NoCombatLog(event)
+    assert(event ~= "COMBAT_LOG_EVENT_UNFILTERED",
+        "the combat log is shut on this client: registering for COMBAT_LOG_EVENT_UNFILTERED is a blocked action")
+end
+function Proto:RegisterEvent(e) NoCombatLog(e); S[self].events[e] = true end
+function Proto:RegisterUnitEvent(e) NoCombatLog(e); S[self].events[e] = true end
 function Proto:GetAlpha() return S[self].alpha end
 function Proto:UnregisterAllEvents() S[self].events = {} end
 function Proto:UnregisterEvent(e) S[self].events[e] = nil end
@@ -212,13 +240,82 @@ function Proto:SetChecked(v) S[self].checked = v and true or false end
 function Proto:GetChecked() return S[self].checked end
 function Proto:SetPoint(...) table.insert(S[self].points, table.pack(...)) end
 function Proto:ClearAllPoints() S[self].points = {} end
-function Proto:SetSize(w, h) S[self].width, S[self].height = w, h end
+-- A status bar's fill texture, sized as the game sizes it: the share of the
+-- way from its least to its most that its value stands at, across it or, with
+-- a vertical orientation, up it. The value may be a secret, since the game
+-- works that share out itself and an addon can't; the mock game, which is the
+-- game here, looks behind one (Behind, with the secrets below). So may the
+-- range: the DoTs band hands over your target's sealed max health as its most
+-- and the plain damage still to come as its value, the other way round from
+-- the Resource fill, and the game does that division too. A bar with no
+-- texture of its own yet (a slider, say) has nothing to size.
+-- (A global: this file's main chunk is at Lua's 200 locals.)
+function BarFill(bar)
+    local s = S[bar]
+    local texture = s.barTexture
+    if not texture then return end
+    -- Unset is 0 to 1; a secret the mock game can look behind is the number
+    -- behind it; a secret with none (a test's bare SECRET) leaves the fill
+    -- empty, as it did before the range could be secret at all.
+    local least = s.barMin == nil and 0 or Behind(s.barMin)
+    local most = s.barMax == nil and 1 or Behind(s.barMax)
+    local value = Behind(s.barValue)
+    local share = 0
+    if type(value) == "number" and type(most) == "number" and type(least) == "number" and most > least then
+        share = math.max(0, math.min(1, (value - least) / (most - least)))
+    end
+    local fill = S[texture]
+    if s.vertical then
+        fill.width, fill.height = s.width or 0, (s.height or 0) * share
+    else
+        fill.width, fill.height = (s.width or 0) * share, s.height or 0
+    end
+end
+function Proto:SetSize(w, h) S[self].width, S[self].height = w, h; BarFill(self) end
 function Proto:GetSize() return S[self].width, S[self].height end
-function Proto:SetWidth(w) S[self].width = w end
-function Proto:SetHeight(h) S[self].height = h end
+function Proto:SetWidth(w) S[self].width = w; BarFill(self) end
+function Proto:SetHeight(h) S[self].height = h; BarFill(self) end
+-- A status bar's range, value, orientation and fill texture: each kept as the
+-- last call's arguments too, as every other method is.
+function Proto:SetMinMaxValues(least, most)
+    local s = S[self]
+    s.last.SetMinMaxValues, s.barMin, s.barMax = table.pack(least, most), least, most
+    BarFill(self)
+end
+function Proto:SetValue(value)
+    local s = S[self]
+    s.last.SetValue, s.barValue = table.pack(value), value
+    BarFill(self)
+end
+function Proto:SetOrientation(way)
+    local s = S[self]
+    s.last.SetOrientation, s.vertical = table.pack(way), way == "VERTICAL"
+    BarFill(self)
+end
+function Proto:SetStatusBarTexture(texture)
+    local s = S[self]
+    s.last.SetStatusBarTexture = table.pack(texture)
+    s.barTexture = s.barTexture or New("Texture", self)
+    BarFill(self)
+end
+-- Like the game: the bar's own fill texture, which it sizes itself, made the
+-- first time it's asked for.
+function Proto:GetStatusBarTexture()
+    local s = S[self]
+    s.barTexture = s.barTexture or New("Texture", self)
+    return s.barTexture
+end
 function Proto:GetWidth() return S[self].width end
 function Proto:GetHeight() return S[self].height end
 function Proto:GetName() return S[self].name end
+-- The frames inside it, as the game gives them: its textures and its text are
+-- not children (they have no OnShow of their own either, which is why the mock
+-- keeps them apart), and one moved into another frame goes with it.
+function Proto:GetChildren()
+    local kids = S[self].kids
+    if not kids then return end
+    return table.unpack(kids)
+end
 function Proto:GetVerticalScroll() return S[self].scroll or 0 end
 function Proto:SetVerticalScroll(v) S[self].scroll = v end
 function Proto:GetEffectiveScale() return 1 end
@@ -364,6 +461,22 @@ do
     SECRETS = { number = Make("number"), boolean = Make("boolean"), string = Make("string") }
     SecretMisuse = {}
     function IsSecret(v) return rawtype(v) == "table" and kinds[v] ~= nil end
+    -- A secret number with a number behind it, for the sums the game does
+    -- itself: your power, which the game keeps from an addon in and out of a
+    -- fight but still measures a status bar's fill against (BarFill, above).
+    -- The addon can no more read one of these than any other secret.
+    local behind = setmetatable({}, { __mode = "k" })
+    function SecretNumber(value)
+        local secret = Make("number")
+        behind[secret] = value
+        return secret
+    end
+    -- The number behind a secret for the mock game's own sums, nothing for a
+    -- secret with none, and a plain value as it is.
+    function Behind(v)
+        if rawtype(v) == "table" and kinds[v] then return behind[v] end
+        return v
+    end
     -- What an API hands back for a value the test set: SECRET as the kind it returns.
     function Typed(kind, v)
         if rawequal(v, SECRET) then return SECRETS[kind] end
@@ -504,6 +617,23 @@ local function Environment(keepCVars)
     -- SPELL_RANGE_CHECK_UPDATE as one goes in or out of range): each ask
     -- counted and each let-go taken off. And spells with no range (NoRange).
     RangeChecks, NoRange = {}, {}
+    -- Each spell's own text (C_Spell.GetSpellDescription below), as the game
+    -- really answered it: Corruption and Curse of Agony on a warlock, Rend on
+    -- a warrior, Immolate's two parts, and Serpent Sting. Corruption's twin
+    -- at 1400172 is the same spell read again wearing a +46 spell damage
+    -- robe, which is how it was proved the server scales these numbers.
+    SpellText = {
+        [172] = "Corrupts the target, causing 40 Shadow damage over 12 sec.",
+        [1400172] = "Corrupts the target, causing 76 Shadow damage over 12 sec.",
+        [980] = "Curses the target with agony, causing 72 Shadow damage over 24 sec. This damage is dealt slowly at first,"
+            .. " and builds up as the Bane reaches its full duration.",
+        [772] = "Wounds the target causing them to bleed for 15 damage over 9 sec.",
+        [348] = "Burns the enemy for 11 Fire damage and then an additional 15 Fire damage over 15 sec.",
+        [1978] = "Stings the target, causing 20 Nature damage over 15 sec.",
+    }
+    SpellNames = { [172] = "Corruption", [1400172] = "Corruption", [980] = "Curse of Agony", [772] = "Rend",
+        [348] = "Immolate", [1978] = "Serpent Sting" }
+    SpellTextReads, SpellTextRefuse, SpellTextSecret = 0, false, false
     _G.C_Spell = {
         EnableSpellRangeCheck = function(id, enable)
             assert(type(id) == "number" and type(enable) == "boolean", "a spell ID, and on or off")
@@ -528,7 +658,40 @@ local function Environment(keepCVars)
                 [400589] = "Missile Barrage", [400625] = "Heating Up", [400670] = "Fingers of Frost" })[id]
         end,
         GetSpellInfo = function() return nil end,
+        -- A spell's own text, with the server's numbers already in it, which
+        -- is where the DoTs part gets each spell's damage and time from
+        -- (Dots.lua). The five here are what the game really answered on 26
+        -- Nov 2026 (build 1.60.1.71139) on one warlock and one warrior, so
+        -- the parse is tested against real game text; SpellText[id] sets
+        -- another, SpellTextRefuse makes every ask error and
+        -- SpellTextSecret hands the text back secret. Each ask counted
+        -- (SpellTextReads).
+        GetSpellDescription = function(id)
+            assert(type(id) == "number", "a spell ID")
+            SpellTextReads = SpellTextReads + 1
+            if SpellTextRefuse then error("the game refused") end
+            local text = SpellText[id]
+            if text == nil then return nil end
+            if SpellTextSecret then return SECRETS.string end
+            return text
+        end,
     }
+    -- The same text through the tooltip reader, which also works on this
+    -- client: name, mana cost, cast time, then the description (four lines,
+    -- as measured). Nothing is ever written into the game's own tooltip.
+    _G.C_TooltipInfo = {
+        GetSpellByID = function(id)
+            assert(type(id) == "number", "a spell ID")
+            local text = SpellText[id]
+            if text == nil then return nil end
+            return { lines = { { leftText = SpellNames[id] or "A spell" }, { leftText = "25 Mana" },
+                { leftText = "Instant" }, { leftText = text } } }
+        end,
+    }
+    -- The combat log, shut to addons on this client: there are no tick, hit,
+    -- miss or resist events, ever, so nothing may be built on one.
+    _G.C_CombatLog = { IsCombatLogRestricted = function() return true end }
+    _G.CombatLogGetCurrentEventInfo = nil
     _G.UnitClass = function() return "Druid", "DRUID" end
     -- Your form (Form: its ID, nil for none, or SECRET) and whether you're
     -- stealthed, as the game says; each ask counted (FormReads).
@@ -538,6 +701,14 @@ local function Environment(keepCVars)
     -- A Skyborne, so Walk on Air (in the spellbook) is your own racial.
     _G.UnitRace = function(unit) assert(unit == "player"); return "Skyborne", "Skyborne", 96 end
     _G.UnitPower = function() return 0 end
+    -- Health, secret on this client in a fight and out of one, with a real
+    -- number behind it for the sums the game does itself (BarFill): the DoTs
+    -- band hands your target's sealed max health to a status bar of ours and
+    -- lets the game work the share out. A 30 health dummy, as the band was
+    -- proved on in game.
+    Health, HealthMax = { player = 100, target = 30 }, { player = 100, target = 30 }
+    _G.UnitHealth = function(unit) return SecretNumber(Health[unit] or 0) end
+    _G.UnitHealthMax = function(unit) return SecretNumber(HealthMax[unit] or 1) end
     _G.UnitCastingInfo = function() return nil end
     _G.UnitChannelInfo = function() return nil end
     _G.GetTime = function() return clock end
@@ -548,6 +719,22 @@ local function Environment(keepCVars)
     _G.issecretvalue = IsSecret
     _G.UnitExists = function() return target end
     _G.UnitCanAttack = function(a, b) assert(a == "player" and b == "target"); return Typed("boolean", hostile) end
+    -- Whether your target is dead (TargetDead: true, false or SECRET), which
+    -- the DoTs band asks so it comes off a corpse rather than marking damage
+    -- that will never land.
+    TargetDead = false
+    _G.UnitIsDeadOrGhost = function(unit)
+        assert(type(unit) == "string" and unit ~= "", "a unit")
+        return Typed("boolean", TargetDead)
+    end
+    -- Nameplates (NamePlates[unit] = the plate frame, as NamePlateGame makes
+    -- one): the band marks your target's plate as well as the target frame
+    -- when that is ticked.
+    NamePlates = {}
+    _G.C_NamePlate = { GetNamePlateForUnit = function(unit)
+        assert(type(unit) == "string" and unit ~= "", "a unit")
+        return NamePlates[unit]
+    end }
     _G.UnitAffectingCombat = function() return false end
     _G.InCombatLockdown = function() return lockdown end
     -- Your buffs (PlayerAuras[id] = true, or SECRET for an answer the game
@@ -561,6 +748,17 @@ local function Environment(keepCVars)
     -- add given the next ID; with AuraSoundRefuse (text) every add errors,
     -- kept as "refused <unit> <spellID>" so an add asked again shows.
     AuraSoundCalls, AuraSoundRefuse, NextAuraSound = {}, nil, 0
+    -- Your target's debuffs, which the DoTs part reads out of a fight to put
+    -- its own list straight (Dots.lua): TargetAuras in the order the game
+    -- hands them over, each a table of the fields the probe proved open on 26
+    -- Nov 2026 (spellId, name, duration, expirationTime, applications,
+    -- sourceUnit; points is there and empty, so nothing may lean on it). A
+    -- filter holding PLAYER leaves out anyone else's, as the game does. In a
+    -- fight every index answers nil, on every unit, with any filter, exactly
+    -- as it did in the probe. AuraIndexRefuse makes every ask error and
+    -- AuraIndexSecret hands the fields back secret; each ask counted
+    -- (AuraIndexReads).
+    TargetAuras, AuraIndexReads, AuraIndexRefuse, AuraIndexSecret = {}, 0, false, false
     _G.C_UnitAuras = {
         GetPlayerAuraBySpellID = function(id)
             assert(type(id) == "number", "a spell ID")
@@ -569,6 +767,27 @@ local function Environment(keepCVars)
             if lockdown or not aura then return nil end
             if rawequal(aura, SECRET) then return SECRET end
             return { spellId = id }
+        end,
+        GetAuraDataByIndex = function(unit, index, filter)
+            assert(type(unit) == "string" and unit ~= "", "a unit")
+            assert(type(index) == "number" and index > 0, "an index from one")
+            assert(filter == nil or type(filter) == "string", "a filter, or none")
+            AuraIndexReads = AuraIndexReads + 1
+            if AuraIndexRefuse then error("the game refused") end
+            if lockdown then return nil end
+            local mine = type(filter) == "string" and filter:find("PLAYER", 1, true) ~= nil
+            local kept = {}
+            for _, aura in ipairs(unit == "target" and TargetAuras or {}) do
+                if not mine or aura.sourceUnit == "player" then kept[#kept + 1] = aura end
+            end
+            local aura = kept[index]
+            if not aura then return nil end
+            if AuraIndexSecret then
+                return { spellId = SECRETS.number, name = SECRETS.string, duration = SECRETS.number,
+                    expirationTime = SECRETS.number, applications = SECRETS.number, sourceUnit = SECRETS.string,
+                    points = {} }
+            end
+            return aura
         end,
         AddAuraSound = function(trigger, info)
             assert(trigger == 0, "the Added trigger")
@@ -951,6 +1170,66 @@ local function Environment(keepCVars)
     rawset(GameTooltip, "AddLine", function(self, text) table.insert(S[self].lines, text) end)
 end
 
+-- Blizzard's target frame, as measured in game on 26 Nov 2026 (build
+-- 1.60.1.71139): the frame at level 500 strata LOW, its health bar at 502 and
+-- 126 x 20, its portrait 58 wide. Plain widgets, not Blizzard(...), because
+-- TargetFrame is not in Tools/WidgetMethods.lua's blizzard list and adding it
+-- needs the generator and a wow-ui-source checkout; plain ones mean a call to
+-- a method only its own Lua mixin has is noted as a miss, which is right,
+-- since nothing of ours may touch it anyway. Called with nothing it takes the
+-- frame back out of the game, for the tests that prove the band does nothing
+-- without one. (A global: this file's main chunk is at Lua's 200 locals.)
+function TargetFrameGame(there)
+    _G.TargetFrame = nil
+    if not there then return end
+    local frame = New("Frame", UIParent)
+    S[frame].width, S[frame].height = 232, 100
+    local health = New("StatusBar", frame)
+    S[health].width, S[health].height = 126, 20
+    health:GetStatusBarTexture()
+    -- Its health as the game has it: secret, with the number behind it for
+    -- the game's own sums alone, so the fill texture's width is the share the
+    -- game worked out and nothing of ours ever knows the number.
+    health:SetMinMaxValues(0, UnitHealthMax("target"))
+    health:SetValue(UnitHealth("target"))
+    local portrait = New("Texture", frame)
+    S[portrait].width, S[portrait].height = 58, 58
+    -- The health bar's key as this client has it (the other shape the game
+    -- has used is HealthBarsContainer.healthBar, which the band's own search
+    -- tries first). Its level and strata are not set here: the mock game
+    -- answers every GetFrameLevel with 1, and what matters is the level the
+    -- band sets on its own clipping frame.
+    rawset(frame, "healthbar", health)
+    rawset(frame, "portrait", portrait)
+    _G.TargetFrame = frame
+    return frame, health, portrait
+end
+
+-- A nameplate of your target's, in the shape Blizzard's nameplates have: the
+-- plate frame with a UnitFrame on it and a health bar in that. Its sizes are
+-- not a measurement, unlike the target frame's above: nothing of the DoTs
+-- band works a number out from them, since the band takes the health bar's
+-- own width whatever it is. Plain widgets again, for the same reason. Called
+-- with nothing it takes the plate away, which is what the game does as a
+-- plate goes out of sight and is kept for the next unit.
+-- (A global: this file's main chunk is at Lua's 200 locals.)
+function NamePlateGame(there)
+    NamePlates.target = nil
+    if not there then return end
+    local plate = New("Frame", UIParent)
+    S[plate].width, S[plate].height = 110, 45
+    local unitFrame = New("Frame", plate)
+    local health = New("StatusBar", unitFrame)
+    S[health].width, S[health].height = 110, 10
+    health:GetStatusBarTexture()
+    health:SetMinMaxValues(0, UnitHealthMax("target"))
+    health:SetValue(UnitHealth("target"))
+    rawset(unitFrame, "healthBar", health)
+    rawset(plate, "UnitFrame", unitFrame)
+    NamePlates.target = plate
+    return plate, health, unitFrame
+end
+
 local function Load(saved, beforeLogin)
     local ns = {}
     _G.ForeverEnhancedCooldownManagerDB = saved
@@ -959,6 +1238,9 @@ local function Load(saved, beforeLogin)
         "MinimapButton.lua", "Notes.lua", "Debug.lua" }) do
         assert(loadfile(file))("ForeverEnhancedCooldownManager", ns)
     end
+    -- Both pages are held out of the window for the release going out now,
+    -- so the checks turn them on the way the addon itself will.
+    ns.FILL_PAGE_READY, ns.DOTS_PAGE_READY = true, true
     Fire("ADDON_LOADED", "ForeverEnhancedCooldownManager")
     if not beforeLogin then
         Fire("PLAYER_LOGIN")
@@ -4946,7 +5228,8 @@ local named = { [16928] = "Armor Shatter", [1229504] = "Faction Banner", [126027
     [16870] = "Clearcasting", [12536] = "Clearcasting", [16246] = "Clearcasting", [17941] = "Shadow Trance",
     [14143] = "Remorseless", [6150] = "Quick Shots", [1326168] = "Dark Inspiration", [1400001] = "Moonlit Path", [1400002] = "Starlit Path",
     [1400003] = "Sunlit Path", [1400004] = "Dawnlit Path", [8076] = "Strength of Earth", [25362] = "Strength of Earth",
-    [8836] = "Grace of Air", [5677] = "Mana Spring", [401417] = "Regeneration" }
+    [8836] = "Grace of Air", [5677] = "Mana Spring", [401417] = "Regeneration",
+    [1293816] = "Shadow", [426311] = "Flame" }
 for _, list in ipairs({ data.RANKS, data.PASSIVES }) do
     for name, ids in pairs(list) do
         for _, id in ipairs(ids) do named[id] = named[id] or name end
@@ -5112,6 +5395,30 @@ do
         "offered on the Buffs page as you type, and added by name")
     w:Select("cd")
     Equal(select(2, B:Add("cd", "Dark Inspiration")), "Procs only go on the Buffs bar.", "not on the Cooldowns bar")
+    _G.UnitClass = function() return "WARRIOR", "WARRIOR" end
+    ns.Spells:Scan()
+end
+-- A warlock's Shadow and Flame (a player's report, 26 Nov 2026): the talent
+-- names its two buffs in its own text alone, so nothing in the data leads to
+-- them. Both are listed with the procs, offered on the Buffs page and added
+-- by name, each lit by its own buff's ID.
+do
+    _G.UnitClass = function() return "Warlock", "WARLOCK" end
+    ns.Spells:Scan()
+    local shadow, flame = ns.Spells:Find("Shadow"), ns.Spells:Find("Flame")
+    Equal(shadow.kind .. " " .. shadow.line .. " " .. table.concat(shadow.ids, ",") .. " | " .. flame.kind .. " "
+        .. flame.line .. " " .. table.concat(flame.ids, ","), "proc Procs 1293816 | proc Procs 426311",
+        "a warlock's Shadow and Flame: procs, each by its own buff's ID")
+    w:Select("buff")
+    Search("flam")
+    local offered = Row("Flame") ~= nil
+    Search("")
+    local ok = B:Add("buff", "Flame")
+    Equal(tostring(offered) .. " " .. tostring(ok) .. " " .. tostring(B:HasAura("buff", "Flame")), "true true true",
+        "Flame offered on the Buffs page as you type, and added by name")
+    w:Select("cd")
+    Equal(select(2, B:Add("cd", "Shadow")), "Procs only go on the Buffs bar.", "not on the Cooldowns bar")
+    B:SetAura("buff", "Flame", false)
     _G.UnitClass = function() return "WARRIOR", "WARRIOR" end
     ns.Spells:Scan()
 end
@@ -8514,7 +8821,15 @@ Equal(ns.BarData("cd").grow, "left", "otherwise it's yours to pick")
 bp.options.wrap.buttons[2]:Click()
 Equal(ns.BarData("cd").wrap, "up", "and where new rows go")
 w:Select("buff")
-Equal(S[bp.across].shown or S[bp.options.wrap].shown, false, "packed buffs stay on one row")
+do
+    -- Packed buffs stay on one row: Icons per row and New rows stay on the
+    -- page, greyed with why (28 Nov 2026: a player took them vanishing for a
+    -- bug), and a click on New rows changes nothing.
+    local before = ns.BarData("buff").wrap
+    bp.options.wrap.buttons[before == "up" and 1 or 2]:Click()
+    Equal(tostring(S[bp.across].shown) .. " " .. type(bp.options.wrap.held) .. " " .. tostring(ns.BarData("buff").wrap == before),
+        "true string true", "packed buffs stay on one row: both still shown, greyed with why, and New rows can't be changed")
+end
 bp.options.showMissing:Click()
 Equal(S[bp.across].shown and S[bp.options.wrap].shown, true, "fixed spots can have rows")
 Equal(bp.listError, nil, "the bar page drew without errors")
@@ -14408,6 +14723,110 @@ end)()
         "Square again: each as before, the global cooldown's sweep too, the border and the bar's shadow back")
     C_Spell.GetSpellCooldownDuration = without
     Equal(#printed, 0, "no errors from Blizzard's look")
+end)()
+
+-- The mock game's own additions for the DoTs part ------------------------------------------
+-- Proved here, in the file the mock game lives in, as well as in
+-- Tools/TestDots.lua: a status bar's fill measured against a secret most, your
+-- health secret with a number behind it, each spell's own text as the game
+-- really answers it, Blizzard's target frame at its measured sizes, and the
+-- combat log shut.
+
+;(function()
+    Environment()
+    -- A bar with a secret most and a plain value, which is the way round the
+    -- DoTs band works: your target's sealed max health is the range and the
+    -- damage still to come is the value, so the game does that division and
+    -- nothing of the addon's ever knows the number. On a 30 health dummy.
+    local band = New("StatusBar")
+    band:SetSize(126, 20)
+    band:SetStatusBarTexture("flat")
+    band:SetReverseFill(true)
+    band:SetMinMaxValues(0, UnitHealthMax("target"))
+    band:SetValue(1)
+    local fill = band:GetStatusBarTexture()
+    Equal(("%.2f"):format(S[fill].width), "4.20", "1 damage on a 30 health dummy: the game draws a sliver, 126 wide over 30")
+    band:SetValue(999999)
+    Equal(("%.2f"):format(S[fill].width), "126.00", "far more damage than its health: the whole bar, never wider")
+    Equal(tostring(Last(band, "SetReverseFill", 1)), "true", "the band fills from its right edge, as the health does")
+    -- A most the mock game cannot look behind leaves the fill empty, as it
+    -- did before the range could be secret at all.
+    band:SetMinMaxValues(0, SECRETS.number)
+    band:SetValue(1)
+    Equal(("%.2f"):format(S[fill].width), "0.00", "a secret with no number behind it: nothing drawn")
+
+    -- Your health: secret in a fight and out of one, a number only the game
+    -- may look behind.
+    local now, most = UnitHealth("target"), UnitHealthMax("target")
+    Equal(tostring(IsSecret(now)) .. " " .. tostring(IsSecret(most)) .. " " .. type(now), "true true number",
+        "health comes back secret, and says it is a number, so a type check alone never gets past one")
+    Equal(tostring(Behind(now)) .. " " .. tostring(Behind(most)), "30 30", "with the real number behind it for the game's own sums")
+    Health.target = 15
+    Equal(tostring(Behind(UnitHealth("target"))), "15", "and the tests may set it")
+
+    -- Each spell's own text, with the server's numbers in it.
+    Equal(C_Spell.GetSpellDescription(172), "Corrupts the target, causing 40 Shadow damage over 12 sec.",
+        "Corruption's text, as the game answered it at 0 spell power")
+    Equal(C_Spell.GetSpellDescription(1400172), "Corrupts the target, causing 76 Shadow damage over 12 sec.",
+        "and the same spell and rank wearing a +46 spell damage robe: the server scales it")
+    Equal(C_Spell.GetSpellDescription(772), "Wounds the target causing them to bleed for 15 damage over 9 sec.", "Rend's text")
+    Equal(C_Spell.GetSpellDescription(348), "Burns the enemy for 11 Fire damage and then an additional 15 Fire damage over 15 sec.",
+        "Immolate's, which has a hit and then damage over time")
+    Equal(C_Spell.GetSpellDescription(4321), nil, "a spell the game has no text for")
+    Equal(SpellTextReads, 5, "each ask counted")
+    SpellTextSecret = true
+    Equal(IsSecret(C_Spell.GetSpellDescription(172)), true, "a client that keeps the text secret")
+    SpellTextSecret = false
+    SpellTextRefuse = true
+    local read = pcall(C_Spell.GetSpellDescription, 172)
+    SpellTextRefuse = false
+    Equal(read, false, "and one that refuses to answer at all")
+    local tip = C_TooltipInfo.GetSpellByID(980)
+    Equal(#tip.lines .. " " .. tip.lines[1].leftText .. " " .. tostring(tip.lines[4].leftText == SpellText[980]),
+        "4 Curse of Agony true", "the tooltip reader: four lines, the name first and the spell's text last")
+
+    -- Blizzard's target frame, at its measured sizes, untouched.
+    Equal(_G.TargetFrame, nil, "no target frame until a test asks for one")
+    local frame, health, portrait = TargetFrameGame(true)
+    Equal(frame:GetWidth() .. " " .. health:GetWidth() .. " " .. health:GetHeight() .. " " .. portrait:GetWidth(),
+        "232 126 20 58", "the frame, its health bar 126 by 20 and its portrait 58 wide, as measured in game")
+    Equal(tostring(_G.TargetFrame == frame) .. " " .. tostring(rawget(frame, "healthbar") == health),
+        "true true", "it is the game's TargetFrame, its health bar under the key this client uses")
+    Equal(#S[health].points .. " " .. S[health].alpha .. " " .. tostring(S[health].shown) .. " " .. tostring(S[health].last.SetParent)
+        .. " " .. tostring(S[health].last.SetClipsChildren) .. " " .. tostring(S[health].last.SetFrameLevel),
+        "0 1 true nil nil nil", "and nothing has been set on it: no point, its own alpha, shown, no parent, no clipping, no level")
+    TargetFrameGame()
+    Equal(_G.TargetFrame, nil, "taken back out of the game again")
+
+    -- Your target's nameplate, in the shape Blizzard's plates have, and
+    -- whether your target is dead.
+    Equal(tostring(C_NamePlate.GetNamePlateForUnit("target")), "nil", "no nameplate up until a test asks for one")
+    local plate, plateHealth = NamePlateGame(true)
+    Equal(tostring(C_NamePlate.GetNamePlateForUnit("target") == plate) .. " "
+        .. tostring(rawget(plate, "UnitFrame") ~= nil) .. " " .. plateHealth:GetWidth() .. " " .. plateHealth:GetHeight(),
+        "true true 110 10", "the plate the game hands over for your target, its unit frame and that frame's health bar")
+    Equal(#S[plateHealth].points .. " " .. tostring(S[plateHealth].last.SetParent) .. " "
+        .. tostring(S[plateHealth].last.SetClipsChildren), "0 nil nil", "and nothing has been set on it either")
+    NamePlateGame()
+    Equal(tostring(C_NamePlate.GetNamePlateForUnit("target")), "nil", "and it goes again as a plate is taken away")
+    Equal(tostring(UnitIsDeadOrGhost("target")) .. " " .. tostring(TargetDead), "false false", "your target is alive")
+    TargetDead = true
+    Equal(tostring(UnitIsDeadOrGhost("target")), "true", "and a test may lay it out")
+    TargetDead = SECRET
+    Equal(tostring(IsSecret(UnitIsDeadOrGhost("target"))), "true", "or have the game hold the answer back")
+    TargetDead = false
+
+    -- The combat log, shut.
+    Equal(tostring(C_CombatLog.IsCombatLogRestricted()) .. " " .. tostring(_G.CombatLogGetCurrentEventInfo),
+        "true nil", "the combat log is restricted and its reader is gone")
+    local driver = New("Frame")
+    local allowed = pcall(driver.RegisterEvent, driver, "COMBAT_LOG_EVENT_UNFILTERED")
+    local unit = pcall(driver.RegisterUnitEvent, driver, "COMBAT_LOG_EVENT_UNFILTERED", "player")
+    Equal(tostring(allowed) .. " " .. tostring(unit) .. " " .. tostring(next(S[driver].events)), "false false nil",
+        "registering for it is refused outright, by unit too, and nothing is left heard")
+    driver:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+    Equal(tostring(S[driver].events.UNIT_SPELLCAST_SUCCEEDED), "true", "every other event is registered as before")
+    Equal(#printed, 0, "no errors")
 end)()
 
 print = _G.print
